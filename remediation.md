@@ -147,7 +147,7 @@ Remaining items (2-31-1, 2-31-2 = done):
 - ✅ **2-31-3** Schema fingerprint in store header + migration enforcement. Header extended 24→40B (`[8B magic][8B count][8B rec_size][8B FNV-1a schema fingerprint][8B schema version]`); count@8/rec_size@16 stable. `jinn_store_check_schema` aborts with precise diagnostic on mismatch without a bridging migration (legacy 0-fingerprint files stamped + accepted). Migrations stamp the new fingerprint via `jinn_store_stamp_schema` and run under a `jinn_migration_enter/leave` suppression guard so they may rewrite past the check. Fixed latent cross-binary migration segfault (migration now opens store via real `__store_<name>_ensure_open`). Conformance: tests/store_schema.rs (3 tests).
 - ◻ **2-31-4** Typed result sets for history/search/nearest/graph/distinct.
 - ◻ **2-31-5** Relation traversal in queries + result rows (+`@cascade`).
-- ◻ **2-31-6** Generalize `@kv` to schema-driven key/value types + optional get.
+- ◼ **2-31-6** Generalize `@kv` to schema-driven key/value types + optional get.
 - ◻ **2-31-7** group-by clause + aggregates in query blocks.
 - ◻ **2-31-8** Richer `where` filters: grouping, `in`, ranges, string operators.
 - ◻ **2-31-9** Persistent secondary indexes (`.idx`, WAL-replayed).

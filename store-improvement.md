@@ -176,6 +176,17 @@ shape so missing keys are handled through normal `else` flow rather than a
 sentinel zero. Single source of truth: schema drives the method surface for
 typer and codegen alike.
 
+**Done.** `store_methods.rs` derives `(key_ty, val_ty)` from the schema's
+`key`/`val` fields (defaulting `String`/`i64`). `kv.get` now returns
+`Option of <val_ty>`, so a missing key flows through `? $ ! ...`, `else`, or
+`.unwrap_or(...)` rather than returning a sentinel `0`. Numeric value types are
+supported: `i64` is stored directly and `f64` is bit-cast through the 8-byte
+slot in codegen (`emit_kv_set`/`emit_kv_get`). Keys must be `String`;
+non-numeric value types are rejected at compile time with a precise diagnostic
+(string values await a runtime value-blob format). `incr`/`decr` are gated to
+integer value types. The schema is the single source of truth shared by the
+typer (method surface) and codegen (storage representation).
+
 ## 12. Consolidate decorator parsing into a declarative table
 
 **Today:** `parse_store_def` and `parse_store_field` are long `if attr == "..."`

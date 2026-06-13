@@ -3,7 +3,113 @@ use crate::ast;
 use crate::hir;
 use crate::types::Type;
 
+const KV_BUILTIN_FIELDS: &[&str] = &[
+    "sid", "uuid", "hash", "created", "updated", "deleted", "__version",
+];
+
 impl Typer {
+    fn kv_key_val_types(&self, store: &str) -> (Type, Type) {
+        let mut key_ty = Type::String;
+        let mut val_ty = Type::I64;
+        if let Some(schema) = self.store_schemas.get(store) {
+            let user: Vec<&(crate::intern::Symbol, Type)> = schema
+                .iter()
+                .filter(|(n, _)| !KV_BUILTIN_FIELDS.contains(&&*n.as_str()))
+                .collect();
+            for (n, t) in &user {
+                match &*n.as_str() {
+                    "key" => key_ty = t.clone(),
+                    "val" | "value" => val_ty = t.clone(),
+                    _ => {}
+                }
+            }
+        }
+        (key_ty, val_ty)
+    }
+
+    fn kv_option_type(&mut self, val_ty: &Type) -> Result<crate::intern::Symbol, String> {
+        let mut map = std::collections::HashMap::new();
+        map.insert("T".into(), val_ty.clone());
+        self.monomorphize_enum("Option", &map)
+    }
+
+    fn build_kv_get_option(
+        &mut self,
+        store: crate::intern::Symbol,
+        key_expr: hir::Expr,
+        val_ty: &Type,
+        span: crate::ast::Span,
+    ) -> Result<hir::Expr, String> {
+        let opt_enum = self.kv_option_type(val_ty)?;
+        let opt_ty = Type::Enum(opt_enum);
+        let some_tag = self
+            .enums
+            .get(&opt_enum)
+            .and_then(|vs| vs.iter().position(|(n, _)| n.as_str() == "Some"))
+            .unwrap_or(0) as u32;
+        let nothing_tag = self
+            .enums
+            .get(&opt_enum)
+            .and_then(|vs| vs.iter().position(|(n, _)| n.as_str() == "Nothing"))
+            .unwrap_or(1) as u32;
+
+        let key_id = self.fresh_id();
+        let key_bind = hir::Stmt::Bind(hir::Bind {
+            def_id: key_id,
+            name: "__kv_key".into(),
+            value: key_expr,
+            ty: Type::String,
+            ownership: hir::Ownership::Owned,
+            atomic: false,
+            access_mod: None,
+            span,
+        });
+        let key_ref = || hir::Expr {
+            kind: hir::ExprKind::Var(key_id, "__kv_key".into()),
+            ty: Type::String,
+            span,
+        };
+
+        let has = hir::Expr {
+            kind: hir::ExprKind::KvHas(store, Box::new(key_ref())),
+            ty: Type::Bool,
+            span,
+        };
+        let get = hir::Expr {
+            kind: hir::ExprKind::KvGet(store, Box::new(key_ref())),
+            ty: val_ty.clone(),
+            span,
+        };
+        let some = hir::Expr {
+            kind: hir::ExprKind::VariantCtor(
+                opt_enum,
+                "Some".into(),
+                some_tag,
+                vec![hir::FieldInit {
+                    name: None,
+                    value: get,
+                }],
+            ),
+            ty: opt_ty.clone(),
+            span,
+        };
+        let nothing = hir::Expr {
+            kind: hir::ExprKind::VariantCtor(opt_enum, "Nothing".into(), nothing_tag, vec![]),
+            ty: opt_ty.clone(),
+            span,
+        };
+        let ternary = hir::Expr {
+            kind: hir::ExprKind::Ternary(Box::new(has), Box::new(some), Box::new(nothing)),
+            ty: opt_ty.clone(),
+            span,
+        };
+        Ok(hir::Expr {
+            kind: hir::ExprKind::Block(vec![key_bind, hir::Stmt::Expr(ternary)]),
+            ty: opt_ty,
+            span,
+        })
+    }
+
     pub(in crate::typer) fn dispatch_store_methods(
         &mut self,
         obj: &ast::Expr,
@@ -19,6 +125,19 @@ impl Typer {
                     .map(|decs| decs.contains(&crate::ast::StoreDecorator::Kv))
                     .unwrap_or(false);
                 if is_kv {
+                    let (key_ty, val_ty) = self.kv_key_val_types(&name.as_str());
+                    if !matches!(key_ty, Type::String) {
+                        return Err(format!(
+                            "@kv store '{name}' key field must be `String`, found `{key_ty}`"
+                        ));
+                    }
+                    let val_is_num = matches!(val_ty, Type::I64 | Type::F64);
+                    if !val_is_num {
+                        return Err(format!(
+                            "@kv store '{name}' value type `{val_ty}` is not supported; declare `val as i64` or `val as f64`"
+                        ));
+                    }
+                    let val_is_int = matches!(val_ty, Type::I64);
                     match method {
                         "set" => {
                             if args.len() != 2 {
@@ -26,7 +145,7 @@ impl Typer {
                             }
                             let key_expr =
                                 self.lower_expr_expected(&args[0], Some(&Type::String))?;
-                            let val_expr = self.lower_expr_expected(&args[1], Some(&Type::I64))?;
+                            let val_expr = self.lower_expr_expected(&args[1], Some(&val_ty))?;
                             return Ok(Some(hir::Expr {
                                 kind: hir::ExprKind::KvSet(
                                     *name,
@@ -43,11 +162,9 @@ impl Typer {
                             }
                             let key_expr =
                                 self.lower_expr_expected(&args[0], Some(&Type::String))?;
-                            return Ok(Some(hir::Expr {
-                                kind: hir::ExprKind::KvGet(*name, Box::new(key_expr)),
-                                ty: Type::I64,
-                                span,
-                            }));
+                            return Ok(Some(self.build_kv_get_option(
+                                *name, key_expr, &val_ty, span,
+                            )?));
                         }
                         "has" => {
                             if args.len() != 1 {
@@ -79,6 +196,11 @@ impl Typer {
                                 ty: Type::Void,
                                 span,
                             }));
+                        }
+                        "incr" | "decr" if !val_is_int => {
+                            return Err(format!(
+                                "kv.{method}() requires an integer value type; store '{name}' has `val as {val_ty}`"
+                            ));
                         }
                         "incr" => {
                             let (key_expr, delta_expr) = if args.len() == 1 {

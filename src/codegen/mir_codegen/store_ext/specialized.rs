@@ -1,6 +1,22 @@
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
+    fn kv_value_is_f64(&self, store_name: &str) -> bool {
+        const BUILTIN: &[&str] = &[
+            "sid", "uuid", "hash", "created", "updated", "deleted", "__version",
+        ];
+        self.store_defs
+            .get(store_name)
+            .map(|sd| {
+                sd.fields.iter().any(|f| {
+                    !BUILTIN.contains(&&*f.name.as_str())
+                        && matches!(&*f.name.as_str(), "val" | "value")
+                        && matches!(f.ty, crate::types::Type::F64)
+                })
+            })
+            .unwrap_or(false)
+    }
+
     pub(in crate::codegen) fn emit_kv_set(
         &mut self,
         store_name: &str,
@@ -16,10 +32,20 @@ impl<'ctx> Compiler<'ctx> {
         let key_data = self.string_data(key_val)?;
         let key_len = self.string_len(key_val)?;
 
+        let stored = if self.kv_value_is_f64(store_name) {
+            b!(self.bld.build_bit_cast(
+                val_val.into_float_value(),
+                self.ctx.i64_type(),
+                "kv.f2i"
+            ))
+        } else {
+            val_val
+        };
+
         let set_fn = crate::codegen::fn_or_die(&self.module, "jinn_kv_set");
         b!(self.bld.build_call(
             set_fn,
-            &[kv.into(), key_data.into(), key_len.into(), val_val.into()],
+            &[kv.into(), key_data.into(), key_len.into(), stored.into()],
             ""
         ));
         Ok(self.ctx.i8_type().const_int(0, false).into())
@@ -47,6 +73,10 @@ impl<'ctx> Compiler<'ctx> {
                 "kv.val"
             )))
             .into_int_value();
+        if self.kv_value_is_f64(store_name) {
+            let f = b!(self.bld.build_bit_cast(result, self.ctx.f64_type(), "kv.i2f"));
+            return Ok(f);
+        }
         Ok(result.into())
     }
 

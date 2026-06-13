@@ -2404,7 +2404,7 @@ fn store_view_count_no_filter() {
 #[test]
 fn kv_set_get() {
     expect_store(
-        "store cache @kv\n\n*main\n    cache.set('x', 42)\n    v is cache.get('x')\n    log v\n",
+        "store cache @kv\n\n*main\n    cache.set('x', 42)\n    v is cache.get('x').unwrap_or(-1)\n    log v\n",
         "42",
     );
 }
@@ -2436,7 +2436,7 @@ fn kv_del() {
 #[test]
 fn kv_incr() {
     expect_store(
-        "store cache @kv\n\n*main\n    cache.set('hits', 0)\n    cache.incr('hits')\n    cache.incr('hits')\n    cache.incr('hits')\n    v is cache.get('hits')\n    log v\n",
+        "store cache @kv\n\n*main\n    cache.set('hits', 0)\n    cache.incr('hits')\n    cache.incr('hits')\n    cache.incr('hits')\n    v is cache.get('hits').unwrap_or(-1)\n    log v\n",
         "3",
     );
 }
@@ -2444,7 +2444,7 @@ fn kv_incr() {
 #[test]
 fn kv_incr_delta() {
     expect_store(
-        "store cache @kv\n\n*main\n    cache.set('score', 10)\n    cache.incr('score', 5)\n    v is cache.get('score')\n    log v\n",
+        "store cache @kv\n\n*main\n    cache.set('score', 10)\n    cache.incr('score', 5)\n    v is cache.get('score').unwrap_or(-1)\n    log v\n",
         "15",
     );
 }
@@ -2452,8 +2452,32 @@ fn kv_incr_delta() {
 #[test]
 fn kv_overwrite() {
     expect_store(
-        "store cache @kv\n\n*main\n    cache.set('x', 1)\n    cache.set('x', 2)\n    v is cache.get('x')\n    log v\n    n is cache.count()\n    log n\n",
+        "store cache @kv\n\n*main\n    cache.set('x', 1)\n    cache.set('x', 2)\n    v is cache.get('x').unwrap_or(-1)\n    log v\n    n is cache.count()\n    log n\n",
         "2\n1",
+    );
+}
+
+#[test]
+fn kv_get_missing_flows_else() {
+    expect_store(
+        "store cache @kv\n\n*main\n    cache.set('x', 7)\n    a is cache.get('x') ? $ ! -1\n    log a\n    b is cache.get('missing') ? $ ! -1\n    log b\n",
+        "7\n-1",
+    );
+}
+
+#[test]
+fn kv_get_missing_unwrap_or() {
+    expect_store(
+        "store cache @kv\n\n*main\n    log(cache.get('nope').unwrap_or(99))\n",
+        "99",
+    );
+}
+
+#[test]
+fn kv_f64_value_schema() {
+    expect_store(
+        "store prices @kv\n    key as String\n    val as f64\n\n*main\n    prices.set('eth', 3.5)\n    v is prices.get('eth').unwrap_or(0.0)\n    log v\n    m is prices.get('btc').unwrap_or(-1.0)\n    log m\n",
+        "3.500000\n-1.000000",
     );
 }
 
