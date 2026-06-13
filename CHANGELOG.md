@@ -1,4 +1,5 @@
 # Changelog
+- **[65]** (2026-06-13 21:03) store: declarative decorator table shared by parser/typer/docs (task 2-31-12)
 - **[65]** (2026-06-13 14:01) store: declarative decorator table (src/store_decorators.rs) shared by parser/typer/docs; rejects nonsensical combos (@kv+@vector, @mem+@versioned, @unique on f64, @increment on non-numeric) with precise diagnostics (task 2-31-12)
 - **[64]** (2026-06-13 18:27) store: compact statement + @compact(threshold) auto-policy for tombstone reclamation (task 2-31-10)
 - **[61]** (2026-06-13 18:06) store: persistent secondary indexes with fingerprint validation + rebuild-on-corruption (task 2-31-9)

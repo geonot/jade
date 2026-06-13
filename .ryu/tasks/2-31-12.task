@@ -1,11 +1,22 @@
 title: Declarative decorator table shared by parser/typer/docs
-status: pending
+status: complete
 atomic: true
 priority: low
 blocked_by: []
 created_at: '2026-06-10T05:18:42'
-updated_at: '2026-06-10T05:18:42'
-result: ''
+updated_at: '2026-06-13T14:03:17'
+result: 'Created src/store_decorators.rs as the single declarative source of truth:
+  const STORE_DECORATORS/FIELD_DECORATORS tables encoding each decorator''s name,
+  argument arity/type (None/Int/Ident), mutual exclusions, numeric-only field constraints,
+  and doc summary. Parser (actor_store.rs) now validates names + argument shapes +
+  store-level exclusions from the table; typer (lower/decl.rs) validates field type
+  constraints (@unique on f64 rejected, @increment requires numeric) and field exclusions.
+  render_docs() generates the decorator reference from the same table. Nonsensical
+  combos (@kv+@vector, @mem+@versioned, @unique on f64, unknown decorators) produce
+  precise diagnostics. Pinned by tests/store_decorator_table.rs (7 conformance tests)
+  + 9 module unit tests including a sync invariant (every AST variant in table) and
+  exclusion symmetry. Full lib suite (249), all store suites, std_stable_subset, access_semantics
+  green; zero new warnings.'
 description: Item 12. One table (name, arg arity/type, applicability store-vs-field,
   mutual exclusions) consumed by parser, typer validation, and docs gen. Reject nonsensical
   combos (@kv+@vector, @mem+@versioned, @unique on f64) with precise diagnostics.
