@@ -1009,6 +1009,17 @@ impl Typer {
                 Ok(hir::Stmt::Stop(htarget, *span))
             }
 
+            ast::Stmt::Join(target, span) => {
+                let htarget = self.lower_expr(target)?;
+                if !matches!(&htarget.ty, Type::ActorRef(_)) {
+                    return Err(format!(
+                        "join: target must be an ActorRef, got {}",
+                        htarget.ty
+                    ));
+                }
+                Ok(hir::Stmt::Join(htarget, *span))
+            }
+
             ast::Stmt::SimFor(f, span) => {
                 let iter = self.lower_expr(&f.iter)?;
                 let end = f.end.as_ref().map(|e| self.lower_expr(e)).transpose()?;

@@ -72,6 +72,7 @@ pub(super) fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<Symbol, hir
         Stmt::Transaction(b, _) => fold_block_with_fns(b, pure_fns),
         Stmt::ChannelClose(e, _) => fold_expr_with_fns(e, pure_fns),
         Stmt::Stop(e, _) => fold_expr_with_fns(e, pure_fns),
+        Stmt::Join(e, _) => fold_expr_with_fns(e, pure_fns),
         Stmt::SimFor(f, _) => {
             fold_expr_with_fns(&mut f.iter, pure_fns);
             if let Some(e) = &mut f.end {
@@ -193,6 +194,7 @@ pub(super) fn fold_stmt(stmt: &mut Stmt) {
         Stmt::Transaction(b, _) => fold_block(b),
         Stmt::ChannelClose(e, _) => fold_expr(e),
         Stmt::Stop(e, _) => fold_expr(e),
+        Stmt::Join(e, _) => fold_expr(e),
         Stmt::SimFor(f, _) => {
             fold_expr(&mut f.iter);
             if let Some(e) = &mut f.end {

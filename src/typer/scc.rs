@@ -160,7 +160,10 @@ fn collect_calls_stmt(stmt: &ast::Stmt, calls: &mut HashSet<Symbol>) {
                 collect_calls_block(&arm.body, calls);
             }
         }
-        ast::Stmt::ErrReturn(e, _) | ast::Stmt::ChannelClose(e, _) | ast::Stmt::Stop(e, _) => {
+        ast::Stmt::ErrReturn(e, _)
+        | ast::Stmt::ChannelClose(e, _)
+        | ast::Stmt::Stop(e, _)
+        | ast::Stmt::Join(e, _) => {
             collect_calls_expr(e, calls);
         }
         ast::Stmt::StoreInsert(_, exprs, _) => {

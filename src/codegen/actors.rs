@@ -70,7 +70,10 @@ impl<'ctx> Compiler<'ctx> {
         let mb_name = format!("{name}_mailbox");
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let mb_st = self.ctx.opaque_struct_type(&mb_name);
-        mb_st.set_body(&[ptr_ty.into(), i32t.into(), state_st.into()], false);
+        mb_st.set_body(
+            &[ptr_ty.into(), i32t.into(), state_st.into(), ptr_ty.into()],
+            false,
+        );
 
         Ok(())
     }
@@ -313,6 +316,10 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         self.bld.position_at_end(exit_bb);
+
+        let join_slot_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 3, "join_slot_ptr"));
+        let join_signal = crate::codegen::fn_or_die(&self.module, "jinn_join_signal");
+        b!(self.bld.build_call(join_signal, &[join_slot_ptr.into()], ""));
 
         if let Some(destroy_fn) = self.module.get_function("jinn_actor_destroy") {
             b!(self.bld.build_call(destroy_fn, &[mb_ptr.into()], ""));

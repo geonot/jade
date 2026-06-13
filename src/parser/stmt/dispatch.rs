@@ -345,6 +345,12 @@ impl Parser {
                 let target = self.parse_expr()?;
                 Ok(Stmt::Stop(target, sp))
             }
+            Token::Join => {
+                let sp = self.span();
+                self.advance();
+                let target = self.parse_expr()?;
+                Ok(Stmt::Join(target, sp))
+            }
             Token::Err => {
                 let sp = self.span();
                 self.advance();

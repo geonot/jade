@@ -376,6 +376,9 @@ impl PrettyPrinter {
             Stmt::Stop(e, _) => {
                 self.line(&format!("stop {}", self.expr_str(e)));
             }
+            Stmt::Join(e, _) => {
+                self.line(&format!("join {}", self.expr_str(e)));
+            }
             Stmt::SimFor(f, _) => {
                 let end = f
                     .end

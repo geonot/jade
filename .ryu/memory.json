@@ -34,8 +34,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-06T07:29:11+00:00",
-      "ts_accessed": "2026-06-06T07:29:11+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-13T21:08:43+00:00",
+      "access_count": 1
     },
     "structured_concurrency_design": {
       "key": "structured_concurrency_design",
@@ -46,8 +46,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-10T11:03:19+00:00",
-      "ts_accessed": "2026-06-10T11:03:19+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-13T21:08:46+00:00",
+      "access_count": 2
     },
     "store_error_design": {
       "key": "store_error_design",
@@ -215,6 +215,18 @@
       "pinned": false,
       "ts_created": "2026-06-13T21:03:03+00:00",
       "ts_accessed": "2026-06-13T21:03:03+00:00",
+      "access_count": 0
+    },
+    "concurrency_impl_arch": {
+      "key": "concurrency_impl_arch",
+      "value": "Concurrency impl arch (tasks 2-6/7/9/10). KEYWORDS already exist: spawn, stop, close, yield, dispatch (lexer/mod.rs). Stmt::Stop/ChannelClose in ast+hir; lowered in src/mir/lower/effects.rs to InstKind::Call(\"__stop\"/\"__chan_close\"); codegen in src/codegen/mir_codegen/magic.rs (~239-262): __stop loads ch ptr at mailbox offset 0 and calls jinn_chan_close. MAILBOX layout {ptr channel @0, i32 alive @1, state @2}. ACTOR LOOP codegen src/codegen/actors.rs compile_actor_loop: message-only actor uses jinn_chan_recv (DRAINS buffer after close then exits \u2014 already stop-and-drain). loop-handler actor uses jinn_chan_try_recv (exits immediately on closed = hard stop). spawn (compile_spawn_with_init_vals ~326): malloc mailbox, jinn_chan_create(msg_size, MAILBOX_CAP), jinn_coro_create(loop_fn, mb), jinn_coro_set_daemon, jinn_sched_spawn. Coro handle NOT stored anywhere currently \u2014 needed for join. RUNTIME: jinn_coro_t has state/daemon/on_exit_cb. sched.c: active_coros tracks non-daemon; jinn_sched_yield/park/unpark exist. jinn_chan_recv drains then returns 0 on empty+closed. Tests in tests/concurrency_shutdown.rs. Docs docs/concurrency.md + docs/structured-concurrency.md (design).",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T21:10:16+00:00",
+      "ts_accessed": "2026-06-13T21:10:16+00:00",
       "access_count": 0
     }
   }

@@ -23,6 +23,14 @@ impl Lowerer {
                     *span,
                 )
             }
+            hir::Stmt::Join(expr, span) => {
+                let v = self.lower_expr(expr);
+                self.emit(
+                    InstKind::Call("__join".into(), vec![v]),
+                    Type::Void,
+                    *span,
+                )
+            }
             hir::Stmt::Asm(asm) => {
                 let input_vals: Vec<_> =
                     asm.inputs.iter().map(|(_, e)| self.lower_expr(e)).collect();

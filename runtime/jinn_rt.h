@@ -239,6 +239,15 @@ void jinn_actor_wake(void *mailbox_ptr);
 void jinn_actor_stop(void *mailbox_ptr);
 void jinn_actor_destroy(void *mailbox_ptr);
 
+/* ── Join (actor completion latch) ───────────────────────────────── */
+
+typedef struct jinn_join jinn_join_t;
+
+jinn_join_t *jinn_join_create(void);
+jinn_join_t *jinn_join_get(void *join_slot_ptr);
+void         jinn_join_signal(void *join_slot_ptr);
+void         jinn_actor_join(void *join_slot_ptr);
+
 /* ── Supervisor (OTP-style) ──────────────────────────────────────── */
 
 typedef struct jinn_sup jinn_sup_t;

@@ -1,11 +1,18 @@
 title: Implement actor join primitive
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-10T03:51:23'
-result: ''
+updated_at: '2026-06-13T14:19:35'
+result: 'Implemented `join {actor}` primitive. Added Token::Join (lexer), Stmt::Join
+  (ast+hir) parsed in dispatch.rs, typed (must be ActorRef), lowered to MIR __join,
+  codegen in magic.rs GEPs mailbox field 3 (new join-slot ptr) and calls jinn_actor_join.
+  Runtime: jinn_join_t one-shot completion latch in runtime/actor.c (jinn_join_create/get/signal
+  + jinn_actor_join park-loop). Actor loop exit_bb signals latch via jinn_join_signal
+  before destroy. Idempotent (latch stays done). Works from *main (spin-yield) and
+  coroutine (park). Conformance: join_after_stop_completes, join_twice_is_idempotent
+  in tests/concurrency_shutdown.rs. Docs updated incl. join-self-deadlock footgun.'
 description: 'Implement actor join primitive (review 12_safety; P1-16 area). Current
   state: *main epilogue joins workers implicitly (actor_processes_then_stops test);
   there is NO user-facing join — grep shows no `join` keyword in lexer/parser. Programs

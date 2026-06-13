@@ -261,6 +261,28 @@ impl<'ctx> Compiler<'ctx> {
                 return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
             }
 
+        if name == "__join"
+            && let Some(&actor_val) = args.first() {
+                let actor_ptr = self.val(actor_val).into_pointer_value();
+                let actor_name = match self.value_types.get(&actor_val) {
+                    Some(Type::ActorRef(n)) => n.clone(),
+                    _ => return Err("__join: argument is not an ActorRef".into()),
+                };
+                let mb_name = format!("{actor_name}_mailbox");
+                let mb_st = self
+                    .module
+                    .get_struct_type(&mb_name)
+                    .ok_or_else(|| format!("__join: mailbox struct '{mb_name}' not declared"))?;
+                let join_slot_ptr =
+                    b!(self.bld.build_struct_gep(mb_st, actor_ptr, 3, "join.slot"));
+                let actor_join = self
+                    .module
+                    .get_function("jinn_actor_join")
+                    .ok_or("jinn_actor_join not declared")?;
+                b!(self.bld.build_call(actor_join, &[join_slot_ptr.into()], ""));
+                return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
+            }
+
         if name == "__atomic_load"
             && let Some(&ptr_val) = args.first() {
                 let ptr = self.val(ptr_val).into_pointer_value();

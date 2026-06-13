@@ -433,7 +433,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
                     defs.insert(*name);
                 }
             }
-            Stmt::ChannelClose(e, _) | Stmt::Stop(e, _) => walk_expr(e, modules, defs),
+            Stmt::ChannelClose(e, _) | Stmt::Stop(e, _) | Stmt::Join(e, _) => walk_expr(e, modules, defs),
             Stmt::StoreInsert(_, exprs, _) => {
                 for field in exprs {
                     walk_expr(&field.value, modules, defs);

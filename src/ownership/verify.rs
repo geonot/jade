@@ -162,6 +162,9 @@ impl OwnershipVerifier {
             Stmt::Stop(e, _) => {
                 self.verify_expr(e);
             }
+            Stmt::Join(e, _) => {
+                self.verify_expr(e);
+            }
             Stmt::SimFor(f, _) => {
                 self.verify_expr(&f.iter);
                 if let Some(end) = &f.end {

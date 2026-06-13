@@ -350,6 +350,7 @@ pub enum Stmt {
     Transaction(Block, Span),
     ChannelClose(Expr, Span),
     Stop(Expr, Span),
+    Join(Expr, Span),
     SimFor(For, Span),
     SimBlock(Block, Span),
     UseLocal(Vec<Symbol>, Option<Vec<Symbol>>, Option<Symbol>, Span),

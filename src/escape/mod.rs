@@ -228,6 +228,7 @@ fn seed_binds_in_stmt(stmt: &Stmt, info: &mut EscapeInfo) {
         | StoreCompact(_, _)
         | ChannelClose(_, _)
         | Stop(_, _)
+        | Join(_, _)
         | UseLocal(_, _, _, _)
         | GlobalStore(_, _, _) => {}
     }
@@ -490,7 +491,7 @@ impl<'a> EscapeWalk<'a> {
                 }
             }
             GlobalStore(_, e, _) => self.walk_expr_consumer(e, BindContext::StoredInContainer),
-            ChannelClose(e, _) | Stop(e, _) => self.walk_expr_consumer(e, BindContext::LocalRead),
+            ChannelClose(e, _) | Stop(e, _) | Join(e, _) => self.walk_expr_consumer(e, BindContext::LocalRead),
             Drop(_, _, _, _)
             | Nop(_)
             | Asm(_)

@@ -43,6 +43,105 @@ void jinn_actor_stop(void *mailbox_ptr) {
 }
 
 /*
+ * Join primitive: a one-shot completion latch with a waiter queue.
+ * Created lazily on first join; signalled once when the actor loop exits.
+ */
+struct jinn_join {
+    _Atomic(int32_t) done;
+    _Atomic(int32_t) lock;
+    jinn_coro_t     *waitq;
+};
+
+static inline void join_lock(jinn_join_t *j) {
+    while (atomic_exchange_explicit(&j->lock, 1, memory_order_acquire) != 0) {
+#if defined(__x86_64__)
+        __builtin_ia32_pause();
+#elif defined(__aarch64__)
+        __asm__ volatile("yield");
+#endif
+    }
+}
+
+static inline void join_unlock(jinn_join_t *j) {
+    atomic_store_explicit(&j->lock, 0, memory_order_release);
+}
+
+jinn_join_t *jinn_join_create(void) {
+    jinn_join_t *j = (jinn_join_t *)jinn_xmalloc(sizeof(jinn_join_t));
+    atomic_store(&j->done, 0);
+    atomic_store(&j->lock, 0);
+    j->waitq = NULL;
+    return j;
+}
+
+/*
+ * jinn_join_get: return the join latch stored at mailbox offset 3,
+ * creating it on first access. mailbox layout:
+ *   { ptr channel @0, i32 alive @1, <state> @2, ptr join @last }.
+ * The compiler passes the address of the join slot.
+ */
+jinn_join_t *jinn_join_get(void *join_slot_ptr) {
+    jinn_join_t **slot = (jinn_join_t **)join_slot_ptr;
+    if (!*slot) {
+        *slot = jinn_join_create();
+    }
+    return *slot;
+}
+
+/* Signal completion: mark done and wake all waiters. */
+void jinn_join_signal(void *join_slot_ptr) {
+    jinn_join_t **slot = (jinn_join_t **)join_slot_ptr;
+    jinn_join_t *j = *slot;
+    if (!j) {
+        j = jinn_join_create();
+        *slot = j;
+    }
+    join_lock(j);
+    atomic_store_explicit(&j->done, 1, memory_order_release);
+    jinn_coro_t *w = j->waitq;
+    j->waitq = NULL;
+    join_unlock(j);
+    while (w) {
+        jinn_coro_t *next = w->next;
+        w->next = NULL;
+        w->state = JINN_CORO_READY;
+        jinn_sched_enqueue(w);
+        w = next;
+    }
+}
+
+/* Park the caller until the actor's loop has exited (done latch set). */
+void jinn_actor_join(void *join_slot_ptr) {
+    jinn_join_t *j = jinn_join_get(join_slot_ptr);
+    for (;;) {
+        if (atomic_load_explicit(&j->done, memory_order_acquire)) {
+            return;
+        }
+        jinn_worker_t *wk = tl_worker;
+        if (!wk || !wk->current) {
+            /* Non-coroutine context (e.g. *main): spin-yield to scheduler. */
+            jinn_sched_yield();
+            continue;
+        }
+        jinn_coro_t *self = wk->current;
+        join_lock(j);
+        if (atomic_load_explicit(&j->done, memory_order_acquire)) {
+            join_unlock(j);
+            return;
+        }
+        self->state = JINN_CORO_SUSPENDED;
+        self->next = j->waitq;
+        j->waitq = self;
+        join_unlock(j);
+        wk->last_action = SCHED_ACTION_PARK;
+        jinn_context_swap(&self->ctx, &wk->sched_ctx);
+        /* Resumed — re-check done. */
+    }
+}
+
+
+
+/*
  * jinn_actor_destroy: fully clean up an actor's resources.
  * Called after the actor loop has exited (channel drained/closed).
  * Closes the channel (if not already closed), destroys it, and frees the mailbox.

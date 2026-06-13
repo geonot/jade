@@ -521,6 +521,8 @@ impl<'ctx> Compiler<'ctx> {
 
         decl!("jinn_actor_destroy", void.fn_type(&[ptr.into()], false));
         decl!("jinn_actor_stop", void.fn_type(&[ptr.into()], false));
+        decl!("jinn_join_signal", void.fn_type(&[ptr.into()], false));
+        decl!("jinn_actor_join", void.fn_type(&[ptr.into()], false));
 
         decl!(
             "jinn_select",

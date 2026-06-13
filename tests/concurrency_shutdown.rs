@@ -189,6 +189,87 @@ actor Worker
     );
 }
 
+/// `join` parks the caller until the target actor's mailbox is closed and its
+/// handler loop has fully exited. After `stop` (which closes the mailbox and
+/// lets the message actor drain) a `join` returns once the actor is done.
+#[test]
+fn join_after_stop_completes() {
+    expect(
+        "\
+actor Worker
+    sum
+
+    @work n
+        sum is sum + n
+
+*main
+    w is spawn Worker
+    w.work(10)
+    w.work(32)
+    stop w
+    join w
+    log('joined')
+",
+        "joined",
+    );
+}
+
+/// `join` is idempotent: once the actor has exited, the completion latch stays
+/// set, so a second `join` on the same actor returns immediately. The program
+/// must not hang or deadlock.
+#[test]
+fn join_twice_is_idempotent() {
+    expect(
+        "\
+actor Worker
+    sum
+
+    @work n
+        sum is sum + n
+
+*main
+    w is spawn Worker
+    w.work(5)
+    stop w
+    join w
+    join w
+    log('twice-ok')
+",
+        "twice-ok",
+    );
+}
+
+/// `stop` is graceful **stop-and-drain**, not a hard kill — for a *loop
+/// actor* too. The loop actor polls with `try_recv`, which keeps returning
+/// buffered messages even after the mailbox is closed, and only reports
+/// end-of-stream once the buffer is empty *and* closed. So every message
+/// enqueued before `stop` is still dispatched. Here 1..9 are enqueued, then
+/// `stop` + `join`; the running totals prove all eight were processed before
+/// exit (final total 1+2+..+8 = 36).
+#[test]
+fn loop_actor_stop_drains_all_messages() {
+    expect(
+        "\
+actor Counter
+    total
+    *loop 0
+        nop
+    *add n
+        total is total + n
+        log(total)
+
+*main
+    c is spawn Counter
+    for i in 1 to 9
+        c.add(i)
+    stop c
+    join c
+    log('done')
+",
+        "1\n3\n6\n10\n15\n21\n28\n36\ndone",
+    );
+}
+
 /// A daemon actor left parked on `receive` (no `stop`) does NOT block program
 /// exit: `jinn_sched_run` only waits for non-daemon coroutines, and the worker
 /// loop abandons the parked daemon at shutdown. The program must still exit 0.

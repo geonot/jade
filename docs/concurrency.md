@@ -136,7 +136,26 @@ actor Worker
   does not wait for the handler to run.
 - `stop handle` lowers to `jinn_chan_close` on the mailbox channel
   (`__stop` in [src/codegen/mir_codegen/magic.rs](src/codegen/mir_codegen/magic.rs)).
-  It is exactly "close the actor's mailbox".
+  It is exactly "close the actor's mailbox". For a **message actor**
+  this is **stop-and-drain**: closing the mailbox lets the blocking
+  receive loop deliver every message enqueued before `stop`, *then*
+  exit (see *Message actors vs loop actors* below). `stop` is graceful,
+  not a hard kill — no enqueued message is dropped.
+- `join handle` parks the caller until the target actor's mailbox is
+  closed **and** its handler loop has fully exited. It lowers to
+  `jinn_actor_join` (`__join` in
+  [src/codegen/mir_codegen/magic.rs](src/codegen/mir_codegen/magic.rs)),
+  which waits on a one-shot completion latch stored at the tail of the
+  mailbox struct. The actor loop signals that latch in its exit block
+  (`jinn_join_signal`) before tearing down. `join` is idempotent: once
+  the actor is done the latch stays set, so repeated joins return
+  immediately. A typical graceful shutdown is `stop w` followed by
+  `join w` — drain the queued work, then wait for the actor to finish.
+
+  > **Footgun:** never `join` an actor from inside one of *its own*
+  > handlers — the handler is part of the very loop `join` waits to
+  > exit, so it deadlocks. This is not statically detected; keep `join`
+  > on the owning side (usually `*main` or a parent actor).
 
 ### Message actors vs loop actors
 
@@ -156,9 +175,25 @@ The actor loop is generated in
   loop actor performs periodic work *and* services messages, and exits
   when its mailbox is closed.
 
-Both shapes converge on the same exit path: when the loop ends they call
-`jinn_actor_destroy(mailbox)` (close + destroy the channel + free the
-mailbox), and the coroutine returns.
+Both shapes converge on the same exit path: when the loop ends they
+signal the actor's completion latch (`jinn_join_signal`, so any pending
+`join` wakes) and then call `jinn_actor_destroy(mailbox)` (close +
+destroy the channel + free the mailbox), and the coroutine returns.
+
+### `stop` is stop-and-drain; cancellation is the fast path
+
+Both actor shapes implement **stop-and-drain**: `stop` closes the
+mailbox, the receive/poll loop continues delivering every message that
+was already enqueued, and only once the mailbox is empty *and* closed
+does the loop exit. **No enqueued message is lost on `stop`.** This is
+the graceful shutdown primitive and is the one you almost always want.
+
+Fast, *drop-the-queue* termination is deliberately **not** what `stop`
+does. That belongs to cooperative **cancellation** under a structured
+`together` scope (see [structured-concurrency.md](structured-concurrency.md)):
+a cancelled actor skips the drain and tears down at its next suspension
+point. The distinction is intentional — `stop` = graceful drain,
+cancel = fast abort.
 
 ## Program termination
 

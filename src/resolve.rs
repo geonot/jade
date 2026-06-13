@@ -131,7 +131,7 @@ pub fn rewrite_stmt(stmt: &mut Stmt, renames: &HashMap<Symbol, String>) {
             rewrite_expr(&mut f.iter, renames);
             rewrite_block(&mut f.body, renames);
         }
-        Stmt::ChannelClose(e, _) | Stmt::Stop(e, _) => rewrite_expr(e, renames),
+        Stmt::ChannelClose(e, _) | Stmt::Stop(e, _) | Stmt::Join(e, _) => rewrite_expr(e, renames),
         Stmt::Continue(_)
         | Stmt::Nop(_)
         | Stmt::Asm(_)

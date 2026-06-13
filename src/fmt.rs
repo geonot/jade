@@ -403,6 +403,10 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             indent(out, level);
             out.push_str(&format!("stop {}\n", format_expr(e)));
         }
+        Stmt::Join(e, _) => {
+            indent(out, level);
+            out.push_str(&format!("join {}\n", format_expr(e)));
+        }
         Stmt::UseLocal(u) => {
             indent(out, level);
             out.push_str("use ");
