@@ -1,4 +1,5 @@
 # Changelog
+- **[42]** (2026-06-13 14:44) remediation: fix 5 crash-safety soundness bugs (task 2-30) + complete StoreError @unique/@required error-model integration (task 2-31-2). String slice/char_at bounds checks, oversized-shift trap, Result-with-err-enum monomorphization (Param->Enum annotation resolution), take-in-loop double-free now a compile error. Stale s247 snippet de-keyworded. All 1752 tests green, zero warnings.
 - **[41]** (2026-06-11 12:05) task 2-31-1: Real WAL-backed store transactions — begin snapshots data files + WAL offsets, commit group-fsyncs as one durable batch, escaping errors/traps roll back data files, WAL, and index/column/fts state; nested txns join outermost; +9-test conformance suite tests/store_transactions.rs; documented in jinn.md
 - **[39]** (2026-06-10 11:35) Add tests/crash_safety.rs: crash/trap/invalid-access/overwrite/unsafe-edge-case conformance suite (32 passing tests + 5 ignored tests pinning soundness bugs filed as task 2-30)
 - **[38]** (2026-06-10 11:03) Design structured concurrency: docs/structured-concurrency.md (together scopes, scope-owned actors, cancellation, error propagation) + cross-links (task 2-5)

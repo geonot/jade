@@ -1,11 +1,17 @@
 title: Fix soundness bugs pinned by tests/crash_safety.rs ignored tests
-status: pending
+status: complete
 atomic: false
 priority: high
 blocked_by: []
 created_at: '2026-06-10T04:35:01'
-updated_at: '2026-06-10T04:35:01'
-result: ''
+updated_at: '2026-06-13T07:44:19'
+result: 'All 5 crash-safety soundness bugs fixed and un-ignored in tests/crash_safety.rs
+  (37/37 pass): (1) take-inside-loop now a compile error via check_loop_body_moves
+  in typer (For/SimFor/Loop); (2) bound Result match ICE fixed by resolving misclassified
+  Param annotations to declared Enum/Struct in monomorphize_named_annotation + handling
+  Param/TypeVar payload size in declare_tagged_union; (3) string slice OOB trap (start<=end
+  && end<=len); (4) char_at OOB trap (idx<len); (5) oversized-shift trap (count<bitwidth)
+  for Shl/Shr/Ushr.'
 description: 'Five bugs discovered while building the crash-safety suite; each has
   an #[ignore]d test in tests/crash_safety.rs documenting desired behavior — un-ignore
   as fixed:
