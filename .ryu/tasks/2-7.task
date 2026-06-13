@@ -1,11 +1,19 @@
 title: Implement stop-and-drain channel/scope shutdown
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-10T03:51:23'
-result: ''
+updated_at: '2026-06-13T14:19:43'
+result: 'Stop-and-drain shutdown verified and documented as the semantics of `stop`.
+  Both actor shapes already drain: message actors use jinn_chan_recv (drains then
+  EOS), loop actors use jinn_chan_try_recv (returns buffered msgs even after close,
+  -1 only when empty+closed). So `stop` = graceful stop-and-drain, no message loss
+  — confirmed by new conformance test loop_actor_stop_drains_all_messages (1..8 all
+  processed after stop). Combined with new `join`, graceful shutdown is `stop w` then
+  `join w`. Fast/hard termination is deliberately the cancellation path under structured
+  `together` scopes (task 2-6), documented in docs/concurrency.md new section "`stop`
+  is stop-and-drain; cancellation is the fast path".'
 description: 'Implement stop-and-drain shutdown (review 12_safety; builds on task
   2-8''s observable send-after-close). Current state: `close {ch}` exists; receive
   drains buffer after close (pinned by channel_receive_drains_buffer in tests/concurrency_shutdown.rs);
