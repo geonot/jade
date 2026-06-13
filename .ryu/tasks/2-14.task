@@ -1,11 +1,16 @@
 title: Build adversarial memory-model soundness fuzzer
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-10T03:54:25'
-result: ''
+updated_at: '2026-06-13T07:51:17'
+result: 'Added tests/ownership_fuzz.rs: proptest generator (200 cases) emitting random
+  well-formed-ish ownership-stressing Jinn programs covering nested take, field/heap
+  moves under if, container-read aliasing (v.get), copy of heap values, and rebind-after-move.
+  Each program must either be cleanly rejected or run to completion with no abort
+  (134)/segfault (139)/compiler ICE. Under the ci/sanitize.sh ASan+UBSan sweep the
+  same corpus catches UAF/double-free/OOB in the Perceus + escape + tombstone passes.'
 description: 'Adversarial memory-model soundness fuzzer (review P0-11 second half
   + 11_codegen_runtime). Current state: fuzz/ has lexer/parser/typer cargo-fuzz targets
   (front-end only); no end-to-end soundness fuzzing; no sanitizer CI (ci/sanitize.sh
