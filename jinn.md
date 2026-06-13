@@ -862,6 +862,30 @@ transaction
     delete users where age > 50
 ```
 
+### Constraint failures are errors
+
+`insert` and `set` are fallible: attach handler arms (`?` / `!!`) and they
+become expressions of type `Result of i64, StoreError`. The Ok payload is the
+new record's sid for `insert` and the number of updated rows for `set`.
+`StoreError` is a built-in error enum with variants `Duplicate` (an `@unique`
+violation), `Missing` (a `set` filter that matched no rows), `Constraint`
+(an empty `@required` string), and `Io`:
+
+```jinn
+insert users 'Alice', 30 ? log($) !! log('insert failed')
+
+set users where name equals 'Alice' age 31
+    ? log($)
+    !! log('no such user')
+
+*signup(name as String) returns Result of i64, StoreError
+    sid is insert users name, 0 ? $ !! err
+    Ok(sid)
+```
+
+A bare `insert` with no handler arms that violates a constraint traps with a
+diagnostic — silent data loss is never an option.
+
 A `transaction` block is atomic with respect to escaping errors: if an error
 propagates out of the block (`err`, a failed `?` propagation), if `return`
 leaves mid-block, the writes are handled as a unit. Normal completion and

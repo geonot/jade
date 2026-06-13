@@ -144,6 +144,15 @@ impl Typer {
             Type::Generator(inner) => {
                 Type::Generator(Box::new(self.monomorphize_named_annotation(inner)))
             }
+            Type::Param(name) => {
+                if self.enums.contains_key(name) && !self.generic_enums.contains_key(name) {
+                    Type::Enum(*name)
+                } else if self.structs.contains_key(name) {
+                    Type::Struct(*name, vec![])
+                } else {
+                    ty.clone()
+                }
+            }
             _ => ty.clone(),
         }
     }

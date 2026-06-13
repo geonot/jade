@@ -71,6 +71,25 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
+    pub(crate) fn checked_shift_count(
+        &mut self,
+        count: inkwell::values::IntValue<'ctx>,
+    ) -> Result<(), String> {
+        let bits = count.get_type().get_bit_width();
+        let width = count.get_type().const_int(bits as u64, false);
+        let fv = self.current_fn();
+        let ok = b!(self
+            .bld
+            .build_int_compare(IntPredicate::ULT, count, width, "sh.ok"));
+        let ok_bb = self.ctx.append_basic_block(fv, "sh.ok");
+        let trap_bb = self.ctx.append_basic_block(fv, "sh.trap");
+        b!(self.bld.build_conditional_branch(ok, ok_bb, trap_bb));
+        self.bld.position_at_end(trap_bb);
+        self.emit_trap("shift count exceeds bit width");
+        self.bld.position_at_end(ok_bb);
+        Ok(())
+    }
+
     pub(crate) fn emit_trap(&mut self, msg: &str) {
         let trap_fn = self
             .module

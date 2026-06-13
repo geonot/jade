@@ -70,6 +70,7 @@ pub struct Typer {
         IndexMap<Symbol, (DefId, Vec<(Symbol, Type)>, Vec<(Symbol, Vec<Type>, u32)>)>,
     pub(crate) store_schemas: IndexMap<Symbol, Vec<(Symbol, Type)>>,
     pub(crate) store_decorators: IndexMap<Symbol, Vec<crate::ast::StoreDecorator>>,
+    pub(crate) store_error_def: Option<crate::ast::ErrDef>,
     pub(crate) view_defs: IndexMap<Symbol, (Symbol, Vec<crate::ast::QueryClause>)>,
     pub(crate) mono_depth: u32,
     pub(crate) traits: IndexMap<Symbol, Vec<TraitMethodSig>>,
@@ -164,6 +165,7 @@ impl Typer {
             actors: IndexMap::new(),
             store_schemas: IndexMap::new(),
             store_decorators: IndexMap::new(),
+            store_error_def: None,
             view_defs: IndexMap::new(),
             mono_depth: 0,
             traits: IndexMap::new(),
@@ -263,6 +265,47 @@ impl Typer {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.into(), info);
         }
+    }
+
+    pub(crate) fn in_scope_def_ids(&self) -> std::collections::HashSet<DefId> {
+        self.scopes
+            .iter()
+            .flat_map(|s| s.values().map(|v| v.def_id))
+            .collect()
+    }
+
+    pub(crate) fn check_loop_body_moves(
+        &self,
+        pre: &MoveState,
+        outer_ids: &std::collections::HashSet<DefId>,
+        span: crate::ast::Span,
+    ) -> Result<(), String> {
+        for id in &self.moved_vars {
+            if !pre.vars.contains(id) && outer_ids.contains(id) {
+                return Err(format!(
+                    "{}: value moved out by `take` inside a loop body would be moved \
+                     again on the next iteration; move a fresh value each iteration or \
+                     reassign it before the loop repeats",
+                    span.loc(),
+                ));
+            }
+        }
+        for (id, fields) in &self.moved_fields {
+            if !outer_ids.contains(id) {
+                continue;
+            }
+            let pre_fields = pre.fields.get(id);
+            for f in fields {
+                if pre_fields.map(|pf| !pf.contains(f)).unwrap_or(true) {
+                    return Err(format!(
+                        "{}: field moved out by `take` inside a loop body would be moved \
+                         again on the next iteration; reassign it before the loop repeats",
+                        span.loc(),
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn find_var(&self, name: &str) -> Option<&VarInfo> {

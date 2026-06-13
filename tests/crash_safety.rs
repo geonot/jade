@@ -389,7 +389,6 @@ fn signed_addition_wraps_twos_complement() {
 // ── Known soundness bugs: desired behavior, ignored until fixed ──────────
 
 #[test]
-#[ignore = "BUG: take inside a loop body compiles and double-frees at runtime; should be a compile error"]
 fn take_inside_loop_is_compile_error() {
     expect_compile_fail(
         "*eat(v as take Vec of i64)\n    log(v.len())\n\n*main\n    xs is [1]\n    for i from 0 to 2\n        eat(take xs)\n",
@@ -398,7 +397,6 @@ fn take_inside_loop_is_compile_error() {
 }
 
 #[test]
-#[ignore = "BUG: binding a Result then matching it ICEs with `unresolved type parameter 'E' reached codegen`"]
 fn bound_result_match_does_not_ice() {
     expect(
         "err E\n    Oops\n\n*f(ok as bool) returns Result of i64, E\n    if ok\n        Ok(9)\n    else\n        Err(Oops)\n\n*main\n    r is f(false)\n    match r\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n",
@@ -407,7 +405,6 @@ fn bound_result_match_does_not_ice() {
 }
 
 #[test]
-#[ignore = "BUG: string slice end past length reads out-of-bounds heap memory; should clamp or trap"]
 fn string_slice_oob_is_checked() {
     expect_trap(
         "*main\n    s is 'hello'\n    log(s.slice(2, 99))\n",
@@ -416,13 +413,11 @@ fn string_slice_oob_is_checked() {
 }
 
 #[test]
-#[ignore = "BUG: char_at past string length reads out-of-bounds memory; should trap"]
 fn string_char_at_oob_is_checked() {
     expect_trap("*main\n    s is 'hi'\n    log(s.char_at(99))\n", "out of bounds");
 }
 
 #[test]
-#[ignore = "BUG: shift count >= bit width produces an unspecified value (LLVM poison); should trap or mask"]
 fn oversized_shift_is_defined() {
     expect_trap(
         "*main\n    a is 1\n    b is 70\n    log(a << b)\n",

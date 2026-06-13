@@ -72,7 +72,11 @@ impl Parser {
             }));
         }
 
-        let value = self.parse_pipeline()?;
+        let value = if self.check(Token::Insert) {
+            self.parse_insert_expr()?
+        } else {
+            self.parse_pipeline()?
+        };
 
         let value = if self.check(Token::Query) {
             self.parse_query_block(value)?

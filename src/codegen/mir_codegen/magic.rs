@@ -92,8 +92,11 @@ impl<'ctx> Compiler<'ctx> {
             return self.emit_actor_send(rest, args).map(Some);
         }
 
+        if let Some(store_name) = name.strip_prefix("__store_insert_status_") {
+            return self.emit_store_insert(store_name, args, true).map(Some);
+        }
         if let Some(store_name) = name.strip_prefix("__store_insert_") {
-            return self.emit_store_insert(store_name, args).map(Some);
+            return self.emit_store_insert(store_name, args, false).map(Some);
         }
         if let Some(rest) = name.strip_prefix("__store_query_") {
             return self.emit_store_query(rest, args).map(Some);
@@ -113,8 +116,11 @@ impl<'ctx> Compiler<'ctx> {
         if let Some(rest) = name.strip_prefix("__store_delete_") {
             return self.emit_store_delete(rest, args).map(Some);
         }
+        if let Some(rest) = name.strip_prefix("__store_set_status_") {
+            return self.emit_store_set(rest, args, true).map(Some);
+        }
         if let Some(rest) = name.strip_prefix("__store_set_") {
-            return self.emit_store_set(rest, args).map(Some);
+            return self.emit_store_set(rest, args, false).map(Some);
         }
         if let Some(store_name) = name.strip_prefix("__store_get_") {
             return self.emit_store_get(store_name, args).map(Some);

@@ -685,6 +685,7 @@ impl Typer {
                     }
                 };
                 let bind_id = self.fresh_id();
+                let outer_ids = self.in_scope_def_ids();
                 self.push_scope();
 
                 let is_collection_for = !(end.is_some() || iter_is_int);
@@ -721,6 +722,7 @@ impl Typer {
 
                 let pre_loop = self.snapshot_moved_fields();
                 let mut body = self.lower_block_no_scope(&f.body, ret_ty)?;
+                self.check_loop_body_moves(&pre_loop, &outer_ids, f.span)?;
                 self.finalize_loop_body_drops(&mut body);
                 self.pop_scope();
                 self.restore_moved_fields(pre_loop);
@@ -741,8 +743,10 @@ impl Typer {
                 }))
             }
             ast::Stmt::Loop(l) => {
+                let outer_ids = self.in_scope_def_ids();
                 let pre = self.snapshot_moved_fields();
                 let body = self.lower_block(&l.body, ret_ty)?;
+                self.check_loop_body_moves(&pre, &outer_ids, l.span)?;
                 self.restore_moved_fields(pre);
                 Ok(hir::Stmt::Loop(hir::Loop { body, span: l.span }))
             }
@@ -896,76 +900,7 @@ impl Typer {
             }
 
             ast::Stmt::StoreInsert(store, values, span) => {
-                let schema = self
-                    .store_schemas
-                    .get(store)
-                    .ok_or_else(|| format!("unknown store '{store}'"))?
-                    .clone();
-
-                let builtin_names = [
-                    "sid",
-                    "uuid",
-                    "hash",
-                    "created",
-                    "updated",
-                    "deleted",
-                    "__version",
-                ];
-                let user_schema: Vec<_> = schema
-                    .iter()
-                    .filter(|(n, _)| !builtin_names.iter().any(|b| *n == *b))
-                    .cloned()
-                    .collect();
-
-                let any_named = values.iter().any(|fi| fi.name.is_some());
-                let all_named = values.iter().all(|fi| fi.name.is_some());
-
-                if any_named && !all_named {
-                    return Err(format!(
-                        "store '{store}': cannot mix named and positional \
-                         fields in a single insert"
-                    ));
-                }
-
-                if all_named && !values.is_empty() {
-                    let mut hvalues = Vec::with_capacity(user_schema.len());
-                    for (fname, fty) in &user_schema {
-                        let fi = values
-                            .iter()
-                            .find(|fi| fi.name.as_ref() == Some(fname))
-                            .ok_or_else(|| {
-                                format!("store '{store}' insert: missing field '{fname}'")
-                            })?;
-                        hvalues.push(self.lower_expr_expected(&fi.value, Some(fty))?);
-                    }
-
-                    let mut seen = std::collections::HashSet::new();
-                    for fi in values {
-                        let n = fi.name.as_ref().unwrap();
-                        if !user_schema.iter().any(|(sn, _)| sn == n) {
-                            return Err(format!("store '{store}' has no field '{n}'"));
-                        }
-                        if !seen.insert(*n) {
-                            return Err(format!(
-                                "store '{store}' insert: field '{n}' \
-                                 specified twice"
-                            ));
-                        }
-                    }
-                    return Ok(hir::Stmt::StoreInsert(*store, hvalues, *span));
-                }
-
-                if values.len() != user_schema.len() {
-                    return Err(format!(
-                        "store '{store}' has {} fields but {} values given",
-                        user_schema.len(),
-                        values.len()
-                    ));
-                }
-                let mut hvalues = Vec::new();
-                for (fi, (_fname, fty)) in values.iter().zip(user_schema.iter()) {
-                    hvalues.push(self.lower_expr_expected(&fi.value, Some(fty))?);
-                }
+                let hvalues = self.lower_store_insert_values(store, values)?;
                 Ok(hir::Stmt::StoreInsert(*store, hvalues, *span))
             }
 
@@ -1082,6 +1017,7 @@ impl Typer {
                     }
                 };
                 let bind_id = self.fresh_id();
+                let outer_ids = self.in_scope_def_ids();
                 self.push_scope();
                 self.define_var(
                     &f.bind.as_str(),
@@ -1095,6 +1031,7 @@ impl Typer {
 
                 let pre_loop = self.snapshot_moved_fields();
                 let mut body = self.lower_block_no_scope(&f.body, ret_ty)?;
+                self.check_loop_body_moves(&pre_loop, &outer_ids, *span)?;
                 self.finalize_loop_body_drops(&mut body);
                 self.pop_scope();
                 self.restore_moved_fields(pre_loop);

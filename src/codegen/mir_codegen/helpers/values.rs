@@ -122,13 +122,18 @@ impl<'ctx> Compiler<'ctx> {
                 mir::BinOp::BitAnd => b!(self.bld.build_and(li, ri, "and")),
                 mir::BinOp::BitOr => b!(self.bld.build_or(li, ri, "or")),
                 mir::BinOp::BitXor => b!(self.bld.build_xor(li, ri, "xor")),
-                mir::BinOp::Shl => b!(self.bld.build_left_shift(li, ri, "shl")),
+                mir::BinOp::Shl => {
+                    self.checked_shift_count(ri)?;
+                    b!(self.bld.build_left_shift(li, ri, "shl"))
+                }
                 mir::BinOp::Shr => {
+                    self.checked_shift_count(ri)?;
                     b!(self
                         .bld
                         .build_right_shift(li, ri, result_ty.is_signed(), "shr"))
                 }
                 mir::BinOp::Ushr => {
+                    self.checked_shift_count(ri)?;
                     b!(self.bld.build_right_shift(li, ri, false, "ushr"))
                 }
                 mir::BinOp::And => b!(self.bld.build_and(li, ri, "land")),

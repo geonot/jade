@@ -3,7 +3,7 @@ use crate::ast::*;
 use crate::lexer::Token;
 
 impl Parser {
-    pub(in crate::parser) fn parse_insert_stmt(&mut self) -> Result<Stmt, ParseError> {
+    pub(in crate::parser) fn parse_insert_expr(&mut self) -> Result<Expr, ParseError> {
         let sp = self.span();
         self.expect(Token::Insert)?;
         let store = self.ident()?;
@@ -20,6 +20,22 @@ impl Parser {
         if parens {
             self.expect(Token::RParen)?;
         }
+        Ok(Expr::StoreInsert(store, values, sp))
+    }
+
+    pub(in crate::parser) fn parse_insert_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let e = self.parse_insert_expr()?;
+        let Expr::StoreInsert(store, values, sp) = e else {
+            unreachable!()
+        };
+        if self.at_multiline_arms() {
+            let q = self.parse_multiline_handler_arms(Expr::StoreInsert(store, values, sp))?;
+            return Ok(Stmt::Expr(q));
+        }
+        if matches!(self.peek(), Token::Question | Token::BangBang) {
+            let q = self.parse_stmt_handler_arms(Expr::StoreInsert(store, values, sp))?;
+            return Ok(Stmt::Expr(q));
+        }
         Ok(Stmt::StoreInsert(store, values, sp))
     }
 
@@ -29,7 +45,7 @@ impl Parser {
         if let (Token::Ident(name), Token::Is) = (self.peek().clone(), self.peek_at(1)) {
             self.advance();
             self.advance();
-            let value = self.parse_expr()?;
+            let value = self.parse_pipeline()?;
             return Ok(crate::ast::FieldInit {
                 name: Some(name),
                 value,
@@ -37,7 +53,7 @@ impl Parser {
         }
         Ok(crate::ast::FieldInit {
             name: None,
-            value: self.parse_expr()?,
+            value: self.parse_pipeline()?,
         })
     }
 
@@ -59,8 +75,11 @@ impl Parser {
             if self.check(Token::Newline) || self.check(Token::Eof) {
                 break;
             }
+            if matches!(self.peek(), Token::Question | Token::BangBang) {
+                break;
+            }
             let field = self.ident()?;
-            let value = self.parse_expr()?;
+            let value = self.parse_pipeline()?;
             assignments.push((field, value));
             if self.check(Token::Comma) {
                 self.advance();
@@ -68,6 +87,24 @@ impl Parser {
         }
         if assignments.is_empty() {
             return Err(self.error("expected at least one field assignment in set statement"));
+        }
+        if self.at_multiline_arms() {
+            let q = self.parse_multiline_handler_arms(Expr::StoreUpdate(
+                store,
+                assignments,
+                Box::new(filter),
+                sp,
+            ))?;
+            return Ok(Stmt::Expr(q));
+        }
+        if matches!(self.peek(), Token::Question | Token::BangBang) {
+            let q = self.parse_stmt_handler_arms(Expr::StoreUpdate(
+                store,
+                assignments,
+                Box::new(filter),
+                sp,
+            ))?;
+            return Ok(Stmt::Expr(q));
         }
         Ok(Stmt::StoreSet(store, assignments, filter, sp))
     }

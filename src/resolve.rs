@@ -297,6 +297,20 @@ pub fn rewrite_expr(expr: &mut Expr, renames: &HashMap<Symbol, String>) {
             }
         }
         Expr::StoreGet(_, e, _) => rewrite_expr(e, renames),
+        Expr::StoreInsert(_, fis, _) => {
+            for fi in fis {
+                rewrite_expr(&mut fi.value, renames);
+            }
+        }
+        Expr::StoreUpdate(_, pairs, filter, _) => {
+            for (_, e) in pairs {
+                rewrite_expr(e, renames);
+            }
+            rewrite_expr(&mut filter.value, renames);
+            for (_, cond) in &mut filter.extra {
+                rewrite_expr(&mut cond.value, renames);
+            }
+        }
         Expr::Receive(arms, _) => {
             for arm in arms {
                 rewrite_block(&mut arm.body, renames);

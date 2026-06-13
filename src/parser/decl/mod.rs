@@ -51,7 +51,9 @@ fn is_useless_top_expr(e: &Expr) -> bool {
         | Expr::QualifiedIdent(..)
         | Expr::Query(..) => true,
 
-        Expr::Call(..)
+        Expr::StoreInsert(..)
+        | Expr::StoreUpdate(..)
+        | Expr::Call(..)
         | Expr::Method(..)
         | Expr::Pipe(..)
         | Expr::Block(..)

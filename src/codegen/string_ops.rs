@@ -226,14 +226,39 @@ impl<'ctx> Compiler<'ctx> {
         Ok(phi.as_basic_value())
     }
 
+    fn emit_str_bounds_check(
+        &mut self,
+        idx: inkwell::values::IntValue<'ctx>,
+        len: inkwell::values::IntValue<'ctx>,
+        tag: &str,
+        msg: &str,
+    ) -> Result<(), String> {
+        let fv = self.current_fn();
+        let ok = b!(self.bld.build_int_compare(
+            IntPredicate::ULT,
+            idx,
+            len,
+            &format!("{tag}.ok")
+        ));
+        let ok_bb = self.ctx.append_basic_block(fv, &format!("{tag}.ok"));
+        let fail_bb = self.ctx.append_basic_block(fv, &format!("{tag}.fail"));
+        b!(self.bld.build_conditional_branch(ok, ok_bb, fail_bb));
+        self.bld.position_at_end(fail_bb);
+        self.emit_trap(msg);
+        self.bld.position_at_end(ok_bb);
+        Ok(())
+    }
+
     pub(crate) fn string_char_at(
         &mut self,
         s: BasicValueEnum<'ctx>,
         idx: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
+        let len = self.string_len(s)?.into_int_value();
         let data = self.string_data(s)?.into_pointer_value();
         let i = idx.into_int_value();
+        self.emit_str_bounds_check(i, len, "ca", "string index out of bounds")?;
         let ptr = unsafe { b!(self.bld.build_gep(self.ctx.i8_type(), data, &[i], "ca.ptr")) };
         let byte = b!(self.bld.build_load(self.ctx.i8_type(), ptr, "ca.byte"));
         Ok(b!(self
@@ -250,9 +275,28 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let i8t = self.ctx.i8_type();
 
+        let len = self.string_len(s)?.into_int_value();
         let data = self.string_data(s)?.into_pointer_value();
         let si = start.into_int_value();
         let ei = end.into_int_value();
+
+        let fv = self.current_fn();
+        let start_le_end =
+            b!(self
+                .bld
+                .build_int_compare(IntPredicate::SLE, si, ei, "sl.sle"));
+        let end_le_len =
+            b!(self
+                .bld
+                .build_int_compare(IntPredicate::ULE, ei, len, "sl.elen"));
+        let valid = b!(self.bld.build_and(start_le_end, end_le_len, "sl.valid"));
+        let ok_bb = self.ctx.append_basic_block(fv, "sl.ok");
+        let fail_bb = self.ctx.append_basic_block(fv, "sl.fail");
+        b!(self.bld.build_conditional_branch(valid, ok_bb, fail_bb));
+        self.bld.position_at_end(fail_bb);
+        self.emit_trap("string slice range out of bounds");
+        self.bld.position_at_end(ok_bb);
+
         let new_len = b!(self.bld.build_int_nsw_sub(ei, si, "sl.len"));
         let src = unsafe { b!(self.bld.build_gep(i8t, data, &[si], "sl.src")) };
 

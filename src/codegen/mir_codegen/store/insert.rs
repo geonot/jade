@@ -5,6 +5,7 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         store_name: &str,
         args: &[mir::ValueId],
+        statusful: bool,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let sd = self
             .store_defs
@@ -148,6 +149,51 @@ impl<'ctx> Compiler<'ctx> {
 
         let fn_val = self.bld.get_insert_block().unwrap().get_parent().unwrap();
         let insert_done_bb = self.ctx.append_basic_block(fn_val, "insert.done");
+        let status_ptr = self.entry_alloca(i64t.into(), "ins.status");
+        b!(self.bld.build_store(status_ptr, new_sid));
+        {
+            let mut user_idx = 0usize;
+            for field_def in &sd.fields {
+                let is_required = field_def
+                    .decorators
+                    .iter()
+                    .any(|d| matches!(d, crate::ast::FieldDecorator::Required));
+                if !is_simple && builtin_names.contains(&&*field_def.name.as_str()) {
+                    continue;
+                }
+                if is_required && user_idx < args.len() && field_def.ty == Type::String {
+                    let val = self.val(args[user_idx]);
+                    let len = self.string_len(val)?.into_int_value();
+                    let is_empty = b!(self.bld.build_int_compare(
+                        inkwell::IntPredicate::EQ,
+                        len,
+                        len.get_type().const_int(0, false),
+                        "req.empty"
+                    ));
+                    let bad_bb = self.ctx.append_basic_block(fn_val, "req.bad");
+                    let ok_bb = self.ctx.append_basic_block(fn_val, "req.ok");
+                    b!(self.bld.build_conditional_branch(is_empty, bad_bb, ok_bb));
+
+                    self.bld.position_at_end(bad_bb);
+                    if statusful {
+                        b!(self
+                            .bld
+                            .build_store(status_ptr, i64t.const_int(-2i64 as u64, true)));
+                        self.store_unlock(fp)?;
+                        b!(self.bld.build_unconditional_branch(insert_done_bb));
+                    } else {
+                        self.store_unlock(fp)?;
+                        self.emit_trap(&format!(
+                            "store '{store_name}': missing @required field '{}'",
+                            field_def.name
+                        ));
+                    }
+
+                    self.bld.position_at_end(ok_bb);
+                }
+                user_idx += 1;
+            }
+        }
         {
             let contains_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_contains");
             let mut user_idx = 0usize;
@@ -180,8 +226,19 @@ impl<'ctx> Compiler<'ctx> {
                     b!(self.bld.build_conditional_branch(cmp, dup_bb, ok_bb));
 
                     self.bld.position_at_end(dup_bb);
-                    self.store_unlock(fp)?;
-                    b!(self.bld.build_unconditional_branch(insert_done_bb));
+                    if statusful {
+                        b!(self
+                            .bld
+                            .build_store(status_ptr, i64t.const_int(-1i64 as u64, true)));
+                        self.store_unlock(fp)?;
+                        b!(self.bld.build_unconditional_branch(insert_done_bb));
+                    } else {
+                        self.store_unlock(fp)?;
+                        self.emit_trap(&format!(
+                            "store '{store_name}': duplicate value for @unique field '{}'",
+                            field_def.name
+                        ));
+                    }
 
                     self.bld.position_at_end(ok_bb);
                 }
@@ -418,6 +475,10 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(insert_done_bb));
         self.bld.position_at_end(insert_done_bb);
 
+        if statusful {
+            let status = b!(self.bld.build_load(i64t, status_ptr, "ins.status.v"));
+            return Ok(status);
+        }
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 }

@@ -91,6 +91,9 @@ impl Typer {
                     }
                 }
                 ast::Decl::ErrDef(ed) => {
+                    if ed.name.as_str() == "StoreError" {
+                        self.store_error_def = None;
+                    }
                     self.declare_err_def_sig(ed);
                 }
                 ast::Decl::Test(_) => {}
@@ -280,6 +283,9 @@ impl Typer {
         let mut hir_enums = Vec::new();
         let mut hir_externs = Vec::new();
         let mut hir_err_defs = Vec::new();
+        if let Some(sed) = self.store_error_def.clone() {
+            hir_err_defs.push(self.lower_err_def(&sed));
+        }
         let mut hir_actors = Vec::new();
         let mut hir_stores = Vec::new();
         let mut test_fns: Vec<(String, String)> = Vec::new();

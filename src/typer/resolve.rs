@@ -59,6 +59,23 @@ impl Typer {
                 span: s,
             });
 
+        if !self.enums.contains_key(&Symbol::intern("StoreError")) {
+            let sed = ast::ErrDef {
+                name: "StoreError".into(),
+                variants: ["Duplicate", "Missing", "Constraint", "Io"]
+                    .iter()
+                    .map(|n| ast::ErrVariant {
+                        name: (*n).into(),
+                        fields: vec![],
+                        span: s,
+                    })
+                    .collect(),
+                span: s,
+            };
+            self.declare_err_def_sig(&sed);
+            self.store_error_def = Some(sed);
+        }
+
         self.traits.entry("Iter".into()).or_insert_with(|| {
             vec![super::TraitMethodSig {
                 name: "next".into(),

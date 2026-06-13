@@ -295,6 +295,12 @@ impl Typer {
             ast::Expr::StoreCount(..) => self.lower_expr_store_count(expr, expected),
             ast::Expr::StoreAll(..) => self.lower_expr_store_all(expr, expected),
             ast::Expr::StoreGet(..) => self.lower_expr_store_get(expr, expected),
+            ast::Expr::StoreInsert(store, values, span) => {
+                self.lower_expr_store_insert(store, values, *span)
+            }
+            ast::Expr::StoreUpdate(store, assignments, filter, span) => {
+                self.lower_expr_store_update(store, assignments, filter, *span)
+            }
             ast::Expr::StoreFirst(..) => self.lower_expr_store_first(expr, expected),
             ast::Expr::StoreExists(..) => self.lower_expr_store_exists(expr, expected),
             ast::Expr::StoreDistinct(..) => self.lower_expr_store_distinct(expr, expected),

@@ -246,6 +246,8 @@ pub enum Expr {
     StoreCount(Symbol, Option<Box<StoreFilter>>, Span),
     StoreAll(Symbol, Span),
     StoreGet(Symbol, Box<Expr>, Span),
+    StoreInsert(Symbol, Vec<FieldInit>, Span),
+    StoreUpdate(Symbol, Vec<(Symbol, Expr)>, Box<StoreFilter>, Span),
     StoreFirst(Symbol, Box<StoreFilter>, Span),
     StoreExists(Symbol, Box<StoreFilter>, Span),
     StoreDistinct(Symbol, Symbol, Span),
@@ -308,6 +310,8 @@ impl Expr {
             | Self::StoreCount(_, _, s)
             | Self::StoreAll(_, s)
             | Self::StoreGet(_, _, s)
+            | Self::StoreInsert(_, _, s)
+            | Self::StoreUpdate(_, _, _, s)
             | Self::StoreFirst(_, _, s)
             | Self::StoreExists(_, _, s)
             | Self::StoreDistinct(_, _, s)

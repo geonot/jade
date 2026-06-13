@@ -251,6 +251,42 @@ pub struct StoreFilterCond {
     pub value: Expr,
 }
 
+pub fn store_filter_op_str(op: BinOp) -> &'static str {
+    match op {
+        BinOp::Eq => "eq",
+        BinOp::Ne => "ne",
+        BinOp::Lt => "lt",
+        BinOp::Le => "le",
+        BinOp::Gt => "gt",
+        BinOp::Ge => "ge",
+        _ => "eq",
+    }
+}
+
+pub fn encode_store_set_call(store: Symbol, filter: &StoreFilter, fields: &[Symbol]) -> String {
+    let mut encoded = format!(
+        "__store_set_{store}__{}__{}",
+        filter.field,
+        store_filter_op_str(filter.op)
+    );
+    for (logic_op, cond) in &filter.extra {
+        let lop = match logic_op {
+            crate::ast::LogicalOp::And => "and",
+            crate::ast::LogicalOp::Or => "or",
+        };
+        encoded.push_str(&format!(
+            "__{lop}__{}__{}",
+            cond.field,
+            store_filter_op_str(cond.op)
+        ));
+    }
+    encoded.push_str("__fields");
+    for fname in fields {
+        encoded.push_str(&format!("_{fname}"));
+    }
+    encoded
+}
+
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Bind(Bind),

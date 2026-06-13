@@ -313,6 +313,17 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
                 }
             }
             Expr::StoreGet(_, id, _) => walk_expr(id, modules, defs),
+            Expr::StoreInsert(_, fis, _) => {
+                for fi in fis {
+                    walk_expr(&fi.value, modules, defs);
+                }
+            }
+            Expr::StoreUpdate(_, pairs, filter, _) => {
+                for (_, e) in pairs {
+                    walk_expr(e, modules, defs);
+                }
+                walk_store_filter(filter, modules, defs);
+            }
             Expr::StoreAll(_, _) | Expr::StoreDistinct(_, _, _) | Expr::Unreachable(_) => {}
             Expr::Ident(_, _)
             | Expr::Int(_, _)

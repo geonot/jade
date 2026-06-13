@@ -54,7 +54,9 @@ impl<'ctx> Compiler<'ctx> {
         for (vname, ftys, tag) in variants {
             let mut payload_bytes: usize = 0;
             for t in ftys {
-                let size = if Self::is_recursive_field(t, name) {
+                let size = if Self::is_recursive_field(t, name)
+                    || matches!(t, Type::Param(_) | Type::TypeVar(_))
+                {
                     8
                 } else {
                     self.type_store_size(self.llvm_ty(t)) as usize

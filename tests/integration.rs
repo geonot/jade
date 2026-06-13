@@ -2276,10 +2276,40 @@ fn store_versioned_history_count() {
 }
 
 #[test]
-fn store_unique_skips_duplicate() {
-    expect_store(
+fn store_unique_unhandled_duplicate_traps() {
+    let dir = tempfile::tempdir().unwrap();
+    let jinn = dir.path().join("test.jn");
+    let out = dir.path().join("test_bin");
+    std::fs::write(
+        &jinn,
         "store emails\n    addr as String @unique\n    name as String\n\n*main\n    insert emails 'a@b.com', 'Alice'\n    insert emails 'a@b.com', 'Bob'\n    c is count emails\n    log c\n",
-        "1",
+    )
+    .unwrap();
+    let status = Command::new(jinnc())
+        .arg(&jinn)
+        .arg("-o")
+        .arg(&out)
+        .status()
+        .expect("jinnc failed to start");
+    assert!(status.success());
+    let output = Command::new(&out)
+        .current_dir(dir.path())
+        .output()
+        .expect("compiled binary failed to start");
+    assert!(!output.status.success(), "duplicate insert must trap");
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("duplicate value for @unique field 'addr'"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn store_unique_handled_duplicate_yields_store_error() {
+    expect_store(
+        "store emails\n    addr as String @unique\n    name as String\n\n*main\n    insert emails 'a@b.com', 'Alice' ? log($) !! log(-1)\n    insert emails 'a@b.com', 'Bob' ? log($) !! log(-1)\n    c is count emails\n    log c\n",
+        "1\n-1\n1",
     );
 }
 

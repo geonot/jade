@@ -5,6 +5,7 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         encoded_name: &str,
         args: &[mir::ValueId],
+        statusful: bool,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let (filter_part, fields_part) = if let Some(pos) = encoded_name.find("__fields_") {
             (&encoded_name[..pos], &encoded_name[pos + 9..])
@@ -62,6 +63,10 @@ impl<'ctx> Compiler<'ctx> {
         let fv = self.cur_fn.expect("ICE: cur_fn not set");
         let idx_ptr = self.entry_alloca(i64t.into(), "set.idx");
         b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
+        let upd_count_ptr = self.entry_alloca(i64t.into(), "set.updcnt");
+        b!(self
+            .bld
+            .build_store(upd_count_ptr, i64t.const_int(0, false)));
 
         let loop_bb = self.ctx.append_basic_block(fv, "set.loop");
         let body_bb = self.ctx.append_basic_block(fv, "set.body");
@@ -208,6 +213,17 @@ impl<'ctx> Compiler<'ctx> {
 
         self.wal_write_update(store_name, rec_ptr, rec_size)?;
 
+        {
+            let cur = b!(self
+                .bld
+                .build_load(i64t, upd_count_ptr, "set.updcnt.v"))
+            .into_int_value();
+            let inc = b!(self
+                .bld
+                .build_int_add(cur, i64t.const_int(1, false), "set.updcnt.inc"));
+            b!(self.bld.build_store(upd_count_ptr, inc));
+        }
+
         b!(self.bld.build_unconditional_branch(next_bb));
 
         self.bld.position_at_end(next_bb);
@@ -247,6 +263,25 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_call(fflush_fn, &[fp.into()], ""));
 
         self.store_unlock(fp)?;
+        if statusful {
+            let updated = b!(self
+                .bld
+                .build_load(i64t, upd_count_ptr, "set.updated"))
+            .into_int_value();
+            let none = b!(self.bld.build_int_compare(
+                inkwell::IntPredicate::EQ,
+                updated,
+                i64t.const_int(0, false),
+                "set.none"
+            ));
+            let status = b!(self.bld.build_select(
+                none,
+                i64t.const_int(-1i64 as u64, true),
+                updated,
+                "set.status"
+            ));
+            return Ok(status);
+        }
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 

@@ -1,4 +1,5 @@
 # Changelog
+- **[41]** (2026-06-11 12:05) task 2-31-1: Real WAL-backed store transactions — begin snapshots data files + WAL offsets, commit group-fsyncs as one durable batch, escaping errors/traps roll back data files, WAL, and index/column/fts state; nested txns join outermost; +9-test conformance suite tests/store_transactions.rs; documented in jinn.md
 - **[39]** (2026-06-10 11:35) Add tests/crash_safety.rs: crash/trap/invalid-access/overwrite/unsafe-edge-case conformance suite (32 passing tests + 5 ignored tests pinning soundness bugs filed as task 2-30)
 - **[38]** (2026-06-10 11:03) Design structured concurrency: docs/structured-concurrency.md (together scopes, scope-owned actors, cancellation, error propagation) + cross-links (task 2-5)
 - **[36]** (2026-06-10 10:56) Document all remaining P1 tasks (2-5..2-22) against review findings with verified current-state probes, gap analysis, and definitions of done; complete P0 sweep tasks 2-23..2-29
