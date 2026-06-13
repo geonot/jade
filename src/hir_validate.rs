@@ -197,6 +197,7 @@ impl HirValidator {
             hir::Stmt::StoreDestroy(_, _, _) => {}
             hir::Stmt::StoreRestore(_, _, _) => {}
             hir::Stmt::StoreSave(_, _) => {}
+            hir::Stmt::StoreCompact(_, _) => {}
             hir::Stmt::StoreSet(_, updates, _, _) => {
                 for (_, e) in updates {
                     self.validate_expr(e);
@@ -542,6 +543,7 @@ fn stmt_span(stmt: &hir::Stmt) -> Span {
         hir::Stmt::StoreDestroy(_, _, s) => *s,
         hir::Stmt::StoreRestore(_, _, s) => *s,
         hir::Stmt::StoreSave(_, s) => *s,
+        hir::Stmt::StoreCompact(_, s) => *s,
         hir::Stmt::StoreSet(_, _, _, s) => *s,
         hir::Stmt::Transaction(_, s) => *s,
         hir::Stmt::ChannelClose(_, s) => *s,

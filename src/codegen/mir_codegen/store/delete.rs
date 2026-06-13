@@ -173,6 +173,28 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_call(fflush_fn, &[fp.into()], ""));
         self.store_unlock(fp)?;
 
+        if let Some(&crate::ast::StoreDecorator::Compact(threshold)) = sd
+            .decorators
+            .iter()
+            .find(|d| matches!(d, crate::ast::StoreDecorator::Compact(_)))
+            && let Some(offset) = self.store_deleted_offset(&sd)
+            && let Some(fp_g) = self.module.get_global(&format!("__store_{store_name}_fp"))
+        {
+            let path_lit = format!("{store_name}.store\0");
+            let path_str = b!(self.bld.build_global_string_ptr(&path_lit, "cmp.path"));
+            let compact_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_compact_if");
+            b!(self.bld.build_call(
+                compact_fn,
+                &[
+                    fp_g.as_pointer_value().into(),
+                    path_str.as_pointer_value().into(),
+                    i64t.const_int(offset, false).into(),
+                    i64t.const_int(threshold, false).into(),
+                ],
+                ""
+            ));
+        }
+
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 

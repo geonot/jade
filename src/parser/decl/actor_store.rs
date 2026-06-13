@@ -118,6 +118,18 @@ impl Parser {
                 };
                 self.expect(Token::RParen)?;
                 decorators.push(crate::ast::StoreDecorator::Vector(n));
+            } else if attr == "compact" {
+                self.expect(Token::LParen)?;
+                let n = match self.peek() {
+                    Token::Int(v) => {
+                        let n = *v as u64;
+                        self.advance();
+                        n
+                    }
+                    _ => return Err(self.error("expected compaction threshold")),
+                };
+                self.expect(Token::RParen)?;
+                decorators.push(crate::ast::StoreDecorator::Compact(n));
             } else if attr == "timeseries" {
                 self.expect(Token::LParen)?;
                 let field = self.ident()?;

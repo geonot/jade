@@ -954,6 +954,13 @@ impl Typer {
                 Ok(hir::Stmt::StoreSave(*store, *span))
             }
 
+            ast::Stmt::StoreCompact(store, span) => {
+                if !self.store_schemas.contains_key(store) {
+                    return Err(format!("unknown store '{store}'"));
+                }
+                Ok(hir::Stmt::StoreCompact(*store, *span))
+            }
+
             ast::Stmt::StoreSet(store, assignments, filter, span) => {
                 let schema = self
                     .store_schemas

@@ -147,6 +147,7 @@ impl OwnershipVerifier {
             Stmt::StoreDestroy(_, _, _) => {}
             Stmt::StoreRestore(_, _, _) => {}
             Stmt::StoreSave(_, _) => {}
+            Stmt::StoreCompact(_, _) => {}
             Stmt::StoreSet(_, assigns, _, _) => {
                 for (_, e) in assigns {
                     self.verify_expr(e);

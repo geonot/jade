@@ -93,6 +93,7 @@ pub(super) fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<Symbol, hir
         | Stmt::StoreDestroy(_, _, _)
         | Stmt::StoreRestore(_, _, _)
         | Stmt::StoreSave(_, _)
+        | Stmt::StoreCompact(_, _)
         | Stmt::UseLocal(_, _, _, _) => {}
         Stmt::GlobalStore(_, e, _) => fold_expr_with_fns(e, pure_fns),
     }
@@ -183,6 +184,7 @@ pub(super) fn fold_stmt(stmt: &mut Stmt) {
         Stmt::StoreDestroy(_, _, _) => {}
         Stmt::StoreRestore(_, _, _) => {}
         Stmt::StoreSave(_, _) => {}
+        Stmt::StoreCompact(_, _) => {}
         Stmt::StoreSet(_, pairs, _, _) => {
             for (_, e) in pairs {
                 fold_expr(e);

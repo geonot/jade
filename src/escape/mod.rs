@@ -225,6 +225,7 @@ fn seed_binds_in_stmt(stmt: &Stmt, info: &mut EscapeInfo) {
         | StoreSet(_, _, _, _)
         | StoreRestore(_, _, _)
         | StoreSave(_, _)
+        | StoreCompact(_, _)
         | ChannelClose(_, _)
         | Stop(_, _)
         | UseLocal(_, _, _, _)
@@ -500,6 +501,7 @@ impl<'a> EscapeWalk<'a> {
             | StoreDestroy(_, _, _)
             | StoreRestore(_, _, _)
             | StoreSave(_, _)
+            | StoreCompact(_, _)
             | UseLocal(_, _, _, _) => {}
         }
     }

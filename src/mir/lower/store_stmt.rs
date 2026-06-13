@@ -100,6 +100,15 @@ impl Lowerer {
                 *span,
             ),
 
+            hir::Stmt::StoreCompact(store_name, span) => self.emit(
+                InstKind::Call(
+                    Symbol::intern(&format!("__store_compact_{store_name}")),
+                    vec![],
+                ),
+                Type::I64,
+                *span,
+            ),
+
             hir::Stmt::StoreSet(store_name, fields, filter, span) => {
                 let filter_val = self.lower_expr(&filter.value);
                 let op_str = crate::hir::store_filter_pred_str(filter.pred, filter.op);

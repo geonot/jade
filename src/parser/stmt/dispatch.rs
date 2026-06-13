@@ -410,6 +410,7 @@ impl Parser {
                         "destroy" => return self.parse_destroy_stmt(),
                         "restore" => return self.parse_restore_stmt(),
                         "save" => return self.parse_save_stmt(),
+                        "compact" => return self.parse_compact_stmt(),
                         _ => {}
                     }
                 }

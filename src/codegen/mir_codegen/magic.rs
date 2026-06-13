@@ -140,6 +140,9 @@ impl<'ctx> Compiler<'ctx> {
         if let Some(store_name) = name.strip_prefix("__store_save_") {
             return self.emit_store_save(store_name).map(Some);
         }
+        if let Some(store_name) = name.strip_prefix("__store_compact_") {
+            return self.emit_store_compact(store_name).map(Some);
+        }
         if let Some(rest) = name.strip_prefix("__store_distinct_") {
             return self.emit_store_distinct(rest).map(Some);
         }

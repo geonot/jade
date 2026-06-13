@@ -365,6 +365,10 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             indent(out, level);
             out.push_str(&format!("save {name}\n"));
         }
+        Stmt::StoreCompact(name, _) => {
+            indent(out, level);
+            out.push_str(&format!("compact {name}\n"));
+        }
         Stmt::StoreSet(name, assignments, _filter, _) => {
             indent(out, level);
             out.push_str(&format!("set {name}"));

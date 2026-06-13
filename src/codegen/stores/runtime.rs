@@ -245,6 +245,16 @@ impl<'ctx> Compiler<'ctx> {
             self.module
                 .add_function("jinn_mig_drop_field", ft, Some(Linkage::External));
         }
+        if self.module.get_function("jinn_store_compact").is_none() {
+            let ft = i64t.fn_type(&[ptr.into(), ptr.into(), i64t.into()], false);
+            self.module
+                .add_function("jinn_store_compact", ft, Some(Linkage::External));
+        }
+        if self.module.get_function("jinn_store_compact_if").is_none() {
+            let ft = i64t.fn_type(&[ptr.into(), ptr.into(), i64t.into(), i64t.into()], false);
+            self.module
+                .add_function("jinn_store_compact_if", ft, Some(Linkage::External));
+        }
         if self.module.get_function("jinn_store_check_schema").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(

@@ -136,6 +136,7 @@ pub fn rewrite_stmt(stmt: &mut Stmt, renames: &HashMap<Symbol, String>) {
         | Stmt::Nop(_)
         | Stmt::Asm(_)
         | Stmt::StoreSave(_, _)
+        | Stmt::StoreCompact(_, _)
         | Stmt::StoreDelete(_, _, _)
         | Stmt::StoreDestroy(_, _, _)
         | Stmt::StoreRestore(_, _, _)

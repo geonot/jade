@@ -171,6 +171,61 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
+    pub(in crate::codegen) fn store_deleted_offset(&self, sd: &hir::StoreDef) -> Option<u64> {
+        let deleted_idx = sd.fields.iter().position(|f| f.name == "deleted")?;
+        let mut offset = 0u64;
+        for f in &sd.fields[..deleted_idx] {
+            let lty = self.store_field_llvm_ty(&f.ty);
+            let fa = self.type_abi_align(lty);
+            let fs = self.type_store_size(lty);
+            offset = (offset + fa - 1) & !(fa - 1);
+            offset += fs;
+        }
+        let del_lty = self.store_field_llvm_ty(&sd.fields[deleted_idx].ty);
+        let del_align = self.type_abi_align(del_lty);
+        offset = (offset + del_align - 1) & !(del_align - 1);
+        Some(offset)
+    }
+
+    pub(in crate::codegen) fn emit_store_compact(
+        &mut self,
+        store_name: &str,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let i64t = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+
+        let (sd, _st, _rec_size, _fp) = self.setup_store_access(store_name)?;
+
+        let offset = match self.store_deleted_offset(&sd) {
+            Some(o) => o,
+            None => return Ok(i64t.const_int(0, false).into()),
+        };
+
+        let fp_global_name = format!("__store_{store_name}_fp");
+        let fp_g = self
+            .module
+            .get_global(&fp_global_name)
+            .ok_or_else(|| format!("no fp global for store '{store_name}'"))?;
+
+        let path_lit = format!("{store_name}.store\0");
+        let path_str = b!(self.bld.build_global_string_ptr(&path_lit, "cmp.path"));
+
+        let compact_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_compact");
+        let reclaimed = self.call_result(b!(self.bld.build_call(
+            compact_fn,
+            &[
+                fp_g.as_pointer_value().into(),
+                path_str.as_pointer_value().into(),
+                i64t.const_int(offset, false).into(),
+            ],
+            "cmp.n"
+        )));
+
+        let _ = ptr_ty;
+        self.wal_checkpoint(store_name)?;
+        Ok(reclaimed)
+    }
+
     pub(in crate::codegen) fn emit_store_save(
         &mut self,
         store_name: &str,

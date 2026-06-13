@@ -460,6 +460,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
             | Stmt::Nop(_)
             | Stmt::Asm(_)
             | Stmt::StoreSave(_, _)
+            | Stmt::StoreCompact(_, _)
             | Stmt::StoreDelete(_, _, _)
             | Stmt::StoreDestroy(_, _, _)
             | Stmt::StoreRestore(_, _, _)

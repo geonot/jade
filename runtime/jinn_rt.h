@@ -399,6 +399,8 @@ int64_t jinn_mig_log_applied(FILE *fp, int64_t version);
 void jinn_mig_log_record(FILE *fp, int64_t version, int64_t direction);
 int64_t jinn_mig_add_field(FILE **store_fp_ptr, const char *store_path, int64_t field_offset, int64_t field_size, const void *default_val);
 int64_t jinn_mig_drop_field(FILE **store_fp_ptr, const char *store_path, int64_t field_offset, int64_t field_size);
+int64_t jinn_store_compact(FILE **store_fp_ptr, const char *store_path, int64_t deleted_offset);
+int64_t jinn_store_compact_if(FILE **store_fp_ptr, const char *store_path, int64_t deleted_offset, int64_t threshold);
 void jinn_store_check_schema(FILE *fp, int64_t expected_fp, int64_t expected_ver, const char *store_name);
 void jinn_store_stamp_schema(FILE **store_fp_ptr, int64_t fingerprint, int64_t version);
 void jinn_migration_enter(void);

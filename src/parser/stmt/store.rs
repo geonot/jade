@@ -349,4 +349,11 @@ impl Parser {
         let store = self.ident()?;
         Ok(Stmt::StoreSave(store, sp))
     }
+
+    pub(in crate::parser) fn parse_compact_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let sp = self.span();
+        self.advance();
+        let store = self.ident()?;
+        Ok(Stmt::StoreCompact(store, sp))
+    }
 }

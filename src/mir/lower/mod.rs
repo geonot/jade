@@ -635,6 +635,7 @@ impl Lowerer {
             | hir::Stmt::StoreDestroy(..)
             | hir::Stmt::StoreRestore(..)
             | hir::Stmt::StoreSave(..)
+            | hir::Stmt::StoreCompact(..)
             | hir::Stmt::StoreSet(..)
             | hir::Stmt::Transaction(..) => self.lower_stmt_store(stmt),
             hir::Stmt::ChannelClose(..)

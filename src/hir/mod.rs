@@ -346,6 +346,7 @@ pub enum Stmt {
     StoreSet(Symbol, Vec<(Symbol, Expr)>, Box<StoreFilter>, Span),
     StoreRestore(Symbol, Box<StoreFilter>, Span),
     StoreSave(Symbol, Span),
+    StoreCompact(Symbol, Span),
     Transaction(Block, Span),
     ChannelClose(Expr, Span),
     Stop(Expr, Span),

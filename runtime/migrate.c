@@ -327,3 +327,105 @@ int64_t jinn_mig_drop_field(FILE **store_fp_ptr, const char *store_path,
     *store_fp_ptr = fp;
     return 0;
 }
+
+/*
+ * Compaction / vacuum.
+ *
+ * Rewrites a store file dropping every record whose `deleted` field (an
+ * int64 tombstone timestamp at byte `deleted_offset`) is non-zero.  The
+ * schema fingerprint and version are preserved — compaction never changes
+ * the layout.  Returns the number of records reclaimed, or -1 on error.
+ */
+int64_t jinn_store_compact(FILE **store_fp_ptr, const char *store_path,
+                           int64_t deleted_offset) {
+    FILE *fp = *store_fp_ptr;
+    if (!fp || deleted_offset < 0) return -1;
+
+    fseek(fp, 8, SEEK_SET);
+    int64_t count = 0, rec_size = 0;
+    if (fread(&count, 8, 1, fp) != 1) return -1;
+    if (fread(&rec_size, 8, 1, fp) != 1) return -1;
+    int64_t stored_fp = 0, stored_ver = 0;
+    if (fread(&stored_fp, 8, 1, fp) != 1) stored_fp = 0;
+    if (fread(&stored_ver, 8, 1, fp) != 1) stored_ver = 0;
+    if (count < 0 || rec_size <= 0) return -1;
+    if (deleted_offset + 8 > rec_size) return -1;
+    if (count == 0) return 0;
+    if (rec_size > (INT64_MAX / count)) return -1;
+
+    uint8_t *data = (uint8_t *)malloc((size_t)(count * rec_size));
+    if (!data) return -1;
+    fseek(fp, STORE_HEADER, SEEK_SET);
+    if (fread(data, (size_t)rec_size, (size_t)count, fp) != (size_t)count) {
+        free(data);
+        return -1;
+    }
+
+    int64_t kept = 0;
+    for (int64_t i = 0; i < count; i++) {
+        uint8_t *src = data + i * rec_size;
+        int64_t tomb = 0;
+        memcpy(&tomb, src + deleted_offset, 8);
+        if (tomb != 0) continue;
+        if (kept != i) memcpy(data + kept * rec_size, src, (size_t)rec_size);
+        kept++;
+    }
+
+    int64_t reclaimed = count - kept;
+    if (reclaimed == 0) {
+        free(data);
+        return 0;
+    }
+
+    fclose(fp);
+    fp = fopen(store_path, "w+b");
+    if (!fp) { free(data); return -1; }
+
+    fwrite(STORE_MAGIC, 1, 8, fp);
+    fwrite(&kept, 8, 1, fp);
+    fwrite(&rec_size, 8, 1, fp);
+    fwrite(&stored_fp, 8, 1, fp);
+    fwrite(&stored_ver, 8, 1, fp);
+    if (kept > 0) fwrite(data, (size_t)rec_size, (size_t)kept, fp);
+    fflush(fp);
+
+    free(data);
+    *store_fp_ptr = fp;
+    return reclaimed;
+}
+
+/*
+ * Auto-policy compaction.  Counts live tombstones; if the count is at or
+ * above `threshold` (and threshold > 0), performs a full compaction.
+ * Returns records reclaimed, 0 if below threshold, -1 on error.
+ */
+int64_t jinn_store_compact_if(FILE **store_fp_ptr, const char *store_path,
+                              int64_t deleted_offset, int64_t threshold) {
+    FILE *fp = *store_fp_ptr;
+    if (!fp || deleted_offset < 0 || threshold <= 0) return 0;
+
+    fseek(fp, 8, SEEK_SET);
+    int64_t count = 0, rec_size = 0;
+    if (fread(&count, 8, 1, fp) != 1) return -1;
+    if (fread(&rec_size, 8, 1, fp) != 1) return -1;
+    if (count <= 0 || rec_size <= 0) return 0;
+    if (deleted_offset + 8 > rec_size) return -1;
+    if (rec_size > (INT64_MAX / count)) return -1;
+
+    int64_t tombs = 0;
+    uint8_t *cell = (uint8_t *)malloc(8);
+    if (!cell) return -1;
+    for (int64_t i = 0; i < count; i++) {
+        if (fseek(fp, STORE_HEADER + i * rec_size + deleted_offset, SEEK_SET) != 0) {
+            free(cell);
+            return -1;
+        }
+        int64_t tomb = 0;
+        if (fread(&tomb, 8, 1, fp) != 1) { free(cell); return -1; }
+        if (tomb != 0) tombs++;
+    }
+    free(cell);
+
+    if (tombs < threshold) return 0;
+    return jinn_store_compact(store_fp_ptr, store_path, deleted_offset);
+}

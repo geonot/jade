@@ -405,6 +405,7 @@ impl Typer {
                 self.resolve_filter(filter);
             }
             hir::Stmt::StoreSave(_, _) => {}
+            hir::Stmt::StoreCompact(_, _) => {}
             hir::Stmt::StoreSet(_, updates, filter, _) => {
                 for (_, e) in updates {
                     self.resolve_expr(e);

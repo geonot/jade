@@ -358,6 +358,9 @@ impl PrettyPrinter {
             Stmt::StoreSave(name, _) => {
                 self.line(&format!("store_save {name}"));
             }
+            Stmt::StoreCompact(name, _) => {
+                self.line(&format!("store_compact {name}"));
+            }
             Stmt::StoreSet(name, _, _, _) => {
                 self.line(&format!("store_set {name} ..."));
             }
