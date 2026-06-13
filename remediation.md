@@ -22,6 +22,7 @@ Legend: ✅ done · ◻ remaining · ⊘ blocked.
 | P0 — must-fix before alpha (task 1) | 4 | 0 | 0 |
 | Audit P0 soundness bugs (tasks 2-23..2-29) | 7 | 0 | 0 |
 | Crash-safety soundness bugs (task 2-30) | 5 | 0 | 0 |
+| Coercion/soundness testing (tasks 2-13, 2-14) | 2 | 0 | 0 |
 | Error model (tasks 2-1..2-4) | 11 | 0 | 0 |
 | Concurrency (tasks 2-5..2-10) | 3 | 3 | 0 |
 | Memory / unsafe boundary (tasks 2-11..2-14) | 0 | 3 | 1 |
@@ -94,15 +95,17 @@ These shipped and are pinned by tests. Do not reopen.
 #### A1. task 2-30 — Crash-safety soundness bugs (5) — ✅ DONE (v42)
 All 5 fixed and un-ignored; see §2.7.
 
-#### A2. task 2-14 — Adversarial memory-model soundness fuzzer
-Generate random ownership-stressing programs (nested `take`, field moves in loops,
-borrows through closures/generators, container-read aliasing); run under ASan/TSan
-for leaks/UAF/double-free. Protects Perceus + escape + tombstones.
+#### A2. task 2-14 — Adversarial memory-model soundness fuzzer — ✅ DONE (v47)
+`tests/ownership_fuzz.rs`: generator produces random ownership-stressing
+programs (nested `take`, field/heap moves under `if`, container-read aliasing
+`v.get(i)`, `copy`, rebind-after-move). Each must be cleanly rejected OR run to
+completion with no abort (134) / segfault (139) / ICE. Under ASan (ci/sanitize.sh)
+the same corpus catches UAF/double-free/OOB in Perceus + escape + tombstones.
 
-#### A3. task 2-13 — Property tests for numeric coercion
-Random literal/variable × int/float/width combos; compile at `-O0` and `-O3`;
-assert runtime result == reference. The coercion miscompilation should have been
-caught here.
+#### A3. task 2-13 — Property tests for numeric coercion — ✅ DONE (v46)
+`tests/coercion_property.rs`: 6 properties compile at `-O0` AND `-O3` and assert
+runtime output == Rust reference. Covers the historically-dropped int-var→f64-param
+case plus literal, width, division, and chained coercion.
 
 ### Tier B — Concurrency hardening
 
