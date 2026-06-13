@@ -186,10 +186,14 @@ impl Typer {
                                 .first()
                                 .map(|(_, t)| t.clone())
                                 .unwrap_or(Type::I64);
+                            let neighbor_ty = user_fields
+                                .get(1)
+                                .map(|(_, t)| t.clone())
+                                .unwrap_or(Type::I64);
                             let node_expr = self.lower_expr_expected(&args[0], Some(&first_ty))?;
                             return Ok(Some(hir::Expr {
                                 kind: hir::ExprKind::GraphFrom(*name, Box::new(node_expr)),
-                                ty: Type::I64,
+                                ty: Type::Vec(Box::new(neighbor_ty)),
                                 span,
                             }));
                         }
@@ -216,10 +220,14 @@ impl Typer {
                                 .get(1)
                                 .map(|(_, t)| t.clone())
                                 .unwrap_or(Type::I64);
+                            let neighbor_ty = user_fields
+                                .first()
+                                .map(|(_, t)| t.clone())
+                                .unwrap_or(Type::I64);
                             let node_expr = self.lower_expr_expected(&args[0], Some(&second_ty))?;
                             return Ok(Some(hir::Expr {
                                 kind: hir::ExprKind::GraphTo(*name, Box::new(node_expr)),
-                                ty: Type::I64,
+                                ty: Type::Vec(Box::new(neighbor_ty)),
                                 span,
                             }));
                         }
@@ -269,7 +277,10 @@ impl Typer {
                                     Box::new(query_expr),
                                     Box::new(k_expr),
                                 ),
-                                ty: Type::I64,
+                                ty: Type::Vec(Box::new(Type::Tuple(vec![
+                                    Type::I64,
+                                    Type::F64,
+                                ]))),
                                 span,
                             }));
                         }
@@ -327,7 +338,7 @@ impl Typer {
                     let query_expr = self.lower_expr(&args[1])?;
                     return Ok(Some(hir::Expr {
                         kind: hir::ExprKind::FtsSearch(*name, field, Box::new(query_expr)),
-                        ty: Type::I64,
+                        ty: Type::Vec(Box::new(Type::I64)),
                         span,
                     }));
                 }
@@ -390,9 +401,21 @@ impl Typer {
                             ast::Expr::Ident(f, _) => *f,
                             _ => return Err("distinct() argument must be a field name".into()),
                         };
+                        let field_ty = self
+                            .store_schemas
+                            .get(&name.as_str())
+                            .and_then(|schema| {
+                                schema
+                                    .iter()
+                                    .find(|(n, _)| n == &field)
+                                    .map(|(_, t)| t.clone())
+                            })
+                            .ok_or_else(|| {
+                                format!("distinct(): unknown field '{field}' in store '{name}'")
+                            })?;
                         return Ok(Some(hir::Expr {
                             kind: hir::ExprKind::StoreDistinct(*name, field),
-                            ty: Type::I64,
+                            ty: Type::Vec(Box::new(field_ty)),
                             span,
                         }));
                     }
@@ -422,9 +445,11 @@ impl Typer {
                             return Err("history() requires exactly 1 argument (sid)".into());
                         }
                         let sid_expr = self.lower_expr_expected(&args[0], Some(&Type::I64))?;
+                        let struct_name =
+                            crate::intern::Symbol::intern(&format!("__store_{name}"));
                         return Ok(Some(hir::Expr {
                             kind: hir::ExprKind::StoreHistory(*name, Box::new(sid_expr)),
-                            ty: Type::I64,
+                            ty: Type::Vec(Box::new(Type::Struct(struct_name, vec![]))),
                             span,
                         }));
                     }

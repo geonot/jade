@@ -1,4 +1,18 @@
 # Changelog
+- **[51]** (2026-06-13 09:20) task 2-31-4: typed result sets replace opaque i64 handles for store methods. `history(sid)` -> `[Row]` (Vec<Struct<__store_NAME>>, iterable + field access); `distinct(field)` -> `[FieldType]`; `vector.nearest(q,k)` -> `[(i64, f64)]` (sid + Euclidean distance score, new jinn_vec_nearest_scored runtime); `graph.from(n)`/`graph.to(n)` -> `[NeighborType]` (collected opposite-endpoint values, not a count); FTS `search(field,q)` -> `[i64]` doc-ids (new jinn_fts_search_ids_n runtime). ABI: iterable list = Type::Vec(elem) materialized as heap __vec_header{ptr,len,cap} pointer. Also fix latent tuple-index typing bug: `t[1]` on a heterogeneous tuple now resolves the correct element type for constant indices (was always element 0). Conformance: 8 new/updated tests in tests/integration.rs (history/distinct/nearest/graph/fts typed iteration). 1766 pass / 0 fail, zero new warnings.
+- **[50]** (2026-06-13 15:06) task 2-31-3: schema fingerprint in store header + migration enforcement
+
+Extend store header 24->40B: append 8B FNV-1a schema fingerprint
+(field names/types/order/decorators + store decorators) and 8B schema
+version; count@8/rec_size@16 offsets preserved. On reopen, emit
+jinn_store_check_schema: match -> proceed, legacy 0 -> stamp+proceed,
+mismatch w/o bridging migration -> abort with precise diagnostic.
+Migrations stamp the new fingerprint (jinn_store_stamp_schema) and run
+under jinn_migration_enter/leave so they bypass the open-time check.
+Update all header-rewriting paths (create, hard-delete, migrate
+add/drop). Fix latent cross-binary migration segfault: gen_migration
+opens store via real __store_<name>_ensure_open. Conformance:
+tests/store_schema.rs (3 tests). 1762 pass / 0 fail.
 - **[47]** (2026-06-13 14:51) remediation task 2-14: adversarial memory-model soundness fuzzer (tests/ownership_fuzz.rs) — generates random ownership-stressing programs (nested take, field/heap moves under control flow, container-read aliasing, copy, rebind-after-move); asserts clean rejection OR no abort/segfault/ICE; integrates with ASan sweep to catch UAF/double-free in Perceus+escape+tombstones. 1759 tests green.
 - **[45]** (2026-06-13 14:48) remediation task 2-13: numeric-coercion property suite (tests/coercion_property.rs) — 6 properties compile at -O0 AND -O3 and assert runtime output == Rust reference, pinning the inference->lowering coercion boundary (int var/literal -> f64 param, width coercion, chained float coercion)
 - **[42]** (2026-06-13 14:44) remediation: fix 5 crash-safety soundness bugs (task 2-30) + complete StoreError @unique/@required error-model integration (task 2-31-2). String slice/char_at bounds checks, oversized-shift trap, Result-with-err-enum monomorphization (Param->Enum annotation resolution), take-in-loop double-free now a compile error. Stale s247 snippet de-keyworded. All 1752 tests green, zero warnings.

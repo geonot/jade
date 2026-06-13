@@ -129,3 +129,47 @@ int64_t jinn_vec_nearest(JinnVec *v, const double *query, int64_t k,
     free(indices);
     return k;
 }
+
+/* Same as jinn_vec_nearest but also writes the (Euclidean) distance score
+ * of each result into out_dists[i]. */
+int64_t jinn_vec_nearest_scored(JinnVec *v, const double *query, int64_t k,
+                                int64_t *out_indices, double *out_dists) {
+    if (!v || !v->fp || v->count == 0 || k <= 0) return 0;
+    if (k > v->count) k = v->count;
+
+    int64_t vec_bytes = v->dims * sizeof(double);
+    double *buf = malloc(vec_bytes);
+    if (!buf) return 0;
+
+    double  *dists   = malloc(v->count * sizeof(double));
+    int64_t *indices = malloc(v->count * sizeof(int64_t));
+    if (!dists || !indices) {
+        free(buf); free(dists); free(indices);
+        return 0;
+    }
+
+    fseek(v->fp, 24, SEEK_SET);
+    for (int64_t i = 0; i < v->count; i++) {
+        fread(buf, sizeof(double), v->dims, v->fp);
+        dists[i] = vec_dist_sq(buf, query, v->dims);
+        indices[i] = i;
+    }
+
+    for (int64_t i = 0; i < k; i++) {
+        int64_t min_j = i;
+        for (int64_t j = i + 1; j < v->count; j++) {
+            if (dists[j] < dists[min_j]) min_j = j;
+        }
+        if (min_j != i) {
+            double td = dists[i]; dists[i] = dists[min_j]; dists[min_j] = td;
+            int64_t ti = indices[i]; indices[i] = indices[min_j]; indices[min_j] = ti;
+        }
+        out_indices[i] = indices[i];
+        out_dists[i] = sqrt(dists[i]);
+    }
+
+    free(buf);
+    free(dists);
+    free(indices);
+    return k;
+}

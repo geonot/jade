@@ -176,8 +176,34 @@ impl<'ctx> Compiler<'ctx> {
         let (field_idx, field_def) = user_fields[target_idx];
         let field_ty = field_def.ty.clone();
 
+        let neighbor_target = if direction == "from" { 1usize } else { 0 };
+        let (neighbor_idx, neighbor_def) = user_fields
+            .get(neighbor_target)
+            .copied()
+            .unwrap_or(user_fields[target_idx]);
+        let neighbor_ty = neighbor_def.ty.clone();
+
         let i64t = self.ctx.i64_type();
         let i32t = self.ctx.i32_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let neighbor_lty = self.llvm_ty(&neighbor_ty);
+        let neighbor_size = self.type_store_size(neighbor_lty);
+
+        let header_ty = self.vec_header_type();
+        let malloc_fn = self.ensure_malloc();
+        let result_vec = self
+            .call_result(b!(self.bld.build_call(
+                malloc_fn,
+                &[i64t.const_int(24, false).into()],
+                "g.vec"
+            )))
+            .into_pointer_value();
+        let gv_d = b!(self.bld.build_struct_gep(header_ty, result_vec, 0, "g.vec.d"));
+        b!(self.bld.build_store(gv_d, ptr_ty.const_null()));
+        let gv_l = b!(self.bld.build_struct_gep(header_ty, result_vec, 1, "g.vec.l"));
+        b!(self.bld.build_store(gv_l, i64t.const_int(0, false)));
+        let gv_c = b!(self.bld.build_struct_gep(header_ty, result_vec, 2, "g.vec.c"));
+        b!(self.bld.build_store(gv_c, i64t.const_int(0, false)));
 
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
         b!(self.bld.build_call(
@@ -337,6 +363,19 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_int_add(cur_count, i64t.const_int(1, false), "g.mc1"));
         b!(self.bld.build_store(match_count, new_count));
+
+        let neighbor_gep = b!(self
+            .bld
+            .build_struct_gep(rec_st, rec_buf, neighbor_idx as u32, "g.np"));
+        let neighbor_val =
+            match crate::codegen::store_filter::normalize_store_field_type(&neighbor_ty) {
+                crate::types::Type::String => self.read_string_from_fixed_buf(neighbor_gep)?,
+                ref nty => {
+                    let lty = self.llvm_ty(nty);
+                    b!(self.bld.build_load(lty, neighbor_gep, "g.nval"))
+                }
+            };
+        self.vec_push_raw(result_vec, neighbor_val, neighbor_lty, neighbor_size)?;
         b!(self.bld.build_unconditional_branch(inc_bb));
 
         self.bld.position_at_end(inc_bb);
@@ -347,8 +386,8 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(loop_bb));
 
         self.bld.position_at_end(done_bb);
-        let result = b!(self.bld.build_load(i64t, match_count, "g.result")).into_int_value();
-        Ok(result.into())
+        let _ = match_count;
+        Ok(result_vec.into())
     }
 
     pub(in crate::codegen) fn emit_ts_latest(
@@ -425,21 +464,111 @@ impl<'ctx> Compiler<'ctx> {
         };
 
         let k_val = self.val(args[1]).into_int_value();
+        let f64t = self.ctx.f64_type();
 
-        let out_indices = b!(self.bld.build_array_alloca(i64t, k_val, "vec.out"));
+        let malloc_fn = self.ensure_malloc();
+        let k_bytes = b!(self
+            .bld
+            .build_int_mul(k_val, i64t.const_int(8, false), "vn.kbytes"));
+        let out_indices = self
+            .call_result(b!(self.bld.build_call(
+                malloc_fn,
+                &[k_bytes.into()],
+                "vec.out"
+            )))
+            .into_pointer_value();
+        let out_dists = self
+            .call_result(b!(self.bld.build_call(
+                malloc_fn,
+                &[k_bytes.into()],
+                "vec.dists"
+            )))
+            .into_pointer_value();
 
-        let nearest_fn = crate::codegen::fn_or_die(&self.module, "jinn_vec_nearest");
-        let result = self.call_result(b!(self.bld.build_call(
-            nearest_fn,
-            &[
-                vec_handle.into(),
-                query_ptr.into(),
-                k_val.into(),
-                out_indices.into()
-            ],
-            "vec.found"
-        )));
-        Ok(result)
+        let nearest_fn = crate::codegen::fn_or_die(&self.module, "jinn_vec_nearest_scored");
+        let found = self
+            .call_result(b!(self.bld.build_call(
+                nearest_fn,
+                &[
+                    vec_handle.into(),
+                    query_ptr.into(),
+                    k_val.into(),
+                    out_indices.into(),
+                    out_dists.into()
+                ],
+                "vec.found"
+            )))
+            .into_int_value();
+
+        let tuple_ty = self.ctx.struct_type(&[i64t.into(), f64t.into()], false);
+        let tuple_size = self.type_store_size(tuple_ty.into());
+
+        let header_ty = self.vec_header_type();
+        let result_vec = self
+            .call_result(b!(self.bld.build_call(
+                malloc_fn,
+                &[i64t.const_int(24, false).into()],
+                "vn.vec"
+            )))
+            .into_pointer_value();
+        let v_dgep = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_vec, 0, "vn.vec.d"));
+        b!(self.bld.build_store(v_dgep, ptr_ty.const_null()));
+        let v_lgep = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_vec, 1, "vn.vec.l"));
+        b!(self.bld.build_store(v_lgep, i64t.const_int(0, false)));
+        let v_cgep = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_vec, 2, "vn.vec.c"));
+        b!(self.bld.build_store(v_cgep, i64t.const_int(0, false)));
+
+        let fv = self.cur_fn.expect("ICE: cur_fn not set");
+        let idx_ptr = self.entry_alloca(i64t.into(), "vn.idx");
+        b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
+
+        let loop_bb = self.ctx.append_basic_block(fv, "vn.loop");
+        let body_bb = self.ctx.append_basic_block(fv, "vn.body");
+        let done_bb = self.ctx.append_basic_block(fv, "vn.done");
+
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(loop_bb);
+        let idx = b!(self.bld.build_load(i64t, idx_ptr, "vn.i")).into_int_value();
+        let cmp = b!(self
+            .bld
+            .build_int_compare(inkwell::IntPredicate::ULT, idx, found, "vn.cmp"));
+        b!(self.bld.build_conditional_branch(cmp, body_bb, done_bb));
+
+        self.bld.position_at_end(body_bb);
+        let i_gep = unsafe { b!(self.bld.build_gep(i64t, out_indices, &[idx], "vn.igep")) };
+        let i_val = b!(self.bld.build_load(i64t, i_gep, "vn.ival"));
+        let d_gep = unsafe { b!(self.bld.build_gep(f64t, out_dists, &[idx], "vn.dgep")) };
+        let d_val = b!(self.bld.build_load(f64t, d_gep, "vn.dval"));
+
+        let undef = tuple_ty.get_undef();
+        let with0 = b!(self
+            .bld
+            .build_insert_value(undef, i_val, 0, "vn.ins0"))
+        .into_struct_value();
+        let tuple_val = b!(self
+            .bld
+            .build_insert_value(with0, d_val, 1, "vn.ins1"))
+        .into_struct_value();
+        self.vec_push_raw(result_vec, tuple_val.into(), tuple_ty.into(), tuple_size)?;
+
+        let next_idx = b!(self
+            .bld
+            .build_int_add(idx, i64t.const_int(1, false), "vn.next"));
+        b!(self.bld.build_store(idx_ptr, next_idx));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(done_bb);
+        let free_fn = self.ensure_free();
+        b!(self.bld.build_call(free_fn, &[out_indices.into()], ""));
+        b!(self.bld.build_call(free_fn, &[out_dists.into()], ""));
+        Ok(result_vec.into())
     }
 
     pub(in crate::codegen) fn emit_vec_insert(
@@ -571,14 +700,74 @@ impl<'ctx> Compiler<'ctx> {
         let query_data = self.string_data(query_val)?;
         let query_len = self.string_len(query_val)?;
 
+        let i64t = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+
         let search_fn = crate::codegen::fn_or_die(&self.module, "jinn_fts_search_n");
         let count = self
             .call_result(b!(self.bld.build_call(
                 search_fn,
                 &[fts.into(), query_data.into(), query_len.into()],
-                "fts.res"
+                "fts.cnt"
             )))
             .into_int_value();
-        Ok(count.into())
+
+        let malloc_fn = self.ensure_malloc();
+        let one = i64t.const_int(1, false);
+        let buf_bytes = b!(self
+            .bld
+            .build_int_mul(count, i64t.const_int(8, false), "fts.bb"));
+        let buf_alloc = b!(self.bld.build_select(
+            b!(self.bld.build_int_compare(
+                inkwell::IntPredicate::EQ,
+                buf_bytes,
+                i64t.const_int(0, false),
+                "fts.isz"
+            )),
+            one,
+            buf_bytes,
+            "fts.alloc"
+        ))
+        .into_int_value();
+        let out_ids = self
+            .call_result(b!(self.bld.build_call(
+                malloc_fn,
+                &[buf_alloc.into()],
+                "fts.ids"
+            )))
+            .into_pointer_value();
+
+        let fill_fn = crate::codegen::fn_or_die(&self.module, "jinn_fts_search_ids_n");
+        let found = self
+            .call_result(b!(self.bld.build_call(
+                fill_fn,
+                &[
+                    fts.into(),
+                    query_data.into(),
+                    query_len.into(),
+                    out_ids.into(),
+                    count.into()
+                ],
+                "fts.found"
+            )))
+            .into_int_value();
+
+        let header_ty = self.vec_header_type();
+        let result_vec = self
+            .call_result(b!(self.bld.build_call(
+                malloc_fn,
+                &[i64t.const_int(24, false).into()],
+                "fts.vec"
+            )))
+            .into_pointer_value();
+        let fv_d = b!(self.bld.build_struct_gep(header_ty, result_vec, 0, "fts.vec.d"));
+        b!(self.bld.build_store(fv_d, out_ids));
+        let fv_l = b!(self.bld.build_struct_gep(header_ty, result_vec, 1, "fts.vec.l"));
+        b!(self.bld.build_store(fv_l, found));
+        let fv_c = b!(self.bld.build_struct_gep(header_ty, result_vec, 2, "fts.vec.c"));
+        b!(self.bld.build_store(fv_c, count));
+        let _ = ptr_ty;
+
+        Ok(result_vec.into())
     }
 }

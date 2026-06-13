@@ -181,6 +181,15 @@ int64_t jinn_fts_count_n(JinnFts *f, const char *query, int64_t qlen) {
     return jinn_fts_search_n(f, query, qlen);
 }
 
+int64_t jinn_fts_search_ids_n(JinnFts *f, const char *query, int64_t qlen,
+                              int64_t *out_ids, int64_t max_ids) {
+    char buf[256];
+    if (qlen > 255) qlen = 255;
+    memcpy(buf, query, qlen);
+    buf[qlen] = '\0';
+    return jinn_fts_search(f, buf, out_ids, max_ids);
+}
+
 void jinn_fts_add_n(JinnFts *f, int64_t doc_id, const char *text, int64_t text_len) {
     char buf[4096];
     if (text_len > 4095) text_len = 4095;

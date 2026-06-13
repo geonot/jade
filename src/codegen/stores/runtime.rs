@@ -346,6 +346,14 @@ impl<'ctx> Compiler<'ctx> {
             self.module
                 .add_function("jinn_vec_nearest", ft, Some(Linkage::External));
         }
+        if self.module.get_function("jinn_vec_nearest_scored").is_none() {
+            let ft = i64t.fn_type(
+                &[ptr.into(), ptr.into(), i64t.into(), ptr.into(), ptr.into()],
+                false,
+            );
+            self.module
+                .add_function("jinn_vec_nearest_scored", ft, Some(Linkage::External));
+        }
 
         if self.module.get_function("jinn_col_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into(), i64t.into()], false);
@@ -429,6 +437,14 @@ impl<'ctx> Compiler<'ctx> {
             let ft = i64t.fn_type(&[ptr.into(), ptr.into(), i64t.into()], false);
             self.module
                 .add_function("jinn_fts_search_n", ft, Some(Linkage::External));
+        }
+        if self.module.get_function("jinn_fts_search_ids_n").is_none() {
+            let ft = i64t.fn_type(
+                &[ptr.into(), ptr.into(), i64t.into(), ptr.into(), i64t.into()],
+                false,
+            );
+            self.module
+                .add_function("jinn_fts_search_ids_n", ft, Some(Linkage::External));
         }
         if self.module.get_function("jinn_fts_posting_count").is_none() {
             let ft = i64t.fn_type(&[ptr.into()], false);

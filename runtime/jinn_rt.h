@@ -366,6 +366,7 @@ int64_t jinn_fts_search(JinnFts *f, const char *query, int64_t *out_ids, int64_t
 int64_t jinn_fts_count(JinnFts *f, const char *query);
 int64_t jinn_fts_search_n(JinnFts *f, const char *query, int64_t qlen);
 int64_t jinn_fts_count_n(JinnFts *f, const char *query, int64_t qlen);
+int64_t jinn_fts_search_ids_n(JinnFts *f, const char *query, int64_t qlen, int64_t *out_ids, int64_t max_ids);
 void jinn_fts_add_n(JinnFts *f, int64_t doc_id, const char *text, int64_t text_len);
 int64_t jinn_fts_posting_count(JinnFts *f);
 /* runtime/index.c */
@@ -439,6 +440,7 @@ void jinn_vec_close(JinnVec *v);
 void jinn_vec_insert(JinnVec *v, const double *vec);
 int64_t jinn_vec_count(JinnVec *v);
 int64_t jinn_vec_nearest(JinnVec *v, const double *query, int64_t k, int64_t *out_indices);
+int64_t jinn_vec_nearest_scored(JinnVec *v, const double *query, int64_t k, int64_t *out_indices, double *out_dists);
 /* runtime/version.c */
 FILE *jinn_ver_open(const char *path);
 void jinn_ver_close(FILE *f);

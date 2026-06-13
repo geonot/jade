@@ -2270,8 +2270,16 @@ fn store_versioned_at_version() {
 #[test]
 fn store_versioned_history_count() {
     expect_store(
-        "store notes @versioned\n    text as String\n\n*main\n    insert notes 'v1'\n    set notes where text equals 'v1' text 'v2'\n    set notes where text equals 'v2' text 'v3'\n    h is notes.history(1)\n    log h\n",
+        "store notes @versioned\n    text as String\n\n*main\n    insert notes 'v1'\n    set notes where text equals 'v1' text 'v2'\n    set notes where text equals 'v2' text 'v3'\n    h is notes.history(1)\n    log h.length\n",
         "2",
+    );
+}
+
+#[test]
+fn store_versioned_history_typed_rows() {
+    expect_store(
+        "store notes @versioned\n    text as String\n    n as i64\n\n*main\n    insert notes 'v1', 10\n    set notes where text equals 'v1' text 'v2', n 20\n    set notes where text equals 'v2' text 'v3', n 30\n    h is notes.history(1)\n    for r in h\n        log r.n\n        log r.text\n",
+        "10\nv1\n20\nv2",
     );
 }
 
@@ -2324,7 +2332,7 @@ fn store_unique_allows_different() {
 #[test]
 fn store_distinct_i64() {
     expect_store(
-        "store scores @simple\n    val as I64\n\n*main\n    insert scores 10\n    insert scores 20\n    insert scores 10\n    insert scores 30\n    d is scores.distinct(val)\n    log d\n",
+        "store scores @simple\n    val as I64\n\n*main\n    insert scores 10\n    insert scores 20\n    insert scores 10\n    insert scores 30\n    d is scores.distinct(val)\n    log d.length\n",
         "3",
     );
 }
@@ -2332,8 +2340,24 @@ fn store_distinct_i64() {
 #[test]
 fn store_distinct_string() {
     expect_store(
-        "store items @simple\n    name as String\n    cat as String\n\n*main\n    insert items 'a', 'fruit'\n    insert items 'b', 'fruit'\n    insert items 'c', 'veggie'\n    d is items.distinct(cat)\n    log d\n",
+        "store items @simple\n    name as String\n    cat as String\n\n*main\n    insert items 'a', 'fruit'\n    insert items 'b', 'fruit'\n    insert items 'c', 'veggie'\n    d is items.distinct(cat)\n    log d.length\n",
         "2",
+    );
+}
+
+#[test]
+fn store_distinct_typed_values() {
+    expect_store(
+        "store scores @simple\n    val as I64\n\n*main\n    insert scores 10\n    insert scores 20\n    insert scores 10\n    insert scores 30\n    d is scores.distinct(val)\n    for x in d\n        log x\n",
+        "10\n20\n30",
+    );
+}
+
+#[test]
+fn store_distinct_typed_strings() {
+    expect_store(
+        "store items @simple\n    name as String\n    cat as String\n\n*main\n    insert items 'a', 'fruit'\n    insert items 'b', 'fruit'\n    insert items 'c', 'veggie'\n    d is items.distinct(cat)\n    for x in d\n        log x\n",
+        "fruit\nveggie",
     );
 }
 
@@ -2436,23 +2460,23 @@ fn kv_overwrite() {
 #[test]
 fn graph_from_count() {
     expect_store(
-        "store edges @graph\n    src as i64\n    dst as i64\n    weight as i64\n\n*main\n    insert edges 1, 2, 10\n    insert edges 1, 3, 20\n    insert edges 2, 3, 30\n    n is edges.from(1)\n    log n\n",
-        "2",
+        "store edges @graph\n    src as i64\n    dst as i64\n    weight as i64\n\n*main\n    insert edges 1, 2, 10\n    insert edges 1, 3, 20\n    insert edges 2, 3, 30\n    n is edges.from(1)\n    log n.length\n    for d in n\n        log d\n",
+        "2\n2\n3",
     );
 }
 
 #[test]
 fn graph_to_count() {
     expect_store(
-        "store edges @graph\n    src as i64\n    dst as i64\n\n*main\n    insert edges 1, 3\n    insert edges 2, 3\n    insert edges 3, 1\n    n is edges.to(3)\n    log n\n",
-        "2",
+        "store edges @graph\n    src as i64\n    dst as i64\n\n*main\n    insert edges 1, 3\n    insert edges 2, 3\n    insert edges 3, 1\n    n is edges.to(3)\n    log n.length\n    for s in n\n        log s\n",
+        "2\n1\n2",
     );
 }
 
 #[test]
 fn graph_from_empty() {
     expect_store(
-        "store edges @graph\n    src as i64\n    dst as i64\n\n*main\n    insert edges 1, 2\n    n is edges.from(99)\n    log n\n",
+        "store edges @graph\n    src as i64\n    dst as i64\n\n*main\n    insert edges 1, 2\n    n is edges.from(99)\n    log n.length\n",
         "0",
     );
 }
@@ -2476,16 +2500,16 @@ fn vec_insert_count() {
 #[test]
 fn vec_nearest_basic() {
     expect_store(
-        "store vecs @vector(3)\n\n*main\n    vecs.insert([1.0, 0.0, 0.0])\n    vecs.insert([0.0, 1.0, 0.0])\n    vecs.insert([0.0, 0.0, 1.0])\n    k is vecs.nearest([1.0, 0.0, 0.0], 1)\n    log k\n",
-        "1",
+        "store vecs @vector(3)\n\n*main\n    vecs.insert([1.0, 0.0, 0.0])\n    vecs.insert([0.0, 1.0, 0.0])\n    vecs.insert([0.0, 0.0, 1.0])\n    k is vecs.nearest([1.0, 0.0, 0.0], 1)\n    log k.length\n    log k[0][0]\n    log k[0][1]\n",
+        "1\n0\n0.000000",
     );
 }
 
 #[test]
 fn vec_nearest_topk() {
     expect_store(
-        "store vecs @vector(2)\n\n*main\n    vecs.insert([1.0, 0.0])\n    vecs.insert([2.0, 0.0])\n    vecs.insert([10.0, 10.0])\n    k is vecs.nearest([1.5, 0.0], 2)\n    log k\n",
-        "2",
+        "store vecs @vector(2)\n\n*main\n    vecs.insert([1.0, 0.0])\n    vecs.insert([2.0, 0.0])\n    vecs.insert([10.0, 10.0])\n    k is vecs.nearest([1.5, 0.0], 2)\n    log k.length\n    for r in k\n        log r[0]\n",
+        "2\n0\n1",
     );
 }
 
@@ -2596,7 +2620,7 @@ fn bloom_multiple_inserts() {
 #[test]
 fn fts_search_basic() {
     expect_store(
-        "store docs @simple\n    text as String @search\n\n*main\n    insert docs 'hello world'\n    insert docs 'goodbye world'\n    n is docs.search(text, 'hello')\n    log n\n",
+        "store docs @simple\n    text as String @search\n\n*main\n    insert docs 'hello world'\n    insert docs 'goodbye world'\n    n is docs.search(text, 'hello')\n    log n.length\n",
         "1",
     );
 }
@@ -2604,7 +2628,7 @@ fn fts_search_basic() {
 #[test]
 fn fts_search_multiple_matches() {
     expect_store(
-        "store docs @simple\n    text as String @search\n\n*main\n    insert docs 'hello world'\n    insert docs 'hello again'\n    n is docs.search(text, 'hello')\n    log n\n",
+        "store docs @simple\n    text as String @search\n\n*main\n    insert docs 'hello world'\n    insert docs 'hello again'\n    n is docs.search(text, 'hello')\n    log n.length\n",
         "2",
     );
 }
@@ -2612,8 +2636,16 @@ fn fts_search_multiple_matches() {
 #[test]
 fn fts_search_no_match() {
     expect_store(
-        "store docs @simple\n    text as String @search\n\n*main\n    insert docs 'hello world'\n    n is docs.search(text, 'missing')\n    log n\n",
+        "store docs @simple\n    text as String @search\n\n*main\n    insert docs 'hello world'\n    n is docs.search(text, 'missing')\n    log n.length\n",
         "0",
+    );
+}
+
+#[test]
+fn fts_search_typed_ids() {
+    expect_store(
+        "store docs @simple\n    text as String @search\n\n*main\n    insert docs 'hello world'\n    insert docs 'hello again'\n    n is docs.search(text, 'hello')\n    for id in n\n        log id\n",
+        "1\n2",
     );
 }
 

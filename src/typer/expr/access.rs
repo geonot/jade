@@ -409,14 +409,18 @@ impl Typer {
                 let hidx = self.lower_expr(idx)?;
 
                 let peeled_ty = harr.ty.clone();
+                let const_idx = match &hidx.kind {
+                    hir::ExprKind::Int(n) if *n >= 0 => Some(*n as usize),
+                    _ => None,
+                };
                 let elem_ty = match &peeled_ty {
                     Type::Array(et, _) => *et.clone(),
                     Type::Vec(et) => *et.clone(),
                     Type::Ptr(et) => *et.clone(),
                     Type::Map(_, vt) => *vt.clone(),
-                    Type::Tuple(tys) => tys
-                        .first()
-                        .cloned()
+                    Type::Tuple(tys) => const_idx
+                        .and_then(|i| tys.get(i).cloned())
+                        .or_else(|| tys.first().cloned())
                         .unwrap_or_else(|| self.infer_ctx.fresh_var()),
                     _ => self.infer_ctx.fresh_var(),
                 };

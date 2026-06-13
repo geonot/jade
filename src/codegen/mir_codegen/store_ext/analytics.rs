@@ -69,6 +69,31 @@ impl<'ctx> Compiler<'ctx> {
         let total_count = self.store_read_count(fp)?;
         let buf = self.store_load_records(fp, total_count, rec_size)?;
 
+        let header_ty = self.vec_header_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let malloc_fn = self.ensure_malloc();
+        let result_vec = self
+            .call_result(b!(self.bld.build_call(
+                malloc_fn,
+                &[i64t.const_int(24, false).into()],
+                "dist.vec"
+            )))
+            .into_pointer_value();
+        let v_dgep = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_vec, 0, "dist.vec.d"));
+        b!(self.bld.build_store(v_dgep, ptr_ty.const_null()));
+        let v_lgep = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_vec, 1, "dist.vec.l"));
+        b!(self.bld.build_store(v_lgep, i64t.const_int(0, false)));
+        let v_cgep = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_vec, 2, "dist.vec.c"));
+        b!(self.bld.build_store(v_cgep, i64t.const_int(0, false)));
+        let elem_lty = self.llvm_ty(&field_ty);
+        let elem_size = self.type_store_size(elem_lty);
+
         let calloc_fn = self.ensure_calloc();
         let cap = b!(self.bld.build_int_add(
             b!(self
@@ -199,6 +224,16 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_int_add(uc, i64t.const_int(1, false), "dist.ucinc"));
         b!(self.bld.build_store(uniq_ptr, new_uc));
+
+        let elem_val = match crate::codegen::store_filter::normalize_store_field_type(&field_ty) {
+            crate::types::Type::String => self.read_string_from_fixed_buf(field_gep)?,
+            ref nty => {
+                let lty = self.llvm_ty(nty);
+                b!(self.bld.build_load(lty, field_gep, "dist.elem"))
+            }
+        };
+        self.vec_push_raw(result_vec, elem_val, elem_lty, elem_size)?;
+
         b!(self.bld.build_unconditional_branch(next_bb));
 
         self.bld.position_at_end(next_bb);
@@ -213,8 +248,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_call(free_fn, &[buf.into()], ""));
         b!(self.bld.build_call(free_fn, &[hash_tbl.into()], ""));
 
-        let result = b!(self.bld.build_load(i64t, uniq_ptr, "dist.result")).into_int_value();
-        Ok(result.into())
+        Ok(result_vec.into())
     }
 
     pub(in crate::codegen) fn emit_store_agg(
