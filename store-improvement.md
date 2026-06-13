@@ -202,6 +202,18 @@ combinations at compile time. This follows the project convention that built-in
 surfaces have a single source of truth shared by typer and codegen, and makes
 adding decorator #13 a one-line change.
 
+**Resolved (task 2-31-12):** `src/store_decorators.rs` is now the single source
+of truth — a declarative table of every store and field decorator with its
+argument arity/type, mutual exclusions, and numeric-only/`@unique`-on-`f64`
+constraints. The parser validates names, argument shapes, and store-level
+exclusions; the typer validates field type constraints and exclusions once
+field types are known; `render_docs` generates the reference list from the same
+table. Nonsensical combinations (`@kv`+`@vector`, `@mem`+`@versioned`,
+`@unique` on `f64`, `@increment` on a non-numeric field) are rejected with
+precise diagnostics. Pinned by `tests/store_decorator_table.rs` and unit tests
+in the module (including a sync invariant asserting every AST variant appears in
+the table and that exclusions are symmetric).
+
 ---
 
 ## Suggested priority

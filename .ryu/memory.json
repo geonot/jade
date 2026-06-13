@@ -1,70 +1,221 @@
 {
-  "error_model_design": {
-    "value": "LOCKED Jinn error model (task 2-4, whole-hog rewrite):\n- Declare: `err FileError`+indented variants (existing).\n- RAISE: `err NotFound` (variant of an err enum). HARD MIGRATE off prefix `!`-raise and `! sentinel` ints.\n- QUATERNARY (extends ternary `cond ? a ! b`): `e ? ok_arm ! nothing_arm !! err_arm`. `$`=unwrapped success value in ? arm. `err`=current error value in !! arm (`!! err` propagates, `!! log(err)` inspects).\n- DEFAULTS: `foo()` == `foo() ? $ !! err` (implicit propagate). `foo() !! 0` == `foo() ? $ !! 0`.\n- `! E` in SIGNATURE = error-union annotation (kept), checked R1 + From. `! E` => returns Result of R,E (desugar_bang_ret added in resolve.rs).\n- Signatures fully inferred; returns/!E optional.\n- PROPAGATION always legal; fallibility INFERRED. Only main unhandled => nonzero exit + printed err (no caller-obligation hard error).\n- Lexer: tokenize `!!`. Parser: pratt accepts e ? a ! b !! c uniformly; typer decides ok/nothing/err by type (Result/Option/bool).\n- REMOVE `?>` operator + PendingPropagate machinery.\n- Tasks: 2-4a spec doc; 2-4b lexer !! + err-raise parse; 2-4c quaternary parse+desugar; 2-4d typer (err-raise, $/err binding, infer fallibility, R1-R6 SCC fixpoint, From graph); 2-4e codegen; 2-4f migrate corpus + conformance tests/error_effects.rs.\nAlready added: src/typer/resolve.rs desugar_bang_ret + auto_wrap_ok/auto_unwrap_result helpers in call/method_call.rs + tail auto-wrap in stmt/block.rs.",
-    "ts": "2026-06-05T15:03:25+00:00"
-  },
-  "quaternary_design": {
-    "value": "Task 2-4-3 quaternary parser. Add AST node Expr::Quaternary(subject, Option<ok_arm>, Option<nothing_arm>, Option<err_arm>, Span). Parse in parse_ternary: after subject `e`, on Token::Query parse arms. `?` ok arm, `!` nothing arm, `!!` err arm. Each arm optional. If only `?...!...` with no `!!`, AND subject is boolean-ish, it is still Ternary \u2014 BUT we cannot know type at parse time. DECISION: parse `e ? a ! b` as Ternary (unchanged), and ONLY produce Quaternary when a `!!` arm is present. The `!!`-less Option success/empty case `find() ? use($) ! none()` is parsed as Ternary and reinterpreted by typer when subject is Option (task 2-4-4). `$` parses as Expr::Placeholder, `err` parses as Expr::Ident(\"err\") \u2014 binding resolved in lowering (2-4-4). Multiline arm form: newline+indent then `?`/`!`/`!!` lines. Need to handle INDENT/DEDENT/NEWLINE tokens.",
-    "ts": "2026-06-06T06:33:28+00:00"
-  },
-  "quaternary_impl": {
-    "value": "Task 2-4-4 DONE. Quaternary lowering in src/typer/expr/quaternary.rs: build_quaternary(hsubj, ok/nothing/err AST arms) -> Block { __q_subj is subj; EnumIs(ok_tag) ? ok_block : bad_block }. $=Placeholder intercepted via Typer.dollar_stack (src/typer/expr/mod.rs); err=Ident(\"err\") resolved as scope var. Placeholder-currying in src/typer/expr/access.rs gated by dollar_stack.is_empty(). Propagation: propagate_err_value() in src/typer/stmt/dispatch.rs (From-converts X->E into enclosing Result, R1/R3 diags). Implicit propagation: implicit_propagate() called in Bind handler (dispatch.rs ~290) \u2014 only when enclosing_fn_is_fallible() (ret is Result/Option) AND value is fallible Call (not VariantCtor/Ref) AND no annotation. `!!`-less Ternary over Result/Option reinterpreted via try_ternary_as_quaternary. Parser: statement+bind `?`/`!`/`!!` now go through pratt parse_stmt_handler_arms (collect_handler_arms); legacy finish_bare_*/bind-handler-chains DELETED from src/parser/stmt/bind.rs + dispatch.rs; nested ternary in nothing-arm fixed (pratt.rs recurses). Tests: tests/error_effects.rs +11 (1 ignored=task4). DISCOVERED BUG task 4: Ok/Err ctor picks LAST-monomorphized Result regardless of T/E when multiple Result instantiations exist (pre-existing, blocks multi-layer From test). 8 lib test failures (lambda/poly) are PRE-EXISTING on base, not mine.",
-    "ts": "2026-06-06T07:29:11+00:00"
-  },
-  "structured_concurrency_design": {
-    "value": "Task 2-5 DONE: docs/structured-concurrency.md. `together [name]` scope block: dispatch/spawn inside register as non-daemon children; join on block exit. spawn in scope = scope-owned actor (non-daemon, auto-stop+drain at exit = first-class stop-and-drain). Cancellation: child error or `stop <scope>` cancels cooperatively at suspension points; defers+Perceus drops run; uncatchable Cancelled, not in error unions. Cancelled actors skip drain (stop=graceful, cancel=fast). Errors: first error wins, siblings cancelled, scope is fallible expression (union via SCC fixpoint), implicit propagation + From + multiline quaternary !! arm on block. Actor handler errors propagate to owning scope (error-effects \u00a78 boundary); daemon actors unchanged. L3 escape check: coroutines can't outlive scope. Runtime sketch: jinn_scope_t, coro gains scope ptr + cancelled flag; no changes to active_coros/*main epilogue/C ABI. supervisor decl (parser-only, dormant) = future sugar over scopes. Conformance plan table included for impl task.",
-    "ts": "2026-06-10T11:03:19+00:00"
-  },
-  "store_error_design": {
-    "value": "Task 2-31-2 StoreError design: (1) Builtin `err StoreError` (Duplicate, Missing, Constraint, Io; fieldless) registered in register_prelude_types via declare_err_def_sig (or_insert pattern) + always pushed into hir_prog.err_defs. (2) AST: ast::StoreHandlers{ok:Option<Expr>, err:Option<Expr>}; Stmt::StoreInsert and Stmt::StoreSet gain Option<StoreHandlers> param (update ~12 ast match sites each; HIR Stmt unchanged). Parser: after insert values / set assignments, parse optional inline or multiline ?/!/!!arms (Bang=err arm for Result). Values parsed via parse_pipeline not parse_expr. (3) Typer: bare insert/set lower as before. Handled insert lowers to hir Stmt::Expr(build_quaternary(subject)) where subject = Block{ Bind __st is Call(\"__store_insert_status_NAME\", hvalues):I64; value IfExpr(__st>=0 ? Ok(__st) : Err(__st==-1 ? Duplicate : Constraint)) : Result_i64_StoreError via monomorphize_enum }. Handled set: subject = count>0 ? Ok(count) : Err(Missing). build_quaternary needs pub(in crate::typer). (4) Codegen magic.rs: route __store_insert_status_ BEFORE __store_insert_; emit_store_insert(name,args,statusful) \u2014 status alloca, dup\u2192 -1 (statusful) or emit_trap \"store 'X': duplicate value for @unique field 'f'\" (bare); @required String empty \u2192 -2 / trap; success \u2192 status=new_sid; returns i64. emit_store_set always returns updated-row count i64. (5) Bare-insert semantic change: duplicate now TRAPS instead of silent skip \u2014 update tests/integration.rs store_unique_skips_duplicate. New tests/store_errors.rs. Docs jinn.md.",
-    "ts": "2026-06-11T20:03:21+00:00"
-  },
-  "task_2-31-4_progress": {
-    "value": "COMPLETE (v52). All 5 surfaces typed: history->Vec<Row>, distinct->Vec<FieldType>, nearest->Vec<(i64,f64)>, graph.from/to->Vec<NeighborType>, search->Vec<i64>. ABI: Type::Vec(elem)=heap __vec_header ptr. New runtime: jinn_vec_nearest_scored, jinn_fts_search_ids_n. Fixed tuple-index typing for const idx (access.rs). 1766 tests pass. Next store task: 2-31-5 (relation traversal +@cascade).",
-    "ts": "2026-06-13T16:22:07+00:00"
-  },
-  "task_2-31-5_design": {
-    "value": "Task 2-31-5 relation traversal. DECISION: implement belongs-to cleanly; has-many+cascade real-delete deferred via clear diagnostic (no infra, ambiguous FK).\nBELONGS-TO `&owner as Owner`: now a STORED I64 column named `owner` holding target sid. Changes:\n(1) typer/lower/mod.rs ~line117: include belongs-to relation fields in schema as Type::I64 (skip has-many). \n(2) typer/lower/decl.rs ~line187: belongs-to field ty=I64 in HIR.\n(3) Traversal: in typer/expr/access.rs Field access on Type::Row(store): if field is a relation field (need store->relations map), desugar to StoreGet(TargetStore, row.field_sid) => Type::Row(target). Store relation metadata: add self.store_relations: HashMap<Symbol,Vec<(fieldname,target,is_has_many)>>.\nHAS-MANY `&items as [Item]`: reject at field access with diagnostic OR keep as compile error. Decision: emit clear error \"has-many relation traversal not supported; use `all Item where ...`\".\n@cascade: keep parsing; emit no-op (document). \nExisting StoreGet works: get Store sid -> Row Store, __store_get_{store} runtime fn by primary key.\nFilter eq keyword is `eq` not `==`.",
-    "ts": "2026-06-13T16:37:54+00:00"
-  },
-  "task_2-31-5_impl": {
-    "value": "Task 2-31-5 DONE. Relation traversal implemented.\nBELONGS-TO `&owner as Target` is now a real STORED I64 sid column (was previously dropped entirely). Schema build in src/typer/lower/mod.rs records store_relations: IndexMap<Symbol,Vec<(field,target,is_has_many)>> on typer; belongs-to adds I64 column, has-many adds no column. HIR lowering src/typer/lower/decl.rs: belongs-to ty=I64, has-many skipped.\nTRAVERSAL in src/typer/expr/access.rs: Field access on Type::Row(store) where field is a belongs-to relation -> builds hir StoreGet(target, Field(hobj, field, idx)) typed Row(target). Reuses existing StoreGet (get Store sid -> Row, by primary sid index). Requires NON-@simple stores (sid-bearing) on both ends; @simple has no sid so get-by-key undefined.\nHAS-MANY `&items as [Item]`: clean compile error 'has-many relation ... not directly traversable ... all Item where <fk> eq Store.sid'.\n@cascade: parses+compiles, documented no-op (real delete deferred; no infra, ambiguous fk).\nTests: tests/store_relations.rs (4 tests, all pass). Relation column queryable: `count pets where owner eq 2`.",
-    "ts": "2026-06-13T16:45:03+00:00"
-  },
-  "task_2-31-6_design": {
-    "value": "Task 2-31-6 @kv schema-driven types + optional get. DESIGN:\n- store_methods.rs: add kv_types(name)->(key_ty,val_ty). Read store_schemas fields named 'key'/'val' (skip builtin sid/uuid/hash/created/updated/deleted/__version). Fallback key=String, val=I64. Validate key==String else err. val in {I64,F64} (String values: emit \"kv String values not yet supported\" err).\n- kv.get returns Option of val_ty: monomorphize_enum(\"Option\",{T:val_ty}) -> Type::Enum(opt). KvGet HIR node must carry val_ty + opt enum so codegen builds Some/Nothing. Added KvGet variant carries Type (val_ty). Actually KvGet(Symbol,Box<Expr>) \u2014 extend to KvGet(Symbol,Box<Expr>,Type) where Type=val_ty; ty field=Option enum.\n- set: value typed to val_ty (f64 bitcast to i64 at codegen). incr/decr only valid when val_ty==I64.\n- Runtime kv.c: add jinn_kv_get2(kv,key,len,int64_t*out)->int found. get returns found flag; value via out ptr (raw 8 bytes, f64 bitcast). Keep jinn_kv_get for back-compat? No\u2014switch codegen to get2.\n- codegen emit_kv_get: call has-style get2, build Option enum: if found -> Some(value cast to val_ty), else Nothing. Need enum layout knowledge. Simpler: reuse VariantCtor lowering by building HIR in typer? But KvGet is a leaf MIR call. Approach: lower KvGet in TYPER into a block that calls a runtime-ish primitive returning (found,val) then constructs Some/Nothing via VariantCtor HIR \u2014 avoids codegen enum knowledge. PREFERRED: keep KvGet returning raw, and in typer wrap: build Option via if found.\nBREAKING: existing integration.rs kv tests (line ~2404-2520) use `v is cache.get('x')` then `log v` as i64 \u2014 must update to `.unwrap_or` or `? $ ! 0` form.\nFILES: src/typer/call/store_methods.rs, src/hir/mod.rs (KvGet/KvHas), src/mir/lower/store_expr.rs, src/codegen/mir_codegen/store_ext/specialized.rs, runtime/kv.c, runtime/jinn_rt.h, src/codegen/stores/runtime.rs (fn decl), and all KvGet match arms (fold/escape/verify/resolve/validate/print).",
-    "ts": "2026-06-13T16:47:53+00:00"
-  },
-  "task_2-31-6_impl": {
-    "value": "Task 2-31-6 DONE. @kv schema-driven types + optional get.\n- src/typer/call/store_methods.rs: kv_key_val_types(store) reads schema fields 'key'/'val'|'value' (skip builtins), defaults String/I64. Validates key==String, val in {I64,F64} else compile err. incr/decr gated to I64. get -> build_kv_get_option: monomorphize_enum(\"Option\",{T:val}) then Block(bind __kv_key; Ternary(KvHas, Some(KvGet), Nothing)) typed Option<val>. set typed to val_ty.\n- src/codegen/mir_codegen/store_ext/specialized.rs: kv_value_is_f64(store) reads self.store_defs fields. emit_kv_set bitcasts f64->i64 before jinn_kv_set; emit_kv_get bitcasts i64->f64 after jinn_kv_get. No runtime/HIR/MIR signature changes \u2014 found-ness handled by KvHas in typer-built code (2 lookups, correct).\n- tests/integration.rs: updated 4 existing kv tests to .unwrap_or(-1); added kv_get_missing_flows_else, kv_get_missing_unwrap_or, kv_f64_value_schema. All 417 integration + 27 error/access pass. Zero warnings.\n- store-improvement.md item 11 marked Done; remediation.md 2-31-6 checked.\nString values intentionally rejected (need runtime value-blob).",
-    "ts": "2026-06-13T16:58:50+00:00"
-  },
-  "task_2-31-7_design": {
-    "value": "Task 2-31-7 group-by aggregates. DESIGN: method-based, fits existing aggregate surface (sum/avg/min/max/distinct are methods scanning records in analytics.rs).\nSurface: store.group(keyField).agg(valField) where agg in {sum,avg,min,max,count}. count takes no valField: store.group(keyField).count().\nReturns Vec<Tuple([KeyTy, ValueTy])>. KeyTy = group field type (String/I64). ValueTy: avg->F64, count->I64, sum/min/max-> I64 or F64 per field.\nAST: new Expr::StoreGroup(store, keyField, agg_method, Option<valField>, span). Parser: detect method 'group' returning a pending group then chained method. SIMPLER: handle in store_methods.rs as method 'group' producing intermediate, but chained call is awkward.\nALTERNATIVE chosen: single method form store.group(keyField, valField, \"avg\") is ugly. \nDECISION: parse store.group(keyField) as Expr that captures following .agg(valField). Implement via new HIR ExprKind::StoreGroup(store, key_field, agg:String, val_field:Option<Symbol>). Typer recognizes pattern Call(Field(Call(Field(store,'group'),[key]), agg), [val]).\nCodegen: emit_store_group in analytics.rs - scan records, hashmap keyed by group field -> accumulator(count,sum,min,max), then build Vec of tuples.\ncolumn.c leveraged only conceptually; in-memory scan reuses store_load_records like distinct.",
-    "ts": "2026-06-13T17:02:52+00:00"
-  },
-  "task_2-31-7_impl": {
-    "value": "Task 2-31-7 DONE. group-by aggregates, method-based chained surface: store.group(keyField).agg(valField) with agg in count/sum/avg/min/max (count takes no arg). Returns Vec<Tuple([KeyTy,ValTy])>; access via row[0]=key, row[1]=value. avg->F64, count->I64, sum/min/max->I64 or F64 per field.\n- AST node is Expr::Method(obj,method,args,span) NOT Call(Field). try_store_group() in store_methods.rs intercepts when outer method is an agg and inner obj is Method(Ident(store),\"group\",[key]).\n- HIR: ExprKind::StoreGroup(store,key_field,GroupAgg,Option<val_field>) + GroupAgg enum in hir/mod.rs.\n- MIR name: __store_group_{store}__{key}__{agg}__{val} (empty val for count).\n- Codegen emit_store_group in store_ext/analytics.rs: single-pass open-addressing hash table (hash_tbl markers + parallel rec_of/acc_arr/cnt_arr calloc'd, cap=4*n+16). Float accs bitcast through i64 slots. Output loop scans slots, reads key from rec_of record, builds (key,val) tuples via insert_value, vec_push_raw. avg divides acc by count at output.\n- Added StoreGroup arms in: comptime/fold.rs, escape/mod.rs (x2), ownership/verify.rs, typer/lower/resolve.rs, hir_validate.rs, hir/print.rs, mir/lower/mod.rs.\n- 6 tests in tests/integration.rs (store_group_count/sum/avg/max/min/int_key); order-independent via summing row[1]. All pass, zero warnings, full suite green.",
-    "ts": "2026-06-13T17:16:26+00:00"
-  },
-  "task_2-31-8_design": {
-    "value": "Task 2-31-8 richer where filters. ARCHITECTURE NOTE: filters flow parser->ast::StoreFilter{field,op:BinOp,value,extra:Vec<(LogicalOp,StoreFilterCond)>} -> hir mirror -> MIR encodes everything into mangled fn name __store_query_STORE__FIELD__OP__lop__field__op... + args -> codegen decodes name in query.rs/delete.rs/mutation.rs/read.rs/lifecycle.rs and calls eval_store_filter (store_filter.rs) which does store_compare_field per type.\nDECISION: extend flat model. Replace BinOp op with new ast::FilterPred enum {Cmp(BinOp), In(n_values), Between, Contains, StartsWith}. Carry extra value exprs. Mangle pred into name. eval_store_filter/store_compare_field gain In/Between/Contains/StartsWith cases. between uses 'between LO and HI' but parser must NOT treat that 'and' as logical chain. in uses '[a,b,c]' Array literal -> lower each elem as arg. Grouping: parser supports parenthesized (a and b) groups but only pure-conjunction/disjunction flattening; mixed precedence errors clearly.\nKEY FILES: src/parser/stmt/store.rs (parse_store_filter, parse_filter_op), src/ast.rs (StoreFilter/StoreFilterCond/new FilterPred), src/hir/mod.rs (mirror + encode_store_set_call), src/typer/stmt/filter.rs (lower_store_filter, flatten_filter_expr), src/mir/lower/store_expr.rs + store_stmt.rs (name mangling), src/codegen/mir_codegen/store/{query,delete,mutation,read,lifecycle}.rs (decode), src/codegen/store_filter.rs (eval_store_filter + store_compare_field).",
-    "ts": "2026-06-13T17:27:13+00:00"
-  },
-  "task_2-31-8_impl": {
-    "value": "Task 2-31-8 DONE. Richer where filters via flat-model extension.\nNEW SYNTAX (statement-form parse_store_filter): `where field in [a,b,c]` (desugars to field==a or field==b...), `where field between LO and HI` (desugars field>=LO and field<=HI, consuming the 'and'), `where field contains/starts_with/ends_with 'str'` (String fields only), parenthesized grouping `(a or b)`. Mixed and/or at flat level rejected with clear error 'group with parentheses' (flat eval is left-to-right, no precedence).\nAST: added FilterPred{Cmp,Contains,StartsWith,EndsWith}; pred field on StoreFilter+StoreFilterCond (ast.rs + hir mirror). hir::store_filter_pred_str encodes pred into mangled name (contains/startswith/endswith tokens).\nCODEGEN: parse_store_pred(s)->(BinOp,FilterPred) in query.rs replaced parse_store_op/parse_filter_op. eval_store_filter_pred (store_filter.rs) replaces eval_store_filter; store_compare_field takes pred and dispatches non-Cmp to store_text_predicate (LLVM IR: starts_with memcmp prefix, ends_with memcmp suffix, contains scan loop). extra_specs/extra tuples now carry FilterPred (4-tuple decode / 6-tuple eval). Index use disabled for non-Cmp primary pred.\nTESTS: tests/integration.rs store_filter_in_list/between/contains/starts_with/ends_with/grouping/in_query all pass. Full suite green, zero warnings.",
-    "ts": "2026-06-13T17:44:32+00:00"
-  },
-  "task_2-31-9_design": {
-    "value": "Task 2-31-9 persistent secondary indexes. DESIGN LOCKED:\nIdx file already persists (name.field.idx) with O(1) open. Gaps: no schema-fingerprint validation, no corruption detection, no rebuild. Index lookups do NOT fall back to scan -> cleared idx silently wrong, so rebuild must repopulate.\nRUNTIME index.c: bump magic to \"JINNIDX1\" (32B header: magic+capacity+count+fingerprint). New jinn_idx_open_checked(path, fingerprint, int* needs_rebuild): validate magic(v1)+fingerprint match + header sanity (capacity pow2, 0<=count<=capacity, filesize>=header+capacity*SLOT_SIZE). On any fail recreate fresh with fingerprint stamped, set *needs_rebuild=1. Clean match -> 0, O(1). Keep old jinn_idx_open as wrapper (open_checked w/ fp=0, ignore rebuild) for back-compat. write_header writes fingerprint too; init_file takes fingerprint; grow preserves fingerprint.\nHEADER jinn_rt.h: declare jinn_idx_open_checked.\nCODEGEN handles.rs load_store_idx: pass store fingerprint (super::store_schema_fingerprint(sd)) to open_checked, get needs_rebuild out-param, emit rebuild loop on flag=1: read store count(8B@off8 header), loop recs from HEADER_SIZE stride rec_size, fread record, hash indexed field via hash_store_field_from_gep, skip if deleted!=0, jinn_idx_insert(idx,hash,rec_off). Reuse: store_record_size(sd), crate::codegen::stores::HEADER_SIZE, hash_store_field_from_gep.\nTEST: tests/store_index_persist.rs - run twice (second is O(1) open, no rebuild), corrupt .idx -> rebuild restores correct lookups, schema change w/ migration restamps idx.",
-    "ts": "2026-06-13T17:56:56+00:00"
-  },
-  "task_2-31-9_impl": {
-    "value": "Task 2-31-9 DONE. Persistent secondary indexes.\nRUNTIME runtime/index.c: header now 32B (magic \"JINNIDX1\"+capacity+count+fingerprint). New jinn_idx_open_checked(path,fingerprint,int*needs_rebuild): validates magic+fingerprint+header_is_sane (cap pow2>=256<=2^60, 0<=count<=cap, filesize>=header+cap*24). On any failure recreates fresh stamped w/ fingerprint, *needs_rebuild=1; clean match O(1) *needs_rebuild=0. jinn_idx_open kept as wrapper(fp=0,NULL). grow preserves idx->fingerprint (write_header writes it).\nHEADER jinn_rt.h: declared jinn_idx_open_checked.\nCODEGEN: runtime.rs registers jinn_idx_open_checked (ptr,i64,ptr)->ptr. handles.rs load_store_idx: passes store_schema_fingerprint(sd) + rebuild_flag alloca; on flag!=0 emits gen_idx_rebuild loop. gen_idx_rebuild: load_store_fp, read count@8, loop recs from HEADER_SIZE(40) stride rec_size, fread into rec struct, skip if deleted!=0, hash_store_field_from_gep(field_gep,ty), jinn_idx_insert(idx,hash,rec_off).\nTEST tests/store_index_persist.rs 5 tests all pass: string persist/reopen O(1), missing idx rebuild, corrupt idx rebuild, i64 idx rebuild, soft-delete skipped. Full suite 0 failures, no warnings.",
-    "ts": "2026-06-13T18:06:03+00:00"
-  },
-  "task_2-31-10_impl": {
-    "value": "Task 2-31-10 DONE. compact statement + @compact(threshold) auto-policy for tombstone reclamation.\nRUNTIME runtime/migrate.c: jinn_store_compact(fp**, path, deleted_offset) rewrites .store dropping rows where deleted!=0, PRESERVES fingerprint/version in header (unlike migrate which zeroes), returns reclaimed count. jinn_store_compact_if(fp**, path, off, threshold) counts tombstones, compacts only if >=threshold. Decls in jinn_rt.h.\nAST: Stmt::StoreCompact(Symbol,Span); StoreDecorator::Compact(u64). HIR mirrors Stmt::StoreCompact.\nPARSER: parse_compact_stmt (mirrors save), dispatch \"compact\"=>; decorator @compact(n) POSTFIX (store X @compact(2)).\nTYPER: dispatch.rs StoreCompact validates store exists; resolve.rs noop.\nMIR: store_stmt.rs StoreCompact -> Call __store_compact_{name}, Type::I64.\nCODEGEN: magic.rs strip __store_compact_; lifecycle.rs emit_store_compact + helper store_deleted_offset(sd) computing byte offset via type_abi_align/type_store_size. delete.rs auto-injects jinn_store_compact_if call after soft delete when @compact present. runtime.rs declares both fns.\nExhaustive match sites patched: resolve.rs, comptime/fold.rs(x2), mir/lower/mod.rs, ownership/verify.rs, fmt.rs, driver/sources/implicit.rs, hir_validate.rs(x2), escape/mod.rs(x2), hir/print.rs.\nTESTS tests/store_compact.rs 5 tests all pass. Full suite 32 suites pass, zero warnings.",
-    "ts": "2026-06-13T18:27:24+00:00"
+  "version": 2,
+  "entries": {
+    "error_model_design": {
+      "key": "error_model_design",
+      "value": "LOCKED Jinn error model (task 2-4, whole-hog rewrite):\n- Declare: `err FileError`+indented variants (existing).\n- RAISE: `err NotFound` (variant of an err enum). HARD MIGRATE off prefix `!`-raise and `! sentinel` ints.\n- QUATERNARY (extends ternary `cond ? a ! b`): `e ? ok_arm ! nothing_arm !! err_arm`. `$`=unwrapped success value in ? arm. `err`=current error value in !! arm (`!! err` propagates, `!! log(err)` inspects).\n- DEFAULTS: `foo()` == `foo() ? $ !! err` (implicit propagate). `foo() !! 0` == `foo() ? $ !! 0`.\n- `! E` in SIGNATURE = error-union annotation (kept), checked R1 + From. `! E` => returns Result of R,E (desugar_bang_ret added in resolve.rs).\n- Signatures fully inferred; returns/!E optional.\n- PROPAGATION always legal; fallibility INFERRED. Only main unhandled => nonzero exit + printed err (no caller-obligation hard error).\n- Lexer: tokenize `!!`. Parser: pratt accepts e ? a ! b !! c uniformly; typer decides ok/nothing/err by type (Result/Option/bool).\n- REMOVE `?>` operator + PendingPropagate machinery.\n- Tasks: 2-4a spec doc; 2-4b lexer !! + err-raise parse; 2-4c quaternary parse+desugar; 2-4d typer (err-raise, $/err binding, infer fallibility, R1-R6 SCC fixpoint, From graph); 2-4e codegen; 2-4f migrate corpus + conformance tests/error_effects.rs.\nAlready added: src/typer/resolve.rs desugar_bang_ret + auto_wrap_ok/auto_unwrap_result helpers in call/method_call.rs + tail auto-wrap in stmt/block.rs.",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-05T15:03:25+00:00",
+      "ts_accessed": "2026-06-05T15:03:25+00:00",
+      "access_count": 0
+    },
+    "quaternary_design": {
+      "key": "quaternary_design",
+      "value": "Task 2-4-3 quaternary parser. Add AST node Expr::Quaternary(subject, Option<ok_arm>, Option<nothing_arm>, Option<err_arm>, Span). Parse in parse_ternary: after subject `e`, on Token::Query parse arms. `?` ok arm, `!` nothing arm, `!!` err arm. Each arm optional. If only `?...!...` with no `!!`, AND subject is boolean-ish, it is still Ternary \u2014 BUT we cannot know type at parse time. DECISION: parse `e ? a ! b` as Ternary (unchanged), and ONLY produce Quaternary when a `!!` arm is present. The `!!`-less Option success/empty case `find() ? use($) ! none()` is parsed as Ternary and reinterpreted by typer when subject is Option (task 2-4-4). `$` parses as Expr::Placeholder, `err` parses as Expr::Ident(\"err\") \u2014 binding resolved in lowering (2-4-4). Multiline arm form: newline+indent then `?`/`!`/`!!` lines. Need to handle INDENT/DEDENT/NEWLINE tokens.",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-06T06:33:28+00:00",
+      "ts_accessed": "2026-06-06T06:33:28+00:00",
+      "access_count": 0
+    },
+    "quaternary_impl": {
+      "key": "quaternary_impl",
+      "value": "Task 2-4-4 DONE. Quaternary lowering in src/typer/expr/quaternary.rs: build_quaternary(hsubj, ok/nothing/err AST arms) -> Block { __q_subj is subj; EnumIs(ok_tag) ? ok_block : bad_block }. $=Placeholder intercepted via Typer.dollar_stack (src/typer/expr/mod.rs); err=Ident(\"err\") resolved as scope var. Placeholder-currying in src/typer/expr/access.rs gated by dollar_stack.is_empty(). Propagation: propagate_err_value() in src/typer/stmt/dispatch.rs (From-converts X->E into enclosing Result, R1/R3 diags). Implicit propagation: implicit_propagate() called in Bind handler (dispatch.rs ~290) \u2014 only when enclosing_fn_is_fallible() (ret is Result/Option) AND value is fallible Call (not VariantCtor/Ref) AND no annotation. `!!`-less Ternary over Result/Option reinterpreted via try_ternary_as_quaternary. Parser: statement+bind `?`/`!`/`!!` now go through pratt parse_stmt_handler_arms (collect_handler_arms); legacy finish_bare_*/bind-handler-chains DELETED from src/parser/stmt/bind.rs + dispatch.rs; nested ternary in nothing-arm fixed (pratt.rs recurses). Tests: tests/error_effects.rs +11 (1 ignored=task4). DISCOVERED BUG task 4: Ok/Err ctor picks LAST-monomorphized Result regardless of T/E when multiple Result instantiations exist (pre-existing, blocks multi-layer From test). 8 lib test failures (lambda/poly) are PRE-EXISTING on base, not mine.",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-06T07:29:11+00:00",
+      "ts_accessed": "2026-06-06T07:29:11+00:00",
+      "access_count": 0
+    },
+    "structured_concurrency_design": {
+      "key": "structured_concurrency_design",
+      "value": "Task 2-5 DONE: docs/structured-concurrency.md. `together [name]` scope block: dispatch/spawn inside register as non-daemon children; join on block exit. spawn in scope = scope-owned actor (non-daemon, auto-stop+drain at exit = first-class stop-and-drain). Cancellation: child error or `stop <scope>` cancels cooperatively at suspension points; defers+Perceus drops run; uncatchable Cancelled, not in error unions. Cancelled actors skip drain (stop=graceful, cancel=fast). Errors: first error wins, siblings cancelled, scope is fallible expression (union via SCC fixpoint), implicit propagation + From + multiline quaternary !! arm on block. Actor handler errors propagate to owning scope (error-effects \u00a78 boundary); daemon actors unchanged. L3 escape check: coroutines can't outlive scope. Runtime sketch: jinn_scope_t, coro gains scope ptr + cancelled flag; no changes to active_coros/*main epilogue/C ABI. supervisor decl (parser-only, dormant) = future sugar over scopes. Conformance plan table included for impl task.",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-10T11:03:19+00:00",
+      "ts_accessed": "2026-06-10T11:03:19+00:00",
+      "access_count": 0
+    },
+    "store_error_design": {
+      "key": "store_error_design",
+      "value": "Task 2-31-2 StoreError design: (1) Builtin `err StoreError` (Duplicate, Missing, Constraint, Io; fieldless) registered in register_prelude_types via declare_err_def_sig (or_insert pattern) + always pushed into hir_prog.err_defs. (2) AST: ast::StoreHandlers{ok:Option<Expr>, err:Option<Expr>}; Stmt::StoreInsert and Stmt::StoreSet gain Option<StoreHandlers> param (update ~12 ast match sites each; HIR Stmt unchanged). Parser: after insert values / set assignments, parse optional inline or multiline ?/!/!!arms (Bang=err arm for Result). Values parsed via parse_pipeline not parse_expr. (3) Typer: bare insert/set lower as before. Handled insert lowers to hir Stmt::Expr(build_quaternary(subject)) where subject = Block{ Bind __st is Call(\"__store_insert_status_NAME\", hvalues):I64; value IfExpr(__st>=0 ? Ok(__st) : Err(__st==-1 ? Duplicate : Constraint)) : Result_i64_StoreError via monomorphize_enum }. Handled set: subject = count>0 ? Ok(count) : Err(Missing). build_quaternary needs pub(in crate::typer). (4) Codegen magic.rs: route __store_insert_status_ BEFORE __store_insert_; emit_store_insert(name,args,statusful) \u2014 status alloca, dup\u2192 -1 (statusful) or emit_trap \"store 'X': duplicate value for @unique field 'f'\" (bare); @required String empty \u2192 -2 / trap; success \u2192 status=new_sid; returns i64. emit_store_set always returns updated-row count i64. (5) Bare-insert semantic change: duplicate now TRAPS instead of silent skip \u2014 update tests/integration.rs store_unique_skips_duplicate. New tests/store_errors.rs. Docs jinn.md.",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-11T20:03:21+00:00",
+      "ts_accessed": "2026-06-11T20:03:21+00:00",
+      "access_count": 0
+    },
+    "task_2-31-4_progress": {
+      "key": "task_2-31-4_progress",
+      "value": "COMPLETE (v52). All 5 surfaces typed: history->Vec<Row>, distinct->Vec<FieldType>, nearest->Vec<(i64,f64)>, graph.from/to->Vec<NeighborType>, search->Vec<i64>. ABI: Type::Vec(elem)=heap __vec_header ptr. New runtime: jinn_vec_nearest_scored, jinn_fts_search_ids_n. Fixed tuple-index typing for const idx (access.rs). 1766 tests pass. Next store task: 2-31-5 (relation traversal +@cascade).",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T16:22:07+00:00",
+      "ts_accessed": "2026-06-13T16:22:07+00:00",
+      "access_count": 0
+    },
+    "task_2-31-5_design": {
+      "key": "task_2-31-5_design",
+      "value": "Task 2-31-5 relation traversal. DECISION: implement belongs-to cleanly; has-many+cascade real-delete deferred via clear diagnostic (no infra, ambiguous FK).\nBELONGS-TO `&owner as Owner`: now a STORED I64 column named `owner` holding target sid. Changes:\n(1) typer/lower/mod.rs ~line117: include belongs-to relation fields in schema as Type::I64 (skip has-many). \n(2) typer/lower/decl.rs ~line187: belongs-to field ty=I64 in HIR.\n(3) Traversal: in typer/expr/access.rs Field access on Type::Row(store): if field is a relation field (need store->relations map), desugar to StoreGet(TargetStore, row.field_sid) => Type::Row(target). Store relation metadata: add self.store_relations: HashMap<Symbol,Vec<(fieldname,target,is_has_many)>>.\nHAS-MANY `&items as [Item]`: reject at field access with diagnostic OR keep as compile error. Decision: emit clear error \"has-many relation traversal not supported; use `all Item where ...`\".\n@cascade: keep parsing; emit no-op (document). \nExisting StoreGet works: get Store sid -> Row Store, __store_get_{store} runtime fn by primary key.\nFilter eq keyword is `eq` not `==`.",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T16:37:54+00:00",
+      "ts_accessed": "2026-06-13T16:37:54+00:00",
+      "access_count": 0
+    },
+    "task_2-31-5_impl": {
+      "key": "task_2-31-5_impl",
+      "value": "Task 2-31-5 DONE. Relation traversal implemented.\nBELONGS-TO `&owner as Target` is now a real STORED I64 sid column (was previously dropped entirely). Schema build in src/typer/lower/mod.rs records store_relations: IndexMap<Symbol,Vec<(field,target,is_has_many)>> on typer; belongs-to adds I64 column, has-many adds no column. HIR lowering src/typer/lower/decl.rs: belongs-to ty=I64, has-many skipped.\nTRAVERSAL in src/typer/expr/access.rs: Field access on Type::Row(store) where field is a belongs-to relation -> builds hir StoreGet(target, Field(hobj, field, idx)) typed Row(target). Reuses existing StoreGet (get Store sid -> Row, by primary sid index). Requires NON-@simple stores (sid-bearing) on both ends; @simple has no sid so get-by-key undefined.\nHAS-MANY `&items as [Item]`: clean compile error 'has-many relation ... not directly traversable ... all Item where <fk> eq Store.sid'.\n@cascade: parses+compiles, documented no-op (real delete deferred; no infra, ambiguous fk).\nTests: tests/store_relations.rs (4 tests, all pass). Relation column queryable: `count pets where owner eq 2`.",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T16:45:03+00:00",
+      "ts_accessed": "2026-06-13T16:45:03+00:00",
+      "access_count": 0
+    },
+    "task_2-31-6_design": {
+      "key": "task_2-31-6_design",
+      "value": "Task 2-31-6 @kv schema-driven types + optional get. DESIGN:\n- store_methods.rs: add kv_types(name)->(key_ty,val_ty). Read store_schemas fields named 'key'/'val' (skip builtin sid/uuid/hash/created/updated/deleted/__version). Fallback key=String, val=I64. Validate key==String else err. val in {I64,F64} (String values: emit \"kv String values not yet supported\" err).\n- kv.get returns Option of val_ty: monomorphize_enum(\"Option\",{T:val_ty}) -> Type::Enum(opt). KvGet HIR node must carry val_ty + opt enum so codegen builds Some/Nothing. Added KvGet variant carries Type (val_ty). Actually KvGet(Symbol,Box<Expr>) \u2014 extend to KvGet(Symbol,Box<Expr>,Type) where Type=val_ty; ty field=Option enum.\n- set: value typed to val_ty (f64 bitcast to i64 at codegen). incr/decr only valid when val_ty==I64.\n- Runtime kv.c: add jinn_kv_get2(kv,key,len,int64_t*out)->int found. get returns found flag; value via out ptr (raw 8 bytes, f64 bitcast). Keep jinn_kv_get for back-compat? No\u2014switch codegen to get2.\n- codegen emit_kv_get: call has-style get2, build Option enum: if found -> Some(value cast to val_ty), else Nothing. Need enum layout knowledge. Simpler: reuse VariantCtor lowering by building HIR in typer? But KvGet is a leaf MIR call. Approach: lower KvGet in TYPER into a block that calls a runtime-ish primitive returning (found,val) then constructs Some/Nothing via VariantCtor HIR \u2014 avoids codegen enum knowledge. PREFERRED: keep KvGet returning raw, and in typer wrap: build Option via if found.\nBREAKING: existing integration.rs kv tests (line ~2404-2520) use `v is cache.get('x')` then `log v` as i64 \u2014 must update to `.unwrap_or` or `? $ ! 0` form.\nFILES: src/typer/call/store_methods.rs, src/hir/mod.rs (KvGet/KvHas), src/mir/lower/store_expr.rs, src/codegen/mir_codegen/store_ext/specialized.rs, runtime/kv.c, runtime/jinn_rt.h, src/codegen/stores/runtime.rs (fn decl), and all KvGet match arms (fold/escape/verify/resolve/validate/print).",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T16:47:53+00:00",
+      "ts_accessed": "2026-06-13T16:47:53+00:00",
+      "access_count": 0
+    },
+    "task_2-31-6_impl": {
+      "key": "task_2-31-6_impl",
+      "value": "Task 2-31-6 DONE. @kv schema-driven types + optional get.\n- src/typer/call/store_methods.rs: kv_key_val_types(store) reads schema fields 'key'/'val'|'value' (skip builtins), defaults String/I64. Validates key==String, val in {I64,F64} else compile err. incr/decr gated to I64. get -> build_kv_get_option: monomorphize_enum(\"Option\",{T:val}) then Block(bind __kv_key; Ternary(KvHas, Some(KvGet), Nothing)) typed Option<val>. set typed to val_ty.\n- src/codegen/mir_codegen/store_ext/specialized.rs: kv_value_is_f64(store) reads self.store_defs fields. emit_kv_set bitcasts f64->i64 before jinn_kv_set; emit_kv_get bitcasts i64->f64 after jinn_kv_get. No runtime/HIR/MIR signature changes \u2014 found-ness handled by KvHas in typer-built code (2 lookups, correct).\n- tests/integration.rs: updated 4 existing kv tests to .unwrap_or(-1); added kv_get_missing_flows_else, kv_get_missing_unwrap_or, kv_f64_value_schema. All 417 integration + 27 error/access pass. Zero warnings.\n- store-improvement.md item 11 marked Done; remediation.md 2-31-6 checked.\nString values intentionally rejected (need runtime value-blob).",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T16:58:50+00:00",
+      "ts_accessed": "2026-06-13T16:58:50+00:00",
+      "access_count": 0
+    },
+    "task_2-31-7_design": {
+      "key": "task_2-31-7_design",
+      "value": "Task 2-31-7 group-by aggregates. DESIGN: method-based, fits existing aggregate surface (sum/avg/min/max/distinct are methods scanning records in analytics.rs).\nSurface: store.group(keyField).agg(valField) where agg in {sum,avg,min,max,count}. count takes no valField: store.group(keyField).count().\nReturns Vec<Tuple([KeyTy, ValueTy])>. KeyTy = group field type (String/I64). ValueTy: avg->F64, count->I64, sum/min/max-> I64 or F64 per field.\nAST: new Expr::StoreGroup(store, keyField, agg_method, Option<valField>, span). Parser: detect method 'group' returning a pending group then chained method. SIMPLER: handle in store_methods.rs as method 'group' producing intermediate, but chained call is awkward.\nALTERNATIVE chosen: single method form store.group(keyField, valField, \"avg\") is ugly. \nDECISION: parse store.group(keyField) as Expr that captures following .agg(valField). Implement via new HIR ExprKind::StoreGroup(store, key_field, agg:String, val_field:Option<Symbol>). Typer recognizes pattern Call(Field(Call(Field(store,'group'),[key]), agg), [val]).\nCodegen: emit_store_group in analytics.rs - scan records, hashmap keyed by group field -> accumulator(count,sum,min,max), then build Vec of tuples.\ncolumn.c leveraged only conceptually; in-memory scan reuses store_load_records like distinct.",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T17:02:52+00:00",
+      "ts_accessed": "2026-06-13T17:02:52+00:00",
+      "access_count": 0
+    },
+    "task_2-31-7_impl": {
+      "key": "task_2-31-7_impl",
+      "value": "Task 2-31-7 DONE. group-by aggregates, method-based chained surface: store.group(keyField).agg(valField) with agg in count/sum/avg/min/max (count takes no arg). Returns Vec<Tuple([KeyTy,ValTy])>; access via row[0]=key, row[1]=value. avg->F64, count->I64, sum/min/max->I64 or F64 per field.\n- AST node is Expr::Method(obj,method,args,span) NOT Call(Field). try_store_group() in store_methods.rs intercepts when outer method is an agg and inner obj is Method(Ident(store),\"group\",[key]).\n- HIR: ExprKind::StoreGroup(store,key_field,GroupAgg,Option<val_field>) + GroupAgg enum in hir/mod.rs.\n- MIR name: __store_group_{store}__{key}__{agg}__{val} (empty val for count).\n- Codegen emit_store_group in store_ext/analytics.rs: single-pass open-addressing hash table (hash_tbl markers + parallel rec_of/acc_arr/cnt_arr calloc'd, cap=4*n+16). Float accs bitcast through i64 slots. Output loop scans slots, reads key from rec_of record, builds (key,val) tuples via insert_value, vec_push_raw. avg divides acc by count at output.\n- Added StoreGroup arms in: comptime/fold.rs, escape/mod.rs (x2), ownership/verify.rs, typer/lower/resolve.rs, hir_validate.rs, hir/print.rs, mir/lower/mod.rs.\n- 6 tests in tests/integration.rs (store_group_count/sum/avg/max/min/int_key); order-independent via summing row[1]. All pass, zero warnings, full suite green.",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T17:16:26+00:00",
+      "ts_accessed": "2026-06-13T17:16:26+00:00",
+      "access_count": 0
+    },
+    "task_2-31-8_design": {
+      "key": "task_2-31-8_design",
+      "value": "Task 2-31-8 richer where filters. ARCHITECTURE NOTE: filters flow parser->ast::StoreFilter{field,op:BinOp,value,extra:Vec<(LogicalOp,StoreFilterCond)>} -> hir mirror -> MIR encodes everything into mangled fn name __store_query_STORE__FIELD__OP__lop__field__op... + args -> codegen decodes name in query.rs/delete.rs/mutation.rs/read.rs/lifecycle.rs and calls eval_store_filter (store_filter.rs) which does store_compare_field per type.\nDECISION: extend flat model. Replace BinOp op with new ast::FilterPred enum {Cmp(BinOp), In(n_values), Between, Contains, StartsWith}. Carry extra value exprs. Mangle pred into name. eval_store_filter/store_compare_field gain In/Between/Contains/StartsWith cases. between uses 'between LO and HI' but parser must NOT treat that 'and' as logical chain. in uses '[a,b,c]' Array literal -> lower each elem as arg. Grouping: parser supports parenthesized (a and b) groups but only pure-conjunction/disjunction flattening; mixed precedence errors clearly.\nKEY FILES: src/parser/stmt/store.rs (parse_store_filter, parse_filter_op), src/ast.rs (StoreFilter/StoreFilterCond/new FilterPred), src/hir/mod.rs (mirror + encode_store_set_call), src/typer/stmt/filter.rs (lower_store_filter, flatten_filter_expr), src/mir/lower/store_expr.rs + store_stmt.rs (name mangling), src/codegen/mir_codegen/store/{query,delete,mutation,read,lifecycle}.rs (decode), src/codegen/store_filter.rs (eval_store_filter + store_compare_field).",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T17:27:13+00:00",
+      "ts_accessed": "2026-06-13T17:27:13+00:00",
+      "access_count": 0
+    },
+    "task_2-31-8_impl": {
+      "key": "task_2-31-8_impl",
+      "value": "Task 2-31-8 DONE. Richer where filters via flat-model extension.\nNEW SYNTAX (statement-form parse_store_filter): `where field in [a,b,c]` (desugars to field==a or field==b...), `where field between LO and HI` (desugars field>=LO and field<=HI, consuming the 'and'), `where field contains/starts_with/ends_with 'str'` (String fields only), parenthesized grouping `(a or b)`. Mixed and/or at flat level rejected with clear error 'group with parentheses' (flat eval is left-to-right, no precedence).\nAST: added FilterPred{Cmp,Contains,StartsWith,EndsWith}; pred field on StoreFilter+StoreFilterCond (ast.rs + hir mirror). hir::store_filter_pred_str encodes pred into mangled name (contains/startswith/endswith tokens).\nCODEGEN: parse_store_pred(s)->(BinOp,FilterPred) in query.rs replaced parse_store_op/parse_filter_op. eval_store_filter_pred (store_filter.rs) replaces eval_store_filter; store_compare_field takes pred and dispatches non-Cmp to store_text_predicate (LLVM IR: starts_with memcmp prefix, ends_with memcmp suffix, contains scan loop). extra_specs/extra tuples now carry FilterPred (4-tuple decode / 6-tuple eval). Index use disabled for non-Cmp primary pred.\nTESTS: tests/integration.rs store_filter_in_list/between/contains/starts_with/ends_with/grouping/in_query all pass. Full suite green, zero warnings.",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T17:44:32+00:00",
+      "ts_accessed": "2026-06-13T17:44:32+00:00",
+      "access_count": 0
+    },
+    "task_2-31-9_design": {
+      "key": "task_2-31-9_design",
+      "value": "Task 2-31-9 persistent secondary indexes. DESIGN LOCKED:\nIdx file already persists (name.field.idx) with O(1) open. Gaps: no schema-fingerprint validation, no corruption detection, no rebuild. Index lookups do NOT fall back to scan -> cleared idx silently wrong, so rebuild must repopulate.\nRUNTIME index.c: bump magic to \"JINNIDX1\" (32B header: magic+capacity+count+fingerprint). New jinn_idx_open_checked(path, fingerprint, int* needs_rebuild): validate magic(v1)+fingerprint match + header sanity (capacity pow2, 0<=count<=capacity, filesize>=header+capacity*SLOT_SIZE). On any fail recreate fresh with fingerprint stamped, set *needs_rebuild=1. Clean match -> 0, O(1). Keep old jinn_idx_open as wrapper (open_checked w/ fp=0, ignore rebuild) for back-compat. write_header writes fingerprint too; init_file takes fingerprint; grow preserves fingerprint.\nHEADER jinn_rt.h: declare jinn_idx_open_checked.\nCODEGEN handles.rs load_store_idx: pass store fingerprint (super::store_schema_fingerprint(sd)) to open_checked, get needs_rebuild out-param, emit rebuild loop on flag=1: read store count(8B@off8 header), loop recs from HEADER_SIZE stride rec_size, fread record, hash indexed field via hash_store_field_from_gep, skip if deleted!=0, jinn_idx_insert(idx,hash,rec_off). Reuse: store_record_size(sd), crate::codegen::stores::HEADER_SIZE, hash_store_field_from_gep.\nTEST: tests/store_index_persist.rs - run twice (second is O(1) open, no rebuild), corrupt .idx -> rebuild restores correct lookups, schema change w/ migration restamps idx.",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T17:56:56+00:00",
+      "ts_accessed": "2026-06-13T17:56:56+00:00",
+      "access_count": 0
+    },
+    "task_2-31-9_impl": {
+      "key": "task_2-31-9_impl",
+      "value": "Task 2-31-9 DONE. Persistent secondary indexes.\nRUNTIME runtime/index.c: header now 32B (magic \"JINNIDX1\"+capacity+count+fingerprint). New jinn_idx_open_checked(path,fingerprint,int*needs_rebuild): validates magic+fingerprint+header_is_sane (cap pow2>=256<=2^60, 0<=count<=cap, filesize>=header+cap*24). On any failure recreates fresh stamped w/ fingerprint, *needs_rebuild=1; clean match O(1) *needs_rebuild=0. jinn_idx_open kept as wrapper(fp=0,NULL). grow preserves idx->fingerprint (write_header writes it).\nHEADER jinn_rt.h: declared jinn_idx_open_checked.\nCODEGEN: runtime.rs registers jinn_idx_open_checked (ptr,i64,ptr)->ptr. handles.rs load_store_idx: passes store_schema_fingerprint(sd) + rebuild_flag alloca; on flag!=0 emits gen_idx_rebuild loop. gen_idx_rebuild: load_store_fp, read count@8, loop recs from HEADER_SIZE(40) stride rec_size, fread into rec struct, skip if deleted!=0, hash_store_field_from_gep(field_gep,ty), jinn_idx_insert(idx,hash,rec_off).\nTEST tests/store_index_persist.rs 5 tests all pass: string persist/reopen O(1), missing idx rebuild, corrupt idx rebuild, i64 idx rebuild, soft-delete skipped. Full suite 0 failures, no warnings.",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T18:06:03+00:00",
+      "ts_accessed": "2026-06-13T18:06:03+00:00",
+      "access_count": 0
+    },
+    "task_2-31-10_impl": {
+      "key": "task_2-31-10_impl",
+      "value": "Task 2-31-10 DONE. compact statement + @compact(threshold) auto-policy for tombstone reclamation.\nRUNTIME runtime/migrate.c: jinn_store_compact(fp**, path, deleted_offset) rewrites .store dropping rows where deleted!=0, PRESERVES fingerprint/version in header (unlike migrate which zeroes), returns reclaimed count. jinn_store_compact_if(fp**, path, off, threshold) counts tombstones, compacts only if >=threshold. Decls in jinn_rt.h.\nAST: Stmt::StoreCompact(Symbol,Span); StoreDecorator::Compact(u64). HIR mirrors Stmt::StoreCompact.\nPARSER: parse_compact_stmt (mirrors save), dispatch \"compact\"=>; decorator @compact(n) POSTFIX (store X @compact(2)).\nTYPER: dispatch.rs StoreCompact validates store exists; resolve.rs noop.\nMIR: store_stmt.rs StoreCompact -> Call __store_compact_{name}, Type::I64.\nCODEGEN: magic.rs strip __store_compact_; lifecycle.rs emit_store_compact + helper store_deleted_offset(sd) computing byte offset via type_abi_align/type_store_size. delete.rs auto-injects jinn_store_compact_if call after soft delete when @compact present. runtime.rs declares both fns.\nExhaustive match sites patched: resolve.rs, comptime/fold.rs(x2), mir/lower/mod.rs, ownership/verify.rs, fmt.rs, driver/sources/implicit.rs, hir_validate.rs(x2), escape/mod.rs(x2), hir/print.rs.\nTESTS tests/store_compact.rs 5 tests all pass. Full suite 32 suites pass, zero warnings.",
+      "kind": "fact",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T18:27:24+00:00",
+      "ts_accessed": "2026-06-13T18:27:24+00:00",
+      "access_count": 0
+    },
+    "task_2-31-12_impl": {
+      "key": "task_2-31-12_impl",
+      "value": "Task 2-31-12 DONE. Declarative decorator table = single source of truth.\nNEW src/store_decorators.rs: STORE_DECORATORS/FIELD_DECORATORS const tables (name, ArgKind None/Int/Ident, excludes:&[&str], numeric_only for fields, summary). store_spec/field_spec lookups; store_name/field_name map AST variant->str; validate_store_decorators (pairwise excludes) + validate_field_decorators (numeric_only, @unique-on-f64 ban, excludes); render_docs() generates markdown.\nPARSER src/parser/decl/actor_store.rs: parse_store_def now table-driven (validate name via store_spec, dispatch on spec.arg, then validate_store_decorators -> self.error). parse_store_field validates field name via field_spec up front; calls into validate at typer.\nTYPER src/typer/lower/decl.rs lower_store_def: calls validate_field_decorators per field once ty known (f64 @unique etc).\nTests: tests/store_decorator_table.rs (7 conformance) + 9 lib unit tests in module (sync invariant: every AST variant in table; excludes symmetric).\nPre-existing clippy warnings in pratt.rs unrelated.",
+      "kind": "decision",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-13T21:03:03+00:00",
+      "ts_accessed": "2026-06-13T21:03:03+00:00",
+      "access_count": 0
+    }
   }
 }

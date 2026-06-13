@@ -153,7 +153,7 @@ Remaining items (2-31-1, 2-31-2 = done):
 - ◻ **2-31-9** Persistent secondary indexes (`.idx`, WAL-replayed).
 - ◻ **2-31-10** `compact` statement / `@compact` policy.
 - ◻ **2-31-11** Per-store durability decorators `@durable`/`@relaxed`/`@volatile`.
-- ◻ **2-31-12** Declarative decorator table shared by parser/typer/docs (low).
+- ◼ **2-31-12** Declarative decorator table shared by parser/typer/docs (low).
 - ⊘ **2-31-13** Write `docs/stores.md` (blocked by 2-31-2..12).
 
 ### Tier F — Diagnostics, tooling, ecosystem

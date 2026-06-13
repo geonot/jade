@@ -94,72 +94,58 @@ impl Parser {
         while self.check(Token::At) {
             self.advance();
             let attr = self.ident()?;
-            if attr == "simple" {
-                decorators.push(crate::ast::StoreDecorator::Simple);
-            } else if attr == "mem" {
-                decorators.push(crate::ast::StoreDecorator::Mem);
-            } else if attr == "transient" {
-                decorators.push(crate::ast::StoreDecorator::Transient);
-            } else if attr == "versioned" {
-                decorators.push(crate::ast::StoreDecorator::Versioned);
-            } else if attr == "graph" {
-                decorators.push(crate::ast::StoreDecorator::Graph);
-            } else if attr == "kv" {
-                decorators.push(crate::ast::StoreDecorator::Kv);
-            } else if attr == "vector" {
-                self.expect(Token::LParen)?;
-                let n = match self.peek() {
-                    Token::Int(v) => {
-                        let n = *v as u64;
-                        self.advance();
-                        n
-                    }
-                    _ => return Err(self.error("expected vector dimension")),
-                };
-                self.expect(Token::RParen)?;
-                decorators.push(crate::ast::StoreDecorator::Vector(n));
-            } else if attr == "compact" {
-                self.expect(Token::LParen)?;
-                let n = match self.peek() {
-                    Token::Int(v) => {
-                        let n = *v as u64;
-                        self.advance();
-                        n
-                    }
-                    _ => return Err(self.error("expected compaction threshold")),
-                };
-                self.expect(Token::RParen)?;
-                decorators.push(crate::ast::StoreDecorator::Compact(n));
-            } else if attr == "timeseries" {
-                self.expect(Token::LParen)?;
-                let field = self.ident()?;
-                self.expect(Token::RParen)?;
-                decorators.push(crate::ast::StoreDecorator::TimeSeries(field));
-            } else if attr == "before_insert" {
-                self.expect(Token::LParen)?;
-                let fname = self.ident()?;
-                self.expect(Token::RParen)?;
-                decorators.push(crate::ast::StoreDecorator::BeforeInsert(fname));
-            } else if attr == "after_insert" {
-                self.expect(Token::LParen)?;
-                let fname = self.ident()?;
-                self.expect(Token::RParen)?;
-                decorators.push(crate::ast::StoreDecorator::AfterInsert(fname));
-            } else if attr == "before_delete" {
-                self.expect(Token::LParen)?;
-                let fname = self.ident()?;
-                self.expect(Token::RParen)?;
-                decorators.push(crate::ast::StoreDecorator::BeforeDelete(fname));
-            } else if attr == "after_delete" {
-                self.expect(Token::LParen)?;
-                let fname = self.ident()?;
-                self.expect(Token::RParen)?;
-                decorators.push(crate::ast::StoreDecorator::AfterDelete(fname));
-            } else if attr == "column" {
-                decorators.push(crate::ast::StoreDecorator::Column);
-            } else {
+            let attr_s = attr.as_str();
+            let Some(spec) = crate::store_decorators::store_spec(&attr_s) else {
                 return Err(self.error(&format!("unknown store decorator: @{attr}")));
-            }
+            };
+            let dec = match spec.arg {
+                crate::store_decorators::ArgKind::None => match &*attr_s {
+                    "simple" => crate::ast::StoreDecorator::Simple,
+                    "mem" => crate::ast::StoreDecorator::Mem,
+                    "transient" => crate::ast::StoreDecorator::Transient,
+                    "versioned" => crate::ast::StoreDecorator::Versioned,
+                    "graph" => crate::ast::StoreDecorator::Graph,
+                    "kv" => crate::ast::StoreDecorator::Kv,
+                    "column" => crate::ast::StoreDecorator::Column,
+                    _ => unreachable!(),
+                },
+                crate::store_decorators::ArgKind::Int => {
+                    self.expect(Token::LParen)?;
+                    let n = match self.peek() {
+                        Token::Int(v) => {
+                            let n = *v as u64;
+                            self.advance();
+                            n
+                        }
+                        _ => return Err(self.error(&format!("@{attr} expects an integer argument"))),
+                    };
+                    self.expect(Token::RParen)?;
+                    match &*attr_s {
+                        "vector" => crate::ast::StoreDecorator::Vector(n),
+                        "compact" => crate::ast::StoreDecorator::Compact(n),
+                        _ => unreachable!(),
+                    }
+                }
+                crate::store_decorators::ArgKind::Ident => {
+                    self.expect(Token::LParen)?;
+                    let name = self.ident()?;
+                    self.expect(Token::RParen)?;
+                    match &*attr_s {
+                        "timeseries" => crate::ast::StoreDecorator::TimeSeries(name),
+                        "before_insert" => crate::ast::StoreDecorator::BeforeInsert(name),
+                        "after_insert" => crate::ast::StoreDecorator::AfterInsert(name),
+                        "before_delete" => crate::ast::StoreDecorator::BeforeDelete(name),
+                        "after_delete" => crate::ast::StoreDecorator::AfterDelete(name),
+                        _ => unreachable!(),
+                    }
+                }
+            };
+            decorators.push(dec);
+        }
+
+        if let Err(e) = crate::store_decorators::validate_store_decorators(&name.as_str(), &decorators)
+        {
+            return Err(self.error(&e));
         }
 
         self.expect(Token::Newline)?;
@@ -224,6 +210,10 @@ impl Parser {
         while self.check(Token::At) {
             self.advance();
             let attr = self.ident()?;
+            let attr_s = attr.as_str();
+            if crate::store_decorators::field_spec(&attr_s).is_none() {
+                return Err(self.error(&format!("unknown field decorator: @{attr}")));
+            }
             if attr == "index" {
                 field_decorators.push(crate::ast::FieldDecorator::Index);
             } else if attr == "unique" {
@@ -277,8 +267,6 @@ impl Parser {
                 };
                 self.expect(Token::RParen)?;
                 field_decorators.push(crate::ast::FieldDecorator::Default(val));
-            } else {
-                return Err(self.error(&format!("unknown field decorator: @{attr}")));
             }
         }
 

@@ -23,6 +23,7 @@ pub mod perceus;
 pub mod pkg;
 pub mod resolve;
 pub mod runtime_ffi;
+pub mod store_decorators;
 pub mod typer;
 pub mod types;
 

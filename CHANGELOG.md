@@ -1,4 +1,6 @@
 # Changelog
+- **[65]** (2026-06-13 14:01) store: declarative decorator table (src/store_decorators.rs) shared by parser/typer/docs; rejects nonsensical combos (@kv+@vector, @mem+@versioned, @unique on f64, @increment on non-numeric) with precise diagnostics (task 2-31-12)
+- **[64]** (2026-06-13 18:27) store: compact statement + @compact(threshold) auto-policy for tombstone reclamation (task 2-31-10)
 - **[61]** (2026-06-13 18:06) store: persistent secondary indexes with fingerprint validation + rebuild-on-corruption (task 2-31-9)
 - **[59]** (2026-06-13 17:44) Task 2-31-8: richer store where filters (in, between, contains/starts_with/ends_with, grouping)
 - **[58]** (2026-06-13 17:16) store: add group-by aggregates (store.group(key).agg(val)) returning Vec<(key,val)> tuples; single-pass hashtable codegen, 6 tests (task 2-31-7)

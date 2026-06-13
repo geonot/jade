@@ -187,6 +187,12 @@ impl Typer {
             } else {
                 f.ty.clone().unwrap_or(Type::I64)
             };
+            crate::store_decorators::validate_field_decorators(
+                &sd.name.as_str(),
+                &f.name.as_str(),
+                &ty,
+                &f.decorators,
+            )?;
             fields.push(hir::StoreField {
                 name: f.name,
                 ty,
