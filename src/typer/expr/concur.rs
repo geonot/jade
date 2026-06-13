@@ -113,9 +113,16 @@ impl Typer {
                 let hbody = self.lower_block_no_scope(body, &Type::Void)?;
                 let yield_ty = self.infer_coroutine_yield_type(&hbody);
                 let coro_ty = Type::Coroutine(Box::new(yield_ty));
-                if name != "__anon" {
+                let coro_name = if name.as_str() == "__anon" {
+                    // Anonymous dispatch blocks get a unique generated name so
+                    // multiple of them (e.g. concurrent tasks in a `together`
+                    // scope) lower to distinct coroutine body functions. The
+                    // `__anon` prefix marks them as anonymous for scope-spawn.
+                    let id = self.next_id;
+                    self.next_id += 1;
+                    crate::intern::Symbol::intern(&format!("__anon{id}"))
+                } else {
                     let id = self.fresh_id();
-
                     self.define_var(
                         &name.as_str(),
                         VarInfo {
@@ -125,9 +132,10 @@ impl Typer {
                             scheme: None,
                         },
                     );
-                }
+                    *name
+                };
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::CoroutineCreate(*name, hbody),
+                    kind: hir::ExprKind::CoroutineCreate(coro_name, hbody),
                     ty: coro_ty,
                     span: *span,
                 })

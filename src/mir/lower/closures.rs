@@ -115,7 +115,7 @@ impl Lowerer {
     }
 }
 
-fn collect_var_refs_block(body: &[hir::Stmt], refs: &mut HashSet<Symbol>) {
+pub(super) fn collect_var_refs_block(body: &[hir::Stmt], refs: &mut HashSet<Symbol>) {
     for stmt in body {
         collect_var_refs_stmt(stmt, refs);
     }

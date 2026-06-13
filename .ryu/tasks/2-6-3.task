@@ -1,12 +1,24 @@
 title: 'MIR + codegen lowering for together (happy path: join all children)'
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by:
 - 2-6-2
 created_at: '2026-06-13T14:45:40'
-updated_at: '2026-06-13T14:45:40'
-result: ''
+updated_at: '2026-06-13T15:41:14'
+result: 'together happy-path lowering complete. `dispatch\n body` (anonymous) inside
+  together = concurrent scheduler task; named dispatch stays lazy generator. Typer
+  renames anon dispatches to unique __anon{id}. MIR Function gained scheduler_task
+  flag (shares gen capture ABI but returns normally instead of gen-suspend, fixing
+  null-caller-ctx segfault). Lowerer.scope_stack drives lower_together: __scope_create
+  -> body -> __scope_stop_actors -> __scope_join. Anon task captures enclosing locals
+  (collect_var_refs_block ∩ var_types), passed via gen struct slots; codegen emit_scope_spawn
+  creates coro + jinn_scope_register_child + jinn_sched_spawn. Scope-owned actors:
+  spawn inside scope calls jinn_actor_spawn_scoped (non-daemon, registered, mailbox
+  tracked) so scope auto-stop+drains on exit. uses_concurrency now recurses Together.
+  Conformance: scope_joins_all_dispatches, scope_owned_actor_drains_on_exit, daemon_spawn_outside_scope_unchanged
+  — all 14 concurrency tests pass, 912 bulk tests pass, zero warnings. (column_* failures
+  pre-existing.) Scope cancellation/stop-scope deferred to 2-6-4.'
 description: 'Lower hir::Stmt::Together to MIR: emit __scope_create -> scope ptr bound
   in a scope-local var; set current coro''s scope for the body''s dynamic extent (push/pop
   via runtime tl or by passing scope to spawns lexically). Children: dispatch/spawn

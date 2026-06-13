@@ -443,8 +443,10 @@ impl<'ctx> Compiler<'ctx> {
         .basic()
         .expect("ICE: call returned void");
 
-        let set_daemon = crate::codegen::fn_or_die(&self.module, "jinn_coro_set_daemon");
-        b!(self.bld.build_call(set_daemon, &[coro.into()], ""));
+        let spawn_scoped = crate::codegen::fn_or_die(&self.module, "jinn_actor_spawn_scoped");
+        b!(self
+            .bld
+            .build_call(spawn_scoped, &[coro.into(), mb_ptr_v.into()], ""));
 
         let sched_spawn = crate::codegen::fn_or_die(&self.module, "jinn_sched_spawn");
         b!(self.bld.build_call(sched_spawn, &[coro.into()], ""));

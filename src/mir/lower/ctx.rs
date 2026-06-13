@@ -61,6 +61,10 @@ pub(super) struct Lowerer {
     // Set only while lowering an actor handler body; redirects field
     // reads/writes to the actor state struct. `None` for normal functions.
     pub(super) field_ctx: Option<FieldCtx>,
+    // Stack of `together` scope ValueIds currently open (innermost last).
+    // Non-empty while lowering a `together` body: anonymous `dispatch` blocks
+    // and `spawn`s register with the innermost scope as structured children.
+    pub(super) scope_stack: Vec<ValueId>,
 }
 
 impl Lowerer {
@@ -85,6 +89,7 @@ impl Lowerer {
             attrs: crate::ast::FnAttrs::default(),
             perceus: crate::mir::PerceusMeta::default(),
             is_coroutine: false,
+            scheduler_task: false,
         };
         Lowerer {
             func,
@@ -115,6 +120,7 @@ impl Lowerer {
             value_subst: HashMap::new(),
             unreachable_blocks: HashSet::new(),
             field_ctx: None,
+            scope_stack: Vec::new(),
         }
     }
 

@@ -116,6 +116,40 @@ impl Lowerer {
             }
 
             ExprKind::CoroutineCreate(name, body) => {
+                // A bare anonymous `dispatch` inside a `together` scope is a
+                // structured concurrent task: spawn it on the scheduler and
+                // register it as a child of the innermost scope. A named
+                // `dispatch` remains a lazy generator driven by `.next()`.
+                if name.as_str().starts_with("__anon")
+                    && let Some(&scope_val) = self.scope_stack.last()
+                {
+                    // Capture enclosing locals referenced by the task body, by
+                    // value, into the task's coroutine struct (same ABI as a
+                    // generator's captures). Free vars that are not enclosing
+                    // locals (globals, functions) are left to normal lookup.
+                    let mut refs = std::collections::HashSet::new();
+                    super::closures::collect_var_refs_block(body, &mut refs);
+                    let mut captures: Vec<(Symbol, Type)> = refs
+                        .into_iter()
+                        .filter_map(|n| self.var_types.get(&n).map(|t| (n, t.clone())))
+                        .collect();
+                    captures.sort_by_key(|(n, _)| *n);
+
+                    let cap_vals: Vec<ValueId> = captures
+                        .iter()
+                        .map(|(n, t)| self.read_var(*n, self.current_block, t.clone(), span))
+                        .collect();
+
+                    self.lower_scope_task(*name, body, &captures, span);
+
+                    let mut args = vec![scope_val];
+                    args.extend(cap_vals);
+                    return self.emit(
+                        InstKind::Call(Symbol::intern(&format!("__scope_spawn_{name}")), args),
+                        ty,
+                        span,
+                    );
+                }
                 self.lower_coroutine(*name, body, &[], span);
                 self.emit(
                     InstKind::Call(Symbol::intern(&format!("__coro_create_{name}")), vec![]),
@@ -157,6 +191,32 @@ impl Lowerer {
         }
     }
 
+    pub(super) fn lower_together(
+        &mut self,
+        _name: Option<Symbol>,
+        body: &[hir::Stmt],
+        span: crate::ast::Span,
+    ) -> ValueId {
+        let scope = self.emit(
+            InstKind::Call(Symbol::intern("__scope_create"), vec![]),
+            Type::Ptr(Box::new(Type::Void)),
+            span,
+        );
+        self.scope_stack.push(scope);
+        self.lower_block_stmts(body);
+        self.scope_stack.pop();
+        self.emit(
+            InstKind::Call(Symbol::intern("__scope_stop_actors"), vec![scope]),
+            Type::Void,
+            span,
+        );
+        self.emit(
+            InstKind::Call(Symbol::intern("__scope_join"), vec![scope]),
+            Type::Void,
+            span,
+        )
+    }
+
     pub(super) fn lower_coroutine(
         &mut self,
         name: Symbol,
@@ -164,7 +224,17 @@ impl Lowerer {
         captures: &[(Symbol, Type)],
         span: crate::ast::Span,
     ) {
-        self.lower_coroutine_with_def(name, crate::hir::DefId::BUILTIN, body, captures, span);
+        self.lower_coroutine_inner(name, crate::hir::DefId::BUILTIN, body, captures, span, false);
+    }
+
+    pub(super) fn lower_scope_task(
+        &mut self,
+        name: Symbol,
+        body: &[hir::Stmt],
+        captures: &[(Symbol, Type)],
+        span: crate::ast::Span,
+    ) {
+        self.lower_coroutine_inner(name, crate::hir::DefId::BUILTIN, body, captures, span, true);
     }
 
     fn lower_coroutine_with_def(
@@ -175,10 +245,23 @@ impl Lowerer {
         captures: &[(Symbol, Type)],
         span: crate::ast::Span,
     ) {
+        self.lower_coroutine_inner(name, def_id, body, captures, span, false);
+    }
+
+    fn lower_coroutine_inner(
+        &mut self,
+        name: Symbol,
+        def_id: crate::hir::DefId,
+        body: &[hir::Stmt],
+        captures: &[(Symbol, Type)],
+        span: crate::ast::Span,
+        scheduler_task: bool,
+    ) {
         let coro_fn_name = format!("__coro_{name}");
         let mut sub = Lowerer::new(&coro_fn_name, def_id, span);
         sub.func.ret_ty = Type::Void;
         sub.func.is_coroutine = true;
+        sub.func.scheduler_task = scheduler_task;
 
         let entry = sub.func.entry;
         for (cap_name, cap_ty) in captures {

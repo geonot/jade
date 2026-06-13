@@ -421,6 +421,8 @@ impl<'ctx> Compiler<'ctx> {
                 s,
                 Stmt::ChannelClose(_, _)
                     | Stmt::Stop(_, _)
+                    | Stmt::Join(_, _)
+                    | Stmt::Together(_, _, _)
                     | Stmt::SimFor(_, _)
                     | Stmt::SimBlock(_, _)
             )
@@ -443,6 +445,9 @@ impl<'ctx> Compiler<'ctx> {
                     Stmt::Loop(l) => scan_block(&l.body),
                     Stmt::Match(m) => {
                         scan_expr(&m.subject) || m.arms.iter().any(|a| scan_block(&a.body))
+                    }
+                    Stmt::Together(_, b, _) | Stmt::Transaction(b, _) | Stmt::Defer(b, _) => {
+                        scan_block(b)
                     }
                     Stmt::Ret(Some(e), _, _) => scan_expr(e),
                     _ => false,
@@ -536,6 +541,10 @@ impl<'ctx> Compiler<'ctx> {
         decl!("jinn_scope_check_cancelled", i32t.fn_type(&[], false));
         decl!("jinn_scope_stop_actors", void.fn_type(&[ptr.into()], false));
         decl!("jinn_scope_join", void.fn_type(&[ptr.into()], false));
+        decl!(
+            "jinn_actor_spawn_scoped",
+            void.fn_type(&[ptr.into(), ptr.into()], false)
+        );
 
         decl!(
             "jinn_select",

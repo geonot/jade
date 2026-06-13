@@ -58,6 +58,7 @@ impl<'ctx> Compiler<'ctx> {
             current_reuse_alloca_slots: std::collections::HashMap::new(),
             current_alloc_dest: None,
             cur_fn_is_coroutine: false,
+            cur_fn_is_scheduler_task: false,
         }
     }
 

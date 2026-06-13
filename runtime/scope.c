@@ -95,6 +95,23 @@ void jinn_scope_add_actor(jinn_scope_t *s, void *mailbox_ptr) {
     scope_unlock(s);
 }
 
+/*
+ * jinn_actor_spawn_scoped: called at actor spawn, before sched_spawn.
+ * If a `together` scope is current, the actor becomes a *scope-owned*
+ * non-daemon child: it is registered with the scope (so the scope join waits
+ * for it) and its mailbox is tracked (so scope exit closes it = stop-and-drain).
+ * Outside any scope, the actor is a daemon, fire-and-forget, exactly as before.
+ */
+void jinn_actor_spawn_scoped(jinn_coro_t *coro, void *mailbox_ptr) {
+    jinn_scope_t *s = tl_scope;
+    if (s) {
+        jinn_scope_register_child(coro);
+        jinn_scope_add_actor(s, mailbox_ptr);
+    } else {
+        jinn_coro_set_daemon(coro);
+    }
+}
+
 void jinn_scope_child_done(jinn_scope_t *s) {
     if (!s) return;
     int64_t remaining = atomic_fetch_sub(&s->live_children, 1) - 1;

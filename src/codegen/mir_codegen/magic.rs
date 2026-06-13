@@ -73,6 +73,35 @@ impl<'ctx> Compiler<'ctx> {
                 return self.emit_coro_yield(val).map(Some);
             }
 
+        if name == "__scope_create" {
+            let f = crate::codegen::fn_or_die(&self.module, "jinn_scope_create");
+            let scope = b!(self.bld.build_call(f, &[], "scope"))
+                .try_as_basic_value()
+                .basic()
+                .expect("ICE: jinn_scope_create returned void");
+            return Ok(Some(scope));
+        }
+
+        if (name == "__scope_join" || name == "__scope_stop_actors")
+            && let Some(&scope_val) = args.first()
+        {
+            let scope_ptr = self.val(scope_val).into_pointer_value();
+            let rt = if name == "__scope_join" {
+                "jinn_scope_join"
+            } else {
+                "jinn_scope_stop_actors"
+            };
+            let f = crate::codegen::fn_or_die(&self.module, rt);
+            b!(self.bld.build_call(f, &[scope_ptr.into()], ""));
+            return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
+        }
+
+        if let Some(coro_name) = name.strip_prefix("__scope_spawn_")
+            && let Some(&scope_val) = args.first()
+        {
+            return self.emit_scope_spawn(coro_name, scope_val, &args[1..]).map(Some);
+        }
+
         if name == "__sched_yield" {
             let f = self.module.get_function("jinn_sched_yield").unwrap_or_else(|| {
                 let ft = self.ctx.void_type().fn_type(&[], false);
@@ -355,6 +384,89 @@ impl<'ctx> Compiler<'ctx> {
             }
 
         Ok(None)
+    }
+
+    pub(super) fn emit_scope_spawn(
+        &mut self,
+        coro_name: &str,
+        scope_val: mir::ValueId,
+        cap_args: &[mir::ValueId],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        self.declare_actor_runtime();
+        self.declare_gen_runtime();
+
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        let i32t = self.ctx.i32_type();
+        let i64t = self.ctx.i64_type();
+
+        let coro_fn_name = format!("__coro_{coro_name}");
+        let coro_fn = self
+            .module
+            .get_function(&coro_fn_name)
+            .ok_or_else(|| format!("coroutine body fn `{coro_fn_name}` not declared"))?;
+
+        let cap_vals: Vec<BasicValueEnum<'ctx>> =
+            cap_args.iter().map(|vid| self.val(*vid)).collect();
+
+        // Generator struct carries the coroutine bookkeeping fields plus one
+        // 8-byte slot per captured value (same ABI as `emit_coro_create`).
+        let total_size = Compiler::GEN_SIZE + (cap_vals.len() as u64) * 8;
+        let malloc_fn = self.ensure_malloc();
+        let gen_mem = b!(self.bld.build_call(
+            malloc_fn,
+            &[i64t.const_int(total_size, false).into()],
+            "task.mem"
+        ))
+        .try_as_basic_value()
+        .basic()
+        .expect("ICE: malloc returned void")
+        .into_pointer_value();
+
+        let memset_fn = crate::codegen::fn_or_die(&self.module, "memset");
+        b!(self.bld.build_call(
+            memset_fn,
+            &[
+                gen_mem.into(),
+                i32t.const_int(0, false).into(),
+                i64t.const_int(total_size, false).into()
+            ],
+            ""
+        ));
+
+        for (i, val) in cap_vals.iter().enumerate() {
+            let off = Compiler::GEN_SIZE + (i as u64) * 8;
+            let slot_ptr = self.gen_field_ptr(gen_mem, off, "task.cap")?;
+            b!(self.bld.build_store(slot_ptr, *val));
+        }
+
+        let coro_create = crate::codegen::fn_or_die(&self.module, "jinn_coro_create");
+        let coro = b!(self.bld.build_call(
+            coro_create,
+            &[
+                coro_fn.as_global_value().as_pointer_value().into(),
+                gen_mem.into(),
+            ],
+            "task.coro"
+        ))
+        .try_as_basic_value()
+        .basic()
+        .expect("ICE: jinn_coro_create returned void");
+
+        let coro_ptr_field =
+            self.gen_field_ptr(gen_mem, Compiler::GEN_CORO_PTR_OFF, "task.coro_ptr")?;
+        b!(self.bld.build_store(coro_ptr_field, coro));
+
+        // Register as a non-daemon child of the scope, then enqueue it to run
+        // concurrently. `jinn_scope_register_child` reads the current scope and
+        // links the child so the scope join waits for it.
+        let _ = scope_val;
+        let register = crate::codegen::fn_or_die(&self.module, "jinn_scope_register_child");
+        b!(self.bld.build_call(register, &[coro.into()], ""));
+
+        let sched_spawn = crate::codegen::fn_or_die(&self.module, "jinn_sched_spawn");
+        b!(self.bld.build_call(sched_spawn, &[coro.into()], ""));
+
+        Ok(ptr.const_null().into())
     }
 
     pub(super) fn emit_coro_create(

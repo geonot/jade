@@ -311,6 +311,80 @@ actor Pinger
     assert!(out.contains("all-done"), "missing all-done:\n{out}");
 }
 
+// ── Structured concurrency: `together` scopes ───────────────────────────
+
+/// `together` joins all child dispatches before control leaves the block.
+/// Five anonymous `dispatch` tasks each send `1` on a channel; the code after
+/// the scope drains exactly five values (sum 5), proving the scope waited for
+/// every child to complete. No `usleep`, no manual join.
+#[test]
+fn scope_joins_all_dispatches() {
+    expect(
+        "\
+*main
+    done is channel of i64(16)
+    together
+        for i in 0 to 5
+            dispatch
+                send done, 1
+    total is 0
+    for i in 0 to 5
+        total is total + receive done
+    log(total)
+",
+        "5",
+    );
+}
+
+/// A `spawn` inside a `together` is a *scope-owned* actor: non-daemon, its
+/// mailbox auto-closed at block exit. Because a message actor drains before
+/// exiting, every message sent before the block end is processed before
+/// control passes the scope — first-class stop-and-drain with no ceremony.
+#[test]
+fn scope_owned_actor_drains_on_exit() {
+    expect(
+        "\
+actor Counter
+    total
+
+    @add n
+        total is total + n
+        log(total)
+
+*main
+    together
+        c is spawn Counter
+        c.add(1)
+        c.add(2)
+        c.add(3)
+    log('after-scope')
+",
+        "1\n3\n6\nafter-scope",
+    );
+}
+
+/// `spawn` *outside* any scope is unchanged: a daemon, fire-and-forget actor
+/// that does not block program exit. This is the backward-compatibility guard
+/// — structured concurrency is strictly opt-in.
+#[test]
+fn daemon_spawn_outside_scope_unchanged() {
+    expect(
+        "\
+actor Worker
+    sum
+
+    @work n
+        sum is sum + n
+
+*main
+    w is spawn Worker
+    w.work(10)
+    log('ok')
+",
+        "ok",
+    );
+}
+
 /// A daemon actor left parked on `receive` (no `stop`) does NOT block program
 /// exit: `jinn_sched_run` only waits for non-daemon coroutines, and the worker
 /// loop abandons the parked daemon at shutdown. The program must still exit 0.

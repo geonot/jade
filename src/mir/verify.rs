@@ -399,6 +399,7 @@ mod tests {
             next_block: 100,
             attrs: FnAttrs::default(),
             is_coroutine: false,
+            scheduler_task: false,
             perceus: PerceusMeta::default(),
         }
     }

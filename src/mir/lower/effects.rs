@@ -44,10 +44,7 @@ impl Lowerer {
                 self.lower_block_stmts(body);
                 self.emit(InstKind::Void, Type::Void, *span)
             }
-            hir::Stmt::Together(_name, body, span) => {
-                self.lower_block_stmts(body);
-                self.emit(InstKind::Void, Type::Void, *span)
-            }
+            hir::Stmt::Together(name, body, span) => self.lower_together(*name, body, *span),
             hir::Stmt::UseLocal(_, _, _, _) => self.emit(InstKind::Void, Type::Void, Span::dummy()),
             hir::Stmt::GlobalStore(name, value, _span) => {
                 let val = self.lower_expr(value);

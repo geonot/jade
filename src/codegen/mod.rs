@@ -169,6 +169,7 @@ pub struct Compiler<'ctx> {
     /// so a `Return` marks the generator done and suspends instead of emitting
     /// a normal LLVM `ret`.
     pub(crate) cur_fn_is_coroutine: bool,
+    pub(crate) cur_fn_is_scheduler_task: bool,
 }
 
 pub(crate) struct PendingPhi<'ctx> {

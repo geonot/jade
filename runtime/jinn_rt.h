@@ -276,6 +276,9 @@ void jinn_scope_stop_actors(jinn_scope_t *s);
 void jinn_scope_join(jinn_scope_t *s);
 /* Set the thread-local current scope (used by the worker loop on resume). */
 void jinn_scope_set_current(jinn_scope_t *s);
+/* Actor spawn hook: scope-own (non-daemon, registered) if a scope is current,
+ * else daemon. Replaces the unconditional set_daemon at spawn. */
+void jinn_actor_spawn_scoped(jinn_coro_t *coro, void *mailbox_ptr);
 
 /* ── Supervisor (OTP-style) ──────────────────────────────────────── */
 

@@ -487,6 +487,7 @@ impl<'ctx> Compiler<'ctx> {
         self.var_shadows.clear();
         self.var_scope_markers.clear();
         self.cur_fn_is_coroutine = func.is_coroutine;
+        self.cur_fn_is_scheduler_task = func.scheduler_task;
 
         for bb in &func.blocks {
             let llvm_bb = self.ctx.append_basic_block(fv, &bb.label.as_str());
@@ -703,7 +704,7 @@ impl<'ctx> Compiler<'ctx> {
             }
             mir::Terminator::Return(val) => {
                 self.drain_reuse_slots();
-                if self.cur_fn_is_coroutine {
+                if self.cur_fn_is_coroutine && !self.cur_fn_is_scheduler_task {
                     let _ = val;
                     let ptr = self.ctx.ptr_type(AddressSpace::default());
                     let i8t = self.ctx.i8_type();

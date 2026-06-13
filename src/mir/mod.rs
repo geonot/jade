@@ -48,6 +48,12 @@ pub struct Function {
 
     pub is_coroutine: bool,
 
+    /// A scheduler-spawned concurrent task (structured `together` child), as
+    /// opposed to a lazy generator. Both set `is_coroutine` (they share the
+    /// capture-struct ABI), but a scheduler task returns normally to the
+    /// trampoline (`jinn_coro_exit`) instead of emitting a generator suspend.
+    pub scheduler_task: bool,
+
     pub perceus: PerceusMeta,
 }
 
