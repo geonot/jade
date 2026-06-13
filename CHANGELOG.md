@@ -1,4 +1,5 @@
 # Changelog
+- **[58]** (2026-06-13 17:16) store: add group-by aggregates (store.group(key).agg(val)) returning Vec<(key,val)> tuples; single-pass hashtable codegen, 6 tests (task 2-31-7)
 - **[55]** (2026-06-13 16:58) 2-31-6: @kv schema-driven key/value types with optional get
 - **[53]** (2026-06-13 16:45) Implement belongs-to relation traversal in stores (task 2-31-5): &owner as Owner becomes a stored I64 sid column, row.owner resolves the target row via the primary sid index; has-many emits a steering diagnostic; @cascade parses as a no-op. Adds tests/store_relations.rs conformance suite.
 - **[52]** (2026-06-13 16:21) task 2-31-4: typed result sets for history/distinct/nearest/graph/search (replace opaque i64 handles with iterable Vecs)

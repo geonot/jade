@@ -13,15 +13,7 @@ impl Lowerer {
                 let filter_val = self.lower_expr(&filter.value);
                 let mut args = vec![filter_val];
 
-                let op_str = match filter.op {
-                    ast::BinOp::Eq => "eq",
-                    ast::BinOp::Ne => "ne",
-                    ast::BinOp::Lt => "lt",
-                    ast::BinOp::Le => "le",
-                    ast::BinOp::Gt => "gt",
-                    ast::BinOp::Ge => "ge",
-                    _ => "eq",
-                };
+                let op_str = crate::hir::store_filter_pred_str(filter.pred, filter.op);
                 let mut name = format!("__store_query_{store_name}__{}__{op_str}", filter.field);
 
                 for (lop, cond) in &filter.extra {
@@ -29,15 +21,7 @@ impl Lowerer {
                         ast::LogicalOp::And => "and",
                         ast::LogicalOp::Or => "or",
                     };
-                    let eop_str = match cond.op {
-                        ast::BinOp::Eq => "eq",
-                        ast::BinOp::Ne => "ne",
-                        ast::BinOp::Lt => "lt",
-                        ast::BinOp::Le => "le",
-                        ast::BinOp::Gt => "gt",
-                        ast::BinOp::Ge => "ge",
-                        _ => "eq",
-                    };
+                    let eop_str = crate::hir::store_filter_pred_str(cond.pred, cond.op);
                     name.push_str(&format!("__{lop_str}__{}__{eop_str}", cond.field));
                     let ev = self.lower_expr(&cond.value);
                     args.push(ev);
@@ -60,30 +44,14 @@ impl Lowerer {
             ExprKind::ViewCount(store_name, filter) => {
                 let filter_val = self.lower_expr(&filter.value);
                 let mut args = vec![filter_val];
-                let op_str = match filter.op {
-                    ast::BinOp::Eq => "eq",
-                    ast::BinOp::Ne => "ne",
-                    ast::BinOp::Lt => "lt",
-                    ast::BinOp::Le => "le",
-                    ast::BinOp::Gt => "gt",
-                    ast::BinOp::Ge => "ge",
-                    _ => "eq",
-                };
+                let op_str = crate::hir::store_filter_pred_str(filter.pred, filter.op);
                 let mut name = format!("__view_count_{store_name}__{}__{op_str}", filter.field);
                 for (lop, cond) in &filter.extra {
                     let lop_str = match lop {
                         ast::LogicalOp::And => "and",
                         ast::LogicalOp::Or => "or",
                     };
-                    let eop_str = match cond.op {
-                        ast::BinOp::Eq => "eq",
-                        ast::BinOp::Ne => "ne",
-                        ast::BinOp::Lt => "lt",
-                        ast::BinOp::Le => "le",
-                        ast::BinOp::Gt => "gt",
-                        ast::BinOp::Ge => "ge",
-                        _ => "eq",
-                    };
+                    let eop_str = crate::hir::store_filter_pred_str(cond.pred, cond.op);
                     name.push_str(&format!("__{lop_str}__{}__{eop_str}", cond.field));
                     let ev = self.lower_expr(&cond.value);
                     args.push(ev);
@@ -93,30 +61,14 @@ impl Lowerer {
             ExprKind::ViewAll(store_name, filter) => {
                 let filter_val = self.lower_expr(&filter.value);
                 let mut args = vec![filter_val];
-                let op_str = match filter.op {
-                    ast::BinOp::Eq => "eq",
-                    ast::BinOp::Ne => "ne",
-                    ast::BinOp::Lt => "lt",
-                    ast::BinOp::Le => "le",
-                    ast::BinOp::Gt => "gt",
-                    ast::BinOp::Ge => "ge",
-                    _ => "eq",
-                };
+                let op_str = crate::hir::store_filter_pred_str(filter.pred, filter.op);
                 let mut name = format!("__view_all_{store_name}__{}__{op_str}", filter.field);
                 for (lop, cond) in &filter.extra {
                     let lop_str = match lop {
                         ast::LogicalOp::And => "and",
                         ast::LogicalOp::Or => "or",
                     };
-                    let eop_str = match cond.op {
-                        ast::BinOp::Eq => "eq",
-                        ast::BinOp::Ne => "ne",
-                        ast::BinOp::Lt => "lt",
-                        ast::BinOp::Le => "le",
-                        ast::BinOp::Gt => "gt",
-                        ast::BinOp::Ge => "ge",
-                        _ => "eq",
-                    };
+                    let eop_str = crate::hir::store_filter_pred_str(cond.pred, cond.op);
                     name.push_str(&format!("__{lop_str}__{}__{eop_str}", cond.field));
                     let ev = self.lower_expr(&cond.value);
                     args.push(ev);
@@ -136,15 +88,7 @@ impl Lowerer {
             }
             ExprKind::StoreFirst(store_name, filter) => {
                 let filter_val = self.lower_expr(&filter.value);
-                let op_str = match filter.op {
-                    ast::BinOp::Eq => "eq",
-                    ast::BinOp::Ne => "ne",
-                    ast::BinOp::Lt => "lt",
-                    ast::BinOp::Le => "le",
-                    ast::BinOp::Gt => "gt",
-                    ast::BinOp::Ge => "ge",
-                    _ => "eq",
-                };
+                let op_str = crate::hir::store_filter_pred_str(filter.pred, filter.op);
                 let mut name = format!("__store_first_{store_name}__{}__{op_str}", filter.field);
                 let mut args = vec![filter_val];
                 for (logic_op, cond) in &filter.extra {
@@ -152,15 +96,7 @@ impl Lowerer {
                         ast::LogicalOp::And => "and",
                         ast::LogicalOp::Or => "or",
                     };
-                    let eop_str = match cond.op {
-                        ast::BinOp::Eq => "eq",
-                        ast::BinOp::Ne => "ne",
-                        ast::BinOp::Lt => "lt",
-                        ast::BinOp::Le => "le",
-                        ast::BinOp::Gt => "gt",
-                        ast::BinOp::Ge => "ge",
-                        _ => "eq",
-                    };
+                    let eop_str = crate::hir::store_filter_pred_str(cond.pred, cond.op);
                     name.push_str(&format!("__{lop_str}__{}__{eop_str}", cond.field));
                     args.push(self.lower_expr(&cond.value));
                 }
@@ -168,15 +104,7 @@ impl Lowerer {
             }
             ExprKind::StoreExists(store_name, filter) => {
                 let filter_val = self.lower_expr(&filter.value);
-                let op_str = match filter.op {
-                    ast::BinOp::Eq => "eq",
-                    ast::BinOp::Ne => "ne",
-                    ast::BinOp::Lt => "lt",
-                    ast::BinOp::Le => "le",
-                    ast::BinOp::Gt => "gt",
-                    ast::BinOp::Ge => "ge",
-                    _ => "eq",
-                };
+                let op_str = crate::hir::store_filter_pred_str(filter.pred, filter.op);
                 let mut name = format!("__store_exists_{store_name}__{}__{op_str}", filter.field);
                 let mut args = vec![filter_val];
                 for (logic_op, cond) in &filter.extra {
@@ -184,15 +112,7 @@ impl Lowerer {
                         ast::LogicalOp::And => "and",
                         ast::LogicalOp::Or => "or",
                     };
-                    let eop_str = match cond.op {
-                        ast::BinOp::Eq => "eq",
-                        ast::BinOp::Ne => "ne",
-                        ast::BinOp::Lt => "lt",
-                        ast::BinOp::Le => "le",
-                        ast::BinOp::Gt => "gt",
-                        ast::BinOp::Ge => "ge",
-                        _ => "eq",
-                    };
+                    let eop_str = crate::hir::store_filter_pred_str(cond.pred, cond.op);
                     name.push_str(&format!("__{lop_str}__{}__{eop_str}", cond.field));
                     args.push(self.lower_expr(&cond.value));
                 }

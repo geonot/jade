@@ -6,7 +6,7 @@ impl<'ctx> Compiler<'ctx> {
         encoded_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let (store_name, _, _, _) = Self::parse_encoded_filter(encoded_name)?;
+        let (store_name, _, _, _, _) = Self::parse_encoded_filter(encoded_name)?;
         let sd = self
             .store_defs
             .get(store_name)
@@ -19,7 +19,7 @@ impl<'ctx> Compiler<'ctx> {
             return self.emit_store_hard_delete(encoded_name, args);
         }
 
-        let (store_name, field_name, op, extra_specs) = Self::parse_encoded_filter(encoded_name)?;
+        let (store_name, field_name, op, primary_pred, extra_specs) = Self::parse_encoded_filter(encoded_name)?;
         if args.is_empty() {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
         }
@@ -97,11 +97,12 @@ impl<'ctx> Compiler<'ctx> {
             usize,
             Type,
             crate::ast::BinOp,
+            crate::ast::FilterPred,
             BasicValueEnum<'ctx>,
         )> = extra_specs
             .iter()
             .enumerate()
-            .map(|(ei, (lop, efield, eop))| {
+            .map(|(ei, (lop, efield, eop, epred))| {
                 let (fi, ft) = sd
                     .fields
                     .iter()
@@ -110,11 +111,11 @@ impl<'ctx> Compiler<'ctx> {
                     .map(|(i, f)| (i, f.ty.clone()))
                     .unwrap_or((0, Type::I64));
                 let ev = self.val(args[1 + ei]);
-                (*lop, fi, ft, *eop, ev)
+                (*lop, fi, ft, *eop, *epred, ev)
             })
             .collect();
         let cond =
-            self.eval_store_filter(rec_ptr, st, field_idx, &field_ty, op, filter_val, &extras)?;
+            self.eval_store_filter_pred(rec_ptr, st, field_idx, &field_ty, op, primary_pred, filter_val, &extras)?;
         b!(self.bld.build_conditional_branch(cond, mark_bb, next_bb));
 
         self.bld.position_at_end(mark_bb);
@@ -180,7 +181,7 @@ impl<'ctx> Compiler<'ctx> {
         encoded_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let (store_name, field_name, primary_op, extra_conds) =
+        let (store_name, field_name, primary_op, primary_pred, extra_conds) =
             Self::parse_encoded_filter(encoded_name)?;
         if args.is_empty() {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
@@ -356,11 +357,12 @@ impl<'ctx> Compiler<'ctx> {
                 usize,
                 Type,
                 crate::ast::BinOp,
+                crate::ast::FilterPred,
                 BasicValueEnum<'ctx>,
             )> = extra_conds
                 .iter()
                 .enumerate()
-                .map(|(ei, (lop, fname, cop))| {
+                .map(|(ei, (lop, fname, cop, cpred))| {
                     let (fi, ft) = sd
                         .fields
                         .iter()
@@ -369,11 +371,11 @@ impl<'ctx> Compiler<'ctx> {
                         .map(|(i, f)| (i, f.ty.clone()))
                         .unwrap_or((0, Type::I64));
                     let ev = self.val(args[1 + ei]);
-                    (*lop, fi, ft, *cop, ev)
+                    (*lop, fi, ft, *cop, *cpred, ev)
                 })
                 .collect();
-            self.eval_store_filter(
-                rec_ptr, st, field_idx, &field_ty, primary_op, filter_val, &extras,
+            self.eval_store_filter_pred(
+                rec_ptr, st, field_idx, &field_ty, primary_op, primary_pred, filter_val, &extras,
             )?
         };
         let del_hook_bb = self.ctx.append_basic_block(fv_fn, "del.hook");

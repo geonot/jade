@@ -18,9 +18,14 @@ impl<'ctx> Compiler<'ctx> {
         let field_name = parts[1];
         let remainder = parts[2];
         let segments: Vec<&str> = remainder.split("__").collect();
-        let op = Self::parse_store_op(segments[0]);
+        let (op, primary_pred) = Self::parse_store_pred(segments[0]);
 
-        let mut extra_specs: Vec<(crate::ast::LogicalOp, &str, crate::ast::BinOp)> = Vec::new();
+        let mut extra_specs: Vec<(
+            crate::ast::LogicalOp,
+            &str,
+            crate::ast::BinOp,
+            crate::ast::FilterPred,
+        )> = Vec::new();
         let mut i = 1;
         while i + 2 < segments.len() {
             let lop = match segments[i] {
@@ -32,8 +37,8 @@ impl<'ctx> Compiler<'ctx> {
                 }
             };
             let efield = segments[i + 1];
-            let eop = Self::parse_store_op(segments[i + 2]);
-            extra_specs.push((lop, efield, eop));
+            let (eop, epred) = Self::parse_store_pred(segments[i + 2]);
+            extra_specs.push((lop, efield, eop, epred));
             i += 3;
         }
 
@@ -161,11 +166,12 @@ impl<'ctx> Compiler<'ctx> {
             usize,
             Type,
             crate::ast::BinOp,
+            crate::ast::FilterPred,
             BasicValueEnum<'ctx>,
         )> = extra_specs
             .iter()
             .enumerate()
-            .map(|(ei, (lop, efield, eop))| {
+            .map(|(ei, (lop, efield, eop, epred))| {
                 let (eidx, ety) = sd
                     .fields
                     .iter()
@@ -174,11 +180,11 @@ impl<'ctx> Compiler<'ctx> {
                     .map(|(i, f)| (i, f.ty.clone()))
                     .unwrap();
                 let eval = self.value_map[&args[ei + 1]];
-                (*lop, eidx, ety, *eop, eval)
+                (*lop, eidx, ety, *eop, *epred, eval)
             })
             .collect();
-        let cond = self.eval_store_filter(
-            raw_ptr, rec_st, field_idx, &field_ty, op, filter_val, &extras,
+        let cond = self.eval_store_filter_pred(
+            raw_ptr, rec_st, field_idx, &field_ty, op, primary_pred, filter_val, &extras,
         )?;
         b!(self.bld.build_conditional_branch(cond, copy_bb, next_bb));
 

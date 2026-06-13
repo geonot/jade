@@ -15,7 +15,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let field_names: Vec<&str> = fields_part.split('_').collect();
 
-        let (store_name, filter_field, primary_op, extra_conds) =
+        let (store_name, filter_field, primary_op, primary_pred, extra_conds) =
             Self::parse_encoded_filter(filter_part)?;
         if args.is_empty() {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
@@ -117,11 +117,12 @@ impl<'ctx> Compiler<'ctx> {
                 usize,
                 Type,
                 crate::ast::BinOp,
+                crate::ast::FilterPred,
                 BasicValueEnum<'ctx>,
             )> = extra_conds
                 .iter()
                 .enumerate()
-                .map(|(ei, (lop, fname, cop))| {
+                .map(|(ei, (lop, fname, cop, cpred))| {
                     let (fi, ft) = sd
                         .fields
                         .iter()
@@ -130,11 +131,11 @@ impl<'ctx> Compiler<'ctx> {
                         .map(|(i, f)| (i, f.ty.clone()))
                         .unwrap_or((0, Type::I64));
                     let ev = self.val(args[1 + ei]);
-                    (*lop, fi, ft, *cop, ev)
+                    (*lop, fi, ft, *cop, *cpred, ev)
                 })
                 .collect();
-            self.eval_store_filter(
-                rec_ptr, st, field_idx, &field_ty, primary_op, filter_val, &extras,
+            self.eval_store_filter_pred(
+                rec_ptr, st, field_idx, &field_ty, primary_op, primary_pred, filter_val, &extras,
             )?
         };
         b!(self
@@ -285,18 +286,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
-    pub(in crate::codegen) fn parse_filter_op(s: &str) -> crate::ast::BinOp {
-        match s {
-            "eq" => crate::ast::BinOp::Eq,
-            "ne" => crate::ast::BinOp::Ne,
-            "lt" => crate::ast::BinOp::Lt,
-            "le" => crate::ast::BinOp::Le,
-            "gt" => crate::ast::BinOp::Gt,
-            "ge" => crate::ast::BinOp::Ge,
-            _ => crate::ast::BinOp::Eq,
-        }
-    }
-
     #[allow(clippy::type_complexity)]
     pub(in crate::codegen) fn parse_encoded_filter(
         encoded: &str,
@@ -305,7 +294,13 @@ impl<'ctx> Compiler<'ctx> {
             &str,
             &str,
             crate::ast::BinOp,
-            Vec<(crate::ast::LogicalOp, String, crate::ast::BinOp)>,
+            crate::ast::FilterPred,
+            Vec<(
+                crate::ast::LogicalOp,
+                String,
+                crate::ast::BinOp,
+                crate::ast::FilterPred,
+            )>,
         ),
         String,
     > {
@@ -317,9 +312,14 @@ impl<'ctx> Compiler<'ctx> {
         let field_name = parts[1];
         let remainder = parts[2];
         let segments: Vec<&str> = remainder.split("__").collect();
-        let op = Self::parse_filter_op(segments[0]);
+        let (op, pred) = Self::parse_store_pred(segments[0]);
 
-        let mut extra: Vec<(crate::ast::LogicalOp, String, crate::ast::BinOp)> = Vec::new();
+        let mut extra: Vec<(
+            crate::ast::LogicalOp,
+            String,
+            crate::ast::BinOp,
+            crate::ast::FilterPred,
+        )> = Vec::new();
         let mut i = 1;
         while i + 2 < segments.len() {
             let lop = match segments[i] {
@@ -331,11 +331,11 @@ impl<'ctx> Compiler<'ctx> {
                 }
             };
             let efield = segments[i + 1].to_string();
-            let eop = Self::parse_filter_op(segments[i + 2]);
-            extra.push((lop, efield, eop));
+            let (eop, epred) = Self::parse_store_pred(segments[i + 2]);
+            extra.push((lop, efield, eop, epred));
             i += 3;
         }
-        Ok((store_name, field_name, op, extra))
+        Ok((store_name, field_name, op, pred, extra))
     }
 
     pub(in crate::codegen) fn setup_store_access(
@@ -504,7 +504,7 @@ impl<'ctx> Compiler<'ctx> {
         encoded_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let (store_name, field_name, op, extra_specs) = Self::parse_encoded_filter(encoded_name)?;
+        let (store_name, field_name, op, primary_pred, extra_specs) = Self::parse_encoded_filter(encoded_name)?;
         if args.is_empty() {
             return Ok(self.ctx.bool_type().const_int(0, false).into());
         }
@@ -581,11 +581,12 @@ impl<'ctx> Compiler<'ctx> {
             usize,
             Type,
             crate::ast::BinOp,
+            crate::ast::FilterPred,
             BasicValueEnum<'ctx>,
         )> = extra_specs
             .iter()
             .enumerate()
-            .map(|(ei, (lop, efield, eop))| {
+            .map(|(ei, (lop, efield, eop, epred))| {
                 let (fi, ft) = sd
                     .fields
                     .iter()
@@ -594,11 +595,11 @@ impl<'ctx> Compiler<'ctx> {
                     .map(|(i, f)| (i, f.ty.clone()))
                     .unwrap_or((0, Type::I64));
                 let ev = self.value_map[&args[ei + 1]];
-                (*lop, fi, ft, *eop, ev)
+                (*lop, fi, ft, *eop, *epred, ev)
             })
             .collect();
         let cond =
-            self.eval_store_filter(rec_ptr, st, field_idx, &field_ty, op, filter_val, &extras)?;
+            self.eval_store_filter_pred(rec_ptr, st, field_idx, &field_ty, op, primary_pred, filter_val, &extras)?;
         b!(self.bld.build_conditional_branch(cond, match_bb, next_bb));
 
         self.bld.position_at_end(match_bb);

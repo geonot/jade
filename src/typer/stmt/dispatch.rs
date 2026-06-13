@@ -487,6 +487,7 @@ impl Typer {
                                 value: sid_expr,
                                 span: *span,
                                 extra: Vec::new(),
+                                pred: ast::FilterPred::Cmp,
                             };
                             let _ = row_name;
                             return Ok(hir::Stmt::StoreSet(

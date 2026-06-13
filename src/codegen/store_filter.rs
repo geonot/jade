@@ -187,19 +187,22 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn eval_store_filter(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn eval_store_filter_pred(
         &mut self,
         rec_ptr: PointerValue<'ctx>,
         rec_st: inkwell::types::StructType<'ctx>,
         primary_idx: usize,
         primary_ty: &Type,
         primary_op: BinOp,
+        primary_pred: crate::ast::FilterPred,
         primary_val: BasicValueEnum<'ctx>,
         extras: &[(
             crate::ast::LogicalOp,
             usize,
             Type,
             BinOp,
+            crate::ast::FilterPred,
             BasicValueEnum<'ctx>,
         )],
     ) -> Result<IntValue<'ctx>, String> {
@@ -208,12 +211,12 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_struct_gep(rec_st, rec_ptr, primary_idx as u32, "sf.field"));
         let mut result =
-            self.store_compare_field(field_gep, primary_ty, primary_op, primary_val)?;
-        for (lop, ci, ct, op, cv) in extras {
+            self.store_compare_field(field_gep, primary_ty, primary_op, primary_pred, primary_val)?;
+        for (lop, ci, ct, op, pred, cv) in extras {
             let cg = b!(self
                 .bld
                 .build_struct_gep(rec_st, rec_ptr, *ci as u32, "sf.efield"));
-            let ecmp = self.store_compare_field(cg, ct, *op, *cv)?;
+            let ecmp = self.store_compare_field(cg, ct, *op, *pred, *cv)?;
             result = match lop {
                 crate::ast::LogicalOp::And => b!(self.bld.build_and(result, ecmp, "sf.and")),
                 crate::ast::LogicalOp::Or => b!(self.bld.build_or(result, ecmp, "sf.or")),
@@ -227,9 +230,13 @@ impl<'ctx> Compiler<'ctx> {
         field_ptr: PointerValue<'ctx>,
         field_ty: &Type,
         op: BinOp,
+        pred: crate::ast::FilterPred,
         filter_val: BasicValueEnum<'ctx>,
     ) -> Result<IntValue<'ctx>, String> {
         let field_ty = &normalize_store_field_type(field_ty);
+        if !matches!(pred, crate::ast::FilterPred::Cmp) {
+            return self.store_text_predicate(field_ptr, pred, filter_val);
+        }
         match field_ty {
             Type::String => {
                 let i64t = self.ctx.i64_type();
@@ -414,6 +421,169 @@ impl<'ctx> Compiler<'ctx> {
                 "unsupported store field type for filtering: {:?}",
                 field_ty
             )),
+        }
+    }
+
+    fn store_text_predicate(
+        &mut self,
+        field_ptr: PointerValue<'ctx>,
+        pred: crate::ast::FilterPred,
+        filter_val: BasicValueEnum<'ctx>,
+    ) -> Result<IntValue<'ctx>, String> {
+        let i64t = self.ctx.i64_type();
+        let i8t = self.ctx.i8_type();
+        let i32t = self.ctx.i32_type();
+        let boolt = self.ctx.bool_type();
+
+        let stored_len = b!(self.bld.build_load(i64t, field_ptr, "tp.slen")).into_int_value();
+        let stored_data = unsafe {
+            b!(self
+                .bld
+                .build_gep(i8t, field_ptr, &[i64t.const_int(8, false)], "tp.sdata"))
+        };
+        let needle_len = self.string_len(filter_val)?.into_int_value();
+        let needle_data = self.string_data(filter_val)?.into_pointer_value();
+
+        let fits = b!(self.bld.build_int_compare(
+            IntPredicate::UGE,
+            stored_len,
+            needle_len,
+            "tp.fits"
+        ));
+
+        let fv = self.current_fn();
+        let memcmp_fn = self.ensure_memcmp();
+
+        match pred {
+            crate::ast::FilterPred::StartsWith => {
+                let do_bb = self.ctx.append_basic_block(fv, "tp.sw.do");
+                let res_bb = self.ctx.append_basic_block(fv, "tp.sw.res");
+                let fits_end = self.current_bb();
+                b!(self.bld.build_conditional_branch(fits, do_bb, res_bb));
+
+                self.bld.position_at_end(do_bb);
+                let mc = self
+                    .call_result(b!(self.bld.build_call(
+                        memcmp_fn,
+                        &[stored_data.into(), needle_data.into(), needle_len.into()],
+                        "tp.sw.mc"
+                    )))
+                    .into_int_value();
+                let m = b!(self.bld.build_int_compare(
+                    IntPredicate::EQ,
+                    mc,
+                    i32t.const_int(0, false),
+                    "tp.sw.m"
+                ));
+                b!(self.bld.build_unconditional_branch(res_bb));
+                let do_end = self.current_bb();
+
+                self.bld.position_at_end(res_bb);
+                let phi = b!(self.bld.build_phi(boolt, "tp.sw"));
+                phi.add_incoming(&[
+                    (&boolt.const_int(0, false), fits_end),
+                    (&m, do_end),
+                ]);
+                Ok(phi.as_basic_value().into_int_value())
+            }
+            crate::ast::FilterPred::EndsWith => {
+                let do_bb = self.ctx.append_basic_block(fv, "tp.ew.do");
+                let res_bb = self.ctx.append_basic_block(fv, "tp.ew.res");
+                let fits_end = self.current_bb();
+                b!(self.bld.build_conditional_branch(fits, do_bb, res_bb));
+
+                self.bld.position_at_end(do_bb);
+                let off = b!(self.bld.build_int_sub(stored_len, needle_len, "tp.ew.off"));
+                let start = unsafe {
+                    b!(self
+                        .bld
+                        .build_gep(i8t, stored_data, &[off], "tp.ew.start"))
+                };
+                let mc = self
+                    .call_result(b!(self.bld.build_call(
+                        memcmp_fn,
+                        &[start.into(), needle_data.into(), needle_len.into()],
+                        "tp.ew.mc"
+                    )))
+                    .into_int_value();
+                let m = b!(self.bld.build_int_compare(
+                    IntPredicate::EQ,
+                    mc,
+                    i32t.const_int(0, false),
+                    "tp.ew.m"
+                ));
+                b!(self.bld.build_unconditional_branch(res_bb));
+                let do_end = self.current_bb();
+
+                self.bld.position_at_end(res_bb);
+                let phi = b!(self.bld.build_phi(boolt, "tp.ew"));
+                phi.add_incoming(&[
+                    (&boolt.const_int(0, false), fits_end),
+                    (&m, do_end),
+                ]);
+                Ok(phi.as_basic_value().into_int_value())
+            }
+            crate::ast::FilterPred::Contains => {
+                let head_bb = self.ctx.append_basic_block(fv, "tp.ct.head");
+                let body_bb = self.ctx.append_basic_block(fv, "tp.ct.body");
+                let next_bb = self.ctx.append_basic_block(fv, "tp.ct.next");
+                let res_bb = self.ctx.append_basic_block(fv, "tp.ct.res");
+                let fits_end = self.current_bb();
+                let last = b!(self.bld.build_int_sub(stored_len, needle_len, "tp.ct.last"));
+                b!(self.bld.build_conditional_branch(fits, head_bb, res_bb));
+
+                self.bld.position_at_end(head_bb);
+                let iv = b!(self.bld.build_phi(i64t, "tp.ct.i"));
+                let cur = iv.as_basic_value().into_int_value();
+                let in_range = b!(self.bld.build_int_compare(
+                    IntPredicate::ULE,
+                    cur,
+                    last,
+                    "tp.ct.inr"
+                ));
+                b!(self.bld.build_conditional_branch(in_range, body_bb, res_bb));
+                let head_end = self.current_bb();
+
+                self.bld.position_at_end(body_bb);
+                let ptr = unsafe {
+                    b!(self.bld.build_gep(i8t, stored_data, &[cur], "tp.ct.p"))
+                };
+                let mc = self
+                    .call_result(b!(self.bld.build_call(
+                        memcmp_fn,
+                        &[ptr.into(), needle_data.into(), needle_len.into()],
+                        "tp.ct.mc"
+                    )))
+                    .into_int_value();
+                let hit = b!(self.bld.build_int_compare(
+                    IntPredicate::EQ,
+                    mc,
+                    i32t.const_int(0, false),
+                    "tp.ct.hit"
+                ));
+                b!(self.bld.build_conditional_branch(hit, res_bb, next_bb));
+                let body_end = self.current_bb();
+
+                self.bld.position_at_end(next_bb);
+                let inc = b!(self.bld.build_int_add(cur, i64t.const_int(1, false), "tp.ct.inc"));
+                b!(self.bld.build_unconditional_branch(head_bb));
+                let next_end = self.current_bb();
+
+                iv.add_incoming(&[
+                    (&i64t.const_int(0, false), fits_end),
+                    (&inc, next_end),
+                ]);
+
+                self.bld.position_at_end(res_bb);
+                let phi = b!(self.bld.build_phi(boolt, "tp.ct"));
+                phi.add_incoming(&[
+                    (&boolt.const_int(0, false), fits_end),
+                    (&boolt.const_int(0, false), head_end),
+                    (&boolt.const_int(1, false), body_end),
+                ]);
+                Ok(phi.as_basic_value().into_int_value())
+            }
+            crate::ast::FilterPred::Cmp => unreachable!(),
         }
     }
 }

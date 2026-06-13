@@ -15,9 +15,14 @@ impl<'ctx> Compiler<'ctx> {
 
         let remainder = parts[2];
         let segments: Vec<&str> = remainder.split("__").collect();
-        let op = Self::parse_store_op(segments[0]);
+        let (op, primary_pred) = Self::parse_store_pred(segments[0]);
 
-        let mut extra_specs: Vec<(crate::ast::LogicalOp, &str, crate::ast::BinOp)> = Vec::new();
+        let mut extra_specs: Vec<(
+            crate::ast::LogicalOp,
+            &str,
+            crate::ast::BinOp,
+            crate::ast::FilterPred,
+        )> = Vec::new();
         let mut i = 1;
         while i + 2 < segments.len() {
             let lop = match segments[i] {
@@ -29,8 +34,8 @@ impl<'ctx> Compiler<'ctx> {
                 }
             };
             let efield = segments[i + 1];
-            let eop = Self::parse_store_op(segments[i + 2]);
-            extra_specs.push((lop, efield, eop));
+            let (eop, epred) = Self::parse_store_pred(segments[i + 2]);
+            extra_specs.push((lop, efield, eop, epred));
             i += 3;
         }
 
@@ -71,6 +76,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let primary_field = &sd.fields[field_idx];
         let use_index = matches!(op, crate::ast::BinOp::Eq)
+            && matches!(primary_pred, crate::ast::FilterPred::Cmp)
             && Compiler::field_has_index(primary_field)
             && extra_specs.is_empty();
 
@@ -244,9 +250,10 @@ impl<'ctx> Compiler<'ctx> {
                 usize,
                 Type,
                 crate::ast::BinOp,
+                crate::ast::FilterPred,
                 BasicValueEnum<'ctx>,
             )> = Vec::new();
-            for (ei, (lop, efield, eop)) in extra_specs.iter().enumerate() {
+            for (ei, (lop, efield, eop, epred)) in extra_specs.iter().enumerate() {
                 let (eidx, ety) = sd
                     .fields
                     .iter()
@@ -255,9 +262,9 @@ impl<'ctx> Compiler<'ctx> {
                     .map(|(i, f)| (i, f.ty.clone()))
                     .ok_or_else(|| format!("unknown field '{efield}' in store '{store_name}'"))?;
                 let eval = self.value_map[&args[ei + 1]];
-                extras.push((*lop, eidx, ety, *eop, eval));
+                extras.push((*lop, eidx, ety, *eop, *epred, eval));
             }
-            self.eval_store_filter(rec_ptr, st, field_idx, &field_ty, op, filter_val, &extras)?
+            self.eval_store_filter_pred(rec_ptr, st, field_idx, &field_ty, op, primary_pred, filter_val, &extras)?
         };
         b!(self.bld.build_conditional_branch(cond, match_bb, next_bb));
 
@@ -288,15 +295,19 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result)
     }
 
-    pub(in crate::codegen) fn parse_store_op(s: &str) -> crate::ast::BinOp {
+    pub(in crate::codegen) fn parse_store_pred(s: &str) -> (crate::ast::BinOp, crate::ast::FilterPred) {
+        use crate::ast::{BinOp, FilterPred};
         match s {
-            "eq" => crate::ast::BinOp::Eq,
-            "ne" => crate::ast::BinOp::Ne,
-            "lt" => crate::ast::BinOp::Lt,
-            "le" => crate::ast::BinOp::Le,
-            "gt" => crate::ast::BinOp::Gt,
-            "ge" => crate::ast::BinOp::Ge,
-            _ => crate::ast::BinOp::Eq,
+            "eq" => (BinOp::Eq, FilterPred::Cmp),
+            "ne" => (BinOp::Ne, FilterPred::Cmp),
+            "lt" => (BinOp::Lt, FilterPred::Cmp),
+            "le" => (BinOp::Le, FilterPred::Cmp),
+            "gt" => (BinOp::Gt, FilterPred::Cmp),
+            "ge" => (BinOp::Ge, FilterPred::Cmp),
+            "contains" => (BinOp::Eq, FilterPred::Contains),
+            "startswith" => (BinOp::Eq, FilterPred::StartsWith),
+            "endswith" => (BinOp::Eq, FilterPred::EndsWith),
+            _ => (BinOp::Eq, FilterPred::Cmp),
         }
     }
 
@@ -439,9 +450,14 @@ impl<'ctx> Compiler<'ctx> {
         let field_name = parts[1];
         let remainder = parts[2];
         let segments: Vec<&str> = remainder.split("__").collect();
-        let op = Self::parse_store_op(segments[0]);
+        let (op, primary_pred) = Self::parse_store_pred(segments[0]);
 
-        let mut extra_specs: Vec<(crate::ast::LogicalOp, &str, crate::ast::BinOp)> = Vec::new();
+        let mut extra_specs: Vec<(
+            crate::ast::LogicalOp,
+            &str,
+            crate::ast::BinOp,
+            crate::ast::FilterPred,
+        )> = Vec::new();
         let mut i = 1;
         while i + 2 < segments.len() {
             let lop = match segments[i] {
@@ -453,8 +469,8 @@ impl<'ctx> Compiler<'ctx> {
                 }
             };
             let efield = segments[i + 1];
-            let eop = Self::parse_store_op(segments[i + 2]);
-            extra_specs.push((lop, efield, eop));
+            let (eop, epred) = Self::parse_store_pred(segments[i + 2]);
+            extra_specs.push((lop, efield, eop, epred));
             i += 3;
         }
 
@@ -551,11 +567,12 @@ impl<'ctx> Compiler<'ctx> {
             usize,
             Type,
             crate::ast::BinOp,
+            crate::ast::FilterPred,
             BasicValueEnum<'ctx>,
         )> = extra_specs
             .iter()
             .enumerate()
-            .map(|(ei, (lop, efield, eop))| {
+            .map(|(ei, (lop, efield, eop, epred))| {
                 let (eidx, ety) = sd
                     .fields
                     .iter()
@@ -564,11 +581,11 @@ impl<'ctx> Compiler<'ctx> {
                     .map(|(i, f)| (i, f.ty.clone()))
                     .unwrap();
                 let eval = self.value_map[&args[ei + 1]];
-                (*lop, eidx, ety, *eop, eval)
+                (*lop, eidx, ety, *eop, *epred, eval)
             })
             .collect();
         let cond =
-            self.eval_store_filter(rec_ptr, st, field_idx, &field_ty, op, filter_val, &extras)?;
+            self.eval_store_filter_pred(rec_ptr, st, field_idx, &field_ty, op, primary_pred, filter_val, &extras)?;
         b!(self.bld.build_conditional_branch(cond, match_bb, next_bb));
 
         self.bld.position_at_end(match_bb);

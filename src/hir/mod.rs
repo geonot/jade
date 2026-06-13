@@ -263,6 +263,7 @@ pub struct StoreFilter {
     pub value: Expr,
     pub span: Span,
     pub extra: Vec<(ast::LogicalOp, StoreFilterCond)>,
+    pub pred: ast::FilterPred,
 }
 
 #[derive(Debug, Clone)]
@@ -270,6 +271,7 @@ pub struct StoreFilterCond {
     pub field: Symbol,
     pub op: BinOp,
     pub value: Expr,
+    pub pred: ast::FilterPred,
 }
 
 pub fn store_filter_op_str(op: BinOp) -> &'static str {
@@ -284,11 +286,20 @@ pub fn store_filter_op_str(op: BinOp) -> &'static str {
     }
 }
 
+pub fn store_filter_pred_str(pred: ast::FilterPred, op: BinOp) -> &'static str {
+    match pred {
+        ast::FilterPred::Cmp => store_filter_op_str(op),
+        ast::FilterPred::Contains => "contains",
+        ast::FilterPred::StartsWith => "startswith",
+        ast::FilterPred::EndsWith => "endswith",
+    }
+}
+
 pub fn encode_store_set_call(store: Symbol, filter: &StoreFilter, fields: &[Symbol]) -> String {
     let mut encoded = format!(
         "__store_set_{store}__{}__{}",
         filter.field,
-        store_filter_op_str(filter.op)
+        store_filter_pred_str(filter.pred, filter.op)
     );
     for (logic_op, cond) in &filter.extra {
         let lop = match logic_op {
@@ -298,7 +309,7 @@ pub fn encode_store_set_call(store: Symbol, filter: &StoreFilter, fields: &[Symb
         encoded.push_str(&format!(
             "__{lop}__{}__{}",
             cond.field,
-            store_filter_op_str(cond.op)
+            store_filter_pred_str(cond.pred, cond.op)
         ));
     }
     encoded.push_str("__fields");

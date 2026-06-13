@@ -123,36 +123,194 @@ impl Parser {
         if kw != "where" {
             return Err(self.error("expected 'where'"));
         }
-        let field = self.ident()?;
-        let op = self.parse_filter_op()?;
-        let value = self.parse_bitor()?;
-        let mut extra = Vec::new();
+        let mut flat: Vec<(LogicalOp, StoreFilterCond)> = Vec::new();
         loop {
-            let logical = match self.peek() {
-                Token::And => LogicalOp::And,
-                Token::Or => LogicalOp::Or,
-                _ => break,
+            let logical = if flat.is_empty() {
+                LogicalOp::And
+            } else {
+                match self.peek() {
+                    Token::And => {
+                        self.advance();
+                        LogicalOp::And
+                    }
+                    Token::Or => {
+                        self.advance();
+                        LogicalOp::Or
+                    }
+                    _ => break,
+                }
             };
-            self.advance();
-            let f = self.ident()?;
-            let o = self.parse_filter_op()?;
-            let v = self.parse_bitor()?;
-            extra.push((
-                logical,
-                StoreFilterCond {
-                    field: f,
-                    op: o,
-                    value: v,
-                },
+            self.parse_filter_group(logical, &mut flat)?;
+        }
+        let seen_and = flat.iter().skip(1).any(|(l, _)| *l == LogicalOp::And);
+        let seen_or = flat.iter().skip(1).any(|(l, _)| *l == LogicalOp::Or);
+        if seen_and && seen_or {
+            return Err(self.error(
+                "mixed 'and'/'or' in a where clause is ambiguous; group with parentheses",
             ));
         }
+        let (_, head) = flat.remove(0);
         Ok(StoreFilter {
-            field,
-            op,
-            value,
+            field: head.field,
+            op: head.op,
+            value: head.value,
+            pred: head.pred,
             span: sp,
-            extra,
+            extra: flat,
         })
+    }
+
+    fn parse_filter_group(
+        &mut self,
+        logical: LogicalOp,
+        out: &mut Vec<(LogicalOp, StoreFilterCond)>,
+    ) -> Result<(), ParseError> {
+        if self.check(Token::LParen) {
+            self.advance();
+            let mut first = true;
+            loop {
+                let inner = if first {
+                    first = false;
+                    logical
+                } else {
+                    match self.peek() {
+                        Token::And => {
+                            self.advance();
+                            LogicalOp::And
+                        }
+                        Token::Or => {
+                            self.advance();
+                            LogicalOp::Or
+                        }
+                        _ => break,
+                    }
+                };
+                self.parse_filter_group(inner, out)?;
+            }
+            self.expect(Token::RParen)?;
+            return Ok(());
+        }
+        self.parse_filter_cond(logical, out)
+    }
+
+    fn parse_filter_cond(
+        &mut self,
+        logical: LogicalOp,
+        out: &mut Vec<(LogicalOp, StoreFilterCond)>,
+    ) -> Result<(), ParseError> {
+        let field = self.ident()?;
+        if let Token::Ident(word) = self.peek().clone() {
+            match word.as_str().as_str() {
+                "contains" => {
+                    self.advance();
+                    let v = self.parse_bitor()?;
+                    out.push((
+                        logical,
+                        StoreFilterCond {
+                            field,
+                            op: BinOp::Eq,
+                            value: v,
+                            pred: crate::ast::FilterPred::Contains,
+                        },
+                    ));
+                    return Ok(());
+                }
+                "starts_with" => {
+                    self.advance();
+                    let v = self.parse_bitor()?;
+                    out.push((
+                        logical,
+                        StoreFilterCond {
+                            field,
+                            op: BinOp::Eq,
+                            value: v,
+                            pred: crate::ast::FilterPred::StartsWith,
+                        },
+                    ));
+                    return Ok(());
+                }
+                "ends_with" => {
+                    self.advance();
+                    let v = self.parse_bitor()?;
+                    out.push((
+                        logical,
+                        StoreFilterCond {
+                            field,
+                            op: BinOp::Eq,
+                            value: v,
+                            pred: crate::ast::FilterPred::EndsWith,
+                        },
+                    ));
+                    return Ok(());
+                }
+                "between" => {
+                    self.advance();
+                    let lo = self.parse_bitor()?;
+                    self.expect(Token::And)?;
+                    let hi = self.parse_bitor()?;
+                    out.push((
+                        logical,
+                        StoreFilterCond {
+                            field,
+                            op: BinOp::Ge,
+                            value: lo,
+                            pred: crate::ast::FilterPred::Cmp,
+                        },
+                    ));
+                    out.push((
+                        LogicalOp::And,
+                        StoreFilterCond {
+                            field,
+                            op: BinOp::Le,
+                            value: hi,
+                            pred: crate::ast::FilterPred::Cmp,
+                        },
+                    ));
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+        if self.check(Token::In) {
+            self.advance();
+            self.expect(Token::LBracket)?;
+            let mut values = Vec::new();
+            if !self.check(Token::RBracket) {
+                values.push(self.parse_bitor()?);
+                while self.check(Token::Comma) {
+                    self.advance();
+                    values.push(self.parse_bitor()?);
+                }
+            }
+            self.expect(Token::RBracket)?;
+            if values.is_empty() {
+                return Err(self.error("'in' filter requires at least one value"));
+            }
+            for (i, v) in values.into_iter().enumerate() {
+                out.push((
+                    if i == 0 { logical } else { LogicalOp::Or },
+                    StoreFilterCond {
+                        field,
+                        op: BinOp::Eq,
+                        value: v,
+                        pred: crate::ast::FilterPred::Cmp,
+                    },
+                ));
+            }
+            return Ok(());
+        }
+        let op = self.parse_filter_op()?;
+        let value = self.parse_bitor()?;
+        out.push((
+            logical,
+            StoreFilterCond {
+                field,
+                op,
+                value,
+                pred: crate::ast::FilterPred::Cmp,
+            },
+        ));
+        Ok(())
     }
 
     pub(in crate::parser) fn parse_filter_op(&mut self) -> Result<BinOp, ParseError> {

@@ -21,15 +21,7 @@ impl Lowerer {
             }
             hir::Stmt::StoreDelete(store_name, filter, span) => {
                 let filter_val = self.lower_expr(&filter.value);
-                let op_str = match filter.op {
-                    ast::BinOp::Eq => "eq",
-                    ast::BinOp::Ne => "ne",
-                    ast::BinOp::Lt => "lt",
-                    ast::BinOp::Le => "le",
-                    ast::BinOp::Gt => "gt",
-                    ast::BinOp::Ge => "ge",
-                    _ => "eq",
-                };
+                let op_str = crate::hir::store_filter_pred_str(filter.pred, filter.op);
                 let mut extra_vals = Vec::new();
                 for (_logic_op, cond) in &filter.extra {
                     extra_vals.push(self.lower_expr(&cond.value));
@@ -44,15 +36,7 @@ impl Lowerer {
                         ast::LogicalOp::And => "and",
                         ast::LogicalOp::Or => "or",
                     };
-                    let cop_str = match cond.op {
-                        ast::BinOp::Eq => "eq",
-                        ast::BinOp::Ne => "ne",
-                        ast::BinOp::Lt => "lt",
-                        ast::BinOp::Le => "le",
-                        ast::BinOp::Gt => "gt",
-                        ast::BinOp::Ge => "ge",
-                        _ => "eq",
-                    };
+                    let cop_str = crate::hir::store_filter_pred_str(cond.pred, cond.op);
                     encoded.push_str(&format!("__{lop}__{}__{cop_str}", cond.field));
                 }
                 self.emit(
@@ -63,15 +47,7 @@ impl Lowerer {
             }
             hir::Stmt::StoreDestroy(store_name, filter, span) => {
                 let filter_val = self.lower_expr(&filter.value);
-                let op_str = match filter.op {
-                    ast::BinOp::Eq => "eq",
-                    ast::BinOp::Ne => "ne",
-                    ast::BinOp::Lt => "lt",
-                    ast::BinOp::Le => "le",
-                    ast::BinOp::Gt => "gt",
-                    ast::BinOp::Ge => "ge",
-                    _ => "eq",
-                };
+                let op_str = crate::hir::store_filter_pred_str(filter.pred, filter.op);
                 let mut all_vals = vec![filter_val];
                 for (_logic_op, cond) in &filter.extra {
                     all_vals.push(self.lower_expr(&cond.value));
@@ -83,15 +59,7 @@ impl Lowerer {
                         ast::LogicalOp::And => "and",
                         ast::LogicalOp::Or => "or",
                     };
-                    let cop_str = match cond.op {
-                        ast::BinOp::Eq => "eq",
-                        ast::BinOp::Ne => "ne",
-                        ast::BinOp::Lt => "lt",
-                        ast::BinOp::Le => "le",
-                        ast::BinOp::Gt => "gt",
-                        ast::BinOp::Ge => "ge",
-                        _ => "eq",
-                    };
+                    let cop_str = crate::hir::store_filter_pred_str(cond.pred, cond.op);
                     encoded.push_str(&format!("__{lop}__{}__{cop_str}", cond.field));
                 }
                 self.emit(
@@ -102,15 +70,7 @@ impl Lowerer {
             }
             hir::Stmt::StoreRestore(store_name, filter, span) => {
                 let filter_val = self.lower_expr(&filter.value);
-                let op_str = match filter.op {
-                    ast::BinOp::Eq => "eq",
-                    ast::BinOp::Ne => "ne",
-                    ast::BinOp::Lt => "lt",
-                    ast::BinOp::Le => "le",
-                    ast::BinOp::Gt => "gt",
-                    ast::BinOp::Ge => "ge",
-                    _ => "eq",
-                };
+                let op_str = crate::hir::store_filter_pred_str(filter.pred, filter.op);
                 let mut all_vals = vec![filter_val];
                 for (_logic_op, cond) in &filter.extra {
                     all_vals.push(self.lower_expr(&cond.value));
@@ -122,15 +82,7 @@ impl Lowerer {
                         ast::LogicalOp::And => "and",
                         ast::LogicalOp::Or => "or",
                     };
-                    let cop_str = match cond.op {
-                        ast::BinOp::Eq => "eq",
-                        ast::BinOp::Ne => "ne",
-                        ast::BinOp::Lt => "lt",
-                        ast::BinOp::Le => "le",
-                        ast::BinOp::Gt => "gt",
-                        ast::BinOp::Ge => "ge",
-                        _ => "eq",
-                    };
+                    let cop_str = crate::hir::store_filter_pred_str(cond.pred, cond.op);
                     encoded.push_str(&format!("__{lop}__{}__{cop_str}", cond.field));
                 }
                 self.emit(
@@ -150,15 +102,7 @@ impl Lowerer {
 
             hir::Stmt::StoreSet(store_name, fields, filter, span) => {
                 let filter_val = self.lower_expr(&filter.value);
-                let op_str = match filter.op {
-                    ast::BinOp::Eq => "eq",
-                    ast::BinOp::Ne => "ne",
-                    ast::BinOp::Lt => "lt",
-                    ast::BinOp::Le => "le",
-                    ast::BinOp::Gt => "gt",
-                    ast::BinOp::Ge => "ge",
-                    _ => "eq",
-                };
+                let op_str = crate::hir::store_filter_pred_str(filter.pred, filter.op);
                 let mut extra_vals = Vec::new();
                 for (_logic_op, cond) in &filter.extra {
                     extra_vals.push(self.lower_expr(&cond.value));
@@ -175,15 +119,7 @@ impl Lowerer {
                         ast::LogicalOp::And => "and",
                         ast::LogicalOp::Or => "or",
                     };
-                    let cop_str = match cond.op {
-                        ast::BinOp::Eq => "eq",
-                        ast::BinOp::Ne => "ne",
-                        ast::BinOp::Lt => "lt",
-                        ast::BinOp::Le => "le",
-                        ast::BinOp::Gt => "gt",
-                        ast::BinOp::Ge => "ge",
-                        _ => "eq",
-                    };
+                    let cop_str = crate::hir::store_filter_pred_str(cond.pred, cond.op);
                     encoded.push_str(&format!("__{lop}__{}__{cop_str}", cond.field));
                 }
                 encoded.push_str("__fields");

@@ -756,6 +756,14 @@ pub struct BuilderField {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterPred {
+    Cmp,
+    Contains,
+    StartsWith,
+    EndsWith,
+}
+
 #[derive(Debug, Clone)]
 pub struct StoreFilter {
     pub field: Symbol,
@@ -763,6 +771,7 @@ pub struct StoreFilter {
     pub value: Expr,
     pub span: Span,
     pub extra: Vec<(LogicalOp, StoreFilterCond)>,
+    pub pred: FilterPred,
 }
 
 #[derive(Debug, Clone)]
@@ -770,4 +779,5 @@ pub struct StoreFilterCond {
     pub field: Symbol,
     pub op: BinOp,
     pub value: Expr,
+    pub pred: FilterPred,
 }

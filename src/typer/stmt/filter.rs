@@ -19,6 +19,16 @@ impl Typer {
         if field_ty.is_none() {
             return Err(format!("store '{store}' has no field '{}'", filter.field));
         }
+        if matches!(
+            filter.pred,
+            ast::FilterPred::Contains | ast::FilterPred::StartsWith | ast::FilterPred::EndsWith
+        ) && !matches!(field_ty, Some(Type::String))
+        {
+            return Err(format!(
+                "store '{store}' field '{}' must be a String for text predicates",
+                filter.field
+            ));
+        }
         let hvalue = self.lower_expr_expected(&filter.value, field_ty)?;
         let mut hextra = Vec::new();
         for (lop, cond) in &filter.extra {
@@ -29,6 +39,16 @@ impl Typer {
             if cond_field_ty.is_none() {
                 return Err(format!("store '{store}' has no field '{}'", cond.field));
             }
+            if matches!(
+                cond.pred,
+                ast::FilterPred::Contains | ast::FilterPred::StartsWith | ast::FilterPred::EndsWith
+            ) && !matches!(cond_field_ty, Some(Type::String))
+            {
+                return Err(format!(
+                    "store '{store}' field '{}' must be a String for text predicates",
+                    cond.field
+                ));
+            }
             let hv = self.lower_expr_expected(&cond.value, cond_field_ty)?;
             hextra.push((
                 *lop,
@@ -36,6 +56,7 @@ impl Typer {
                     field: cond.field,
                     op: cond.op,
                     value: hv,
+                    pred: cond.pred,
                 },
             ));
         }
@@ -45,6 +66,7 @@ impl Typer {
             value: hvalue,
             span: filter.span,
             extra: hextra,
+            pred: filter.pred,
         })
     }
 
@@ -67,6 +89,7 @@ impl Typer {
                         field: f,
                         op: o,
                         value: v,
+                        pred: ast::FilterPred::Cmp,
                     },
                 )
             })
@@ -77,6 +100,7 @@ impl Typer {
             value,
             span,
             extra,
+            pred: ast::FilterPred::Cmp,
         })
     }
 
@@ -134,6 +158,7 @@ impl Typer {
                     field: additional.field,
                     op: additional.op,
                     value: additional.value,
+                    pred: additional.pred,
                 },
             ));
             filter

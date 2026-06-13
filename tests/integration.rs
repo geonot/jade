@@ -1827,6 +1827,62 @@ fn store_set_no_match() {
 }
 
 #[test]
+fn store_filter_in_list() {
+    expect_store(
+        "store nums\n    val as i64\n\n*main\n    insert nums 10\n    insert nums 20\n    insert nums 30\n    insert nums 40\n    c is count nums where val in [10, 30]\n    log c\n",
+        "2",
+    );
+}
+
+#[test]
+fn store_filter_between() {
+    expect_store(
+        "store nums\n    val as i64\n\n*main\n    insert nums 5\n    insert nums 15\n    insert nums 25\n    insert nums 35\n    c is count nums where val between 10 and 30\n    log c\n",
+        "2",
+    );
+}
+
+#[test]
+fn store_filter_contains() {
+    expect_store(
+        "store items\n    name as String\n\n*main\n    insert items 'apple'\n    insert items 'mango'\n    insert items 'banana'\n    c is count items where name contains 'an'\n    log c\n",
+        "2",
+    );
+}
+
+#[test]
+fn store_filter_starts_with() {
+    expect_store(
+        "store items\n    name as String\n\n*main\n    insert items 'apple'\n    insert items 'apricot'\n    insert items 'banana'\n    c is count items where name starts_with 'ap'\n    log c\n",
+        "2",
+    );
+}
+
+#[test]
+fn store_filter_ends_with() {
+    expect_store(
+        "store items\n    name as String\n\n*main\n    insert items 'apple'\n    insert items 'maple'\n    insert items 'banana'\n    c is count items where name ends_with 'ple'\n    log c\n",
+        "2",
+    );
+}
+
+#[test]
+fn store_filter_grouping() {
+    expect_store(
+        "store nums\n    val as i64\n\n*main\n    insert nums 10\n    insert nums 20\n    insert nums 30\n    c is count nums where (val equals 10 or val equals 30)\n    log c\n",
+        "2",
+    );
+}
+
+#[test]
+fn store_filter_in_query() {
+    expect_store(
+        "store nums\n    val as i64\n    tag as String\n\n*main\n    insert nums 10, 'a'\n    insert nums 20, 'b'\n    insert nums 30, 'c'\n    r is nums where val in [20]\n    log r.tag\n",
+        "b",
+    );
+}
+
+#[test]
 fn store_transaction() {
     expect_store(
         "store users\n    name as String\n    age as i64\n\n*main\n    transaction\n        insert users 'Alice', 30\n        insert users 'Bob', 25\n        insert users 'Charlie', 35\n    c is count users\n    log c\n    r is users where name equals 'Bob'\n    log r.name\n    log r.age\n",
