@@ -1,0 +1,24 @@
+TASK: Work through Jinn language remediation items. Source docs in repo root: JINN_LANGUAGE_REVIEW_2026_06.md (panel review §8 actionable items), JINN_AUDIT_2026_06_02.md (P0 bugs), store-improvement.md (12 store items). Consolidated inventory written to /home/rome/Glitch/software/jade/remediation.md (the single source of truth tracker). Task tree under .ryu/tasks/ mirrors it.
+
+REPO: /home/rome/Glitch/software/jade. Jinn compiler (jinnc, Rust). Build: `cargo build --release` (ZERO warnings invariant). Test: `cargo test --release` (currently 1759 pass / 0 fail). Compiled binary at target/release/jinnc. Apps build via `cd apps/X && jinnc build -o out`. Conventions: no code comments in source edits; built-in method surfaces single-source-of-truth shared typer+codegen.
+
+COMPLETED THIS SESSION (committed up to v48):
+- task 2-30 (5 crash-safety soundness bugs, all un-ignored in tests/crash_safety.rs, 37/37 green):
+  1. take-in-loop double-free -> compile error. Added Typer::check_loop_body_moves + in_scope_def_ids in src/typer/mod.rs; wired into For/SimFor/Loop in src/typer/stmt/dispatch.rs (capture outer_ids before push_scope, check after lowering body).
+  2. bound Result match ICE (unresolved Param 'E'). Root cause: parser src/parser/expr/primary.rs ident_to_type maps single-uppercase names to Type::Param. Fix: src/typer/mono.rs monomorphize_named_annotation now resolves Type::Param(name) -> Type::Enum if name in self.enums (and not generic_enums), or Type::Struct if in self.structs. Also src/codegen/decl.rs declare_tagged_union treats Param/TypeVar field as 8 bytes.
+  3/4. string slice/char_at OOB traps: src/codegen/string_ops.rs added emit_str_bounds_check + range checks.
+  5. oversized shift trap: src/codegen/arith.rs checked_shift_count; called for Shl/Shr/Ushr in src/codegen/mir_codegen/helpers/values.rs.
+  Also fixed stale snippet snippets/201-300/s247.jn (err keyword collision -> renamed to e_term).
+- task 2-31-2 (StoreError @unique/@required via error model): was in-progress uncommitted store work, verified complete: builtin err StoreError, insert/set with ?/!! quaternary handling, bare insert/set trap with precise diagnostics. tests/store_errors.rs 12/12 green. (Note: tree had substantial pre-existing uncommitted store work that I committed together — typer/expr/store.rs +267, codegen store insert/mutation, parser store.rs etc.)
+- task 2-13 (numeric coercion property tests): tests/coercion_property.rs, 6 properties compile at -O0 AND -O3, assert == Rust reference. NOTE: Jinn does NOT auto-coerce mixed int/float in bare binops (5 + 0.5 is a type error by design); coercion happens at call/binding boundaries only.
+- task 2-14 (adversarial memory-model fuzzer): tests/ownership_fuzz.rs, proptest generator of ownership-stressing programs (take/copy/field moves/container reads/rebind), asserts clean-reject OR no abort/segfault/ICE; ASan sweep (ci/sanitize.sh) catches UAF/double-free.
+
+REMAINING (28 tasks, see remediation.md & task_list). Next tiers in execution order:
+- Tier B concurrency: 2-6 (structured concurrency scopes 'together', design in docs/structured-concurrency.md), 2-7 (stop-and-drain), 2-9 (actor join), 2-10 (cooperative preemption/yield injection).
+- Tier C safe/unsafe: 2-11 (spec, blocks 2-12 enforce + 2-22 docs).
+- Tier D stores: 2-16 (query language: multi-row where, order/limit/projection/aggregates), 2-17 (crash-consistency tests).
+- Tier E stores 2-31: remaining 2-31-3 (schema fingerprint+migration), 2-31-4 (typed result sets), 2-31-5 (relation traversal), 2-31-6 (@kv schema-driven), 2-31-7 (group-by), 2-31-8 (richer where), 2-31-9 (persistent indexes), 2-31-10 (compact), 2-31-11 (durability decorators), 2-31-12 (decorator table), 2-31-13 (docs/stores.md, blocked).
+- Tier F tooling: 2-15 (generic instantiation diagnostics), 2-18 (jinn fmt), 2-19 (package manager), 2-20 (real version numbers), 2-21 (sigil reference docs).
+- Tier G P2 (task 3, blocked by task 2).
+
+WORKFLOW: pick next item, implement with pinned conformance test(s), zero warnings, full cargo test green, update remediation.md + task_complete + save. Use save (not finish) to commit since these are project-content changes not ryu-tool changes. VERSION currently ~48.

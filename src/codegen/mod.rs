@@ -150,6 +150,8 @@ pub struct Compiler<'ctx> {
 
     pub(crate) migration_fns: Vec<FunctionValue<'ctx>>,
 
+    pub(crate) store_schema_versions: IndexMap<Symbol, i64>,
+
     pub(crate) global_init_fn: Option<FunctionValue<'ctx>>,
 
     pub(crate) vec_growth_floor_by_value: std::collections::HashMap<mir::ValueId, u64>,

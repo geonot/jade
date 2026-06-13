@@ -184,7 +184,7 @@ impl<'ctx> Compiler<'ctx> {
             fseek_fn,
             &[
                 fp.into(),
-                i64t.const_int(24, false).into(),
+                i64t.const_int(crate::codegen::stores::HEADER_SIZE, false).into(),
                 i32t.const_int(0, false).into(),
             ],
             ""
@@ -219,7 +219,7 @@ impl<'ctx> Compiler<'ctx> {
             fseek_fn,
             &[
                 fp.into(),
-                i64t.const_int(24, false).into(),
+                i64t.const_int(crate::codegen::stores::HEADER_SIZE, false).into(),
                 i32t.const_int(0, false).into(),
             ],
             ""

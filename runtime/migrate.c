@@ -24,11 +24,89 @@
 #include <stdint.h>
 #include "jinn_rt.h"
 
-#define STORE_HEADER 24
-#define STORE_MAGIC  "JINNSTR\0"
+#define STORE_HEADER 40
+#define STORE_MAGIC  "JADESTR\0"
+#define STORE_FP_OFFSET  24
+#define STORE_VER_OFFSET 32
 #define MIG_HEADER   8
 #define MIG_MAGIC    "JINNMIG\0"
 #define MIG_ENTRY    17   /* 8 + 8 + 1 */
+
+/*
+ * Schema fingerprint guard.
+ *
+ * On opening an existing store, the compiler emits a call comparing the
+ * compile-time schema fingerprint against the value persisted in the
+ * header (bytes 24..32).  A mismatch means the on-disk layout no longer
+ * matches the program's declared schema.
+ *
+ * Behaviour:
+ *   - stored == 0           legacy/unstamped file: stamp it and proceed.
+ *   - stored == expected    schema matches: proceed.
+ *   - otherwise             abort with a precise diagnostic instructing
+ *                           the programmer to add a migration.
+ */
+static int jinn_migration_active = 0;
+
+void jinn_migration_enter(void) { jinn_migration_active++; }
+void jinn_migration_leave(void) {
+    if (jinn_migration_active > 0) jinn_migration_active--;
+}
+
+void jinn_store_check_schema(FILE *fp, int64_t expected_fp,
+                             int64_t expected_ver, const char *store_name) {
+    if (!fp) return;
+    if (jinn_migration_active) return;
+    long saved = ftell(fp);
+    int64_t stored_fp = 0, stored_ver = 0;
+    if (fseek(fp, STORE_FP_OFFSET, SEEK_SET) == 0) {
+        if (fread(&stored_fp, 8, 1, fp) != 1) stored_fp = 0;
+        if (fread(&stored_ver, 8, 1, fp) != 1) stored_ver = 0;
+    }
+    if (stored_fp == expected_fp) {
+        if (saved >= 0) fseek(fp, saved, SEEK_SET);
+        return;
+    }
+    if (stored_fp == 0) {
+        /* unstamped legacy file: stamp and proceed */
+        fseek(fp, STORE_FP_OFFSET, SEEK_SET);
+        fwrite(&expected_fp, 8, 1, fp);
+        fwrite(&expected_ver, 8, 1, fp);
+        fflush(fp);
+        if (saved >= 0) fseek(fp, saved, SEEK_SET);
+        return;
+    }
+    fprintf(stderr,
+            "jinn: store '%s' schema mismatch: on-disk fingerprint %lld "
+            "(version %lld) does not match the program's schema "
+            "(fingerprint %lld, version %lld).\n"
+            "      The store layout changed without a bridging migration. "
+            "Add a `migration` that advances the schema, or delete %s.store "
+            "to recreate it.\n",
+            store_name ? store_name : "?",
+            (long long)stored_fp, (long long)stored_ver,
+            (long long)expected_fp, (long long)expected_ver,
+            store_name ? store_name : "?");
+    fflush(stderr);
+    abort();
+}
+
+/*
+ * Stamp the schema fingerprint/version into a store header.  Called by
+ * generated migration code after rewriting records to the new layout so
+ * that the next open sees a matching fingerprint.
+ */
+void jinn_store_stamp_schema(FILE **store_fp_ptr, int64_t fingerprint,
+                             int64_t version) {
+    if (!store_fp_ptr || !*store_fp_ptr) return;
+    FILE *fp = *store_fp_ptr;
+    long saved = ftell(fp);
+    fseek(fp, STORE_FP_OFFSET, SEEK_SET);
+    fwrite(&fingerprint, 8, 1, fp);
+    fwrite(&version, 8, 1, fp);
+    fflush(fp);
+    if (saved >= 0) fseek(fp, saved, SEEK_SET);
+}
 
 /* ─── Migration log ─────────────────────────────────────────────── */
 
@@ -161,10 +239,13 @@ int64_t jinn_mig_add_field(FILE **store_fp_ptr, const char *store_path,
     fp = fopen(store_path, "w+b");
     if (!fp) { free(old_data); free(new_data); return -1; }
 
-    /* write header */
+    /* write header (magic, count, rec_size, fingerprint, version) */
     fwrite(STORE_MAGIC, 1, 8, fp);
     fwrite(&count, 8, 1, fp);
     fwrite(&new_rec_size, 8, 1, fp);
+    int64_t zero = 0;
+    fwrite(&zero, 8, 1, fp);
+    fwrite(&zero, 8, 1, fp);
     /* write records */
     fwrite(new_data, (size_t)new_rec_size, (size_t)count, fp);
     fflush(fp);
@@ -235,6 +316,9 @@ int64_t jinn_mig_drop_field(FILE **store_fp_ptr, const char *store_path,
     fwrite(STORE_MAGIC, 1, 8, fp);
     fwrite(&count, 8, 1, fp);
     fwrite(&new_rec_size, 8, 1, fp);
+    int64_t zero2 = 0;
+    fwrite(&zero2, 8, 1, fp);
+    fwrite(&zero2, 8, 1, fp);
     fwrite(new_data, (size_t)new_rec_size, (size_t)count, fp);
     fflush(fp);
 

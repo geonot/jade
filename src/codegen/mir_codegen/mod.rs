@@ -254,6 +254,15 @@ impl<'ctx> Compiler<'ctx> {
                 self.declare_store_runtime();
             }
             for mig in &hir_prog.migrations {
+                for op in &mig.up {
+                    let e = self
+                        .store_schema_versions
+                        .entry(op.store_name)
+                        .or_insert(0);
+                    if mig.version > *e {
+                        *e = mig.version;
+                    }
+                }
                 let mfn = self.gen_migration(mig)?;
                 self.migration_fns.push(mfn);
             }

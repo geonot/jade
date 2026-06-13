@@ -166,6 +166,13 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result)
     }
 
+    pub(crate) fn store_schema_version(&self, sd: &hir::StoreDef) -> i64 {
+        self.store_schema_versions
+            .get(&sd.name)
+            .copied()
+            .unwrap_or(0)
+    }
+
     pub(crate) fn gen_store_ensure_open(
         &mut self,
         sd: &hir::StoreDef,
@@ -241,6 +248,21 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(store_existing_bb);
         b!(self.bld.build_store(global.as_pointer_value(), fp_val));
+        let fingerprint = super::store_schema_fingerprint(sd);
+        let schema_version = self.store_schema_version(sd);
+        let name_str =
+            b!(self.bld.build_global_string_ptr(&format!("{name}\0"), "store.name"));
+        let check_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_check_schema");
+        b!(self.bld.build_call(
+            check_fn,
+            &[
+                fp_val.into(),
+                i64t.const_int(fingerprint as u64, false).into(),
+                i64t.const_int(schema_version as u64, false).into(),
+                name_str.as_pointer_value().into(),
+            ],
+            ""
+        ));
         b!(self.bld.build_unconditional_branch(done_bb));
 
         self.bld.position_at_end(init_bb);
@@ -291,6 +313,37 @@ impl<'ctx> Compiler<'ctx> {
             fwrite_fn,
             &[
                 rec_size_alloca.into(),
+                i64t.const_int(8, false).into(),
+                i64t.const_int(1, false).into(),
+                new_fp.into(),
+            ],
+            ""
+        ));
+
+        let fingerprint = super::store_schema_fingerprint(sd);
+        let schema_version = self.store_schema_version(sd);
+        let fp_alloca = self.entry_alloca(i64t.into(), "hdr.fp");
+        b!(self
+            .bld
+            .build_store(fp_alloca, i64t.const_int(fingerprint as u64, false)));
+        b!(self.bld.build_call(
+            fwrite_fn,
+            &[
+                fp_alloca.into(),
+                i64t.const_int(8, false).into(),
+                i64t.const_int(1, false).into(),
+                new_fp.into(),
+            ],
+            ""
+        ));
+        let ver_alloca = self.entry_alloca(i64t.into(), "hdr.ver");
+        b!(self
+            .bld
+            .build_store(ver_alloca, i64t.const_int(schema_version as u64, false)));
+        b!(self.bld.build_call(
+            fwrite_fn,
+            &[
+                ver_alloca.into(),
                 i64t.const_int(8, false).into(),
                 i64t.const_int(1, false).into(),
                 new_fp.into(),

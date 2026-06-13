@@ -279,6 +279,48 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
+        let (fingerprint, schema_version) = self
+            .store_defs
+            .get(store_name)
+            .map(|sd| {
+                (
+                    crate::codegen::stores::store_schema_fingerprint(sd),
+                    self.store_schema_versions
+                        .get(&sd.name)
+                        .copied()
+                        .unwrap_or(0),
+                )
+            })
+            .unwrap_or((0, 0));
+        let fp_hdr_ptr = self.entry_alloca(i64t.into(), "del.fp");
+        b!(self
+            .bld
+            .build_store(fp_hdr_ptr, i64t.const_int(fingerprint as u64, false)));
+        b!(self.bld.build_call(
+            fwrite_fn,
+            &[
+                fp_hdr_ptr.into(),
+                i64t.const_int(8, false).into(),
+                i64t.const_int(1, false).into(),
+                new_fp.into()
+            ],
+            ""
+        ));
+        let ver_hdr_ptr = self.entry_alloca(i64t.into(), "del.ver");
+        b!(self
+            .bld
+            .build_store(ver_hdr_ptr, i64t.const_int(schema_version as u64, false)));
+        b!(self.bld.build_call(
+            fwrite_fn,
+            &[
+                ver_hdr_ptr.into(),
+                i64t.const_int(8, false).into(),
+                i64t.const_int(1, false).into(),
+                new_fp.into()
+            ],
+            ""
+        ));
+
         let fv_fn = self.cur_fn.expect("ICE: cur_fn not set");
         let idx_ptr = self.entry_alloca(i64t.into(), "del.idx");
         b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));

@@ -1,11 +1,23 @@
 title: Schema fingerprint in store header + migration enforcement
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []
 created_at: '2026-06-10T05:18:42'
-updated_at: '2026-06-10T05:18:42'
-result: ''
+updated_at: '2026-06-13T08:06:19'
+result: 'Schema fingerprint + migration enforcement implemented. Store header extended
+  24→40 bytes adding 8B FNV-1a schema fingerprint (over field names/types/order/decorators
+  + store decorators) and 8B schema version; count@8 and rec_size@16 offsets preserved.
+  On reopening an existing store, codegen emits jinn_store_check_schema(fp, expected_fp,
+  version, name): match → proceed; legacy 0-fingerprint → stamp+proceed; mismatch
+  without bridging migration → abort with precise diagnostic naming the store. Migrations
+  stamp the target fingerprint via jinn_store_stamp_schema after rewriting, and run
+  wrapped in jinn_migration_enter/leave so the open-time check is suppressed while
+  migrating. All header-rewriting paths (creation, hard-delete, migrate add/drop)
+  updated to write the full 40B header. Fixed a latent cross-binary migration segfault
+  (gen_migration now opens the store via the real __store_<name>_ensure_open function
+  instead of a non-existent name). Conformance tests/store_schema.rs (3 tests). Full
+  suite 1762 pass / 0 fail, zero warnings.'
 description: 'Item 7. Hash field names/types/order/decorators into store file header
   at creation. On open compare; on mismatch find migration chain bridging versions
   and apply, else fail with precise diagnostic. Tests: change schema, rerun, expect

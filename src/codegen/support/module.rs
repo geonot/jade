@@ -50,6 +50,7 @@ impl<'ctx> Compiler<'ctx> {
             self_alloc_types: std::collections::HashMap::new(),
             block_exit_map: std::collections::HashMap::new(),
             migration_fns: Vec::new(),
+            store_schema_versions: IndexMap::new(),
             global_init_fn: None,
             vec_growth_floor_by_value: std::collections::HashMap::new(),
             current_perceus_meta: mir::PerceusMeta::default(),

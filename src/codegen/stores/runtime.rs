@@ -240,6 +240,33 @@ impl<'ctx> Compiler<'ctx> {
             self.module
                 .add_function("jinn_mig_drop_field", ft, Some(Linkage::External));
         }
+        if self.module.get_function("jinn_store_check_schema").is_none() {
+            let void_ty = self.ctx.void_type();
+            let ft = void_ty.fn_type(
+                &[ptr.into(), i64t.into(), i64t.into(), ptr.into()],
+                false,
+            );
+            self.module
+                .add_function("jinn_store_check_schema", ft, Some(Linkage::External));
+        }
+        if self.module.get_function("jinn_store_stamp_schema").is_none() {
+            let void_ty = self.ctx.void_type();
+            let ft = void_ty.fn_type(&[ptr.into(), i64t.into(), i64t.into()], false);
+            self.module
+                .add_function("jinn_store_stamp_schema", ft, Some(Linkage::External));
+        }
+        if self.module.get_function("jinn_migration_enter").is_none() {
+            let void_ty = self.ctx.void_type();
+            let ft = void_ty.fn_type(&[], false);
+            self.module
+                .add_function("jinn_migration_enter", ft, Some(Linkage::External));
+        }
+        if self.module.get_function("jinn_migration_leave").is_none() {
+            let void_ty = self.ctx.void_type();
+            let ft = void_ty.fn_type(&[], false);
+            self.module
+                .add_function("jinn_migration_leave", ft, Some(Linkage::External));
+        }
 
         if self.module.get_function("jinn_kv_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into()], false);

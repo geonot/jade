@@ -260,6 +260,8 @@ impl<'ctx> Compiler<'ctx> {
             .build_conditional_branch(is_applied, done_bb, apply_bb));
 
         self.bld.position_at_end(apply_bb);
+        let mig_enter = crate::codegen::fn_or_die(&self.module, "jinn_migration_enter");
+        b!(self.bld.build_call(mig_enter, &[], ""));
 
         let record_bb = self.ctx.append_basic_block(fv, "record");
 
@@ -295,8 +297,8 @@ impl<'ctx> Compiler<'ctx> {
             let fclose_fn = crate::codegen::fn_or_die(&self.module, "fclose");
             b!(self.bld.build_call(fclose_fn, &[test_fp.into()], ""));
 
-            let ensure_fn_name = format!("__store_ensure_{store_name}");
-            if let Some(ensure_fn) = self.module.get_function(&ensure_fn_name) {
+            if let Some(sd) = self.store_defs.get(store_name).cloned() {
+                let ensure_fn = self.gen_store_ensure_open(&sd)?;
                 b!(self.bld.build_call(ensure_fn, &[], ""));
             }
 
@@ -396,6 +398,24 @@ impl<'ctx> Compiler<'ctx> {
                 }
             }
 
+            if let Some(sd) = self.store_defs.get(store_name) {
+                let fingerprint = super::store_schema_fingerprint(sd);
+                let version = self.store_schema_versions.get(store_name).copied().unwrap_or(0);
+                if let Some(fp_g) = self.module.get_global(&fp_global_name) {
+                    let stamp_fn =
+                        crate::codegen::fn_or_die(&self.module, "jinn_store_stamp_schema");
+                    b!(self.bld.build_call(
+                        stamp_fn,
+                        &[
+                            fp_g.as_pointer_value().into(),
+                            i64t.const_int(fingerprint as u64, false).into(),
+                            i64t.const_int(version as u64, false).into(),
+                        ],
+                        ""
+                    ));
+                }
+            }
+
             b!(self.bld.build_unconditional_branch(next_bb));
             self.bld.position_at_end(next_bb);
         }
@@ -403,6 +423,8 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(record_bb));
 
         self.bld.position_at_end(record_bb);
+        let mig_leave = crate::codegen::fn_or_die(&self.module, "jinn_migration_leave");
+        b!(self.bld.build_call(mig_leave, &[], ""));
         let log_record = crate::codegen::fn_or_die(&self.module, "jinn_mig_log_record");
         b!(self.bld.build_call(
             log_record,
