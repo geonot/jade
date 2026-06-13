@@ -1,11 +1,17 @@
 title: 'StoreError: surface @unique/@required violations via error model'
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []
 created_at: '2026-06-10T05:18:42'
-updated_at: '2026-06-10T05:18:42'
-result: ''
+updated_at: '2026-06-13T07:44:40'
+result: StoreError @unique/@required violations now flow through the error model.
+  Builtin `err StoreError` (Duplicate/Missing/Constraint/Io) registered in prelude.
+  insert/set with ?/!!  arms lower to quaternary over a Result of i64, StoreError;
+  bare insert/set trap with precise diagnostics ("duplicate value for @unique field
+  'f'"). Codegen __store_insert_status_ path emits status alloca and routes dup->-1/Constraint,
+  empty @required->-2. 12-test tests/store_errors.rs conformance suite + updated integration
+  test, all green.
 description: Item 3. Built-in err StoreError (Duplicate, Missing, Constraint, Io);
   insert/set become fallible expressions participating in quaternary/else handling.
   No silent constraint failures. Tests pin behavior.
