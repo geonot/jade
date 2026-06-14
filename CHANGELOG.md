@@ -1,4 +1,5 @@
 # Changelog
+- **[79]** (2026-06-14 02:42) 2-6-5-1: runtime scope error slot (first-error-wins CAS + take); decompose 2-6-5 into subtasks
 - **[77]** (2026-06-14 02:24) 2-6-4: cooperative cancellation — stop <scope>, channel + back-edge cancellation points, defer-on-cancel cleanup, runtime wake, conformance tests + docs
 - **[75]** (2026-06-13 22:42) task 2-6-3: together happy-path lowering (scheduler tasks, captures, scope-owned actor drain, join)
 - **[73]** (2026-06-13 22:00) task 2-6-1/2-6-2: together scope surface + runtime jinn_scope_t layer

@@ -993,11 +993,18 @@ impl Typer {
                 if let Some(n) = name {
                     self.scope_names.push(*n);
                 }
+                let before: std::collections::BTreeSet<Symbol> =
+                    self.current_fn_error_types.clone();
                 let hbody = self.lower_block(body, ret_ty);
                 if name.is_some() {
                     self.scope_names.pop();
                 }
-                Ok(hir::Stmt::Together(*name, hbody?, *span))
+                let errs: Vec<Symbol> = self
+                    .current_fn_error_types
+                    .difference(&before)
+                    .cloned()
+                    .collect();
+                Ok(hir::Stmt::Together(*name, hbody?, errs, *span))
             }
 
             ast::Stmt::ChannelClose(ch, span) => {

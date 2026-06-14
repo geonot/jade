@@ -178,6 +178,15 @@ void jinn_scope_record_error(jinn_scope_t *s, int64_t errval) {
     jinn_scope_cancel(s);
 }
 
+/* Record an error on the scope owning the *currently running* coroutine.
+ * Called from a scope task's top frame when an error propagates out of it. */
+void jinn_scope_record_current_error(int64_t errval) {
+    jinn_worker_t *w = tl_worker;
+    if (w && w->current && w->current->scope) {
+        jinn_scope_record_error((jinn_scope_t *)w->current->scope, errval);
+    }
+}
+
 /* If an error was recorded on this scope, write it to *out and return 1. */
 int jinn_scope_take_error(jinn_scope_t *s, int64_t *out) {
     if (!s) return 0;
@@ -228,9 +237,7 @@ static void scope_wake_cancelled(jinn_scope_t *s) {
     }
 }
 
-void jinn_scope_join(jinn_scope_t *s) {
-    if (!s) return;
-
+static int jinn_scope_join_no_free(jinn_scope_t *s) {
     for (;;) {
         if (atomic_load_explicit(&s->live_children, memory_order_acquire) <= 0) {
             break;
@@ -257,7 +264,25 @@ void jinn_scope_join(jinn_scope_t *s) {
         /* Resumed — re-check live_children. */
     }
 
+    return atomic_load_explicit(&s->has_error, memory_order_acquire) ? 1 : 0;
+}
+
+void jinn_scope_join(jinn_scope_t *s) {
+    if (!s) return;
+    jinn_scope_join_no_free(s);
     /* Pop scope, restore the enclosing one, and free. */
     tl_scope = s->prev;
     free(s);
+}
+
+/* Join, then take any recorded error before freeing the scope. Returns the
+ * recorded error word, or INT64_MIN if no child propagated an error. */
+int64_t jinn_scope_join_take_error(jinn_scope_t *s) {
+    if (!s) return INT64_MIN;
+    int had = jinn_scope_join_no_free(s);
+    int64_t word = had ? atomic_load_explicit(&s->error_val, memory_order_acquire)
+                       : INT64_MIN;
+    tl_scope = s->prev;
+    free(s);
+    return word;
 }

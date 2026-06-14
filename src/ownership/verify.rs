@@ -156,7 +156,7 @@ impl OwnershipVerifier {
             Stmt::Transaction(body, _) => {
                 self.verify_block(body);
             }
-            Stmt::Together(_, body, _) => {
+            Stmt::Together(_, body, _, _) => {
                 self.verify_block(body);
             }
             Stmt::ChannelClose(e, _) => {

@@ -288,6 +288,18 @@
       "ts_created": "2026-06-14T02:42:37+00:00",
       "ts_accessed": "2026-06-14T02:42:37+00:00",
       "access_count": 0
+    },
+    "task_2-6-5-2_impl": {
+      "key": "task_2-6-5-2_impl",
+      "value": "Task 2-6-5-2 DONE: scope task records error + together surfaces it.\nFLOW: (1) scope-task body (anon dispatch) typed in src/typer/expr/concur.rs lower_expr_dispatch_block: while in_scope (name==\"__anon\"), TAKE current_fn_ret_ty (set None) so propagation produces RAW err value (err variant, not enclosing Result), then restore. After lowering, collect_errreturn_enums scans hbody for ErrReturn value-enum names and inserts into current_fn_error_types (so enclosing fn becomes fallible). (2) HIR Together node extended: Together(Option<Symbol>, Block, Vec<Symbol> errs, Span) \u2014 errs = delta of current_fn_error_types introduced by body (snapshotted before/after in typer/stmt/dispatch.rs). (3) MIR src/mir/lower/concurrency.rs lower_together(name,body,errs,span): if errs non-empty, after __scope_stop_actors emit __scope_join_take_error(scope)->i64 (returns err word or i64::MIN sentinel); branch on !=MIN; prop block calls __scope_build_err_{ErrEnum}(word)->Result, runs deferred, Return(Some(result)). (4) codegen mir_codegen/mod.rs Return terminator: if cur_fn_is_scheduler_task && Some(val): call jinn_scope_record_current_error(coerce_to_i64(val)) then ret void. (5) magic.rs: __scope_join_take_error -> jinn_scope_join_take_error; __scope_build_err_{enum} = emit_scope_build_err builds Result::Err(err_enum{tag=(i32)word}) from result_ty (Type::Enum) layout {i32 tag, payload}.\nRUNTIME runtime/scope.c: jinn_scope_record_current_error(i64) records on tl_worker->current->scope. jinn_scope_join split: static jinn_scope_join_no_free(s)->int(had_error), jinn_scope_join(s) wraps+frees, jinn_scope_join_take_error(s)->i64 joins+takes word+frees (INT64_MIN=none). Declared in src/codegen/support/runtime.rs + jinn_rt.h.\nTESTS: tests/concurrency_shutdown.rs failing_child_surfaces_error + failing_child_cancels_siblings PASS. Sibling cancellation is cooperative (back-edge/channel yield points).\nDEFERRED to 2-6-5-3: !! handler arm at scope site; multi-err-enum reconstruction (currently uses errs[0]); From-conversion at scope boundary.\ncolumn_max/min/sum integration tests fail PRE-EXISTING (store aggregates, unrelated).",
+      "kind": "decision",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-14T03:31:10+00:00",
+      "ts_accessed": "2026-06-14T03:31:10+00:00",
+      "access_count": 0
     }
   }
 }

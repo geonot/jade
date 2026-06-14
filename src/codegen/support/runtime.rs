@@ -423,7 +423,7 @@ impl<'ctx> Compiler<'ctx> {
                     | Stmt::Stop(_, _)
                     | Stmt::ScopeCancel(_, _)
                     | Stmt::Join(_, _)
-                    | Stmt::Together(_, _, _)
+                    | Stmt::Together(_, _, _, _)
                     | Stmt::SimFor(_, _)
                     | Stmt::SimBlock(_, _)
             )
@@ -447,7 +447,7 @@ impl<'ctx> Compiler<'ctx> {
                     Stmt::Match(m) => {
                         scan_expr(&m.subject) || m.arms.iter().any(|a| scan_block(&a.body))
                     }
-                    Stmt::Together(_, b, _) | Stmt::Transaction(b, _) | Stmt::Defer(b, _) => {
+                    Stmt::Together(_, b, _, _) | Stmt::Transaction(b, _) | Stmt::Defer(b, _) => {
                         scan_block(b)
                     }
                     Stmt::Ret(Some(e), _, _) => scan_expr(e),
@@ -541,7 +541,9 @@ impl<'ctx> Compiler<'ctx> {
         decl!("jinn_scope_cancel", void.fn_type(&[ptr.into()], false));
         decl!("jinn_scope_check_cancelled", i32t.fn_type(&[], false));
         decl!("jinn_scope_record_error", void.fn_type(&[ptr.into(), i64t.into()], false));
+        decl!("jinn_scope_record_current_error", void.fn_type(&[i64t.into()], false));
         decl!("jinn_scope_take_error", i32t.fn_type(&[ptr.into(), ptr.into()], false));
+        decl!("jinn_scope_join_take_error", i64t.fn_type(&[ptr.into()], false));
         decl!("jinn_scope_stop_actors", void.fn_type(&[ptr.into()], false));
         decl!("jinn_scope_join", void.fn_type(&[ptr.into()], false));
         decl!(

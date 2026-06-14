@@ -460,3 +460,69 @@ fn defer_runs_on_cancellation() {
         "cleaned\ndone",
     );
 }
+
+// ── Scope error propagation (task 2-6-5) ────────────────────────────────
+
+/// A child task that propagates an error records it on the scope; the failing
+/// scope re-raises in the enclosing (fallible) function. `work` returns
+/// `Result of i64, Boom`, the dispatched child raises `Bad`, and `main` matches
+/// the surfaced `Err` — the scope-site re-raise carries the child's error out.
+#[test]
+fn failing_child_surfaces_error() {
+    expect(
+        "\
+err Boom
+    Bad
+
+*risky() returns i64 ! Boom
+    err Bad
+
+*work() returns i64 ! Boom
+    together
+        dispatch
+            x is risky() ? $ !! err
+            log(1)
+    0
+
+*main()
+    match work()
+        Ok(v) ? log(v)
+        Err(e) ? log(99)
+",
+        "99",
+    );
+}
+
+/// A failing child cancels its siblings (E1): the failing task records the
+/// error and cancels the scope, so a looping sibling unwinds at its next
+/// suspension point instead of running to completion. The would-be million
+/// iterations never finish; the error surfaces and the program exits cleanly.
+#[test]
+fn failing_child_cancels_siblings() {
+    expect(
+        "\
+err Boom
+    Bad
+
+*risky() returns i64 ! Boom
+    err Bad
+
+*work() returns i64 ! Boom
+    progress is channel of i64(64)
+    together
+        dispatch
+            x is risky() ? $ !! err
+            log(0)
+        dispatch
+            for i in 0 to 1000000
+                send progress, i
+    0
+
+*main()
+    match work()
+        Ok(v) ? log(v)
+        Err(e) ? log(99)
+",
+        "99",
+    );
+}

@@ -724,6 +724,19 @@ impl<'ctx> Compiler<'ctx> {
                     b!(self.bld.build_unreachable());
                     return Ok(());
                 }
+                if self.cur_fn_is_scheduler_task {
+                    if let Some(vid) = val {
+                        let v = self.val(*vid);
+                        let errval = self.coerce_to_i64(v);
+                        let f = crate::codegen::fn_or_die(
+                            &self.module,
+                            "jinn_scope_record_current_error",
+                        );
+                        b!(self.bld.build_call(f, &[errval.into()], ""));
+                    }
+                    b!(self.bld.build_return(None));
+                    return Ok(());
+                }
                 if let Some(vid) = val {
                     let v = self.val(*vid);
                     let expected = self.llvm_ty(ret_ty);

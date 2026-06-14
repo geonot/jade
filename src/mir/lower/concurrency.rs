@@ -195,6 +195,7 @@ impl Lowerer {
         &mut self,
         name: Option<Symbol>,
         body: &[hir::Stmt],
+        errs: &[Symbol],
         span: crate::ast::Span,
     ) -> ValueId {
         let scope = self.emit(
@@ -216,11 +217,54 @@ impl Lowerer {
             Type::Void,
             span,
         );
-        self.emit(
-            InstKind::Call(Symbol::intern("__scope_join"), vec![scope]),
-            Type::Void,
+
+        if errs.is_empty() {
+            return self.emit(
+                InstKind::Call(Symbol::intern("__scope_join"), vec![scope]),
+                Type::Void,
+                span,
+            );
+        }
+
+        let result_ty = self
+            .func
+            .ret_ty
+            .clone();
+        let err_enum = errs[0];
+        let got = self.emit(
+            InstKind::Call(Symbol::intern("__scope_join_take_error"), vec![scope]),
+            Type::I64,
             span,
-        )
+        );
+        let sentinel = self.emit(InstKind::IntConst(i64::MIN), Type::I64, span);
+        let has_err = self.emit(
+            InstKind::Cmp(crate::mir::CmpOp::Ne, got, sentinel, Type::I64),
+            Type::Bool,
+            span,
+        );
+        let prop_bb = self.new_block("scope.err.prop");
+        let cont_bb = self.new_block("scope.err.cont");
+        self.set_terminator(Terminator::Branch(has_err, prop_bb, cont_bb));
+
+        self.seal_block(prop_bb);
+        self.switch_to(prop_bb);
+        let err_result = self.emit(
+            InstKind::Call(
+                Symbol::intern(&format!("__scope_build_err_{err_enum}")),
+                vec![got],
+            ),
+            result_ty,
+            span,
+        );
+        self.lower_deferred_in_reverse();
+        self.set_terminator(Terminator::Return(Some(err_result)));
+        let dead = self.new_block("scope.err.dead");
+        self.switch_to(dead);
+        self.mark_dead_block(dead);
+
+        self.seal_block(cont_bb);
+        self.switch_to(cont_bb);
+        self.emit(InstKind::Void, Type::Void, span)
     }
 
     pub(super) fn lower_coroutine(

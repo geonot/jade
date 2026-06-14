@@ -348,7 +348,7 @@ pub enum Stmt {
     StoreSave(Symbol, Span),
     StoreCompact(Symbol, Span),
     Transaction(Block, Span),
-    Together(Option<Symbol>, Block, Span),
+    Together(Option<Symbol>, Block, Vec<Symbol>, Span),
     ChannelClose(Expr, Span),
     Stop(Expr, Span),
     ScopeCancel(Symbol, Span),
