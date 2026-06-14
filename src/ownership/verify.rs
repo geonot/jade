@@ -162,6 +162,7 @@ impl OwnershipVerifier {
             Stmt::ChannelClose(e, _) => {
                 self.verify_expr(e);
             }
+            Stmt::ScopeCancel(_, _) => {}
             Stmt::Stop(e, _) => {
                 self.verify_expr(e);
             }

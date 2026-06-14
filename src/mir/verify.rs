@@ -400,6 +400,7 @@ mod tests {
             attrs: FnAttrs::default(),
             is_coroutine: false,
             scheduler_task: false,
+            cancel_cleanup: None,
             perceus: PerceusMeta::default(),
         }
     }

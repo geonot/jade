@@ -207,6 +207,7 @@ impl HirValidator {
             hir::Stmt::Together(_, block, _) => self.validate_block(block),
             hir::Stmt::ChannelClose(e, _) => self.validate_expr(e),
             hir::Stmt::Stop(e, _) => self.validate_expr(e),
+            hir::Stmt::ScopeCancel(_, _) => {}
             hir::Stmt::Join(e, _) => self.validate_expr(e),
             hir::Stmt::SimFor(f, _) => {
                 self.validate_expr(&f.iter);
@@ -551,6 +552,7 @@ fn stmt_span(stmt: &hir::Stmt) -> Span {
         hir::Stmt::Together(_, _, s) => *s,
         hir::Stmt::ChannelClose(_, s) => *s,
         hir::Stmt::Stop(_, s) => *s,
+        hir::Stmt::ScopeCancel(_, s) => *s,
         hir::Stmt::Join(_, s) => *s,
         hir::Stmt::SimFor(_, s) => *s,
         hir::Stmt::SimBlock(_, s) => *s,

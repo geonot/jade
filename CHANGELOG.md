@@ -1,4 +1,5 @@
 # Changelog
+- **[75]** (2026-06-13 22:42) task 2-6-3: together happy-path lowering (scheduler tasks, captures, scope-owned actor drain, join)
 - **[73]** (2026-06-13 22:00) task 2-6-1/2-6-2: together scope surface + runtime jinn_scope_t layer
 - **[70]** (2026-06-13 21:44) tasks 2-9/2-7/2-10: join primitive, stop-and-drain semantics, cooperative preemption yield injection
 - **[65]** (2026-06-13 21:03) store: declarative decorator table shared by parser/typer/docs (task 2-31-12)

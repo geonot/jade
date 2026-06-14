@@ -65,6 +65,7 @@ pub(super) struct Lowerer {
     // Non-empty while lowering a `together` body: anonymous `dispatch` blocks
     // and `spawn`s register with the innermost scope as structured children.
     pub(super) scope_stack: Vec<ValueId>,
+    pub(super) scope_named: Vec<(crate::intern::Symbol, ValueId)>,
 }
 
 impl Lowerer {
@@ -90,6 +91,7 @@ impl Lowerer {
             perceus: crate::mir::PerceusMeta::default(),
             is_coroutine: false,
             scheduler_task: false,
+            cancel_cleanup: None,
         };
         Lowerer {
             func,
@@ -121,6 +123,7 @@ impl Lowerer {
             unreachable_blocks: HashSet::new(),
             field_ctx: None,
             scope_stack: Vec::new(),
+            scope_named: Vec::new(),
         }
     }
 

@@ -351,6 +351,7 @@ pub enum Stmt {
     Together(Option<Symbol>, Block, Span),
     ChannelClose(Expr, Span),
     Stop(Expr, Span),
+    ScopeCancel(Symbol, Span),
     Join(Expr, Span),
     SimFor(For, Span),
     SimBlock(Block, Span),

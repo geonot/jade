@@ -133,8 +133,45 @@ void jinn_chan_close(jinn_chan_t *ch) {
     /* Wake non-coroutine thread waiters */
 }
 
+/* Remove `target` from either wait queue of `ch` and reschedule it. Used by
+ * scope cancellation to unpark a child blocked on a channel so it reaches its
+ * next cancellation check and unwinds. Safe to call with a coro that is not
+ * actually queued (no-op in that case). */
+static int waitq_remove(jinn_coro_t **head, jinn_coro_t **tail, jinn_coro_t *target) {
+    jinn_coro_t *prev = NULL, *cur = *head;
+    while (cur) {
+        if (cur == target) {
+            if (prev) prev->next = cur->next; else *head = cur->next;
+            if (*tail == cur) *tail = prev;
+            cur->next = NULL;
+            return 1;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+    return 0;
+}
+
+void jinn_chan_wake_coro(jinn_chan_t *ch, jinn_coro_t *c) {
+    if (!ch || !c) return;
+    chan_lock(ch);
+    int found = waitq_remove(&ch->send_waitq, &ch->send_waitq_tail, c)
+             || waitq_remove(&ch->recv_waitq, &ch->recv_waitq_tail, c);
+    chan_unlock(ch);
+    if (found) {
+        c->wait_chan = NULL;
+        c->state = JINN_CORO_READY;
+        jinn_sched_enqueue(c);
+    }
+}
+
 int jinn_chan_send(jinn_chan_t *ch, const void *data) {
     for (;;) {
+        jinn_worker_t *wc = tl_worker;
+        if (wc && wc->current
+            && atomic_load_explicit(&wc->current->cancelled, memory_order_acquire)) {
+            return 0;
+        }
         chan_lock(ch);
 
         /* Check for close */
@@ -183,6 +220,13 @@ int jinn_chan_send(jinn_chan_t *ch, const void *data) {
         }
 
         jinn_coro_t *self = w->current;
+        /* Re-check cancellation under the lock to avoid a lost wakeup: if the
+         * scope was cancelled after our top-of-loop check, bail instead of
+         * parking forever. */
+        if (atomic_load_explicit(&self->cancelled, memory_order_acquire)) {
+            chan_unlock(ch);
+            return 0;
+        }
         self->state = JINN_CORO_SUSPENDED;
         self->wait_chan = ch;
         self->next = NULL;
@@ -202,6 +246,12 @@ int jinn_chan_send(jinn_chan_t *ch, const void *data) {
 
 int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
     for (;;) {
+        jinn_worker_t *wc = tl_worker;
+        if (wc && wc->current
+            && atomic_load_explicit(&wc->current->cancelled, memory_order_acquire)) {
+            memset(data_out, 0, ch->elem_size);
+            return 0;
+        }
         chan_lock(ch);
 
         uint64_t head = atomic_load_explicit(&ch->head, memory_order_relaxed);
@@ -250,6 +300,11 @@ int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
         }
 
         jinn_coro_t *self = w->current;
+        if (atomic_load_explicit(&self->cancelled, memory_order_acquire)) {
+            memset(data_out, 0, ch->elem_size);
+            chan_unlock(ch);
+            return 0;
+        }
         self->state = JINN_CORO_SUSPENDED;
         self->wait_chan = ch;
         self->next = NULL;

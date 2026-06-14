@@ -48,6 +48,7 @@ pub(crate) struct MoveState {
 pub struct Typer {
     pub(crate) next_id: u32,
     pub(crate) scopes: Vec<HashMap<Symbol, VarInfo>>,
+    pub(crate) scope_names: Vec<Symbol>,
     pub(crate) fns: IndexMap<Symbol, (DefId, Vec<Type>, Type)>,
     pub(crate) structs: IndexMap<Symbol, Vec<(Symbol, Type)>>,
 
@@ -147,6 +148,7 @@ impl Typer {
         Self {
             next_id: 1,
             scopes: Vec::new(),
+            scope_names: Vec::new(),
             fns: IndexMap::new(),
             structs: IndexMap::new(),
             struct_attrs: IndexMap::new(),

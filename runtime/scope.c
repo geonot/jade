@@ -141,10 +141,15 @@ void jinn_scope_cancel(jinn_scope_t *s) {
     for (int i = 0; i < na; i++) actors[i] = s->actors[i];
     scope_unlock(s);
 
-    /* Mark every live child cancelled. */
+    /* Mark every live child cancelled, and wake any blocked on a channel so
+     * they resume, observe cancellation, and unwind at their next check. */
     for (int i = 0; i < n; i++) {
         if (snapshot[i]) {
             atomic_store_explicit(&snapshot[i]->cancelled, 1, memory_order_release);
+            void *wc = snapshot[i]->wait_chan;
+            if (wc) {
+                jinn_chan_wake_coro((jinn_chan_t *)wc, snapshot[i]);
+            }
         }
     }
     /* Cancellation closes scope-owned actor mailboxes too: a cancelled actor
@@ -175,6 +180,26 @@ void jinn_scope_stop_actors(jinn_scope_t *s) {
     }
 }
 
+/* Wake any cancelled child currently parked on a channel so it resumes,
+ * observes cancellation, and unwinds. Idempotent and cheap; called from the
+ * join loop to close the race where a child parks just after cancellation
+ * marked it but before it published its `wait_chan`. */
+static void scope_wake_cancelled(jinn_scope_t *s) {
+    if (!atomic_load_explicit(&s->cancelled, memory_order_acquire)) return;
+    scope_lock(s);
+    int n = s->child_count;
+    jinn_coro_t *snapshot[JINN_SCOPE_MAX_ACTORS];
+    for (int i = 0; i < n; i++) snapshot[i] = s->children[i];
+    scope_unlock(s);
+    for (int i = 0; i < n; i++) {
+        jinn_coro_t *c = snapshot[i];
+        if (c && c->state == JINN_CORO_SUSPENDED) {
+            void *wc = c->wait_chan;
+            if (wc) jinn_chan_wake_coro((jinn_chan_t *)wc, c);
+        }
+    }
+}
+
 void jinn_scope_join(jinn_scope_t *s) {
     if (!s) return;
 
@@ -182,6 +207,7 @@ void jinn_scope_join(jinn_scope_t *s) {
         if (atomic_load_explicit(&s->live_children, memory_order_acquire) <= 0) {
             break;
         }
+        scope_wake_cancelled(s);
         jinn_worker_t *w = tl_worker;
         if (!w || !w->current) {
             /* Parent is *main / a non-coroutine thread: spin-yield so the

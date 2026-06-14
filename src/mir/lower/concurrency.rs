@@ -193,7 +193,7 @@ impl Lowerer {
 
     pub(super) fn lower_together(
         &mut self,
-        _name: Option<Symbol>,
+        name: Option<Symbol>,
         body: &[hir::Stmt],
         span: crate::ast::Span,
     ) -> ValueId {
@@ -203,7 +203,13 @@ impl Lowerer {
             span,
         );
         self.scope_stack.push(scope);
+        if let Some(n) = name {
+            self.scope_named.push((n, scope));
+        }
         self.lower_block_stmts(body);
+        if name.is_some() {
+            self.scope_named.pop();
+        }
         self.scope_stack.pop();
         self.emit(
             InstKind::Call(Symbol::intern("__scope_stop_actors"), vec![scope]),
@@ -279,6 +285,17 @@ impl Lowerer {
         }
 
         super::finish_body(&mut sub, body, &Type::Void, span, false);
+
+        if scheduler_task && !sub.function_defers.is_empty() {
+            let cleanup = sub.new_block("cancel.cleanup");
+            sub.seal_block(cleanup);
+            let saved = sub.current_block;
+            sub.switch_to(cleanup);
+            sub.lower_deferred_in_reverse();
+            sub.set_terminator(Terminator::Return(None));
+            sub.switch_to(saved);
+            sub.func.cancel_cleanup = Some(cleanup);
+        }
 
         self.lambda_fns.push(sub.func);
         self.lambda_fns.append(&mut sub.lambda_fns);

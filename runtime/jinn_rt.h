@@ -211,6 +211,7 @@ int         jinn_chan_send(jinn_chan_t *ch, const void *data);
 int         jinn_chan_recv(jinn_chan_t *ch, void *data_out);
 int         jinn_chan_try_recv(jinn_chan_t *ch, void *data_out);
 void        jinn_chan_close(jinn_chan_t *ch);
+void        jinn_chan_wake_coro(jinn_chan_t *ch, jinn_coro_t *c);
 void        jinn_chan_destroy(jinn_chan_t *ch);
 
 /* ── Select ──────────────────────────────────────────────────────── */

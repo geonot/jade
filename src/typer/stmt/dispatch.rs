@@ -990,8 +990,14 @@ impl Typer {
             }
 
             ast::Stmt::Together(name, body, span) => {
-                let hbody = self.lower_block(body, ret_ty)?;
-                Ok(hir::Stmt::Together(*name, hbody, *span))
+                if let Some(n) = name {
+                    self.scope_names.push(*n);
+                }
+                let hbody = self.lower_block(body, ret_ty);
+                if name.is_some() {
+                    self.scope_names.pop();
+                }
+                Ok(hir::Stmt::Together(*name, hbody?, *span))
             }
 
             ast::Stmt::ChannelClose(ch, span) => {
@@ -1004,6 +1010,11 @@ impl Typer {
             }
 
             ast::Stmt::Stop(target, span) => {
+                if let ast::Expr::Ident(n, _) = target
+                    && self.scope_names.contains(n)
+                {
+                    return Ok(hir::Stmt::ScopeCancel(*n, *span));
+                }
                 let htarget = self.lower_expr(target)?;
                 if !matches!(&htarget.ty, Type::ActorRef(_)) {
                     return Err(format!(

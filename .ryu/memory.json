@@ -264,6 +264,18 @@
       "ts_created": "2026-06-13T22:41:02+00:00",
       "ts_accessed": "2026-06-13T22:41:02+00:00",
       "access_count": 0
+    },
+    "task_2-6-4_impl": {
+      "key": "task_2-6-4_impl",
+      "value": "Task 2-6-4 DONE. Cooperative cancellation. `stop <scope>`: typer tracks scope_names (Vec<Symbol> in Typer, push/pop in Together lowering); Stop on Expr::Ident matching a scope name -> hir::Stmt::ScopeCancel(Symbol,Span) (new hir variant, no AST change). MIR Lowerer.scope_named: Vec<(Symbol,ValueId)> (ctx.rs) bound in lower_together; effects.rs ScopeCancel emits __scope_cancel(scope). codegen magic.rs __scope_cancel -> jinn_scope_cancel (already declared). RUNTIME: jinn_chan_send/recv check tl_worker->current->cancelled at top of park loop AND under chan_lock just before park-commit (closes lost-wakeup), return 0 early. New jinn_chan_wake_coro(ch,coro) splices coro out of waitq + enqueues (waitq_remove helper). jinn_scope_cancel wakes children parked on channels via wait_chan. jinn_scope_join calls scope_wake_cancelled each spin (only effective when parent is *main / non-coro). MIR: Function.cancel_cleanup: Option<BlockId>; built in lower_coroutine_inner for scheduler tasks WITH defers (switch to new block, lower_deferred_in_reverse, Return(None)). yield_passes.rs inject_cancel_checks: at each back-edge src in scheduler task, split block -> call jinn_scope_check_cancelled, Cmp Ne 0, Branch(flag, cleanup, cancel.cont) where cancel.cont holds orig terminator. Tests stop_scope_cancels_without_drain (handshake via ready channel for determinism - prefix MUST be delivered before stop) + defer_runs_on_cancellation pass. PITFALL: consumer reading from a cancelled producer deadlocks if stop wins race before prefix sent - use a ready-channel handshake. BOUNDED/DEFERRED: block-scoped (loop-local) defers not materialized at cleanup; coroutine-parent join relies on direct cancel wake. Docs updated in docs/concurrency.md (cancellation section + test table). 2-6-5 (error propagation) still blocked-by removed now.",
+      "kind": "decision",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-14T02:23:28+00:00",
+      "ts_accessed": "2026-06-14T02:23:28+00:00",
+      "access_count": 0
     }
   }
 }

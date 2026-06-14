@@ -54,6 +54,11 @@ pub struct Function {
     /// trampoline (`jinn_coro_exit`) instead of emitting a generator suspend.
     pub scheduler_task: bool,
 
+    /// For scheduler tasks: a cleanup block that runs the body's defers and
+    /// returns. Cooperative-cancellation checks branch here so a cancelled
+    /// task unwinds through its defers instead of running to completion.
+    pub cancel_cleanup: Option<BlockId>,
+
     pub perceus: PerceusMeta,
 }
 

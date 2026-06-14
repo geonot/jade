@@ -161,6 +161,7 @@ fn collect_var_refs_stmt(stmt: &hir::Stmt, refs: &mut HashSet<Symbol>) {
         | hir::Stmt::ChannelClose(expr, _)
         | hir::Stmt::Stop(expr, _)
         | hir::Stmt::Join(expr, _) => collect_var_refs_expr(expr, refs),
+        hir::Stmt::ScopeCancel(_, _) => {}
         hir::Stmt::TupleBind(_, expr, _) => collect_var_refs_expr(expr, refs),
         hir::Stmt::SimFor(sim_for, _) => {
             collect_var_refs_expr(&sim_for.iter, refs);

@@ -96,6 +96,15 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
         }
 
+        if name == "__scope_cancel"
+            && let Some(&scope_val) = args.first()
+        {
+            let scope_ptr = self.val(scope_val).into_pointer_value();
+            let f = crate::codegen::fn_or_die(&self.module, "jinn_scope_cancel");
+            b!(self.bld.build_call(f, &[scope_ptr.into()], ""));
+            return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
+        }
+
         if let Some(coro_name) = name.strip_prefix("__scope_spawn_")
             && let Some(&scope_val) = args.first()
         {

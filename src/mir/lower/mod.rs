@@ -640,6 +640,7 @@ impl Lowerer {
             | hir::Stmt::Transaction(..) => self.lower_stmt_store(stmt),
             hir::Stmt::ChannelClose(..)
             | hir::Stmt::Stop(..)
+            | hir::Stmt::ScopeCancel(..)
             | hir::Stmt::Join(..)
             | hir::Stmt::Together(..)
             | hir::Stmt::Asm(..)

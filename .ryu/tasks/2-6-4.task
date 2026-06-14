@@ -1,12 +1,24 @@
 title: 'Cancellation: stop scope + cooperative unwind at suspension points'
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by:
 - 2-6-3
 created_at: '2026-06-13T14:45:40'
-updated_at: '2026-06-13T14:45:40'
-result: ''
+updated_at: '2026-06-13T19:23:52'
+result: 'Cooperative cancellation implemented. `stop <scope>` cancels a named together
+  scope: typer tracks scope names and lowers `stop name` to hir::Stmt::ScopeCancel
+  -> MIR __scope_cancel -> jinn_scope_cancel. Channel send/recv park loops are cancellation
+  points (check coro->cancelled at loop top and under-lock before parking, closing
+  the lost-wakeup race); jinn_chan_wake_coro unparks channel-blocked children on cancel.
+  Loop back-edges in scheduler tasks are cancellation points via inject_cancel_checks
+  (yield_passes.rs): when the task has defers, the check branches to a synthesized
+  cancel.cleanup block that runs defers then returns, so defer runs on cancellation.
+  Conformance: stop_scope_cancels_without_drain and defer_runs_on_cancellation pass
+  (deterministic via a ready-channel handshake); full concurrency_shutdown suite 16/16
+  green; lib 249, access_semantics 11, std_stable_subset 2 all pass; only pre-existing
+  column_max/min/sum integration failures remain. Bounded/deferred limits (loop-local
+  defers, coroutine-parent join wake) documented in docs/concurrency.md.'
 description: 'Implement cooperative cancellation. `stop <scope>` and failing child
   mark scope.cancelled + wake all children. Park loops (channel send/recv, sched yield,
   sleep) check coro->cancelled and return a distinct unwind status; the injected yields

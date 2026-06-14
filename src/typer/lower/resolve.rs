@@ -420,6 +420,7 @@ impl Typer {
             }
             hir::Stmt::ChannelClose(e, _) => self.resolve_expr(e),
             hir::Stmt::Stop(e, _) => self.resolve_expr(e),
+            hir::Stmt::ScopeCancel(_, _) => {}
             hir::Stmt::Join(e, _) => self.resolve_expr(e),
             hir::Stmt::SimFor(f, _) => {
                 f.bind_ty = self.infer_ctx.resolve(&f.bind_ty);

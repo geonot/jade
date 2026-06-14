@@ -221,9 +221,54 @@ actor blocked on `receive` does **not** prevent the program from exiting.
 
 The rules in this document describe the unscoped base layer. A lexical
 scope construct (`together`) that joins children on exit, propagates child
-errors, and gives `stop` a cancellation meaning is designed in
+errors, and gives `stop` a cancellation meaning is specified in
 [docs/structured-concurrency.md](structured-concurrency.md); it layers on
 top of this contract without changing anything specified here.
+
+### Cancellation: `stop <scope>`
+
+A `together` block may be named, and `stop <name>` **cancels** that scope:
+
+```jinn
+together s
+    dispatch
+        for i in 0 to 1000000
+            send out, i      # would run forever
+    stop s                   # cancel: the dispatch unwinds at its next park
+```
+
+Cancellation is **cooperative**. `jinn_scope_cancel`
+([runtime/scope.c](../runtime/scope.c)) marks the scope and every live child
+`cancelled`, closes scope-owned actor mailboxes, and wakes any child parked
+on a channel. A cancelled coroutine observes cancellation at a *cancellation
+point* and unwinds:
+
+- **Channel `send`/`recv`** check the running coroutine's `cancelled` flag at
+  the top of their park loop and just before committing to park (closing the
+  lost-wakeup race under the channel lock), returning early (as if closed)
+  when set.
+- **Loop back-edges** in a scheduler task are cancellation points too: the
+  `inject_yields` pass also injects a `jinn_scope_check_cancelled` test
+  (`inject_cancel_checks` in
+  [src/mir/opt/yield_passes.rs](../src/mir/opt/yield_passes.rs)). If the task
+  has `defer`s, the check branches to a synthesized `cancel.cleanup` block
+  that runs the body's defers and returns — so **`defer` runs on
+  cancellation**, exactly like an early return.
+
+Cancellation contrasts with actor `stop` (stop-and-drain, §Actors): `stop
+<scope>` is the fast abort — the cancelled task drops its remaining work
+instead of draining it.
+
+**Bounded scope (current implementation).** Cancellation unwinds through
+*function-level* `defer`s of a scheduler task. Two cases are deferred and
+documented rather than silently mis-handled: (1) `defer`s whose cleanup code
+references values defined inside a loop (block-scoped defers under
+cancellation) are not specially materialised at the cleanup block; (2) a
+coroutine *parent* that has parked in `jinn_scope_join` relies on the direct
+wake from `jinn_scope_cancel` (the join-loop re-wake only runs when the
+parent is `*main`). Neither affects the common `together`/`dispatch`/`stop`
+shape; both are tracked for the structured-concurrency error-propagation
+work.
 
 ## Sharp edges (read this before shipping a concurrent program)
 
@@ -293,6 +338,11 @@ real Jinn program through `jinnc`, in
 | `join_twice_is_idempotent`          | A second `join` on a finished actor returns immediately (no deadlock).  |
 | `tight_loop_actor_does_not_starve_siblings` | Injected back-edge yields keep a spinning actor from starving siblings. |
 | `actor_without_stop_still_exits`    | A daemon actor parked on `receive` does not block program exit.         |
+| `scope_joins_all_dispatches`        | `together` joins every `dispatch`ed child before control leaves the block. |
+| `scope_owned_actor_drains_on_exit`  | A `spawn` inside `together` is scope-owned: its mailbox drains at block exit. |
+| `daemon_spawn_outside_scope_unchanged` | `spawn` outside any scope stays a fire-and-forget daemon.            |
+| `stop_scope_cancels_without_drain`  | `stop <scope>` cancels a child task at its next park; the infinite tail never runs. |
+| `defer_runs_on_cancellation`        | A `defer` inside a cancelled task still runs as the task unwinds.       |
 
 The multithreaded MPMC stress, crash-consistency, and tail-latency
 characterization for channels lives separately in

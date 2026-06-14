@@ -73,6 +73,7 @@ pub(super) fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<Symbol, hir
         Stmt::Together(_, b, _) => fold_block_with_fns(b, pure_fns),
         Stmt::ChannelClose(e, _) => fold_expr_with_fns(e, pure_fns),
         Stmt::Stop(e, _) => fold_expr_with_fns(e, pure_fns),
+        Stmt::ScopeCancel(_, _) => {}
         Stmt::Join(e, _) => fold_expr_with_fns(e, pure_fns),
         Stmt::SimFor(f, _) => {
             fold_expr_with_fns(&mut f.iter, pure_fns);
@@ -196,6 +197,7 @@ pub(super) fn fold_stmt(stmt: &mut Stmt) {
         Stmt::Together(_, b, _) => fold_block(b),
         Stmt::ChannelClose(e, _) => fold_expr(e),
         Stmt::Stop(e, _) => fold_expr(e),
+        Stmt::ScopeCancel(_, _) => {}
         Stmt::Join(e, _) => fold_expr(e),
         Stmt::SimFor(f, _) => {
             fold_expr(&mut f.iter);

@@ -57,5 +57,66 @@ pub fn inject_yields(func: &mut Function) -> bool {
             });
         }
     }
+
+    inject_cancel_checks(func, &yield_srcs);
     true
+}
+
+/// For a scheduler task with a cancel-cleanup block, make every back-edge a
+/// cooperative cancellation point: if the running coroutine has been cancelled
+/// (its enclosing scope was `stop`ped or a sibling failed), branch to the
+/// cleanup block so the body's defers run before the task exits, instead of
+/// looping forever.
+fn inject_cancel_checks(func: &mut Function, yield_srcs: &HashSet<BlockId>) {
+    let Some(cleanup) = func.cancel_cleanup else {
+        return;
+    };
+    if !func.scheduler_task {
+        return;
+    }
+
+    let srcs: Vec<BlockId> = func
+        .blocks
+        .iter()
+        .map(|b| b.id)
+        .filter(|id| yield_srcs.contains(id) && *id != cleanup)
+        .collect();
+
+    for src in srcs {
+        let idx = func.blocks.iter().position(|b| b.id == src).unwrap();
+        let orig_term = func.blocks[idx].terminator.clone();
+
+        let cont = func.new_block("cancel.cont");
+        let chk = func.new_value();
+        let flag = func.new_value();
+
+        let cont_bb = func.blocks.iter_mut().find(|b| b.id == cont).unwrap();
+        cont_bb.terminator = orig_term;
+
+        let bb = func.blocks.iter_mut().find(|b| b.id == src).unwrap();
+        bb.insts.push(Instruction {
+            dest: Some(chk),
+            kind: InstKind::Call(Symbol::intern("jinn_scope_check_cancelled"), Vec::new()),
+            ty: Type::I32,
+            span: Span::dummy(),
+            def_id: None,
+        });
+        let zero = func.new_value();
+        let bb = func.blocks.iter_mut().find(|b| b.id == src).unwrap();
+        bb.insts.push(Instruction {
+            dest: Some(zero),
+            kind: InstKind::IntConst(0),
+            ty: Type::I32,
+            span: Span::dummy(),
+            def_id: None,
+        });
+        bb.insts.push(Instruction {
+            dest: Some(flag),
+            kind: InstKind::Cmp(CmpOp::Ne, chk, zero, Type::I32),
+            ty: Type::Bool,
+            span: Span::dummy(),
+            def_id: None,
+        });
+        bb.terminator = Terminator::Branch(flag, cleanup, cont);
+    }
 }

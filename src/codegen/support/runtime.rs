@@ -421,6 +421,7 @@ impl<'ctx> Compiler<'ctx> {
                 s,
                 Stmt::ChannelClose(_, _)
                     | Stmt::Stop(_, _)
+                    | Stmt::ScopeCancel(_, _)
                     | Stmt::Join(_, _)
                     | Stmt::Together(_, _, _)
                     | Stmt::SimFor(_, _)

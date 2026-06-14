@@ -406,3 +406,57 @@ actor Worker
         "ok",
     );
 }
+
+// ── Cancellation (task 2-6-4) ───────────────────────────────────────────
+
+/// `stop <scope>` cancels a named `together` scope: a child task delivers a
+/// fixed prefix (handshaking over `ready` so the test is timing-independent),
+/// then would send forever. After the prefix is observed, `stop s` cancels the
+/// task at its next channel operation, so the infinite tail never runs and the
+/// program exits cleanly having consumed exactly the prefix.
+#[test]
+fn stop_scope_cancels_without_drain() {
+    expect(
+        "\
+*main
+    out is channel of i64(64)
+    ready is channel of i64(1)
+    together s
+        dispatch
+            for i in 0 to 4
+                send out, i
+            send ready, 1
+            for j in 0 to 1000000
+                send out, 99
+        x is receive ready
+        stop s
+    count is 0
+    while count < 4
+        v is receive out
+        count is count + 1
+    log(count)
+",
+        "4",
+    );
+}
+
+/// A `defer` inside a cancelled task still runs: cancellation unwinds through
+/// the body's deferred cleanup before the task exits, exactly like an early
+/// return.
+#[test]
+fn defer_runs_on_cancellation() {
+    expect(
+        "\
+*main
+    sig is channel of i64(1)
+    together s
+        dispatch
+            defer log('cleaned')
+            for i in 0 to 1000000
+                send sig, i
+        stop s
+    log('done')
+",
+        "cleaned\ndone",
+    );
+}
