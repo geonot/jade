@@ -1,0 +1,21 @@
+title: 'Codegen: scope task records its error; together block yields scope error'
+status: pending
+atomic: true
+priority: high
+blocked_by:
+- 2-6-5-1
+created_at: '2026-06-13T19:29:53'
+updated_at: '2026-06-13T19:29:53'
+result: ''
+description: 'Wire child-task error to the scope (E1/E5). When a scheduler task (anonymous
+  dispatch / scope-owned actor handler) propagates an error out of its top frame,
+  codegen must call jinn_scope_record_error(scope, err) instead of (or in addition
+  to) the normal early-return. The scope task already returns via the early-return
+  path; capture the propagated error value there. Make the `together` block lowering,
+  after __scope_join, call jinn_scope_take_error and, if present, perform the function-level
+  error propagation (implicit propagate at scope site) OR feed it into a quaternary
+  `!!` arm if present (handled in 2-6-5-3). For now (no handler): a failing scope
+  re-raises in the enclosing function via the existing early-return-with-error path.
+  Depends on 2-6-5-1. DoD: a together block with a failing dispatch makes the enclosing
+  fn fallible and the error surfaces; failing_child_cancels_siblings test passes (sibling
+  does not complete its work). Atomic.'

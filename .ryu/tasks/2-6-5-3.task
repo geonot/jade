@@ -1,0 +1,20 @@
+title: 'Typer: together as fallible expression — scope error union + From at site'
+status: pending
+atomic: true
+priority: medium
+blocked_by:
+- 2-6-5-2
+created_at: '2026-06-13T19:30:22'
+updated_at: '2026-06-13T19:30:22'
+result: ''
+description: 'E3/E6: make the `together` block a fallible expression whose error union
+  is the union of its child bodies'' error unions. Reuse the existing function error-inference
+  machinery (SCC least-fixpoint, From graph from the locked error model). The scope
+  participates in implicit propagation: with no handler a failing scope makes the
+  enclosing function fallible and re-raises with From conversion (R1/R3 checked at
+  the scope site). Support the multiline quaternary `!!` arm on a together block (E4):
+  `together ... !! log(err)` binds `err` to the first error; `?` arm allowed ($ is
+  Unit); `!` arm rejected as meaningless for scopes. If full SCC union proves too
+  invasive, degrade cleanly: compute the union from directly-lexical child bodies
+  and emit a diagnostic for the deferred cases. Depends on 2-6-5-2. DoD: scope_error_propagates_with_from
+  passes; a `!!` handler on together compiles and binds err. Atomic.'

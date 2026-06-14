@@ -1,11 +1,11 @@
 title: Error propagation from children + scope error-union + escape check + docs
 status: pending
-atomic: true
+atomic: false
 priority: medium
 blocked_by:
 - 2-6-4
 created_at: '2026-06-13T14:45:52'
-updated_at: '2026-06-13T14:45:52'
+updated_at: '2026-06-13T19:28:46'
 result: ''
 description: 'E1-E6: failing child cancels siblings and re-raises at scope (first-error-wins
   via CAS slot). Scope is a fallible expression: error union = union of child body

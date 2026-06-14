@@ -25,6 +25,8 @@ struct jinn_scope {
     _Atomic(int64_t)  live_children;
     _Atomic(int32_t)  cancelled;
     _Atomic(int32_t)  lock;
+    _Atomic(int32_t)  has_error;       /* first-error-wins latch (0/1) */
+    _Atomic(int64_t)  error_val;       /* the recorded error (one machine word) */
     jinn_coro_t      *parent;          /* parked parent coroutine, or NULL */
     jinn_scope_t     *prev;            /* enclosing scope (nesting stack) */
     jinn_coro_t      *children[JINN_SCOPE_MAX_ACTORS]; /* live child coros */
@@ -62,6 +64,8 @@ jinn_scope_t *jinn_scope_create(void) {
     atomic_store(&s->live_children, 0);
     atomic_store(&s->cancelled, 0);
     atomic_store(&s->lock, 0);
+    atomic_store(&s->has_error, 0);
+    atomic_store(&s->error_val, 0);
     s->parent = NULL;
     s->prev = tl_scope;
     s->child_count = 0;
@@ -158,6 +162,30 @@ void jinn_scope_cancel(jinn_scope_t *s) {
     for (int i = 0; i < na; i++) {
         jinn_actor_stop(actors[i]);
     }
+}
+
+/* Record a child's propagated error on the scope. First-error-wins (E2): a
+ * CAS on `has_error` ensures only the first caller stores `error_val`. The
+ * recording child then cancels the scope (E1) so siblings unwind. */
+void jinn_scope_record_error(jinn_scope_t *s, int64_t errval) {
+    if (!s) return;
+    int32_t expected = 0;
+    if (atomic_compare_exchange_strong_explicit(
+            &s->has_error, &expected, 1,
+            memory_order_acq_rel, memory_order_acquire)) {
+        atomic_store_explicit(&s->error_val, errval, memory_order_release);
+    }
+    jinn_scope_cancel(s);
+}
+
+/* If an error was recorded on this scope, write it to *out and return 1. */
+int jinn_scope_take_error(jinn_scope_t *s, int64_t *out) {
+    if (!s) return 0;
+    if (atomic_load_explicit(&s->has_error, memory_order_acquire)) {
+        if (out) *out = atomic_load_explicit(&s->error_val, memory_order_acquire);
+        return 1;
+    }
+    return 0;
 }
 
 int jinn_scope_check_cancelled(void) {

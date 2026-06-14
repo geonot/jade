@@ -1,0 +1,17 @@
+title: Escape check (L3) + daemon fallible-actor warning (E5)
+status: pending
+atomic: true
+priority: medium
+blocked_by:
+- 2-6-5-3
+created_at: '2026-06-13T19:30:54'
+updated_at: '2026-06-13T19:30:54'
+result: ''
+description: 'L3: a scope-bound dispatch/coroutine cannot escape its `together` scope.
+  Binding a dispatched coroutine to a name that outlives the scope, or returning it
+  from the enclosing function, is a compile error ("coroutine cannot outlive its `together`
+  scope"). Reuse the existing escape analysis (src/escape/mod.rs). E5 (warning half):
+  a daemon actor (spawn outside any scope) with a fallible handler keeps current behavior
+  (error terminates that actor coroutine silently) but the compiler emits a warning
+  suggesting a scope. Depends on 2-6-5-3. DoD: coroutine_escape_is_compile_error test
+  passes; daemon fallible actor emits a warning. Atomic.'

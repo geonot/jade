@@ -1,0 +1,16 @@
+title: 'Docs: flip structured-concurrency to implemented; cross-refs + test table'
+status: pending
+atomic: true
+priority: low
+blocked_by:
+- 2-6-5-4
+created_at: '2026-06-13T19:31:23'
+updated_at: '2026-06-13T19:31:23'
+result: ''
+description: 'Flip docs/structured-concurrency.md status from "design — not implemented"
+  to implemented (note any cleanly-deferred pieces precisely). Update docs/concurrency.md
+  cross-references and the test table to include the new error-propagation/escape
+  conformance tests. Ensure the worked example in §7 actually compiles and runs (or
+  annotate deferred parts). Depends on 2-6-5-4. DoD: docs consistent with implementation;
+  conformance test table lists failing_child_cancels_siblings, scope_error_propagates_with_from,
+  coroutine_escape_is_compile_error. Atomic.'

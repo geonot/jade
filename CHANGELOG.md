@@ -1,4 +1,5 @@
 # Changelog
+- **[77]** (2026-06-14 02:24) 2-6-4: cooperative cancellation — stop <scope>, channel + back-edge cancellation points, defer-on-cancel cleanup, runtime wake, conformance tests + docs
 - **[75]** (2026-06-13 22:42) task 2-6-3: together happy-path lowering (scheduler tasks, captures, scope-owned actor drain, join)
 - **[73]** (2026-06-13 22:00) task 2-6-1/2-6-2: together scope surface + runtime jinn_scope_t layer
 - **[70]** (2026-06-13 21:44) tasks 2-9/2-7/2-10: join primitive, stop-and-drain semantics, cooperative preemption yield injection

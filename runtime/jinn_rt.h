@@ -271,6 +271,10 @@ void jinn_scope_child_done(jinn_scope_t *s);
 void jinn_scope_cancel(jinn_scope_t *s);
 /* True if the calling coroutine has been cancelled by its scope. */
 int  jinn_scope_check_cancelled(void);
+/* Record a child's propagated error (first-error-wins) and cancel the scope. */
+void jinn_scope_record_error(jinn_scope_t *s, int64_t errval);
+/* If an error was recorded, write it to *out and return 1, else return 0. */
+int  jinn_scope_take_error(jinn_scope_t *s, int64_t *out);
 /* Close every scope-owned actor mailbox (graceful stop-and-drain). */
 void jinn_scope_stop_actors(jinn_scope_t *s);
 /* Block the parent until all children complete, pop the scope, then free it. */

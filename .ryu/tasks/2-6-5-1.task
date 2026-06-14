@@ -1,0 +1,25 @@
+title: 'Runtime: scope error slot + first-error-wins CAS + propagate at join'
+status: complete
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-13T19:29:22'
+updated_at: '2026-06-13T19:41:14'
+result: 'Added first-error-wins error slot to jinn_scope_t: atomic has_error latch
+  + error_val (one machine word). jinn_scope_record_error(scope, errval) CAS-latches
+  the first error then cancels the scope (E1/E2); jinn_scope_take_error(scope, &out)
+  returns whether one was recorded. Initialized in jinn_scope_create. Declared in
+  jinn_rt.h and src/codegen/support/runtime.rs (jinn_scope_record_error: void(ptr,i64);
+  jinn_scope_take_error: i32(ptr,ptr)). Error represented as a single i64 word (tag
+  for fieldless err variants, value/ptr for ptr-represented errors) — bounded but
+  covers the conformance cases. Build clean.'
+description: 'Add a first-error-wins error slot to jinn_scope_t (runtime/scope.c):
+  an atomic (e.g. i64 tag + payload, or a single i64 error code matching the error
+  model''s runtime representation). New runtime API: jinn_scope_record_error(scope,
+  errval) does an atomic CAS so only the FIRST error is kept (E2), and triggers jinn_scope_cancel
+  (E1: failing child cancels siblings). jinn_scope_join must surface whether an error
+  was recorded and the value. Add a query jinn_scope_take_error(scope, out) returning
+  bool. Confirm the error runtime representation by inspecting how errors are represented
+  at codegen/runtime for the existing error model (search error_effects / how `! E`
+  returns are lowered). DoD: runtime compiles clean; helpers declared in jinn_rt.h
+  and src/codegen/support/runtime.rs. Atomic.'

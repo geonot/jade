@@ -540,6 +540,8 @@ impl<'ctx> Compiler<'ctx> {
         decl!("jinn_scope_child_done", void.fn_type(&[ptr.into()], false));
         decl!("jinn_scope_cancel", void.fn_type(&[ptr.into()], false));
         decl!("jinn_scope_check_cancelled", i32t.fn_type(&[], false));
+        decl!("jinn_scope_record_error", void.fn_type(&[ptr.into(), i64t.into()], false));
+        decl!("jinn_scope_take_error", i32t.fn_type(&[ptr.into(), ptr.into()], false));
         decl!("jinn_scope_stop_actors", void.fn_type(&[ptr.into()], false));
         decl!("jinn_scope_join", void.fn_type(&[ptr.into()], false));
         decl!(
