@@ -1,12 +1,24 @@
 title: 'Codegen: scope task records its error; together block yields scope error'
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by:
 - 2-6-5-1
 created_at: '2026-06-13T19:29:53'
-updated_at: '2026-06-13T19:29:53'
-result: ''
+updated_at: '2026-06-13T20:31:33'
+result: 'Wired child-task error to the scope (E1/E5). Scope-task bodies (anon dispatch)
+  now type-propagate the RAW err variant (current_fn_ret_ty taken during body lowering)
+  and their err enums are folded into the enclosing fn''s error types (collect_errreturn_enums),
+  making it fallible. Codegen Return for scheduler tasks calls jinn_scope_record_current_error(errword).
+  The together block, when its children can raise (HIR Together carries Vec<Symbol>
+  errs), calls jinn_scope_join_take_error after join (returns err word or INT64_MIN),
+  and on error reconstructs Result::Err via __scope_build_err_{enum} and re-raises
+  via the enclosing fn''s error-return path. Runtime: added jinn_scope_record_current_error
+  + jinn_scope_join_take_error (split jinn_scope_join into no-free core). New conformance
+  tests failing_child_surfaces_error and failing_child_cancels_siblings pass (sibling
+  cancelled at yield points, error surfaces, exit 0). Zero-warning build; concurrency_shutdown
+  (18), error_effects (27), bulk_tests (912) all green. !! handler arm and multi-err
+  reconstruction deferred to 2-6-5-3.'
 description: 'Wire child-task error to the scope (E1/E5). When a scheduler task (anonymous
   dispatch / scope-owned actor handler) propagates an error out of its top frame,
   codegen must call jinn_scope_record_error(scope, err) instead of (or in addition
