@@ -85,7 +85,11 @@ to lamp: you never `lamp add libjn`, it has no manifest, and it is not
 resolved through the dependency graph. It ships and versions with the
 toolchain like the code generator does. The previous draft mistakenly listed
 it as a curation tier; this revision removes that. Where this spec speaks of
-"the toolchain," `libjn` is part of the toolchain.
+"the toolchain," `libjn` is part of the toolchain. Because `libjn` is layered
+(freestanding primitives → allocator → OS/syscall shims → scheduler), it is
+also what makes the freestanding output kinds (`os`, `raw`) and the substrate
+dials (`runtimeless`/`threadless`/`heapless`, §2.3.1) possible: lamp links only
+the layers the artifact's used surface actually reaches.
 
 ### 1.1 `std`
 
@@ -154,11 +158,12 @@ requires
   forked-zip  is git 'https://git.example/zip' rev 'a1b2c3d'
 
 provides
-  bin orchard      is 'src/main.jn'        # native executable
   lib orchard-core is 'src/lib.jn'         # a .jnb library
     requires internal                      # output-scoped deps (§2.3)
-  bin orchard-prune is 'src/prune.jn'
+  bin orchard-prune is 'src/prune.jn'      # a run-and-exit CLI
     requires orchard-core                  # one output depends on another
+  app orchard      is 'src/main.jn'        # a deployable application (§2.3.1)
+    requires orchard-core                  # kind usually inferred; pinned here
 
 members
   ./planner                                # child project (§2.4)
@@ -173,6 +178,10 @@ build
   profiles
     release is opt 3, debug-info false
     dev     is opt 0, debug-info true
+
+deployments                                # where instances of `app` run (§9)
+  dev   is local                  data './.run/dev'
+  prod  is host 'deploy@orchard.example'  replicas 3
 ```
 
 ### 2.1 The restricted manifest sublanguage
@@ -180,10 +189,17 @@ build
 The manifest is **declarative and side-effect free.** To make "parsed, never
 executed" precise (§6.4), the manifest is a *restricted Jinn dialect*: only
 the top-level blocks `project`, `requires`, `provides`, `members`,
-`dev-requires`, `build`, `capabilities`, `features`, and `[target]` overrides
-are recognized; only `is`-bindings to **literals** (string, int, bool, list)
+`dev-requires`, `build`, `capabilities`, `features`, `deployments`, and
+`[target]` overrides are recognized; only `is`-bindings to **literals** (string, int, bool, list)
 and the dependency-source keywords (`from`, `path`, `git`, `rev`) are allowed.
-No function calls, no control flow, no `*name` definitions. The parser rejects
+The `deployments` block adds a small, equally-declarative keyword set
+(`local`, `host`, `data`, `replicas`, `settings`, and the `for each … in`
+fleet form — §9.2), and `provides` admits the substrate dials
+(`runtimeless`/`threadless`/`heapless`) and freestanding targets
+(`for arch '…'`, `for mcu '…'`, §2.3.1) — still binding only to literals and
+names; none has more execution power than the rest. No function calls, no control flow (the
+`for each` form is a declarative fan-out over a literal list, not a loop), no
+`*name` definitions. The parser rejects
 anything else with a precise diagnostic. There is no `postinstall`, ever — we
 close npm's single largest attack vector by construction.
 
@@ -202,15 +218,51 @@ close npm's single largest attack vector by construction.
   **profiles** (`opt`, `debug-info`, `lto`, …), feeding reproducibility (§7).
 - **`capabilities`** — the *project-wide ceiling* (§6.1). Individual outputs
   may declare narrower sets.
+- **`deployments`** — named **targets** for `app` outputs: the environments or
+  per-tenant instances an application is deployed to, each a profile of
+  environment, settings, persistence, and platform (§9). Present only for
+  projects that ship an `app`; ignored entirely for pure `lib`/`bin` projects.
 
 ### 2.3 `provides` — multiple outputs from one project
 
 A single project produces **one or more named outputs**. This is the
-multi-package/multi-executable requirement made first-class:
+multi-package/multi-executable requirement made first-class. An output is
+described on **two orthogonal axes** (§2.3.1), and together they tell lamp
+*how to package, link, and run* it without further questions:
 
-- `bin <name> is '<entry>.jn'` — a native executable.
-- `lib <name> is '<entry>.jn'` — a `.jnb` library (§5), publishable and
-  consumable by other projects.
+- the **kind** — *what the artifact is*;
+- the **substrate** — *what runtime it assumes underneath*.
+
+There are **five kinds**, the first three *hosted* (they assume Jinn's full
+runtime — allocator, scheduler, OS) and the last two *freestanding* (no OS
+beneath them):
+
+- `lib <name> is '<entry>.jn'` — a `.jnb` **library** (§5): an interface plus
+  packed MIR/object, publishable to a registry and consumable by other
+  projects. Has no `main`. Packaged as a `.jnb` (§5.2) and content-addressed.
+- `bin <name> is '<entry>.jn'` — a plain **executable**: a self-contained
+  native artifact with a `main`, meant to be *run and exit* (a CLI, a build
+  tool, a one-shot). It owns no managed persistence or lifecycle; lamp packages
+  it as a single statically-linked native binary and nothing more.
+- `app <name> is '<entry>.jn'` — an **application**: a long-lived, *deployable*
+  unit with a `main` that owns persistent `@store`s (§2.3.1), settings, and an
+  environment, and is the target of `lamp deploy` (§9). An `app` is the only
+  kind that carries a deployment contract (store schemas, settings keys,
+  capability ceiling, env requirements). lamp packages it as a *deploy bundle*
+  (§9.1): the native binary plus a manifest of the store schema fingerprints,
+  settings contract, and required capabilities it was built against.
+- `os <name> is '<entry>.jn'` — a freestanding **operating-system image**: the
+  artifact *is* the OS. There is no kernel beneath it; it owns the hardware,
+  provides its own boot entry, and makes no syscalls (it *implements* them).
+  lamp packages it as a bootable image (with a target machine/arch and a
+  loader), linking only the freestanding slice of `libjn` (§1.0) — no hosted
+  syscall layer, no OS scheduler unless the image brings its own.
+- `raw <name> is '<entry>.jn'` — **bare-metal / embedded firmware**: a
+  freestanding artifact for a fixed device with no OS and usually no heap. A
+  `raw` output exposes a raw entry vector (reset handler / `_start`), targets a
+  specific MCU/arch, and links the absolute minimum: value-semantics code,
+  Perceus refcounting over static/arena memory, and only the `libjn` primitives
+  it actually touches. Packaged as a flat binary / ELF for flashing.
 
 Rules:
 
@@ -234,6 +286,102 @@ Rules:
 5. **Per-output versions.** An output may set `version is '...'`; otherwise it
    inherits `project.version`. This lets one repo ship, e.g., a stable
    `orchard-core 2.x` library and a fast-moving `orchard 1.x` CLI.
+
+#### 2.3.1 The two axes: kind and substrate
+
+A kind is not bureaucracy; it is the single fact that lets lamp decide the
+artifact shape, the link set, the lifecycle, and the trust surface without
+asking. The **kind** decides *what is produced*; the **substrate** decides
+*which layers of the runtime are linked in*. They are orthogonal: a `bin` can
+be threadless, an `app` is fully hosted, an `os` is freestanding-by-definition.
+
+**Axis 1 — kind.**
+
+| Kind  | Has `main` | Substrate (default) | Persistent `@store`s | Packaged as | Lifecycle | `lamp deploy` |
+|-------|:----------:|---------------------|:--------------------:|-------------|-----------|:-------------:|
+| `lib` | no         | hosted              | no (may *define* store types, instantiates none) | `.jnb` (interface + pack), content-addressed | consumed at build time | no |
+| `bin` | yes        | hosted              | none used            | single static native binary | run and exit | no |
+| `app` | yes        | hosted              | one or more          | deploy bundle (binary + deploy contract) | long-lived, stateful, updatable in place | **yes** |
+| `os`  | yes (boot entry) | freestanding   | n/a (owns the device) | bootable image (arch + loader) | owns the machine | no |
+| `raw` | yes (reset vector) | freestanding | n/a                | flat binary / ELF for flashing | owns the device | no |
+
+**Axis 2 — substrate dials.** The substrate is the set of `libjn` runtime
+layers an artifact assumes. Rather than a fixed menu, it is expressed as
+opt-outs from the full hosted runtime — and each is **inferred from the used
+surface**, then optionally pinned:
+
+- `runtimeless` — no Jinn runtime bring-up (no global init, no managed entry).
+  The artifact provides its own entry and gets only the language primitives it
+  calls. Implied by `os`/`raw`.
+- `threadless` — no scheduler, no actors/channels (docs/concurrency.md). Perceus
+  refcounting still works; the program is single-threaded. Inferred when the
+  reachable closure spawns no actors and opens no channels.
+- `heapless` (a.k.a. allocator-less) — no dynamic allocation. Value-semantics
+  code over static and arena memory only; the allocator layer is not linked.
+  Inferred when the closure performs no heap allocation. The compiler proves
+  this from ownership/escape analysis and *errors* (rather than silently
+  linking malloc) if a heap path is reachable under a pinned `heapless`.
+
+The substrate is written inline after the entry, reading as prose:
+
+```jinn
+provides
+  bin probe   is 'src/probe.jn'  threadless          # CLI, no scheduler linked
+  os  kernel  is 'src/boot.jn'   for arch 'riscv64'   # freestanding, runtimeless
+  raw blinky  is 'src/blinky.jn' for mcu 'rp2040' heapless   # firmware, no heap
+```
+
+`os` implies `runtimeless` and "no syscalls" (it provides them); `raw` implies
+`runtimeless` and usually `heapless`. Pinning a dial that the inference already
+holds is redundant (a `--pedantic` lint); pinning one the code *violates* is a
+precise, located error (e.g. "`heapless` pinned but `Vec.push` at `boot.jn:42`
+allocates").
+
+**Inference, not declaration.** You rarely write either axis by hand. lamp
+infers the kind from the entry's surface, matching the Jinn ethos (the compiler
+does the heavy lifting):
+
+- no `main` ⇒ `lib`;
+- `main`, hosted, instantiates **no** persistent `@store` ⇒ `bin`;
+- `main`, hosted, instantiates **one or more** persistent `@store`s (task 2-31
+  store decorators) ⇒ `app`;
+- a freestanding entry (declares `for arch`/`for mcu`, or pins `runtimeless`,
+  or defines a boot/reset entry) ⇒ `os` or `raw` — `raw` when a device target
+  is named and `heapless` holds, `os` otherwise.
+
+Writing the kind explicitly (`app orchard is '...'`) is allowed and serves two
+purposes: it *pins* intent (a mismatch between the declared kind and the
+inferred surface is a precise error — e.g. declaring `bin` for an entry that
+opens a `@store`, or `os` for an entry that makes hosted syscalls), and it lets
+a stateless service that *will* grow persistence be deployable from day one.
+`lamp lint` flags the redundant case (a declared kind/dial equal to the
+inferred one) only with `--pedantic`. Only `lib`/`bin`/`app` are publishable to
+the registry; only `app` is deployable (§9); `os`/`raw` are built and flashed,
+not deployed or published.
+
+**The deploy contract.** Building an `app` derives — from the same effect/store
+analysis that powers capabilities (§6.1) — a *deployment contract* embedded in
+the bundle:
+
+- **store schemas** — for every persistent `@store` the app opens, its
+  schema fingerprint (the schema-fingerprinted descriptor; task 2-31-9). This
+  is what makes migrations checkable (§9.3) rather than hopeful.
+- **settings contract** — the typed configuration keys the app reads from its
+  environment/config, with their types and defaults, derived from the
+  `config`/settings surface (docs/config-blocks.md). A target that fails to
+  supply a required, default-less setting is rejected *before* a process
+  starts.
+- **capability ceiling** — the capability union (§6.1) the binary needs;
+  carried into the deploy so a target environment can refuse, sandbox, or audit
+  it exactly as the resolver does at build time.
+- **env requirements** — declared external resources (a network address to
+  bind, a data directory, secrets by name — never by value). These are
+  *requirements*, satisfied per-target (§9.2), not baked in.
+
+Because the contract is *derived*, it cannot drift from the code: an `app` that
+adds a store, a setting, or a capability changes its contract, and a deploy to
+an existing target surfaces that change as a reviewable diff (§9.3) — the same
+discipline lamp already applies to dependency capabilities.
 
 ### 2.4 `members` — hierarchical projects (parent includes children)
 
@@ -1062,13 +1210,186 @@ on top. No flag day.
 
 ---
 
-## 9. The maintainer surface: bugs, changelogs, releases
+## 9. Deployments — running your application instances
+
+Everything above gets a *library* or an *executable* built, signed, and into a
+store. Deployment is the other half of an application's life: taking an `app`
+output (§2.3) and **running an instance of it in an environment**, then keeping
+that instance current as the code, its stores, and its settings evolve. This is
+the operator's surface, and lamp owns it with the same discipline it brings to
+dependencies: derived contracts, content addressing, reproducibility, and
+reviewable diffs — no ceremony in the common case.
+
+The shape is deliberately small:
+
+```
+lamp deploy <application> <target>
+```
+
+`<application>` is an `app` output of the project (the only deployable kind —
+§2.3.1). `<target>` is a named **deployment target**: a place an instance runs,
+with a profile of environment, settings, persistence location, and a platform.
+Targets are *named*, and the names are yours. The two canonical shapes are the
+classic environment ladder and per-tenant instances:
+
+```jinn
+# environment ladder
+deployments
+  dev     is local                       data './.run/dev'
+  stage   is host 'deploy@stage.internal'
+  prod    is host 'deploy@orchard.example'  replicas 3
+
+# per-tenant instances of the same app
+deployments
+  tenant for each name in tenants         # user1, user2, user3, …
+    is host 'deploy@{name}.orchard.app'
+    settings tenant-id is name
+```
+
+Both forms produce the same thing: a set of named targets, each a fully
+specified place to run an instance of an `app`. `lamp deploy orchard prod`,
+`lamp deploy orchard tenant/user2`. With no target, lamp lists targets and the
+deployed revision of each.
+
+### 9.1 What a deployment *is* — the deployed-state record
+
+A target's live state is itself content-addressed and recorded, so a deployment
+is auditable and reversible rather than a fire-and-forget `scp`. For each
+target lamp keeps a **deployment record** (committed alongside `project.lock`,
+human-readable, machine-authored — `project.deploy.lock`):
+
+```jinn
+# project.deploy.lock — auto-generated, do not edit
+target prod
+  app          orchard
+  revision     blake3:9f3c…             # exact app bundle hash deployed
+  version      1.4.0
+  deployed-at  2026-06-14T22:10:03Z
+  store-schemas
+    accounts   blake3:11ab…             # schema fingerprint live at target
+    audit-log  blake3:77de…
+  settings-hash blake3:c0ffee…          # hash of the resolved settings set
+  capabilities [net:bind:443, fs:rw:/var/lib/orchard]
+  signer       blake3:keyA…
+```
+
+The record is the join point for every deploy operation: the **binary update**
+diffs `revision`; **store migrations** diff `store-schemas`; **settings**
+changes diff `settings-hash`; **capability** changes diff `capabilities` — each
+shown and confirmed before anything mutates. Because the deployed bundle is the
+same content-addressed `.jnb`/native artifact the build produced (§5, §7), the
+revision hash *is* the proof of what is running: reproducible build → identical
+hash → "the running instance is exactly this commit," verifiable after the
+fact.
+
+### 9.2 The target profile — environment, settings, persistence, platform
+
+A target satisfies the app's **deploy contract** (§2.3.1). Four facets, each
+inferred-with-defaults, overridable per target, and checked *before* a process
+is touched:
+
+- **environment** — declared external resources the app requires: an address to
+  bind, a data directory, named secrets (by *name*; lamp never stores secret
+  *values* — it records that the target must supply `db-password`, and binds it
+  from the platform's secret source at launch). A target missing a required,
+  default-less resource is rejected with the exact unmet requirement.
+- **settings** — the typed configuration keys from the settings contract.
+  Defaults come from the app; a target overrides any key (`settings log-level
+  is 'debug'`). Types are checked against the contract, so a misconfigured
+  target fails at `lamp deploy`, not at 3 a.m. in production.
+- **persistence** — where the app's `@store`s live for *this* instance
+  (`data './run/dev'`, a host path, an object-store URL). Persistence is
+  per-target, so `dev` and `prod` and each tenant get isolated state by
+  construction; the store schema fingerprints in the record pin what shape that
+  state is in.
+- **platform** — how the instance is launched and supervised: `local` (a
+  managed local process), `host <ssh-target>` (push bundle + supervise over a
+  transport), or a pluggable platform driver (container image, systemd unit,
+  cloud target). The platform is the *only* facet with an external adapter; the
+  other three are pure data. lamp ships `local` and `host`; everything else is
+  a driver resolved like any dependency, capability-gated.
+
+All four are declared in the `deployments` block of `project.jn` (restricted
+sublanguage, §2.1 — declarative, no execution) and resolved against the app's
+derived contract. A target that under- or over-specifies the contract is a hard
+error naming the offending key, *before* deployment begins.
+
+### 9.3 The deploy transaction — binary update, store migrations, settings
+
+`lamp deploy <app> <target>` is a **single transaction with a plan-then-apply
+gate**, modeled on the resolver's reviewable-diff philosophy:
+
+1. **Build & verify.** Build the `app` for the target's platform under the
+   committed lock (reproducible, §7); compute the bundle revision hash; verify
+   signatures and the capability set.
+2. **Compute the deploy diff** against the target's deployment record (§9.1):
+   - *binary*: old revision → new revision (and the source/dep diff behind it);
+   - *stores*: for each `@store`, old schema fingerprint → new. A changed
+     fingerprint requires a **migration** (below);
+   - *settings*: added/removed/changed keys, with new required-without-default
+     keys flagged as **blocking** until the target supplies them;
+   - *capabilities*: any *widening* is flagged exactly as the resolver flags a
+     dependency widening (§6.1) — a deploy that needs a new capability at a
+     target is an explicit acknowledgement, never silent.
+3. **Plan store migrations.** A changed store schema fingerprint is resolved
+   against the app's **migrations** — ordered, content-addressed schema
+   transforms the app declares for its stores (each keyed by `from`→`to`
+   fingerprint, so the path from the *target's live* schema to the *new* schema
+   is computed, not assumed). Migrations are checked at *compile* time against
+   the store schema (task 2-31-9 fingerprints), so an unreachable or
+   ill-typed migration is a build error, not a runtime corruption. lamp shows
+   the migration path and whether it is online (no downtime), offline (instance
+   paused), or destructive (requires `--allow-destructive` and a snapshot).
+4. **Gate.** The full diff — binary, migrations, settings, capabilities — is
+   printed and confirmed (`--yes` to skip in CI). Nothing has mutated yet.
+5. **Apply, atomically and reversibly.** lamp snapshots the target's store
+   state (cheap, content-addressed), runs migrations, stages the new bundle,
+   cuts over, and only then updates the deployment record. A failure at any
+   step rolls back to the snapshot and the prior record. `lamp rollback <app>
+   <target>` restores the previous recorded revision and the matching store
+   snapshot in one step — the deployment record makes "what was running an hour
+   ago" an exact, restorable fact.
+
+Because every input is content-addressed and the record pins the live schema,
+*re-running the same deploy is a no-op* (the diff is empty) — deploys are
+idempotent, which is the property that makes them safe to put in CI and safe to
+retry.
+
+### 9.4 Many targets, one app — fleets and per-tenant rollout
+
+The `for each` target form (above) makes a *fleet* of identical-shaped
+instances first-class. `lamp deploy orchard tenant` (no specific tenant) plans
+the diff once and applies it across the fleet with a configurable strategy:
+`--rolling` (one at a time, halt on first failure — the default), `--canary
+<target>` (deploy to one, observe, then proceed), or `--all-at-once`. Each
+instance keeps its own deployment record and its own isolated persistence, so a
+migration that succeeds on `user1` and fails on `user2` leaves `user2` rolled
+back and the fleet partially updated — reported precisely, never silently
+divergent. Per-target settings (`tenant-id is name`) differentiate instances
+without forking the app.
+
+### 9.5 Why deployment belongs in lamp
+
+A deployment is just another reproducible, content-addressed, capability-bounded
+artifact transition — the exact problem lamp already solves for dependencies,
+turned outward at runtime. Putting it in the one tool means the bundle you
+deploy is provably the bundle you built (§7), the stores you migrate are
+checked against the schemas you compiled (task 2-31-9), the settings you set are
+type-checked against the contract you derived (§2.3.1), and the capabilities you
+grant a running instance are the same reviewable set the resolver vetted at
+build time (§6.1). Deployment is not a separate ops product bolted on; it is the
+runtime face of the same trust fabric — boring, verifiable, and idempotent by
+construction.
+
+---
+
+## 10. The maintainer surface: bugs, changelogs, releases
 
 A package is more than code. lamp brings issue tracking and release notes into
 the **same content-addressed, signed, federated fabric** — so they survive,
 mirror, and verify like the code, rather than living in a proprietary forge.
 
-### 9.1 Bug tracking
+### 10.1 Bug tracking
 
 - Issues live in-repo under structured `issues/` (append-only, content-addressed
   records: id, reporter, signed body, status, labels). Part of the package;
@@ -1079,7 +1400,7 @@ mirror, and verify like the code, rather than living in a proprietary forge.
 - Signed records let a federated tracker aggregate across mirrors with no
   central server; a maintainer's "close" is verifiable.
 
-### 9.2 Changelogs & patch notes
+### 10.2 Changelogs & patch notes
 
 - `CHANGELOG` as structured per-version entries
   (`added`/`changed`/`fixed`/`security`/`removed`, Keep-a-Changelog shape).
@@ -1087,7 +1408,7 @@ mirror, and verify like the code, rather than living in a proprietary forge.
   `lamp release` seals it; `lamp notes 1.4.1` / `--since 1.2.0` render/aggregate
   human notes. Security entries auto-feed the advisory DB.
 
-### 9.3 The release flow (replaces `cmd_publish`)
+### 10.3 The release flow (replaces `cmd_publish`)
 
 `lamp release [<lib|bin> <name>][@<version>]` is the maintainer's one command.
 With no output named, it releases every publishable `lib` in the project at the
@@ -1110,7 +1431,7 @@ project version. It:
 without deleting bytes (existing locks still build — published bytes are
 immutable; we advise against, never rewrite history).
 
-### 9.4 Interface-driven semver (Elm-style)
+### 10.4 Interface-driven semver (Elm-style)
 
 Because `interface.jhi` is a precise machine surface, `lamp release` **computes
 the minimum legal semver bump by diffing the new interface against the last
@@ -1121,7 +1442,7 @@ become hard to ship. This applies per `lib` output independently.
 
 ---
 
-## 10. Scaffolding & developer ergonomics
+## 11. Scaffolding & developer ergonomics
 
 One coherent verb set. No `init` vs `new` vs `create` confusion.
 
@@ -1139,11 +1460,13 @@ One coherent verb set. No `init` vs `new` vs `create` confusion.
 | `lamp lint` | manifest hygiene (`*` ranges, unused deps, license, member cycles) |
 | `lamp search <q>` | search; ranks std/ext (canonical) first |
 | `lamp doc` | build & serve docs from `.jhi` + source |
-| `lamp release [<output>][@ver]` / `lamp yank <name>@ver` | §9.3 |
+| `lamp release [<output>][@ver]` / `lamp yank <name>@ver` | §10.3 |
+| `lamp deploy <app> <target>` / `lamp rollback <app> <target>` | run/update/revert an app instance (§9) |
+| `lamp targets [<app>]` | list deployment targets and their live revision (§9.1) |
 | `lamp serve` | run a registry (§8) |
 | `lamp gc` | prune unreachable store entries (§4) |
 | `lamp trust <key>` | acknowledge a new/rotated signer (§6.2) |
-| `lamp bug` / `lamp bugs` / `lamp changelog` / `lamp notes` | §9 |
+| `lamp bug` / `lamp bugs` / `lamp changelog` / `lamp notes` | §10 |
 | `lamp nominate <pkg>` | start the community→`ext` promotion (§1.2) |
 
 Scaffolds produce a *minimal* `project.jn`, a `src/` tree, a `tests/` tree wired
@@ -1153,7 +1476,7 @@ block and one child.
 
 ---
 
-## 11. What we learned from prior systems
+## 12. What we learned from prior systems
 
 - **Cargo (Rust)** — gold standard UX: one tool, one manifest, one lockfile,
   integrated test/bench/doc, **workspaces** (the basis for our `members`). *We
@@ -1189,15 +1512,15 @@ block and one child.
   fix bare TOFU.*
 - **Hackage/Stack, Elm, OPAM, Pub** — curated registries and "one canonical
   package" culture (the basis for `ext`). Elm's **compiler-computed semver
-  bump** is the model for §9.4.
+  bump** is the model for §10.4.
 
 ---
 
-## 12. Implementation roadmap (from the prototype)
+## 13. Implementation roadmap (from the prototype)
 
 | Phase | Work | Touches |
 |-------|------|---------|
-| 1 | Split `lamp` driver from `jinnc`; unify the verb set (§10) | `src/driver/`, new `src/bin/lamp.rs` |
+| 1 | Split `lamp` driver from `jinnc`; unify the verb set (§11) | `src/driver/`, new `src/bin/lamp.rs` |
 | 2 | Manifest v2 (`provides` multi-output, `members`, `capabilities`, `features`, sources, dev-deps, restricted sublanguage §2.1) | `src/pkg.rs` |
 | 3 | Output/member DAG: name unification, cycle detection, per-output scoping (§2.3–2.4) | `src/pkg.rs`, new `src/workspace.rs` |
 | 4 | Content-addressed store + canonical archive + BLAKE3 | `src/cache.rs`, new `src/store.rs` |
@@ -1205,11 +1528,13 @@ block and one child.
 | 6 | MVS resolver + conflict reporting; binary deps as ABI-pinned ranges, used-surface hashing, `requires-isolated` (§3.4, §5.6) | `src/cache.rs` resolve |
 | 7 | Capability derivation from effects; resolver enforcement; FFI taint (§5.5) | typer/effects + `src/pkg.rs` |
 | 8 | Signing, TUF roots + transparency log + revocation, provenance, SBOM | new `src/trust.rs` |
-| 9 | `.jnb` writer/reader: `interface.jhi` (HIR slice), MIR/object pack, `deps.descriptor` (triples), used-surface hash, semver diff (§5.6, §9.4) | new `src/jnb/`, codegen, typer |
+| 9 | `.jnb` writer/reader: `interface.jhi` (HIR slice), MIR/object pack, `deps.descriptor` (triples), used-surface hash, semver diff (§5.6, §10.4) | new `src/jnb/`, codegen, typer |
 | 10 | Registry protocol (versioned) + `lamp serve`; git transport bridge | new `src/registry/` |
 | 11 | Reproducible-build normalization + `--verify` | driver/codegen |
 | 12 | Maintainer surface: bugs, changelog, notes, release/yank (per-output) | new `src/maint/` |
-| 13 | `ext/` tier wiring, curation CI, `lamp nominate`, `lamp gc`, `lamp trust` | repo CI, `ext/` |
+| 13 | Output two-axis model (§2.3.1): kind inference (`lib`/`bin`/`app`/`os`/`raw`) + substrate-dial inference (`runtimeless`/`threadless`/`heapless`) from used surface, layered `libjn` link selection, freestanding `for arch`/`for mcu` targets; derived `app` deploy contract (store-schema fingerprints, settings contract, caps, env reqs) | typer/effects, escape analysis, `src/pkg.rs`, `libjn` link layers |
+| 14 | Deployments: `deployments` manifest block, `project.deploy.lock` record, deploy transaction (build/diff/migrate/gate/apply/rollback), `local`+`host` platforms, fleet/per-tenant rollout (§9) | new `src/deploy/`, `local`/`host` drivers, store-migration check (task 2-31-9) |
+| 15 | `ext/` tier wiring, curation CI, `lamp nominate`, `lamp gc`, `lamp trust` | repo CI, `ext/` |
 
 **Conformance tests** (Jinn style) per phase, plus end-to-end: a multi-output
 project (`bin` + `lib` + a `members` child) builds reproducibly; one binary
@@ -1223,18 +1548,39 @@ stable so binaries link without rebuild; a signature-changing X bump forcing a
 source rebuild of the binary; an irreducible incompatible-major conflict
 producing a hard error, then resolving via `requires-isolated` with both copies
 SBOM-reported; and an application final-link packing the unified closure into a
-single deduplicated executable.
+single deduplicated executable. Deployment cases: an `app` whose kind is
+inferred from an opened `@store` (and a `bin`/`app` mismatch rejected); a deploy
+to a fresh target creating its `project.deploy.lock` record; a re-deploy of the
+same revision being a no-op (idempotent empty diff); a store-schema bump
+planning a checked migration and being blocked when the migration path is
+ill-typed; a settings change introducing a required default-less key blocking
+until supplied; a capability widening surfaced as an explicit acknowledgement; a
+failed migration rolling back to the snapshot and prior record; and a
+per-tenant `for each` fleet rollout where one tenant's failure rolls that
+tenant back while the rest proceed, reported precisely. Output two-axis cases: a
+`bin` inferred `threadless` with the linked artifact confirmed free of
+scheduler symbols; a `heapless` `raw` firmware that *errors* when a reachable
+path allocates (`Vec.push`) and links no allocator when it does not; an `os`
+image inferred freestanding from a boot entry and rejected when it makes a
+hosted syscall; and a pinned dial equal to the inferred one warning only under
+`--pedantic`.
 
 ---
 
-## 13. Summary
+## 14. Summary
 
 lamp is **one tool**, **one manifest (`project.jn`)**, **one lockfile
 (`project.lock`)**, and **one content-addressed, signed, federated store**. A
-single project can **produce many outputs** — multiple executables and `.jnb`
-libraries — that reference each other either *standalone* (by content address,
-across repos) or *hierarchically* (parent includes children, by name within the
-tree, never touching the registry). It makes the safe, reproducible, auditable
+single project can **produce many outputs** described on two orthogonal axes —
+a *kind* (`lib` a `.jnb` library, `bin` a run-and-exit executable, `app` a
+long-lived deployable stateful application, `os` a freestanding bootable image,
+`raw` bare-metal firmware) and a *substrate* (the `libjn` runtime layers it
+assumes, opted out of via `runtimeless`/`threadless`/`heapless`) — both
+inferred from the entry's surface so the output *determines its own packaging,
+link set, and lifecycle* without ceremony. Outputs reference each other
+either *standalone* (by content address, across repos) or *hierarchically*
+(parent includes children, by name within the tree, never touching the
+registry). It makes the safe, reproducible, auditable
 path the *default* and the only ergonomic one. It introduces `ext` to
 concentrate community effort into single canonical packages (with `libjn` kept
 where it belongs — the libc-replacement runtime, not a packaging tier), a
@@ -1250,7 +1596,12 @@ capability system — with the FFI gap closed honestly — that makes a dependen
 powers a reviewable lockfile diff,
 TUF-grade signing with a transparency log and revocation, interface-driven
 semver, and a maintainer surface that lives in the same durable fabric as the
-code. It learns from Cargo's UX and workspaces, Go's MVS and transparency,
+code. It carries that same fabric outward to runtime: `lamp deploy <app>
+<target>` runs and updates application instances — environment ladders or
+per-tenant fleets — as a single reproducible, idempotent transaction over a
+content-addressed deployment record, with binary updates, compile-checked store
+migrations, type-checked settings, and capability grants all surfaced as a
+reviewable diff and rolled back atomically on failure. It learns from Cargo's UX and workspaces, Go's MVS and transparency,
 Nix's store, Deno's capabilities, Maven's multi-module builds, Elm/Hackage
 curation, and Sigstore/SLSA/TUF provenance — while refusing JS-land's tool
 sprawl and install-time code execution. It is the package manager Jinn's ethos

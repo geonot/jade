@@ -1,4 +1,5 @@
 # Changelog
+- **[93]** (2026-06-15 11:10) lamp: decided top-to-bottom spec — separate cap pass, scope identity, interface v2 + hash ladder, config-block sugar (resolves Q1-Q9)
 - **[88]** (2026-06-15 10:24) docs: lamp compiler prerequisites (lamp-prereqs.md) + task 2-32 tree
 - **[87]** (2026-06-15 10:12) lamp: add §5.7 path-scoped identity, hash unification, and the compatibility ladder
 - **[86]** (2026-06-15 08:38) lamp.md: specify transitive-dependency model for .jnb binaries (§5.6) — packed-by-reference + dedup, ABI-pinned MVS, used-surface hashing, requires-isolated escape hatch; reconcile §3.4/§5.2/§11/§12/§13

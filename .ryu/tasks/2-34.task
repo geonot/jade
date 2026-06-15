@@ -1,0 +1,29 @@
+title: 'lamp: deployments / application instances + output-kind clarification'
+status: complete
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-15T04:24:12'
+updated_at: '2026-06-15T04:31:46'
+result: 'docs/lamp.md extended. (A) Output kinds reworked into TWO orthogonal axes
+  in §2.3/§2.3.1: KIND (lib/bin/app hosted; os/raw freestanding) + SUBSTRATE dials
+  (runtimeless/threadless/heapless), both inferred from used surface, pinnable, with
+  located errors on violation. Kind+substrate determine packaging, link set (layered
+  libjn), and lifecycle. (B) New §9 Deployments: `lamp deploy <app> <target>`, deployments
+  manifest block (env ladder + per-tenant for-each fleets), project.deploy.lock deployment
+  record, plan-then-apply deploy transaction (build/verify → diff binary+stores+settings+caps
+  → compile-checked store migrations via task 2-31-9 fingerprints → gate → atomic
+  apply+rollback), target profile (env/settings/persistence/platform: local+host+driver),
+  fleet rollout strategies. Wired into §1.0 (libjn layers), §2.1/§2.2 manifest grammar+keys,
+  §10 renumber (was §9), §11 command table (deploy/rollback/targets), §13 roadmap
+  phases 13+14, §14 summary, and conformance test list. Section numbering 0–14 verified
+  consistent, all §refs resolve.'
+description: 'Extend docs/lamp.md with: (A) clarify output kinds in §2.3 — library
+  vs application vs executable — so packaging is determined by intent. (B) Add a new
+  top-level section specifying DEPLOYMENTS: an application deployed to an environment/platform
+  (dev/stage/prod or per-tenant user1/user2/...). `lamp deploy <application> <target>`
+  handles binary update, store migrations (application persistent @store schema-fingerprint,
+  task 2-31-9), environment, settings, persistence. Wire into §10 command table, §12
+  roadmap, §13 summary. Match doc voice: clean/works-by-default/sensibly-inferred,
+  devops-veteran sensibility, no ceremony in common case. Reuse content-addressing
+  (§5), caps (§6.1), reproducible builds (§7), signing/provenance (§6.2).'
