@@ -233,26 +233,26 @@ boolean position) as a near-certain mistake.
 ### 4.5 The conditional operator `? / ! / !!` — canonical layout
 
 Jinn does not have a separate ternary-versus-`if` distinction. `? / ! / !!` is
-**one** indentation-aware decision construct, and there is no statement-form
-`if` keyword for it to compete with: arms are glyph-tagged so arity is
-unambiguous at the marker, an arm is simply **absent** for a guard, **inline**
-for a one-liner, and **indented** for a block. The formatter treats this as the
-universal conditional and is the single source of truth for its layout.
+**one** indentation-aware decision construct that scales from a boolean ternary
+to the *quaternary* error form. This section governs only its **layout**; the
+arm semantics are canonical in
+[`docs/error-effects.md`](error-effects.md) §4 and the formatter must not drift
+from them.
 
-**Arm grammar (what the markers mean).**
+**Arm grammar (the markers, per error-effects.md §4).** The subject expression
+determines what the arms mean — the formatter never reinterprets them:
 
-| marker | arm | required? |
-| --- | --- | --- |
-| `?` | predicate, then opens the consequent | always |
-| (consequent) | the `then` arm | optional (absent ⇒ guard) |
-| `!` | the `else` arm | optional |
-| `!!` | the **error** arm — only legal when the scrutinee is an error-carrying type | optional |
+| marker | bool subject | `Option`/`Result` subject | binding |
+| --- | --- | --- | --- |
+| `?` | then | success (`Ok(v)` / `Some(v)`) | `$` = unwrapped value |
+| `!` | else | empty (`Nothing`, Option only) | — |
+| `!!` | — | error (`Err(e)`) | `err` = error value |
 
-`!!` is the one type-sensitive marker: it lights up only on a result/error-like
-scrutinee, where `? / ! / !!` is sugar for `match` over `Ok / else / Err`. On a
-plain `bool` scrutinee `!!` is a **compile error** (and `J3110`, below, flags it
-in lint). This keeps the construct honest: two-armed forms are conditionals,
-the `!!` form is match-on-a-sum.
+Arms are optional and default-filled per §4: a bare fallible call `foo()` is
+exactly `foo() ? $ !! err` (success unwraps, error propagates). `$` is legal
+only inside a `?` arm, `err` only inside a `!!` arm. The formatter treats this
+as the universal conditional and is the single source of truth for its
+**layout**, not its meaning.
 
 **Inline vs. block (the layout rule).** An arm is **inline** when it is a single
 expression; it goes on the operator line. An arm becomes a **block** the moment
@@ -262,10 +262,15 @@ multi-statement arm into a parenthesized `;`-chain — indentation is the block
 form.
 
 ```
-foo ? ok()                       # one-armed guard (then only)
-foo ? ok() ! no()                # symmetric two-armed
-not foo ? no()                   # preferred over an empty then-arm: foo ? ! no()
-foo ? ok() ! no() !! err         # error-carrying scrutinee (match sugar)
+cond ? a                         # one-armed (then only)
+cond ? a ! b                     # ternary: then / else
+not cond ? b                     # preferred over an empty then-arm: cond ? ! b
+foo() ? use($) !! log(err)       # quaternary: success ($) / error (err)
+find() ? use($) ! none()         # Option: success / empty
+
+foo()                            # multiline arm form (§4): leading markers
+    ? use($)
+    !! log(err)
 
 user ?                           # multi-statement arms → indented blocks
     validate()
@@ -279,20 +284,23 @@ user ?                           # multi-statement arms → indented blocks
 | id | rule | action |
 | --- | --- | --- |
 | `J0014` | one space around `?`, `!`, `!!`; no space before the marker's body when inline | normalize |
-| `J0015` | empty then-arm `foo ? ! no()` → `not foo ? no()` (negate predicate, drop empty arm) | rewrite |
+| `J0015` | empty then-arm `cond ? ! b` → `not cond ? b` (negate predicate, drop empty arm; bool subjects only) | rewrite |
 | `J1006` | arm whose body is a single expression collapses inline; an arm with ≥2 statements expands to an indented block; markers (`!`, `!!`) sit at the parent indent above their block | normalize |
-| `J1007` | parenthesized `;`-chain in an arm `foo ? (a(); b()) ! …` → indented block form | rewrite |
+| `J1007` | parenthesized `;`-chain in an arm `cond ? (a(); b()) ! …` → indented block form | rewrite |
+| `J1008` | redundant explicit `foo() ? $ !! err` → bare `foo()` (the propagation default, §5) | rewrite |
 
 **Lint (T4).**
 
 | id | rule | nature |
 | --- | --- | --- |
-| `J3110` | `!!` arm on a non-error (`bool`) scrutinee | bug (type misuse) |
+| `J3110` | `!!` arm on a non-fallible subject (a `bool`, or a `Result`/`Option`-free expression) | bug (type misuse) |
 | `J3111` | nested `? … ! ?`-chains ≥3 deep on distinct scrutinees → `match` (readability) | suggestion |
 
 This subsumes the older `J3003` (deeply nested ternary): a chain that is really
 multi-way dispatch over one scrutinee is promoted to `match` (`J3004`/`J3111`),
-while a genuinely two-armed decision stays as `? / !`.
+while a genuinely two-armed decision stays as `? / !`. The `!!` arm is the
+error projection of the *same* construct (error-effects.md §4), not a separate
+operator — `J3110` only fires when `!!` is used where no error value can exist.
 
 ---
 

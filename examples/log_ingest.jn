@@ -1,0 +1,131 @@
+# log_ingest.jn — an access-log ingestion pipeline.
+#
+# Reads Common-Log-Format lines, parses + validates each with checked
+# error-effects, classifies a severity from the status code, and lands the
+# accepted records in a compile-time-checked persistent store. Errors are
+# values: a malformed line is tallied, never fatal.
+
+err ParseError
+    Empty
+    BadLine(String)
+    BadStatus(String)
+    BadBytes(String)
+
+err IngestError
+    Parse(ParseError)
+    Store(StoreError)
+
+impl From of ParseError for IngestError
+    *from(e as ParseError) returns IngestError is Parse(e)
+
+impl From of StoreError for IngestError
+    *from(e as StoreError) returns IngestError is Store(e)
+
+type Hit
+    ip as String
+    path as String
+    status as i64
+    bytes as i64
+
+store hits
+    ip as String @index
+    path as String
+    status as i64
+    bytes as i64
+
+# Parse a non-negative decimal. No surface `parse` exists, so we fold the bytes
+# ourselves — and make the failure a value, not a panic.
+*to_int(s as String) returns i64 ! ParseError
+    if s.is_empty()
+        err BadBytes(s)
+    n is 0
+    for i in 0 to s.length
+        d is s.char_at(i) - 48
+        if d < 0 or d > 9
+            err BadBytes(s)
+        n is n * 10 + d
+    n
+
+*severity(status as i64) returns String
+    status >= 500 ? 'error' ! status >= 400 ? 'warn' ! 'info'
+
+# Bytes field is either '-' (no body) or a decimal count.
+*bytes_of(field as String) returns i64 ! ParseError
+    if field equals '-'
+        0
+    else
+        to_int(field)
+
+# Pull the request path out of the quoted "METHOD path PROTO" field.
+*path_of(line as String) returns String ! ParseError
+    q is line.split('"')
+    if q.len() < 2
+        err BadLine(line)
+    parts is q.get(1).split(' ')
+    if parts.len() < 2
+        err BadLine(line)
+    parts.get(1)
+
+# Common Log Format: ip ident user [time] "req" status bytes
+*parse(line as String) returns Hit ! ParseError
+    if line.trim().is_empty()
+        err Empty
+    f is line.split(' ')
+    if f.len() < 2
+        err BadLine(line)
+    status is to_int(f.get(f.len() - 2)) !! err BadStatus(line)
+    bytes is bytes_of(f.get(f.len() - 1))
+    path is path_of(line)
+    Hit(ip is f.get(0), path is path, status is status, bytes is bytes)
+
+*land(h as Hit) returns i64 ! IngestError
+    insert hits h.ip, h.path, h.status, h.bytes ? $ !! err
+
+type Report
+    accepted as i64
+    rejected as i64
+    bytes as i64
+
+# Parse + persist one line. Returns the accepted byte count, or an error that
+# the caller tallies — a malformed line never aborts the run.
+*absorb(line as String) returns i64 ! IngestError
+    h is parse(line)
+    land(h)
+    h.bytes
+
+*ingest(lines as Vec of String) returns Report
+    accepted is 0
+    rejected is 0
+    total_bytes is 0
+
+    for line in lines
+        match absorb(line)
+            Ok(n) ?
+                accepted += 1
+                total_bytes += n
+            Err(_) ?
+                rejected += 1
+                log('reject: {line}')
+
+    Report(accepted is accepted, rejected is rejected, bytes is total_bytes)
+
+*errors_logged returns i64
+    count hits where status >= 500
+
+*main
+    raw is [
+        '10.0.0.1 - - [10/Oct/2026:13:55:36 -0700] "GET /index.html HTTP/1.1" 200 2326',
+        '10.0.0.2 - - [10/Oct/2026:13:55:37 -0700] "GET /missing HTTP/1.1" 404 -',
+        '10.0.0.3 - - [10/Oct/2026:13:55:38 -0700] "POST /api/pay HTTP/1.1" 503 91',
+        'this is not a log line at all',
+        '',
+    ]
+
+    r is ingest(raw)
+    log('accepted={r.accepted} rejected={r.rejected} bytes={r.bytes}')
+
+    transaction
+        delete hits where bytes equals 0
+
+    log('500-class label: {severity(503)}')
+    log('server errors: {errors_logged()}')

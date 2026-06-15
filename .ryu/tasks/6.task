@@ -1,0 +1,38 @@
+title: Fix 5 codegen bugs surfaced by examples/log_ingest.jn
+status: pending
+atomic: false
+priority: high
+blocked_by: []
+created_at: '2026-06-15T07:52:02'
+updated_at: '2026-06-15T07:52:02'
+result: ''
+description: 'Writing idiomatic Jinn (examples/log_ingest.jn) surfaced 5 real compiler
+  bugs. All have minimal repros (see memory bug_ternary_err_guard_codegen). Definition
+  of done: each repro compiles AND runs correctly; add conformance tests.
+
+
+  1. Ternary statement-guard that raises: `cond ? err Variant` (no else arm) in a
+  fallible fn → codegen `Load of undefined variable err`. Block form `if cond \n err
+  Variant` works. Repro: `*sub(d as i64) returns i64 ! PE` body `d < 0 ? err Bad`
+  then `d`.
+
+
+  2. Qualified variant construction `EnumName.Variant(payload)` → `Load of undefined
+  variable EnumName`. Nullary `Enum.A` degrades match subject to i64. Bare `Variant(x)`
+  / `A` works. NOTE: jinn.md §10 and §498 docs USE the broken qualified form (AppError.Io(e),
+  Severity.Warn) — docs must be corrected too.
+
+
+  3. String-interpolating / to_string of an enum value with a payload → panic at src/codegen/conversions.rs:381
+  (expected IntValue, found StructValue). Need enum Display/to_string lowering.
+
+
+  4. Explicit `return <value>` in a fallible fn does NOT auto-wrap to Ok(value) (only
+  tail expressions do) → LLVM `ret i64 0` vs `%Result_...` mismatch. Repro: `*f(x
+  as i64) returns i64 ! PE` with `if x equals 0 \n return 0` then `x`.
+
+
+  5. A function returning a nullary-variant enum value produces a type-mismatched
+  aggregate when stored into a record field → LLVM `Invalid InsertValueInst operands`
+  (`%Sev %call` into `%H`). Repro: `*pick() returns Sev` body `Warn`; then `H(s is
+  pick())` or `v is pick(); H(s is v)`.'
