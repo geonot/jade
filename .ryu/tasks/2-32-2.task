@@ -1,12 +1,19 @@
 title: Formalize capability/effect system
-status: pending
+status: complete
 atomic: false
 priority: high
 blocked_by:
 - 2-32-1
 created_at: '2026-06-15T03:24:10'
-updated_at: '2026-06-15T03:24:10'
-result: ''
+updated_at: '2026-06-15T05:49:29'
+result: Capability/effect system formalized and landed end-to-end per docs/caps.md.
+  src/caps.rs (closed lattice + CapSet join/containment + CapRow empty-row promotion),
+  src/cap_sites.rs (CAP_SITES SSOT table), src/typer/caps.rs (SCC-fixpoint derivation
+  pass reusing scc.rs, primitive-site detection for Call+Method forms, derived⊑declared
+  check with shortest-call-path diagnostic), AST+parser `needs` clause at fn/method
+  level (contextual keyword, `needs pure`/`needs ()` checked-empty). Wired into typer
+  after errset. 21 new tests, zero new warnings/clippy, no regressions (3 column_*
+  failures pre-existing).
 description: 'Build the capability system (docs/lamp-prereqs.md §2). Subtasks will
   cover: capability lattice (fs.read/write path-scoped, net.client/server, process.spawn,
   env.read, clock, time, random, ffi.unsafe, state) with containment relation; declaration
