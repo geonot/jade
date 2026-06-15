@@ -130,6 +130,7 @@ pub struct Typer {
     pub(crate) dollar_stack: Vec<(DefId, Type)>,
 
     pub(crate) root_pkg_id: Option<crate::pkgid::PkgId>,
+    pub(crate) dep_pkg_ids: std::collections::HashMap<crate::intern::Symbol, crate::pkgid::PkgId>,
 }
 
 #[derive(Debug, Clone)]
@@ -215,6 +216,7 @@ impl Typer {
             escape_tiers: std::collections::HashMap::new(),
             dollar_stack: Vec::new(),
             root_pkg_id: None,
+            dep_pkg_ids: std::collections::HashMap::new(),
         }
     }
 
@@ -224,6 +226,13 @@ impl Typer {
 
     pub fn set_root_pkg_id(&mut self, id: crate::pkgid::PkgId) {
         self.root_pkg_id = Some(id);
+    }
+
+    pub fn set_dep_pkg_ids(
+        &mut self,
+        ids: std::collections::HashMap<crate::intern::Symbol, crate::pkgid::PkgId>,
+    ) {
+        self.dep_pkg_ids = ids;
     }
 
     pub fn set_test_mode(&mut self, enabled: bool) {

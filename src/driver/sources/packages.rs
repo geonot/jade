@@ -1,6 +1,13 @@
 use super::*;
+use crate::pkgid::{PkgId, ScopePath, PackageRecord, compute_semantic_hash};
 
 pub(in crate::driver) fn load_packages(base_dir: &std::path::Path) -> HashMap<Symbol, PathBuf> {
+    load_packages_with_ids(base_dir).0
+}
+
+pub(in crate::driver) fn load_packages_with_ids(
+    base_dir: &std::path::Path,
+) -> (HashMap<Symbol, PathBuf>, HashMap<Symbol, PkgId>) {
     let project_root = find_project_root(base_dir).unwrap_or_else(|| base_dir.to_path_buf());
     let project_jinn = project_root.join("project.jn");
     let requires = if project_jinn.exists() {
@@ -12,7 +19,7 @@ pub(in crate::driver) fn load_packages(base_dir: &std::path::Path) -> HashMap<Sy
         Vec::new()
     };
     if requires.is_empty() {
-        return HashMap::new();
+        return (HashMap::new(), HashMap::new());
     }
     let pkg = Package {
         name: String::new(),
@@ -36,5 +43,29 @@ pub(in crate::driver) fn load_packages(base_dir: &std::path::Path) -> HashMap<Sy
         .unwrap_or_else(|e| die(&format!("resolve: {e}")));
     let lock_content = resolved.write();
     fs::write(&lock_file, &lock_content).unwrap_or_else(|e| die(&format!("write lock: {e}")));
-    build_package_map(&cache, &resolved)
+    let path_map = build_package_map(&cache, &resolved);
+    let id_map = build_pkg_id_map(&path_map);
+    (path_map, id_map)
+}
+
+fn build_pkg_id_map(path_map: &HashMap<Symbol, PathBuf>) -> HashMap<Symbol, PkgId> {
+    let mut ids = HashMap::new();
+    for (&name, path) in path_map {
+        let src = crate::driver::sources::dag::source_bytes_for(path);
+        let hash = compute_semantic_hash(
+            name,
+            ScopePath::root(),
+            &SemVer { major: 0, minor: 0, patch: 0 },
+            &src,
+            &[],
+        );
+        let pkg_id = PkgId::intern(PackageRecord {
+            name,
+            owner_scope: ScopePath::root(),
+            version: SemVer { major: 0, minor: 0, patch: 0 },
+            semantic_hash: hash,
+        });
+        ids.insert(name, pkg_id);
+    }
+    ids
 }

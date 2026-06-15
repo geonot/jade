@@ -1,11 +1,15 @@
 title: Thread PackageId through resolver
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-15T05:51:53'
-updated_at: '2026-06-15T05:51:53'
-result: ''
+updated_at: '2026-06-15T12:15:16'
+result: 'Added load_packages_with_ids() to packages.rs — returns (HashMap<Symbol,
+  PathBuf>, HashMap<Symbol, PkgId>) by computing semantic_hash for each resolved package.
+  Added dep_pkg_ids: HashMap<Symbol, PkgId> field + set_dep_pkg_ids() method to Typer.
+  pipeline.rs now calls load_packages_with_ids and passes the PkgId map into the Typer.
+  Resolution phase is now PackageId-aware. Zero warnings, 289 lib tests pass.'
 description: Update the resolution phase to carry PackageId context, replacing reliance
   on string prefix_module identity during resolve. Done when resolution operations
   are PackageId-aware and resolve-phase tests pass with scoped identities. Depends

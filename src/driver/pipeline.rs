@@ -17,7 +17,7 @@ use crate::typer::Typer;
 use super::cli::strip_codegen_prefix;
 use super::cli::*;
 use super::sources::{
-    EntityIndex, load_packages, merge_source_files, resolve_implicit_imports, resolve_modules,
+    EntityIndex, load_packages_with_ids, merge_source_files, resolve_implicit_imports, resolve_modules,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -53,7 +53,7 @@ pub(super) fn compile_and_link(
     let mut loaded: HashSet<Symbol> = merged;
 
     loaded.insert(Symbol::intern(&input_canon.to_string_lossy()));
-    let packages = load_packages(base_dir);
+    let (packages, pkg_id_map) = load_packages_with_ids(base_dir);
     resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
     let entity_index = EntityIndex::build(base_dir, &packages);
     resolve_implicit_imports(&mut prog, base_dir, &mut loaded, &packages, &entity_index);
@@ -100,6 +100,7 @@ pub(super) fn compile_and_link(
     let mut typer = Typer::new();
     typer.set_source_dir(base_dir.to_path_buf());
     typer.set_root_pkg_id(root_pkg_id);
+    typer.set_dep_pkg_ids(pkg_id_map);
     if test_mode {
         typer.set_test_mode(true);
     }

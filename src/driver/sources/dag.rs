@@ -46,7 +46,7 @@ pub fn flatten_workspace(
     Ok(dag)
 }
 
-fn source_bytes_for(path: &std::path::Path) -> Vec<u8> {
+pub fn source_bytes_for(path: &std::path::Path) -> Vec<u8> {
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(path) {
         let mut paths: Vec<PathBuf> = entries
