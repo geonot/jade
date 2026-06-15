@@ -713,6 +713,181 @@ property of the lockfile.
 
 ---
 
+### 5.7 Path-scoped identity, hash unification, and the compatibility ladder
+
+§5.6 resolves *which version* of a dependency enters the graph. §5.7 specifies
+*how every package is named internally*, *when two packages may be proven the
+same and collapsed*, and *what happens at a type boundary when they are not*.
+The three layers are strictly separated so that each stays simple:
+
+1. **Resolution names everything by path (always).** Deterministic, local.
+2. **Unification collapses provably-identical packages (an optimization).**
+   Hash-driven, safe-by-construction, never changes program meaning.
+3. **The boundary flag decides cross-version coercion (a one-bit policy).**
+   Default-exclusive, set by the exposer.
+
+#### 5.7.1 The fully-qualified name
+
+Every package instance has a canonical internal identity that is **scoped to its
+immediate parent**:
+
+```
+foo:bar              # foo's direct dependency bar
+foo:baz:bar          # bar as seen by baz, which is foo's dependency
+```
+
+`baz`'s `use bar` resolves against **`baz`'s** manifest — `foo:baz:bar` — with
+no global negotiation. `foo`'s own `use bar` resolves to `foo:bar`. The two are
+distinct identities by construction; resolution is purely local and therefore
+deterministic (npm's nested insight, without npm's flat-collision arbitration).
+
+The full reference carries version, owner-scope, and the **BLAKE3 semantic
+hash** (§5.7.3):
+
+```
+bar[blake3:7d1a…]{foo:baz}(1.2.0)
+```
+
+A consumer may reach a transitive dependency explicitly with a **path import**,
+`use baz/bar`, which binds `foo:baz:bar` directly. This is allowed only when
+`baz` **re-exports** `bar` (a manifest `reexport bar` declaration); an
+un-re-exported reach-in is a hard error, because a private implementation detail
+of `baz` (which `bar` it happens to use) must not silently become part of
+`foo`'s build — the npm reach-in fragility, closed by requiring consent.
+
+#### 5.7.2 The unification pass — promote provably-identical packages
+
+Path-scoping would, naively, force one copy of `bar` per scope even when they are
+byte-identical. The **unification pass** recovers global dedup (§5.6.1) *as a
+provably-safe optimization* rather than baking it into resolution:
+
+> Two path-scoped instances `A` and `B` may be **promoted** to a single global
+> entity — owner-scope and version dropped from the symbol, one copy of the
+> code, one set of symbols — **iff** they satisfy the *promotion predicate*.
+
+**Promotion predicate.** `A` and `B` are promotable iff:
+
+- **(identity)** their **semantic hashes are equal** (§5.7.3) — same code,
+  same transitive layout, same ownership/Perceus glue, same effect rows; **and**
+- **(purity)** their interface is **effect-free in the capability sense
+  (§6.1)** — the module declares no ambient state capability.
+
+The purity clause is the keystone, and it is *free* because state is a
+capability, not an ambient: a module that owns process-wide mutable state
+(a registry, an interner, a `@store` handle, a scheduler hook) carries that
+state as a declared cap threaded through its signature. Therefore:
+
+- A **stateless** module (no state-cap in its signature) is *provably* free of
+  hidden singletons. Identical hash ⇒ identical, observable-behaviour-preserving
+  ⇒ unconditionally safe to collapse to one symbol. No heuristic "scan for
+  globals" pass is needed — the cap system *is* the proof.
+- A **stateful** module never accidentally aliases under unification: even if its
+  *code* hash is identical and the code is shared, its *state* is per-cap, so two
+  instantiations passed distinct cap instances stay distinct **by construction**.
+  Code dedup and state identity are orthogonal; the cap makes them so for free.
+
+Promotion is a pure optimization: it changes symbol count and binary size, never
+program meaning. For the monomorphizing, value-semantics backend this directly
+defeats the version-count × generic-fan-out code-bloat that pure nested
+resolution would cause (identical semantic hash ⇒ identical monomorphization ⇒
+one copy).
+
+#### 5.7.3 The compatibility ladder — three hashes, not one
+
+A version number is a human claim; the hash is the truth (§5.6.3 already pins
+this for `iface`). §5.7 generalizes it into a **three-rung ladder**, computed
+over canonical, deterministic input (the **typed, monomorphized MIR** — *not*
+raw object code, which carries addresses, relocations, opt-level and
+target-triple noise and would almost never match; see §5.7.5):
+
+| Rung | Hash | What it covers | Equality means | Default action |
+|------|------|----------------|----------------|----------------|
+| **object** | binary hash of final object | code + layout + codegen | bit-identical artifact | link-time dedup (§5.7.5) |
+| **abi** | Merkle hash of the **full transitive type/ownership/effect closure** of the used surface | memory layout, field order/size, Perceus owned-vs-borrowed obligations, **cap/effect rows**, calling convention of every type reachable through the signature | the ABI contract is identical; code may differ | **coercible** across versions when the boundary flag permits (§5.7.4) |
+| **api** | hash of names + arity + nominal type identities only | the call *shape* | the surface looks the same; the contract may not | **never auto-coerce**; warn only |
+
+The **abi** rung is the load-bearing, correctness-critical one, and it is why a
+shallow signature hash is *forbidden*: `f(c: Config)` keeps the same `api` hash
+when `Config` silently gains a field or widens an `i32`→`i64`, yet that flips
+both layout and Perceus glue. The abi hash is therefore a **recursive Merkle
+hash over the entire reachable type graph** (with cycle handling), including:
+
+- field layout, order, and size of every reachable type;
+- the Perceus ownership protocol (which fields are owned vs borrowed, drop/reuse
+  glue) — *part of the ABI, not an afterthought*;
+- the **capability/effect signature** — so a function that *acquires* a state
+  cap between v1 and v2 hashes differently even at identical data layout, which
+  is exactly right: gaining an effect *is* a behavioural/ABI change;
+- calling-convention determinants (sret threshold, enum tag/niche layout).
+
+Hashing only immediate param/return *identities* would make the abi rung a
+silent memory-corruption generator for a value-semantics language with no boxing
+escape hatch; the Merkle closure is mandatory.
+
+The ladder drives diagnostics: object-match ⇒ unify silently; abi-match,
+object-differ ⇒ *"compatible; behaviour may differ between X 1.2.0 and 2.0.0"*;
+api-match, abi-differ ⇒ *"surface matches but the ABI contract changed; will not
+unify"* — each naming both fully-qualified identities and their hashes.
+
+#### 5.7.4 The boundary flag — default exclusive, set by the exposer
+
+When two scoped instances are **not** promotable and a value of one crosses into
+the other (`foo:baz:bar:Config` handed to `foo:bar:bar`'s `configure`), they are
+**distinct nominal types** and the call is **rejected** — the sound default,
+made unambiguous by full qualification. The *only* open decision is the policy
+knob, which is one bit:
+
+- **`exclusive` (default)** — the dep is private to its scope; cross-version
+  coercion is forbidden; the reject stands. A scoped instance's choice of
+  transitive version is *not* part of its public ABI.
+- **`unify-ok`** — declared **by the package that exposes the type in a public
+  signature**, this permits the compiler to coerce across versions *exactly when
+  the **abi** hashes match* (§5.7.3). The boundary call then succeeds against one
+  shared layout.
+
+Default-exclusive matters: silent unification on incidental hash collision would
+make `baz`'s private choice of `bar` into part of `baz`'s ABI — a patch bump
+inside `baz` could start or stop unifying with `foo`'s `bar` and flip whether
+`foo` compiles. The flag is therefore set by the side that *exposes* the type,
+never inferred. This is the same public/private distinction §5.6.4's
+`requires-isolated` gestures at, now stated as an affirmative, exposer-owned
+opt-in rather than an escape hatch.
+
+#### 5.7.5 Two hashes, two jobs: semantic vs binary
+
+The ladder's **abi**/**api** rungs are *semantic* — they must be deterministic
+and target-independent, so they are folded over the **canonical typed MIR**, the
+same artifact §5.6.6 already hashes for the used surface. The **object** rung is
+a *binary* hash over the final compiled object, used solely for link-time dedup
+and the reproducible-build check (§7). Conflating them breaks both: a binary hash
+over object code rarely matches across builds (defeating unification), and a
+semantic hash cannot dedup identical final objects. lamp keeps them distinct:
+**semantic hash decides compatibility and promotion; binary hash decides
+artifact identity.** The store (§4) keys on the binary hash; the resolver and
+unification pass key on the semantic hash.
+
+#### 5.7.6 The extreme case, and why it is sound
+
+Two incompatible majors may coexist deliberately:
+
+```jinn
+use foo@1.2.0 as foo1
+use foo@2.0.0 as foo2
+```
+
+This is admitted because the model already supports it: `foo1` and `foo2` are
+`foo:foo1`-scoped and `foo:foo2`-scoped distinct identities with distinct abi
+hashes, never promoted, their caps unioned separately into the consumer
+(§6.1), both shown `[isolated]` in `lamp tree --caps` (§5.6.4). The one hazard is
+**coherence**: if Jinn grows protocols/typeclasses, `foo@1` and `foo@2` could
+each `impl Show for SharedType`, and a use site with a `SharedType` of ambiguous
+provenance has two candidate instances. Until coherence is specified, lamp
+**rejects** two live versions that would produce overlapping instances on a type
+they do not both own (the orphan rule, version-aware). `as foo1/as foo2` is
+permitted only when no such overlap exists.
+
+---
+
 ## 6. Supply-chain security (the core of lamp)
 
 Threat model: malicious/compromised transitive deps, typosquatting,

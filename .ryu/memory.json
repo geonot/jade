@@ -106,8 +106,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-13T16:47:53+00:00",
-      "ts_accessed": "2026-06-13T16:47:53+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-15T08:49:06+00:00",
+      "access_count": 1
     },
     "task_2-31-6_impl": {
       "key": "task_2-31-6_impl",
@@ -142,8 +142,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-13T17:16:26+00:00",
-      "ts_accessed": "2026-06-13T17:16:26+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-15T08:49:06+00:00",
+      "access_count": 1
     },
     "task_2-31-8_design": {
       "key": "task_2-31-8_design",
@@ -154,8 +154,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-13T17:27:13+00:00",
-      "ts_accessed": "2026-06-14T02:26:15+00:00",
-      "access_count": 1
+      "ts_accessed": "2026-06-15T08:49:06+00:00",
+      "access_count": 3
     },
     "task_2-31-8_impl": {
       "key": "task_2-31-8_impl",
@@ -166,8 +166,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-13T17:44:32+00:00",
-      "ts_accessed": "2026-06-14T02:26:15+00:00",
-      "access_count": 1
+      "ts_accessed": "2026-06-15T08:49:06+00:00",
+      "access_count": 3
     },
     "task_2-31-9_design": {
       "key": "task_2-31-9_design",
@@ -214,8 +214,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-13T21:03:03+00:00",
-      "ts_accessed": "2026-06-14T06:54:34+00:00",
-      "access_count": 2
+      "ts_accessed": "2026-06-15T10:11:02+00:00",
+      "access_count": 5
     },
     "concurrency_impl_arch": {
       "key": "concurrency_impl_arch",
@@ -226,8 +226,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-13T21:10:16+00:00",
-      "ts_accessed": "2026-06-13T21:10:16+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-15T10:11:02+00:00",
+      "access_count": 1
     },
     "task_2-10_impl": {
       "key": "task_2-10_impl",
@@ -238,8 +238,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-13T21:43:37+00:00",
-      "ts_accessed": "2026-06-13T21:43:37+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-15T08:49:06+00:00",
+      "access_count": 1
     },
     "join_keyword_contextual": {
       "key": "join_keyword_contextual",
@@ -262,8 +262,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-13T22:41:02+00:00",
-      "ts_accessed": "2026-06-14T06:54:34+00:00",
-      "access_count": 1
+      "ts_accessed": "2026-06-15T08:49:06+00:00",
+      "access_count": 4
     },
     "task_2-6-4_impl": {
       "key": "task_2-6-4_impl",
@@ -274,8 +274,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-14T02:23:28+00:00",
-      "ts_accessed": "2026-06-14T06:54:34+00:00",
-      "access_count": 2
+      "ts_accessed": "2026-06-15T10:11:02+00:00",
+      "access_count": 6
     },
     "task_2-6-5_progress": {
       "key": "task_2-6-5_progress",
@@ -298,8 +298,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-14T03:31:10+00:00",
-      "ts_accessed": "2026-06-14T06:54:46+00:00",
-      "access_count": 2
+      "ts_accessed": "2026-06-15T10:11:02+00:00",
+      "access_count": 6
     },
     "task_2-6-5-3_findings": {
       "key": "task_2-6-5-3_findings",
@@ -322,8 +322,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T05:01:19+00:00",
-      "ts_accessed": "2026-06-15T05:01:19+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-15T10:11:02+00:00",
+      "access_count": 4
     },
     "task_5_fmt_spec": {
       "key": "task_5_fmt_spec",
@@ -334,8 +334,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T05:19:22+00:00",
-      "ts_accessed": "2026-06-15T05:19:22+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-15T10:11:02+00:00",
+      "access_count": 2
     },
     "task_2-19_rev2_requirements": {
       "key": "task_2-19_rev2_requirements",
@@ -346,8 +346,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T08:12:55+00:00",
-      "ts_accessed": "2026-06-15T08:12:55+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-15T10:11:02+00:00",
+      "access_count": 4
     },
     "lamp_transitive_dep_model": {
       "key": "lamp_transitive_dep_model",
@@ -363,7 +363,61 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T08:38:28+00:00",
-      "ts_accessed": "2026-06-15T08:38:28+00:00",
+      "ts_accessed": "2026-06-15T10:11:02+00:00",
+      "access_count": 5
+    },
+    "lamp_5.7_multiversion_design": {
+      "key": "lamp_5.7_multiversion_design",
+      "value": "lamp.md \u00a75.7 (new): path-scoped multi-version dep model. THREE STRICT LAYERS: (1) resolution names everything by parent-scoped path ALWAYS (foo:bar, foo:baz:bar) \u2014 local/deterministic; baz's `use bar` -> foo:baz:bar. Full ref: bar[blake3:..]{foo:baz}(1.2.0). `use baz/bar` path-import allowed ONLY if baz `reexport bar` (no silent reach-in). (2) UNIFICATION PASS = optimization: promote two scoped instances to one global symbol iff PROMOTION PREDICATE = (semantic hash equal) AND (effect-free in cap sense). (3) BOUNDARY FLAG = one bit policy: default `exclusive` (reject cross-version coercion, sound), `unify-ok` set BY THE EXPOSER permits coercion when abi-hash matches. `use foo@1 as foo1`/`@2 as foo2` admitted but rejected when it would create overlapping protocol instances (coherence/orphan, version-aware).",
+      "kind": "decision",
+      "tags": [
+        "lamp",
+        "packaging",
+        "multiversion",
+        "task_2-19",
+        "jnb"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T10:12:41+00:00",
+      "ts_accessed": "2026-06-15T10:12:41+00:00",
+      "access_count": 0
+    },
+    "lamp_abi_hash_must_be_merkle": {
+      "key": "lamp_abi_hash_must_be_merkle",
+      "value": "PITFALL (lamp \u00a75.7.3): the compatibility hash MUST be a deep Merkle hash over the FULL transitive type/ownership/effect closure of the used surface \u2014 NOT a shallow signature/param-return hash. A shallow hash keeps matching when Config silently gains a field or i32->i64 widens, but that flips memory layout + Perceus owned/borrowed drop glue => memory corruption (no boxing escape hatch in value-semantics Jinn). Merkle closure must include: field layout/order/size, Perceus ownership protocol, CAP/EFFECT rows (acquiring an effect = ABI change), calling-conv (sret threshold, enum niche). Three rungs: object (binary hash, link dedup), abi (Merkle semantic, coercible when unify-ok), api (names+arity only, warn-never-coerce).",
+      "kind": "pitfall",
+      "tags": [
+        "lamp",
+        "abi",
+        "hashing",
+        "perceus",
+        "multiversion"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T10:12:41+00:00",
+      "ts_accessed": "2026-06-15T10:12:41+00:00",
+      "access_count": 0
+    },
+    "lamp_cap_promotion_invariant": {
+      "key": "lamp_cap_promotion_invariant",
+      "value": "KEYSTONE DECISION (lamp \u00a75.7.2): module-level state is a CAPABILITY not ambient => unification safety is FREE. Promotable <=> semantic-hash-equal AND effect-free-signature. Stateless module: identical hash => provably no hidden singleton => unconditionally safe to collapse (no 'scan for globals' heuristic needed; cap system IS the proof). Stateful module: code dedup orthogonal to state identity \u2014 code shared, state per-cap, two instantiations w/ distinct caps stay distinct by construction. Also: semantic hash (typed MIR, target-indep) decides compat/promotion; binary hash (object) decides artifact identity/link-dedup \u2014 keep distinct, conflating breaks both.",
+      "kind": "decision",
+      "tags": [
+        "lamp",
+        "caps",
+        "unification",
+        "multiversion",
+        "perceus"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T10:12:41+00:00",
+      "ts_accessed": "2026-06-15T10:12:41+00:00",
       "access_count": 0
     }
   }
