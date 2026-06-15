@@ -1,4 +1,5 @@
 # Changelog
+- **[85]** (2026-06-15 08:16) lamp spec rev2: project.lock, .jnb, multi-output + members, libjn dereferenced, TUF/FFI/MVS-lock fixes
 - **[84]** (2026-06-15 05:19) docs: add idiomatic.md (anti-pattern catalog) + fmt.md (jinn fmt+lint spec)
 - **[82]** (2026-06-15 05:04) docs(lamp): comprehensive technical spec for the Jinn package system (task 2-19 design)
 - **[80]** (2026-06-14 03:31) 2-6-5-2: scope task records propagated error; together surfaces it (E1/E5) + conformance tests

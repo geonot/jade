@@ -348,6 +348,23 @@
       "ts_created": "2026-06-15T08:12:55+00:00",
       "ts_accessed": "2026-06-15T08:12:55+00:00",
       "access_count": 0
+    },
+    "lamp_transitive_dep_model": {
+      "key": "lamp_transitive_dep_model",
+      "value": "lamp.md \u00a75.6 (new): how a .jnb binary's transitive deps work. DECISION: binaries reference deps by content-address (option c: packed-by-reference, deduplicated), NEVER fat-bundle (rejected: kills dedup, unpatchable CVEs, Maven shaded-jar antipattern). Mechanism: (1) .jnb carries deps.descriptor = triples (range, iface-hash=used-surface BLAKE3, built-version), NO dep bytes. (2) Resolver folds binary ranges into ONE global MVS solution -> single-version unification holds across binary boundary (fixes old \u00a73.4 'leaf pinned to exact version' which contradicted \u00a73.1). (3) ABI check: selected X's used-surface iface hash must match what binary compiled against -> fast path no rebuild; mismatch -> rebuild from source if shipped, else per-edge pin to matching X, else hard error. (4) used-surface hash (\u00a75.6.6) = hash only of X symbols A's MIR references, so unrelated X additions don't force rebuilds. (5) genuine incompat -> hard error, escape hatch requires-isolated (namespaced dup copies, SBOM-reported). (6) lib=always by-ref; bin/app=final-link packs unified closure ONCE at leaf after unification. (7) lock gains iface + via + pin(abi|isolated) fields. Also rewrote \u00a73.4, \u00a75.2 structure, \u00a711 Maven bullet, \u00a712 phases 6&9, \u00a713 summary, conformance tests.",
+      "kind": "decision",
+      "tags": [
+        "lamp",
+        "task_2-19",
+        "packaging",
+        "jnb"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T08:38:28+00:00",
+      "ts_accessed": "2026-06-15T08:38:28+00:00",
+      "access_count": 0
     }
   }
 }

@@ -375,14 +375,34 @@ supply-chain review surface. Intra-tree member `lib`s (§2.4 hierarchical mode)
 are recorded with `source path` and a content hash of the built `.jnb`, so even
 local outputs participate in integrity checking.
 
-### 3.4 Binary deps and isolation
+### 3.4 Binary deps and the resolution boundary
 
-A `requires-isolated` duplicate, or any dependency consumed as a binary
-`.jnb` (§5), cannot be recompiled to unify versions. The resolver therefore
-treats binary deps as **leaf nodes pinned to the exact published version** and
-refuses to "bump them up" under MVS. If two binary deps demand incompatible
-majors of a third binary, that is a hard, unfixable error reported with both
-import paths — there is no silent shimming.
+A `.jnb` consumed in `binary`/`binary-debug` flavor (§5) carries *already
+compiled* code. This raises the question the rest of this spec must answer
+precisely: **when A is a binary and A requires X@1, Y@2, where do X and Y come
+from, and at which versions?** Naively treating a binary as an opaque "leaf
+pinned to its published versions" is wrong — it silently re-introduces the
+diamond/duplicate-version problem that §3.1's single-version unification exists
+to kill. The full mechanism is specified in **§5.6**; the resolution-level
+contract is:
+
+1. **A `.jnb`'s dependency edges are open, not frozen, by default.** A binary
+   publishes its deps as *version ranges with interface hashes* (§5.6.2), not
+   as hard-pinned bytes. The consumer's resolver folds those ranges into the
+   one global MVS solution, so X resolves to **one** version across source and
+   binary consumers alike. Single-version unification (§3.1) holds across the
+   binary boundary.
+2. **What a binary *cannot* do is recompile itself.** Its `mir/`/`object/` were
+   monomorphized against the interface hashes it recorded. The resolver may
+   pick any X in A's declared range **only if** that X's `interface.jhi` hash
+   matches what A was compiled against (an *ABI-compatible* pick), or A ships
+   source for a rebuild. §5.6.3 makes this check exact.
+3. **Genuine incompatibility still fails loudly.** If two binaries were
+   compiled against interface-incompatible majors of a third dependency and no
+   single version satisfies both interface hashes, that is a hard error
+   reporting both binaries, both ranges, and both interface hashes — never a
+   silent duplicate. Deliberate coexistence requires `requires-isolated`
+   (§5.6.4), and each isolated copy is reported in the SBOM.
 
 ---
 
@@ -442,7 +462,8 @@ link, and optionally debug a library **without its source**.
 A `.jnb` is a sealed canonical archive (§5.4) containing:
 
 ```
-project.jn           # package identity, version, caps, deps, feature map
+project.jn           # package identity, version, caps, feature map
+deps.descriptor      # dependency triples (range, iface-hash, built) — §5.6.2; NO dep bytes
 interface.jhi        # "Jinn header interface" — see §5.3
 mir/<target>/        # serialized typed MIR per target (the linkable code)
 object/<target>/     # native object/static-lib per target (optional, fast-link)
@@ -450,6 +471,9 @@ debug/<target>/      # DWARF + source map + MIR↔source spans (debug variant)
 provenance.json      # toolchain version, source content hash, build env hash
 sig                  # signature over the whole sealed archive
 ```
+
+A `.jnb` carries **only its own code**; the bytes of X and Y live once in the
+content-addressed store and are referenced, never embedded (§5.6).
 
 Three publish flavors:
 
@@ -516,6 +540,176 @@ close this honestly rather than pretend:
 3. `lamp build --deny ffi.unsafe` refuses such a graph entirely. This gives the
    consumer a hard, auditable boundary: trusting a binary's FFI is an explicit,
    logged decision, never silent.
+
+### 5.6 Transitive dependencies of a binary — the resolution model
+
+This is the question on which any binary-library design lives or dies: **A is a
+`.jnb`; A requires X@1 and Y@2. Does A bundle X and Y inside itself, fetch them
+by manifest at the consumer's build, or something in between?** Every prior
+system answers badly in one of two ways — *static bundling* (each binary
+carries private copies; you get N copies of X, code bloat, and no security
+patch propagation, the Maven shaded-jar / Go-vendor-into-binary failure) or
+*unconstrained late binding* (the binary names a range and prays the consumer
+picks something link-compatible, the C/C++ shared-object hell). lamp takes a
+third path that the content-addressed store and `interface.jhi` make possible.
+
+#### 5.6.1 Principle: a binary references its deps, it does not contain them
+
+**A `.jnb` never embeds the bytes of its dependencies.** It is *not* a fat
+archive. A `.jnb` for A contains only A's own `interface.jhi`, A's own
+`mir/`/`object/`, and a **dependency descriptor** naming X and Y. X and Y are
+resolved into the *same* content-addressed store (§4) as everything else and
+**deduplicated globally**. If three binaries and your own source all depend on
+the same X@1.2.0, there is exactly **one** `blake3-…/X` store entry, used by
+all four. This is precisely the user's option (c) — *packed-by-reference,
+independent, deduplicated* — chosen deliberately over fat bundling (a) and over
+naive by-manifest refetch (b), while subsuming the good parts of both: like (b)
+the bytes are fetched/located through the resolver, but like (a) the build is
+fully pinned and offline-capable because the descriptor records exact content
+hashes, not just names.
+
+The fat-bundle option is rejected outright: it defeats the store's dedup,
+multiplies the attack surface, makes a CVE in X unpatchable without rebuilding
+every binary that bundled it, and inflates the SBOM with hidden copies. The
+only exception is `lamp vendor`/static-final-link for air-gapped *application*
+delivery (§5.6.5), which is an explicit end-of-line packaging step, never the
+library format.
+
+#### 5.6.2 The binary dependency descriptor
+
+Inside A's `.jnb`, the `project.jn` `deps` are recorded not as bare names but as
+**triples** — `(range, interface-hash, compiled-against-version)`:
+
+```
+deps
+  X  range '^1.0'  iface blake3:7d1a…  built 1.2.0
+  Y  range '^2.3'  iface blake3:0fe4…  built 2.4.1
+```
+
+- **`range`** — the semver range A's *author* declared. Feeds the consumer's
+  MVS exactly like a source dep's range. A binary is a first-class participant
+  in the one global resolution, not a leaf.
+- **`iface`** — the BLAKE3 of the `interface.jhi` of the *exact* X that A's
+  `mir/object` were compiled and monomorphized against. This is the ABI anchor.
+- **`built`** — the concrete version A was built against, for diagnostics and as
+  the MVS *floor* for this edge (A cannot link against an X older than the one
+  it was compiled with).
+
+The descriptor is part of the signed, canonical archive (§5.4), so A's declared
+dependency surface is tamper-evident and travels with the bytes.
+
+#### 5.6.3 How the consumer resolves a binary's deps — ABI-pinned MVS
+
+When A is in the graph, the resolver:
+
+1. **Folds A's `range`s into the global MVS solution.** X's selected version is
+   the MVS minimum satisfying *all* requesters — A's source siblings, other
+   binaries, and A — exactly as for source. Result: one X version, tree-wide
+   (§3.1 preserved).
+2. **Checks ABI compatibility of the pick against A's `iface` hash.** Two
+   outcomes:
+   - **Interface-hash match** (the common case under semver — a patch/minor
+     bump that adds API but does not change the symbols A uses keeps A's used
+     surface hash-stable; see §5.6.6 on *surface hashing*): A's pre-compiled
+     `mir/object` links directly against the selected X. No rebuild. This is the
+     fast path and the whole point of binaries.
+   - **Interface-hash mismatch** (X's selected version changed the surface A was
+     built against): A's compiled code is **stale** for this X. lamp then, in
+     order: (a) if A shipped `source` flavor, **rebuilds A from source** against
+     the selected X — binaries silently degrade to source builds rather than
+     link garbage; (b) else if a different in-range X exists whose interface
+     hash *does* match A's `iface`, the resolver may select that X for A's
+     subgraph (the narrow, recorded use of per-edge pinning); (c) else **hard
+     error**: "binary A was built against X interface `7d1a…`; no in-range X
+     provides it and A ships no source — rebuild A or relax the constraint,"
+     naming every party.
+3. **Records the outcome in `project.lock`.** The lock gains a `via` field on
+   binary-introduced edges so the review surface shows *why* an X version is
+   present and which binary's ABI pinned it (§5.6.7).
+
+The crucial invariant: **lamp never links a binary against a dependency whose
+interface differs from the one it was compiled against.** A version number is
+not an ABI promise; the `interface.jhi` hash is. This closes the C/C++ "right
+soname, wrong layout" class of bugs by construction.
+
+#### 5.6.4 When a single version genuinely cannot satisfy everyone
+
+If binary A needs X interface `7d1a…` and binary B needs X interface `0fe4…`
+and these belong to incompatible majors, MVS cannot unify them and neither A nor
+B ships source. This is a real, irreducible conflict. lamp's response, in
+priority order:
+
+1. **Report it as a hard error** with the full picture: both binaries, both
+   ranges, both interface hashes, and the import paths — the §3.4 contract.
+2. **Offer the explicit escape hatch `requires-isolated X`** in the manifest.
+   This admits *two* X store entries into the build, each linked only into the
+   subgraph that demanded it, with symbol namespacing so they never collide at
+   link time. Both copies appear in the SBOM and in `lamp tree --caps` with an
+   `[isolated]` marker; their capability sets union into the consumer
+   separately. This is the *only* path to version duplication, and it is loud,
+   deliberate, and auditable — the antithesis of npm's silent nested
+   `node_modules`.
+3. **Surface the cure**: `lamp audit` reports which binary, if rebuilt against
+   the other's X, would collapse the isolation, and `lamp tree --why X` shows
+   the divergence so a maintainer can push for a source release or an aligned
+   bump upstream.
+
+#### 5.6.5 Application final-link vs. library distribution
+
+The "do binaries pack their deps" question has *two* legitimate answers
+depending on the artifact's role, and lamp keeps them strictly separate:
+
+- **A `lib` `.jnb` (library)** — *always* references deps (§5.6.1). It is a node
+  in someone else's graph; bundling would be antisocial. This is the default and
+  the only library form.
+- **A `bin` (final application)** — at the *end* of the line, where the artifact
+  is delivered to run, not to be depended upon, `lamp build` (and `lamp vendor`
+  / `--static`) performs a **whole-program final link**: the resolved, unified,
+  deduplicated closure is linked into one executable (or a vendored tree). Here
+  the deps *are* packed — but this happens **once, at the leaf, after global
+  unification**, so there is still exactly one X in the binary, chosen by the
+  one MVS solution. Packing at the application boundary is fine; packing at
+  every library boundary is the bug.
+
+This is the clean resolution of the user's framing: libraries are
+*packed-by-reference and deduplicated*; applications are *packed-by-value, once,
+after unification*. The store guarantees the value packed is the same bytes the
+references pointed at.
+
+#### 5.6.6 Surface hashing — making the fast path actually fast
+
+If the `iface` hash were over A's *entire* dependency interface, every trivial
+addition to X would invalidate every binary using X and force mass rebuilds —
+the fast path would rarely fire. So the `iface` hash is computed over the
+**used surface**: the subset of X's `interface.jhi` that A's MIR actually
+references (the symbols, types, monomorphizations, effect rows, and Perceus
+obligations A links against), canonicalized and hashed. Adding unrelated API to
+X leaves A's used-surface hash unchanged → fast path holds. Changing a signature
+A *uses* flips the hash → A is correctly rebuilt or pinned. The compiler already
+computes A's import set during type-checking against `interface.jhi` (§5.3); the
+used-surface hash is a deterministic fold over exactly that set. This makes
+binary reuse robust under normal semver evolution while staying sound.
+
+#### 5.6.7 What the lockfile records (closing the loop with §3.3)
+
+The §3.3 lock entry gains, for any edge introduced or constrained by a binary:
+
+```
+X 1.2.0
+  source  lamp://reg.jinn.dev/X
+  content blake3:…                     # the one shared store entry
+  iface   blake3:7d1a…                 # used-surface hash the build linked against
+  via     [A (binary, built 1.2.0), my-cli (source)]   # who requires it & how
+  pin     abi                          # 'abi' = held by a binary's iface; 'isolated' if duplicated
+```
+
+So a reviewer sees, in one diff, that X is shared (not bundled), exactly which
+binary's ABI pins it, and whether any duplication (`isolated`) entered the
+graph. A future X bump that would break A's ABI shows up as a lock change that
+either rebuilds A (if source) or requires an explicit decision — never a silent
+relink. Transitive dependency handling is thus, like everything else in lamp, a
+**reviewable, content-addressed, deduplicated, single-version-by-default**
+property of the lockfile.
 
 ---
 
@@ -794,8 +988,12 @@ block and one child.
 - **Maven/Gradle (JVM)** — coordinates + checksums + GPG signing + binary
   artifacts (`.jar`); also multi-module reactor builds (kin to `members`). *We
   take binary artifacts (`.jnb`), checksums, signing, and multi-output builds.*
-  Weakness: XML/Groovy sprawl, slow resolution, diamond pain. *We use
-  Jinn-native manifests + MVS + single-version unification.*
+  Weakness: XML/Groovy sprawl, slow resolution, diamond pain, and the
+  **shaded/fat-jar** anti-pattern that bundles private dep copies into each
+  artifact (dedup death, unpatchable CVEs). *We use Jinn-native manifests + MVS +
+  single-version unification, and binaries reference deduplicated store entries
+  rather than bundling them (§5.6); bundling happens once at the application
+  leaf, never per library.*
 - **Sigstore / SLSA / in-toto / TUF** — keyless-ish signing, transparency logs,
   provenance, rebuild verification, **delegated trust + revocation**. *We adopt
   transparency logs, provenance, rebuild verification, and TUF-style roots to
@@ -815,10 +1013,10 @@ block and one child.
 | 3 | Output/member DAG: name unification, cycle detection, per-output scoping (§2.3–2.4) | `src/pkg.rs`, new `src/workspace.rs` |
 | 4 | Content-addressed store + canonical archive + BLAKE3 | `src/cache.rs`, new `src/store.rs` |
 | 5 | Lockfile v2 → `project.lock` (content/sig/caps/feats/deps); diff driver | `src/lock.rs` |
-| 6 | MVS resolver + conflict reporting + binary-leaf pinning (§3.4) | `src/cache.rs` resolve |
+| 6 | MVS resolver + conflict reporting; binary deps as ABI-pinned ranges, used-surface hashing, `requires-isolated` (§3.4, §5.6) | `src/cache.rs` resolve |
 | 7 | Capability derivation from effects; resolver enforcement; FFI taint (§5.5) | typer/effects + `src/pkg.rs` |
 | 8 | Signing, TUF roots + transparency log + revocation, provenance, SBOM | new `src/trust.rs` |
-| 9 | `.jnb` writer/reader: `interface.jhi` (HIR slice), MIR/object pack, semver diff (§9.4) | new `src/jnb/`, codegen, typer |
+| 9 | `.jnb` writer/reader: `interface.jhi` (HIR slice), MIR/object pack, `deps.descriptor` (triples), used-surface hash, semver diff (§5.6, §9.4) | new `src/jnb/`, codegen, typer |
 | 10 | Registry protocol (versioned) + `lamp serve`; git transport bridge | new `src/registry/` |
 | 11 | Reproducible-build normalization + `--verify` | driver/codegen |
 | 12 | Maintainer surface: bugs, changelog, notes, release/yank (per-output) | new `src/maint/` |
@@ -828,9 +1026,15 @@ block and one child.
 project (`bin` + `lib` + a `members` child) builds reproducibly; one binary
 references a sibling `lib` (standalone) and one references a member `lib`
 (hierarchical); tampered-hash, capability-widening, signature-mismatch, revoked
--key, and FFI-taint rejection tests; and a `.jnb` round-trip (build a lib,
-consume it as binary and as binary-debug, confirm type-checking identical to
-source).
+-key, and FFI-taint rejection tests; a `.jnb` round-trip (build a lib, consume
+it as binary and as binary-debug, confirm type-checking identical to source);
+and the §5.6 transitive cases — two binaries sharing one deduplicated X (single
+store entry, single lock entry); a minor X bump leaving the used-surface hash
+stable so binaries link without rebuild; a signature-changing X bump forcing a
+source rebuild of the binary; an irreducible incompatible-major conflict
+producing a hard error, then resolving via `requires-isolated` with both copies
+SBOM-reported; and an application final-link packing the unified closure into a
+single deduplicated executable.
 
 ---
 
@@ -846,8 +1050,15 @@ path the *default* and the only ergonomic one. It introduces `ext` to
 concentrate community effort into single canonical packages (with `libjn` kept
 where it belongs — the libc-replacement runtime, not a packaging tier), a
 `.jnb` binary format that integrates as cleanly as source while supporting
-closed and debuggable distribution, a capability system — with the FFI gap
-closed honestly — that makes a dependency's powers a reviewable lockfile diff,
+closed and debuggable distribution — and that handles its *own* transitive
+dependencies by reference, not by bundling: a binary's deps live once in the
+shared content-addressed store, fold into the one global MVS solution
+(single-version unification holds across the binary boundary), and are linked
+only when the consumer's selected version matches the used-surface interface
+hash the binary was compiled against — degrading to a source rebuild, or a loud
+`requires-isolated` decision, never a silent duplicate (§5.6). It adds a
+capability system — with the FFI gap closed honestly — that makes a dependency's
+powers a reviewable lockfile diff,
 TUF-grade signing with a transparency log and revocation, interface-driven
 semver, and a maintainer surface that lives in the same durable fabric as the
 code. It learns from Cargo's UX and workspaces, Go's MVS and transparency,
