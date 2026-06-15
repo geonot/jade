@@ -1,0 +1,14 @@
+title: Implement multi-version coexistence with distinct identities
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-15T05:51:53'
+updated_at: '2026-06-15T05:51:53'
+result: ''
+description: Support 'use foo@1 as foo1' / 'use foo@2 as foo2' producing distinct
+  non-unifiable identities with separate capability unions. Implementation may be
+  deferred or implemented per the Q4 decision from 2-32-1. Done when either multi-version
+  coexistence works with separate cap unions and tests, or the deferral is documented
+  with a guard/error path tested. Depends on path-scoped use resolution and Q4 decision
+  (2-32-1).

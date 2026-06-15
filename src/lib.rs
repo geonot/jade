@@ -20,6 +20,7 @@ pub mod lock;
 pub mod lsp;
 pub mod mir;
 pub mod ownership;
+pub mod pkgid;
 pub mod parser;
 pub mod perceus;
 pub mod pkg;

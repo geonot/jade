@@ -1,0 +1,13 @@
+title: Compute semantic_hash for packages
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-15T05:51:53'
+updated_at: '2026-06-15T05:51:53'
+result: ''
+description: Implement the semantic_hash field computation for PackageId, defining
+  what inputs contribute to the hash (source content, version, dependency identities).
+  Done when packages produce stable, deterministic semantic hashes verified by tests,
+  including that identical content yields identical hashes and changed content yields
+  different hashes. Depends on PackageId data structure subtask.

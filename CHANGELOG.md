@@ -1,4 +1,5 @@
 # Changelog
+- **[98]** (2026-06-15 12:49) caps pillar (task 2-32-2): lattice + SSOT cap-sites table + SCC-fixpoint derivation pass + `needs` clause; resolves lamp prereq Q1/Q6/Q7
 - **[98]** (2026-06-15 05:49) caps pillar landed (task 2-32-2): src/caps.rs lattice + src/cap_sites.rs SSOT table + src/typer/caps.rs SCC-fixpoint derivation pass + `needs` clause (fn/method); inferred-by-default, annotation = checked upper bound; derived⊑declared with call-path diagnostic; empty-row promotion rule. 21 tests, zero warnings.
 - **[95]** (2026-06-15 11:31) lamp spec: deployments (§9) + two-axis output model (kind lib/bin/app/os/raw × substrate runtimeless/threadless/heapless)
 - **[93]** (2026-06-15 11:10) lamp: decided top-to-bottom spec — separate cap pass, scope identity, interface v2 + hash ladder, config-block sugar (resolves Q1-Q9)

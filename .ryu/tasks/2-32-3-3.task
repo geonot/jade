@@ -1,0 +1,12 @@
+title: Assign root PackageId for single-package fast path
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-15T05:51:53'
+updated_at: '2026-06-15T05:51:53'
+result: ''
+description: Implement the single-package fast path that assigns a root PackageId
+  without full workspace machinery. Done when a single-package build resolves with
+  a root PackageId end-to-end and existing single-package tests pass. Depends on PackageId
+  data structure and semantic_hash subtasks.

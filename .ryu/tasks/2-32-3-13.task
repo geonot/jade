@@ -1,0 +1,12 @@
+title: End-to-end tests for scoped identity, resolution, and reexport
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-15T05:51:53'
+updated_at: '2026-06-15T05:51:53'
+result: ''
+description: 'Add integration tests covering scoped identity end-to-end: path resolution,
+  reexport consent (legal and reach-in error cases), and multi-version (deferred-or-implemented
+  per Q4). Done when the full test suite passes and satisfies the definition of done.
+  Depends on all threading, resolution, reexport, multi-version, and codegen subtasks.'

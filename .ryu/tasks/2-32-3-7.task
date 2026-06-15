@@ -1,0 +1,12 @@
+title: Implement reexport consent enforcement
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-15T05:51:53'
+updated_at: '2026-06-15T05:51:53'
+result: ''
+description: Enforce that 'use baz/bar' is legal only when baz explicitly declares
+  reexport of bar; any reach-in without consent is a hard error. Done when reexport
+  declarations are parsed/recognized, consented reexports resolve, and reach-in attempts
+  produce hard errors verified by tests. Depends on path-scoped use resolution subtask.

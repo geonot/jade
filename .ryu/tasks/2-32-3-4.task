@@ -1,0 +1,13 @@
+title: Implement workspace flattening into one resolution DAG
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-15T05:51:53'
+updated_at: '2026-06-15T05:51:53'
+result: ''
+description: Flatten workspace members into a single dependency DAG, assigning PackageIds
+  to each member. Detect and report collisions as hard errors. Done when a multi-member
+  workspace flattens to one DAG, each member has a distinct PackageId, and collision
+  cases produce hard errors verified by tests. Depends on PackageId data structure
+  subtask.

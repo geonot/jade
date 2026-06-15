@@ -1,0 +1,12 @@
+title: Implement path-scoped use resolution
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-15T05:51:53'
+updated_at: '2026-06-15T05:51:53'
+result: ''
+description: Implement path-scoped resolution semantics where 'use bar in baz' resolves
+  to foo:baz:bar locally with no global arbitration. Done when path-scoped use statements
+  resolve to the correct scoped target and tests cover local resolution without global
+  lookup. Depends on resolver threading subtask.

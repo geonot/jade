@@ -1,0 +1,12 @@
+title: Retire prefix_module model
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-15T05:51:53'
+updated_at: '2026-06-15T05:51:53'
+result: ''
+description: Remove the legacy string prefix_module model and all code paths depending
+  on it, ensuring everything routes through PackageId. Done when prefix_module is
+  fully removed, the build compiles, and no remaining references exist. Depends on
+  resolver, HIR, MIR, and codegen threading subtasks.

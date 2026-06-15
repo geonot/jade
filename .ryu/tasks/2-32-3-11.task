@@ -1,0 +1,12 @@
+title: Implement PackageId-based symbol mangling in codegen
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-15T05:51:53'
+updated_at: '2026-06-15T05:51:53'
+result: ''
+description: Replace flat module_name mangling with <pkgid-hash>_<module>_<name> scheme
+  in codegen. Done when emitted symbols use the new mangling, multi-version symbols
+  are distinct, and mangling tests verify the format and uniqueness. Depends on MIR
+  threading and semantic_hash subtasks.

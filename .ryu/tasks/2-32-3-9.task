@@ -1,0 +1,11 @@
+title: Thread PackageId through HIR
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-06-15T05:51:53'
+updated_at: '2026-06-15T05:51:53'
+result: ''
+description: Propagate PackageId identity into the HIR representation so symbols carry
+  their package-scoped identity. Done when HIR nodes reference PackageIds and HIR-level
+  tests confirm identity preservation. Depends on resolver threading subtask.
