@@ -178,6 +178,14 @@ impl std::fmt::Display for PkgId {
 /// The hash is a Blake3 Merkle step: Hash(domain_sep ++ name ++ version ++ scope
 /// ++ source_bytes ++ sorted(dep_hash)*).  Changing any input flips the hash;
 /// equal inputs always yield the same hash.
+/// For each package A with a `use B` in its manifest, record the scoped PkgId
+/// that `B` resolves to from A's perspective.
+///
+/// Key: `(consumer_pkg_id, dep_name_symbol)`
+/// Value: the dep's `PkgId` as seen by the consumer (path-scoped under the
+///        consumer's owner scope, per scope.md §2.1).
+pub type ScopedUseMap = HashMap<(PkgId, Symbol), PkgId>;
+
 pub fn compute_semantic_hash(
     name: Symbol,
     scope: ScopePath,

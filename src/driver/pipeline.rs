@@ -16,8 +16,10 @@ use crate::typer::Typer;
 
 use super::cli::strip_codegen_prefix;
 use super::cli::*;
+use super::project::ProjectConfig;
 use super::sources::{
     EntityIndex, load_packages_with_ids, merge_source_files, resolve_implicit_imports, resolve_modules,
+    flatten_workspace, resolve_scoped_pkg_ids,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -101,6 +103,23 @@ pub(super) fn compile_and_link(
     typer.set_source_dir(base_dir.to_path_buf());
     typer.set_root_pkg_id(root_pkg_id);
     typer.set_dep_pkg_ids(pkg_id_map);
+    let scoped_use_map = {
+        let root_deps = {
+            let proj_jn = base_dir.join("project.jn");
+            if proj_jn.exists() {
+                ProjectConfig::from_file(&proj_jn)
+                    .map(|c| c.requires)
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            }
+        };
+        match flatten_workspace(pkg_name, base_dir, &root_deps, &packages) {
+            Ok(dag) => resolve_scoped_pkg_ids(&dag),
+            Err(_) => Default::default(),
+        }
+    };
+    typer.set_scoped_use_map(scoped_use_map);
     if test_mode {
         typer.set_test_mode(true);
     }

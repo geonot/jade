@@ -1,0 +1,17 @@
+title: Fix ternary mixed-fallible-arm phi ICE + struct-return bugs
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-15T12:26:54'
+updated_at: '2026-06-15T12:26:54'
+result: ''
+description: 'Three related codegen/typer bugs found making log_ingest.jn idiomatic
+  (v108). (1) ICE mir_codegen/mod.rs:633 phi mismatch when a ternary `cond ? <plain
+  i64> ! <fallible call>` mixes an i64 arm with a Result<i64,E> arm — typer must unify
+  both arms to the fn''s fallible result (auto-wrap-ok the plain arm, propagate the
+  fallible arm) before the phi. (2) non-fallible bare struct return `*mk returns P\n
+  P(1,2)` returns zeroed fields (sret bug). (3) `match` on a fallible struct return
+  reports ''non-exhaustive match on I64''. See memory bug_ternary_mixed_fallible_arm_phi_ice
+  and bug_bare_struct_return_zeroed. DoD: minimal repros compile+run correctly, conformance
+  tests added to tests/error_effects.rs, zero warnings, full suite green.'

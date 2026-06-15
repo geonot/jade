@@ -131,6 +131,7 @@ pub struct Typer {
 
     pub(crate) root_pkg_id: Option<crate::pkgid::PkgId>,
     pub(crate) dep_pkg_ids: std::collections::HashMap<crate::intern::Symbol, crate::pkgid::PkgId>,
+    pub(crate) scoped_use_map: crate::pkgid::ScopedUseMap,
 }
 
 #[derive(Debug, Clone)]
@@ -217,6 +218,7 @@ impl Typer {
             dollar_stack: Vec::new(),
             root_pkg_id: None,
             dep_pkg_ids: std::collections::HashMap::new(),
+            scoped_use_map: crate::pkgid::ScopedUseMap::new(),
         }
     }
 
@@ -233,6 +235,13 @@ impl Typer {
         ids: std::collections::HashMap<crate::intern::Symbol, crate::pkgid::PkgId>,
     ) {
         self.dep_pkg_ids = ids;
+    }
+
+    pub fn set_scoped_use_map(
+        &mut self,
+        map: crate::pkgid::ScopedUseMap,
+    ) {
+        self.scoped_use_map = map;
     }
 
     pub fn set_test_mode(&mut self, enabled: bool) {

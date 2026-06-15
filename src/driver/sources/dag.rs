@@ -4,7 +4,33 @@ use std::path::PathBuf;
 
 use crate::intern::Symbol;
 use crate::pkg::{Dependency, SemVer};
-use crate::pkgid::{PackageRecord, PkgId, ScopePath, compute_semantic_hash};
+use crate::pkgid::{PackageRecord, PkgId, ScopePath, ScopedUseMap, compute_semantic_hash};
+
+/// For each package A with a `use B` in its manifest, record the scoped PkgId
+/// that `B` resolves to from A's perspective.
+///
+/// Key: `(consumer_pkg_id, dep_name_symbol)`
+/// Value: the dep's `PkgId` as seen by the consumer (path-scoped under the
+///        consumer's owner scope, per scope.md §2.1).
+
+/// Build the `ScopedUseMap` for the given `ResolutionDag`.
+///
+/// For every node in the DAG, for every dep edge, the dep's identity is:
+///   - `owner_scope` = child scope of the consumer's full path
+///   - hash computed from the dep's source + its own transitive dep hashes
+///
+/// This is the structural realisation of scope.md §2.1 "local, deterministic,
+/// no global arbitration".
+pub fn resolve_scoped_pkg_ids(dag: &ResolutionDag) -> ScopedUseMap {
+    let mut map = ScopedUseMap::new();
+    for node in &dag.nodes {
+        for &dep_id in &node.deps {
+            let dep_rec = dep_id.record();
+            map.insert((node.pkg_id, dep_rec.name), dep_id);
+        }
+    }
+    map
+}
 
 #[derive(Debug, Clone)]
 pub struct ResolvedNode {

@@ -621,7 +621,62 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T14:46:07+00:00",
-      "ts_accessed": "2026-06-15T15:39:38+00:00",
+      "ts_accessed": "2026-06-15T19:20:36+00:00",
+      "access_count": 1
+    },
+    "bug_bare_struct_return_zeroed": {
+      "key": "bug_bare_struct_return_zeroed",
+      "value": "OPEN BUG (found v108, while making log_ingest.jn idiomatic). Two related struct-return codegen/typer bugs, distinct from the 5 log_ingest fixes (those were all fallible-path). REPRO: (1) NON-FALLIBLE bare struct return: `*mk returns P\\n  P(1,2)` then `a is mk(); a.x` => fields read 0. Same for explicit `return P(1,2)` and bind-then-return `r is P(1,2)\\n r`. Inline `P(1,2)` + field access in SAME fn is correct. So it's the struct-return ABI (sret) on non-fallible fns dropping/zeroing the payload. (2) `match` on a FALLIBLE struct return `*mk returns P ! E` with `Ok(p)?/Err(e)?` => 'hir: non-exhaustive match on I64' (typer not seeing it as Result<P,E>, or match desugar mistyping). WORKAROUND that WORKS: fallible struct return consumed via ternary `mk(21) ? log($.b) !! log(-1)` is correct (pinned by tests/error_effects.rs fallible_fn_returning_struct_payload_intact). Positional construction `P(x, y*2)` works everywhere. NEEDS: new task to fix sret on plain struct-return fns + Result-typing of `match` on fallible struct returns.",
+      "kind": "pitfall",
+      "tags": [
+        "bug",
+        "codegen",
+        "sret",
+        "struct-return",
+        "match",
+        "open"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T19:24:59+00:00",
+      "ts_accessed": "2026-06-15T19:24:59+00:00",
+      "access_count": 0
+    },
+    "bug_ternary_mixed_fallible_arm_phi_ice": {
+      "key": "bug_ternary_mixed_fallible_arm_phi_ice",
+      "value": "OPEN BUG (found v108). ICE in src/codegen/mir_codegen/mod.rs:633 'phi node type mismatch: StructType Result__G_i64_E vs IntType i64'. REPRO (minimal): fn `*bo(f) returns i64 ! E\\n  f equals '-' ? 0 ! ti(f)` where ti is fallible `returns i64 ! E`. The ternary `cond ? <plain i64> ! <fallible call>` has one arm plain i64 and other arm Result<i64,E>; typer should unify both arms to the fn's fallible result (auto-wrap 0 as Ok, propagate the call) but codegen emits a phi merging i64 and Result. The if/else form `if cond\\n 0\\n else\\n ti(f)` compiles fine (whole-fn tail auto-wrap reconciles). NEEDS FIX: ternary arm unification must auto-wrap-ok the plain arm + propagate the fallible arm to a common Result type before the phi, mirroring block.rs tail auto_wrap_ok / dispatch.rs Ret arm. Likely in typer access.rs ternary lowering and/or codegen phi build for ?/! arms.",
+      "kind": "pitfall",
+      "tags": [
+        "bug",
+        "codegen",
+        "phi",
+        "ternary",
+        "error-effects",
+        "open"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T19:26:12+00:00",
+      "ts_accessed": "2026-06-15T19:26:12+00:00",
+      "access_count": 0
+    },
+    "pitfall_inline_fallible_struct_arg": {
+      "key": "pitfall_inline_fallible_struct_arg",
+      "value": "PITFALL (v108): passing a fallible call directly as a struct-construction arg, e.g. `Hit(f.get(0), path_of(line), ...)` where path_of returns `String ! ParseError`, produces a codegen error 'Invalid InsertValueInst operands' (inserts a Result into a String field) rather than auto-propagating or a clean diagnostic. WORKAROUND (idiomatic anyway): bind the fallible call first `path is path_of(line)` (propagation happens at the binding) then construct positionally `Hit(f.get(0), path, ...)`. So: positional construction is fine; the rule is fallible calls belong in bindings, not inline as constructor args. Possible future fix: auto-propagate fallible call args in fallible-fn construction context, OR emit J-diagnostic.",
+      "kind": "pitfall",
+      "tags": [
+        "pitfall",
+        "codegen",
+        "struct-construction",
+        "error-effects"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T19:27:44+00:00",
+      "ts_accessed": "2026-06-15T19:27:44+00:00",
       "access_count": 0
     }
   }

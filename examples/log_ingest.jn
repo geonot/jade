@@ -53,12 +53,10 @@ store hits
 *severity(status as i64) returns Severity
     status >= 500 ? Error ! status >= 400 ? Warn ! Info
 
-# Bytes field is either '-' (no body) or a decimal count.
+# Bytes field is either '-' (no body) or a decimal count. Normalise the empty
+# marker to a zero, then fold a single fallible parse.
 *bytes_of(field as String) returns i64 ! ParseError
-    if field equals '-'
-        0
-    else
-        to_int(field)
+    to_int(field equals '-' ? '0' ! field)
 
 # Pull the request path out of the quoted "METHOD path PROTO" field.
 *path_of(line as String) returns String ! ParseError
@@ -76,7 +74,7 @@ store hits
     status is to_int(f.get(f.len() - 2)) !! err BadStatus(line)
     bytes is bytes_of(f.get(f.len() - 1))
     path is path_of(line)
-    Hit(ip is f.get(0), path is path, status is status, bytes is bytes, sev is severity(status))
+    Hit(f.get(0), path, status, bytes, severity(status))
 
 *land(h as Hit) returns i64 ! IngestError
     insert hits h.ip, h.path, h.status, h.bytes ? $ !! err
@@ -90,9 +88,8 @@ type Report
 # the caller tallies — a malformed line never aborts the run.
 *absorb(line as String) returns i64 ! IngestError
     h is parse(line)
-    n is h.bytes
     land(h)
-    n
+    h.bytes
 
 *ingest(lines as Vec of String) returns Report
     accepted is 0
@@ -108,7 +105,7 @@ type Report
                 rejected += 1
                 log('reject ({e}): {line}')
 
-    Report(accepted is accepted, rejected is rejected, bytes is total_bytes)
+    Report(accepted, rejected, total_bytes)
 
 *errors_logged returns i64
     count hits where status >= 500

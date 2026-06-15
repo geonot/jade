@@ -1,0 +1,32 @@
+Working on task 2-32-3-6 (path-scoped use resolution). Current state:
+
+**What was done:**
+- Tasks 2-32-3-2, 2-32-3-3, 2-32-3-4, 2-32-3-5 all complete
+- Added blake3 dep, compute_semantic_hash() in src/pkgid.rs
+- Added ScopedUseMap type alias to src/pkgid.rs
+- Added root_pkg_id, dep_pkg_ids, scoped_use_map fields to Typer (src/typer/mod.rs)
+- Created src/driver/sources/dag.rs with ResolutionDag, flatten_workspace, resolve_scoped_pkg_ids
+- load_packages_with_ids() in src/driver/sources/packages.rs
+- pipeline.rs wired up root_pkg_id, dep_pkg_ids, and is building scoped_use_map
+
+**Current compile errors:**
+1. dag.rs line 7: imports ScopedUseMap from pkgid AND line 15 tries to `pub use` it again → duplicate
+2. sources/mod.rs line 29: `pub(super) use dag::ScopedUseMap` — the re-export fails because the dag module uses it internally
+
+**Fix needed:**
+- In dag.rs: remove the `pub use crate::pkgid::ScopedUseMap;` re-export (line 15), keep only the import on line 7
+- In sources/mod.rs: change `pub(super) use dag::ScopedUseMap` to `pub(super) use crate::pkgid::ScopedUseMap` OR just remove it (pipeline.rs no longer needs it from sources)
+- In pipeline.rs: add `use crate::pkgid::ScopedUseMap;` directly if needed (but it's not referenced by name in pipeline.rs, only via typer.set_scoped_use_map())
+
+**Key files:**
+- src/pkgid.rs — ScopedUseMap type alias, compute_semantic_hash, PkgId/ScopePath
+- src/driver/sources/dag.rs — ResolutionDag, flatten_workspace, resolve_scoped_pkg_ids
+- src/driver/sources/packages.rs — load_packages_with_ids
+- src/driver/sources/mod.rs — re-exports
+- src/driver/pipeline.rs — wires everything together
+- src/typer/mod.rs — carries root_pkg_id, dep_pkg_ids, scoped_use_map
+
+**Next steps after fixing compile:**
+1. Verify zero warnings, 289+ tests pass
+2. Complete task 2-32-3-6 (add tests for scoped use resolution)
+3. Continue to 2-32-3-7 through 2-32-3-13
