@@ -2,6 +2,7 @@ use crate::intern::Symbol;
 use crate::pkg::SemVer;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use blake3::Hasher;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ScopePath(u32);
@@ -164,6 +165,46 @@ impl std::fmt::Display for PkgId {
     }
 }
 
+/// Compute the `semantic_hash` for a package.
+///
+/// Inputs:
+///   - `name`: the package's own name
+///   - `scope`: the owner scope (dotted path)
+///   - `version`: the resolved version
+///   - `source_bytes`: concatenated sorted source file contents for this package
+///   - `dep_hashes`: semantic hashes of direct dependencies, **sorted ascending**
+///     before passing in (caller responsibility — determinism requires a stable order)
+///
+/// The hash is a Blake3 Merkle step: Hash(domain_sep ++ name ++ version ++ scope
+/// ++ source_bytes ++ sorted(dep_hash)*).  Changing any input flips the hash;
+/// equal inputs always yield the same hash.
+pub fn compute_semantic_hash(
+    name: Symbol,
+    scope: ScopePath,
+    version: &SemVer,
+    source_bytes: &[u8],
+    dep_hashes: &[[u8; 32]],
+) -> [u8; 32] {
+    let mut h = Hasher::new_derive_key("jinn:pkgid:semantic_hash:v1");
+    h.update(name.as_str().as_bytes());
+    h.update(&[0u8]);
+    let scope_str = scope.render();
+    h.update(scope_str.as_bytes());
+    h.update(&[0u8]);
+    let ver_str = version.to_string();
+    h.update(ver_str.as_bytes());
+    h.update(&[0u8]);
+    let src_len = (source_bytes.len() as u64).to_le_bytes();
+    h.update(&src_len);
+    h.update(source_bytes);
+    let dep_count = (dep_hashes.len() as u64).to_le_bytes();
+    h.update(&dep_count);
+    for dh in dep_hashes {
+        h.update(dh);
+    }
+    *h.finalize().as_bytes()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,5 +297,87 @@ mod tests {
             semantic_hash: [0xab, 0xcd, 0xef, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         });
         assert_eq!(p.mangle_prefix(), "abcdef01");
+    }
+
+    #[test]
+    fn semantic_hash_is_deterministic() {
+        let scope = ScopePath::root();
+        let version = ver(1);
+        let src = b"fn main\n  42";
+        let h1 = compute_semantic_hash(sym("foo"), scope, &version, src, &[]);
+        let h2 = compute_semantic_hash(sym("foo"), scope, &version, src, &[]);
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn semantic_hash_differs_on_name_change() {
+        let scope = ScopePath::root();
+        let version = ver(1);
+        let src = b"fn main\n  42";
+        let h1 = compute_semantic_hash(sym("foo"), scope, &version, src, &[]);
+        let h2 = compute_semantic_hash(sym("bar"), scope, &version, src, &[]);
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn semantic_hash_differs_on_source_change() {
+        let scope = ScopePath::root();
+        let version = ver(1);
+        let h1 = compute_semantic_hash(sym("foo"), scope, &version, b"fn main\n  42", &[]);
+        let h2 = compute_semantic_hash(sym("foo"), scope, &version, b"fn main\n  43", &[]);
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn semantic_hash_differs_on_version_change() {
+        let scope = ScopePath::root();
+        let src = b"fn main\n  42";
+        let h1 = compute_semantic_hash(sym("foo"), scope, &ver(1), src, &[]);
+        let h2 = compute_semantic_hash(sym("foo"), scope, &ver(2), src, &[]);
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn semantic_hash_differs_on_scope_change() {
+        let scope_a = ScopePath::intern(&[sym("parent_a")]);
+        let scope_b = ScopePath::intern(&[sym("parent_b")]);
+        let version = ver(1);
+        let src = b"fn main\n  42";
+        let h1 = compute_semantic_hash(sym("foo"), scope_a, &version, src, &[]);
+        let h2 = compute_semantic_hash(sym("foo"), scope_b, &version, src, &[]);
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn semantic_hash_includes_dep_hashes() {
+        let scope = ScopePath::root();
+        let version = ver(1);
+        let src = b"fn main\n  42";
+        let dep: [u8; 32] = [0xde; 32];
+        let h_no_dep = compute_semantic_hash(sym("foo"), scope, &version, src, &[]);
+        let h_with_dep = compute_semantic_hash(sym("foo"), scope, &version, src, &[dep]);
+        assert_ne!(h_no_dep, h_with_dep);
+    }
+
+    #[test]
+    fn semantic_hash_dep_order_matters() {
+        let scope = ScopePath::root();
+        let version = ver(1);
+        let src = b"fn main\n  42";
+        let d1 = [0x11u8; 32];
+        let d2 = [0x22u8; 32];
+        let h1 = compute_semantic_hash(sym("foo"), scope, &version, src, &[d1, d2]);
+        let h2 = compute_semantic_hash(sym("foo"), scope, &version, src, &[d2, d1]);
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn semantic_hash_empty_source_stable() {
+        let scope = ScopePath::root();
+        let version = ver(0);
+        let h1 = compute_semantic_hash(sym("root"), scope, &version, b"", &[]);
+        let h2 = compute_semantic_hash(sym("root"), scope, &version, b"", &[]);
+        assert_eq!(h1, h2);
+        assert_ne!(h1, [0u8; 32]);
     }
 }

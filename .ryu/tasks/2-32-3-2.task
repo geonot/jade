@@ -1,11 +1,16 @@
 title: Compute semantic_hash for packages
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-15T05:51:53'
-updated_at: '2026-06-15T05:51:53'
-result: ''
+updated_at: '2026-06-15T12:04:53'
+result: 'Added `blake3` crate. Implemented `compute_semantic_hash(name, scope, version,
+  source_bytes, dep_hashes) -> [u8;32]` in src/pkgid.rs using Blake3 with a domain-separated
+  key "jinn:pkgid:semantic_hash:v1". Hashes: name, scope path, version, source byte
+  length + content, dep count + sorted dep hashes. Added 8 tests covering: determinism,
+  name/source/version/scope/dep changes all flip the hash, dep order matters, empty
+  source is stable and non-zero. All 15 pkgid tests pass; 285 lib tests pass.'
 description: Implement the semantic_hash field computation for PackageId, defining
   what inputs contribute to the hash (source content, version, dependency identities).
   Done when packages produce stable, deterministic semantic hashes verified by tests,

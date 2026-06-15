@@ -437,8 +437,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T10:24:23+00:00",
-      "ts_accessed": "2026-06-15T14:29:45+00:00",
-      "access_count": 4
+      "ts_accessed": "2026-06-15T19:02:22+00:00",
+      "access_count": 5
     },
     "lamp_spec_directive_2-33": {
       "key": "lamp_spec_directive_2-33",
@@ -478,8 +478,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T11:09:50+00:00",
-      "ts_accessed": "2026-06-15T14:29:45+00:00",
-      "access_count": 4
+      "ts_accessed": "2026-06-15T19:02:22+00:00",
+      "access_count": 5
     },
     "lamp_deploy_2-34_requirements": {
       "key": "lamp_deploy_2-34_requirements",
@@ -584,8 +584,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T12:52:15+00:00",
-      "ts_accessed": "2026-06-15T13:49:32+00:00",
-      "access_count": 5
+      "ts_accessed": "2026-06-15T19:02:22+00:00",
+      "access_count": 6
     },
     "fmt_conditional_operator_4.5": {
       "key": "fmt_conditional_operator_4.5",
@@ -607,21 +607,21 @@
     },
     "bug_ternary_err_guard_codegen": {
       "key": "bug_ternary_err_guard_codegen",
-      "value": "COMPILER BUG (found 2026-06 via examples/log_ingest.jn). A single-armed ternary statement-guard that RAISES \u2014 `cond ? err Variant` with NO else arm, in a fallible fn \u2014 fails codegen with `Load of undefined variable err`. Minimal repro: `*sub(d as i64) returns i64 ! PE` body `d < 0 ? err Bad` then `d`. The `if cond \\n err Variant` BLOCK form works fine. Root cause (suspected): lowering `? err X` builds a quaternary-shaped node that spuriously references the catch-keyword `err` operand. ALSO FOUND same session: qualified variant construction `EnumName.Variant(x)` is broken (`Load of undefined variable EnumName`, and nullary `Enum.A` degrades match subject to i64) \u2014 the WORKING idiom is BARE variants `Variant(x)` / `A`. Note jinn.md \u00a710 + \u00a7498 docs use the broken `AppError.Io(e)` form. Workaround in idiomatic code: use `if`-block guards for raises, bare variant constructors.",
-      "kind": "pitfall",
+      "value": "RESOLVED (v104). 5 codegen/typer bugs found via examples/log_ingest.jn, all fixed + conformance-tested (tests/error_effects.rs: ternary_err_guard_raises, qualified_variant_construction_and_match, enum_value_interpolation_renders_variant_name, explicit_return_autowraps_ok_in_fallible_fn, fn_returning_enum_stored_in_struct_field, fallible_fn_returning_struct_payload_intact). FIXES: (1) `cond ? err X` guard: parse_primary.rs \u2014 Token::Err followed by Ident parses as Expr::Call(__err_raise,[variant]); typer access.rs lower_err_raise_expr -> propagate_err_value + Unreachable. (2) qualified variant Enum.Variant: access.rs is_enum_variant_of + normalize Field/Call(Field) to bare variant. (3) enum to_string/interp: conversions.rs enum_to_string (switch on tag@field0 -> global variant-name string, phi merge); wired in formatting.rs emit_to_string for Type::Enum AND Type::Struct(name) where enums.contains_key. (4) `return v` in fallible fn: dispatch.rs Ret arm now mirrors block.rs tail auto_wrap_ok. (5) ROOT: declaration ordering \u2014 enum payload size used type_store_size(llvm_ty(struct)) but struct body unset (opaque) => size 0 => truncated payload. FIX: new types.rs type_size_of(&Type) (structural, reads self.structs/self.enums metadata); decl.rs declare_tagged_union uses it + reuses pre-created opaque type; mir_codegen/mod.rs two-phase: opaque all structs+enums, set struct bodies+self.structs, THEN enum bodies. NOTE: qualified forms in jinn.md \u00a710/\u00a7498 (AppError.Io(e)) now compile.",
+      "kind": "decision",
       "tags": [
         "bug",
         "codegen",
         "error-effects",
-        "ternary",
-        "guard",
-        "enum-construction"
+        "enum",
+        "resolved",
+        "v104"
       ],
       "confidence": 0.9,
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T14:46:07+00:00",
-      "ts_accessed": "2026-06-15T14:46:07+00:00",
+      "ts_accessed": "2026-06-15T15:39:38+00:00",
       "access_count": 0
     }
   }
