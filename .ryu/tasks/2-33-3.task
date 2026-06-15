@@ -1,13 +1,22 @@
 title: 'Spec: resolution + interface v2 + three-hash ladder'
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by:
 - 2-33-1
 - 2-33-2
 created_at: '2026-06-15T04:03:13'
-updated_at: '2026-06-15T04:03:13'
-result: ''
+updated_at: '2026-06-15T04:07:37'
+result: 'docs/interface-hash.md written. interface.jhi v2 = serialized typed HIR/MIR
+  surface (real types::Type, ownership, error+cap rows, Perceus obligations, canonical
+  MIR for inlining). Layout via target-independent pass (TargetLayout × Type → Layout),
+  LLVM consumes never authors. Merkle algo PINNED: SCC condense + structural pre-key
+  ordering + bottom-up fixpoint for reproducibility. Q2 resolved: api target-independent,
+  abi PER-TARGET (abi_hashes: map<Target,Blake3>), corrected lamp.md §5.7.5 phrasing.
+  Q5 resolved: built-floor and iface-hash two INDEPENDENT constraints w/ distinct
+  diagnostics naming the actual squeeze. Q9 resolved: abi-hash frozen across PATCH,
+  minor bumps interface format-version w/ re-derive-or-rebuild + loud fallback; lock
+  records toolchain version. Used-surface fast path. Canonical MIR serialization rules.'
 description: 'Decided spec for interface.jhi v2 (serialized typed HIR/MIR surface
   w/ ownership+effect+caps+Perceus), the api/abi/object hash ladder, used-surface
   hashing, Merkle closure w/ cycle handling. Resolve Q2 (abi hash per-target, interface
