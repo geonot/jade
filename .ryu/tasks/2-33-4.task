@@ -1,12 +1,19 @@
 title: 'Spec: config-block sugar as real compilable jinn'
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by:
 - 2-33-1
 created_at: '2026-06-15T04:03:13'
-updated_at: '2026-06-15T04:03:13'
-result: ''
+updated_at: '2026-06-15T04:09:58'
+result: 'docs/config-blocks.md written. Config block = indentation-scoped sugar desugaring
+  to ordinary Jinn record/object literals (real compilable Jinn, one eval model).
+  Q3 resolved: entry = `key clause-list` in a distinct grammatical context; connectors
+  are a closed schema-driven set so `opt 3` reads as a connector-clause not a call/binary-expr;
+  LL(1), no backtracking, no collision with expr-statements. Three shorthands pinned.
+  Schema validation per consumer. project.jn = first schema. Restriction lint over
+  desugared record (no calls/control-flow/*name) → no install-time execution by construction.
+  General construct, manifest wired now, general use provisional in stability.md.'
 description: 'Decided grammar for a general declarative config-block construct that
   is REGULAR compilable jinn (config blocks desugar to object constructors / maps
   / records). Resolve Q3 (exact production: indentation block of `key is <literal|list|nested-block>`,

@@ -459,6 +459,27 @@
       "ts_created": "2026-06-15T11:03:13+00:00",
       "ts_accessed": "2026-06-15T11:03:13+00:00",
       "access_count": 0
+    },
+    "lamp_spec_2-33_decided": {
+      "key": "lamp_spec_2-33_decided",
+      "value": "Task 2-33 DONE. lamp top-to-bottom DECIDED spec, 4 new docs + amendments. (1) docs/caps.md: caps = SEPARATE pass from errset (share only scc.rs fixpoint util). `needs` clause (twin of `! E`) at fn/method/class/module, inferred-default+narrows. Closed lattice, scoped containment (fs.read path \u2291). CAP_SITES single-source table; untagged runtime surface = BUILD ERROR (Q7). Q1: promote iff cap row EMPTY (stricter than state-free \u2014 clock/random state-free-but-nonempty share code not identity). Q6: cap row part of function TYPE \u2192 propagates thru HOFs/actors, no laundering. FFI taint one-directional, --deny = undischargeable effect. (2) docs/scope.md: PackageId{name,owner_scope,version,semantic_hash} interned in NEW src/pkgid.rs (u32+side table), ScopePath=interned dotted sym. Path-scoped local resolution; single-package fast path (root PackageId, replaces prefix_module, zero cost). Mangling=pkgid_hash; promotion=same mangled name. reexport consent for path imports. Q4: accept `as foo1/as foo2` PARSE, hard-reject live two-major instantiation till traits/coherence (additive lift). Workspace=one DAG/one lock/global-unique names. (3) docs/interface-hash.md: interface.jhi v2 = serialized typed HIR/MIR (real types::Type, ownership, error+cap rows, Perceus, canonical MIR). Layout=target-indep pass TargetLayout\u00d7Type\u2192Layout (LLVM consumes not authors). Merkle PINNED: SCC condense+structural pre-key+bottom-up fixpoint. Q2: api target-INDEP, abi PER-TARGET (abi_hashes:map<Target,Blake3>), corrected lamp \u00a75.7.5. Q5: built-floor & iface-hash TWO INDEPENDENT constraints, distinct diagnostics. Q9: abi frozen across PATCH; minor bump \u2192 interface format-version + re-derive-or-rebuild loud fallback; lock records toolchain ver. (4) docs/config-blocks.md: config block = sugar desugaring to record/object literal (real Jinn). Q3: entry = `key clause-list`, distinct grammatical context, connectors closed schema-driven set so `opt 3` is connector-clause not call, LL(1) no backtrack. Restriction = lint over desugared record (no calls/control-flow/*name) \u2192 no install-time exec by construction. General construct, manifest schema wired first, rest provisional in stability.md. AMENDED lamp.md \u00a75.7.2/\u00a75.7.5/\u00a76.1 + lamp-prereqs.md \u00a70 header + \u00a72.4 (separate-pass decision).",
+      "kind": "decision",
+      "tags": [
+        "lamp",
+        "caps",
+        "scope",
+        "resolution",
+        "hashing",
+        "config-sugar",
+        "task_2-33",
+        "decided"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T11:09:50+00:00",
+      "ts_accessed": "2026-06-15T11:09:50+00:00",
+      "access_count": 0
     }
   }
 }

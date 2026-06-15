@@ -8,6 +8,20 @@ design (`docs/lamp.md`) silently assumes but that does not yet exist in
 Read `docs/lamp.md` first. Section references below (§5.6, §5.7, §6.1, …) point
 into it.
 
+> **Resolved.** The four workstreams and the §5 open-question register below are
+> now turned into *decided* spec across four documents, in dependency order:
+> 1. **`docs/caps.md`** — capabilities as a clean, **separate** pass (resolves
+>    Q1, Q6, Q7; supersedes §2.4's "one merged `{errors, caps}` fixpoint" lean —
+>    see §2.4 note).
+> 2. **`docs/scope.md`** — `PackageId` & path-scoped identity (resolves Q4).
+> 3. **`docs/interface-hash.md`** — interface v2 + three-hash ladder (resolves
+>    Q2, Q5, Q9).
+> 4. **`docs/config-blocks.md`** — config sugar as real compilable Jinn
+>    (resolves Q3).
+>
+> This document is retained as the *rationale & current-reality* record; the
+> decided semantics live in those four docs and the amended `docs/lamp.md`.
+
 ---
 
 ## 0. Why this document exists
@@ -197,10 +211,15 @@ error effects.** This keeps one mental model across both effect systems.
 ### 2.4 Decisions to make
 
 - Reuse the error-effect infrastructure (`errset.rs`, the SCC fixpoint in
-  `src/typer/scc.rs`) or build a parallel cap-effect pass? **Lean: generalize
+  `src/typer/scc.rs`) or build a parallel cap-effect pass? ~~Lean: generalize
   the effect machinery to carry a `{ errors, caps }` effect record, one
-  fixpoint, two payloads** — avoids two near-identical passes and keeps the abi
-  hash's "effect row" single-sourced.
+  fixpoint, two payloads.~~ **DECIDED (`docs/caps.md` §3.1): a separate cap
+  pass.** Errors and caps are different facts with different propagation rules
+  (caps flow through *every* call + primitive sites + function-typed values;
+  errors flow through `?`/`!`/handlers) and different diagnostics. They share
+  only the generic SCC least-fixpoint *utility* (`src/typer/scc.rs`,
+  parameterized over the lattice), and the interface stores them as sibling rows.
+  One pass producing two unrelated outputs was a false economy.
 - Where do caps live on the HIR/MIR fn? They must reach `interface.jhi` (§3) and
   the abi hash, so they belong on the typed signature, not a side channel.
 - Is `state` inferred from module-level mutable bindings + `@store` handles

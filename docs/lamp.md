@@ -765,12 +765,16 @@ provably-safe optimization* rather than baking it into resolution:
 > entity — owner-scope and version dropped from the symbol, one copy of the
 > code, one set of symbols — **iff** they satisfy the *promotion predicate*.
 
-**Promotion predicate.** `A` and `B` are promotable iff:
+**Promotion predicate** (decided — `docs/caps.md` §4.1, tightened from the
+original "no state cap" to "empty cap row" to make the proof airtight; this is
+the resolution of prereqs Q1). `A` and `B` are promotable iff:
 
 - **(identity)** their **semantic hashes are equal** (§5.7.3) — same code,
   same transitive layout, same ownership/Perceus glue, same effect rows; **and**
-- **(purity)** their interface is **effect-free in the capability sense
-  (§6.1)** — the module declares no ambient state capability.
+- **(purity)** both **capability rows are empty** (`caps == ()`, `docs/caps.md`
+  §3.1) — not merely state-free. A clock/random-reading module is state-free but
+  non-empty, so its *code* may be shared but its *identity* is never collapsed.
+  Promoting only on the empty row removes the last class of aliasing surprise.
 
 The purity clause is the keystone, and it is *free* because state is a
 capability, not an ambient: a module that owns process-wide mutable state
@@ -855,9 +859,14 @@ opt-in rather than an escape hatch.
 
 #### 5.7.5 Two hashes, two jobs: semantic vs binary
 
-The ladder's **abi**/**api** rungs are *semantic* — they must be deterministic
-and target-independent, so they are folded over the **canonical typed MIR**, the
-same artifact §5.6.6 already hashes for the used surface. The **object** rung is
+The **api** rung is *semantic and target-independent* — folded over the
+**canonical typed MIR**, the same artifact §5.6.6 hashes for the used surface.
+The **abi** rung is *semantic but **per-target*** (decided — `docs/interface-
+hash.md` §3.4, resolving prereqs Q2): it folds the canonical MIR **plus the
+target's `TargetLayout`**, because field layout, sret threshold, and niche
+availability are target-dependent. A `.jnb` records `(target → abi_hash)`; an ABI
+is a per-target contract and pretending otherwise would let a `wasm32` consumer
+reuse a `native` layout. Both rungs The **object** rung is
 a *binary* hash over the final compiled object, used solely for link-time dedup
 and the reproducible-build check (§7). Conflating them breaks both: a binary hash
 over object code rarely matches across builds (defeating unification), and a
@@ -896,8 +905,13 @@ key compromise.
 
 ### 6.1 Capabilities / effects manifest
 
-Every package declares the **ambient capabilities** it requires, via the same
-effect system Jinn already uses (`docs/error-effects.md`):
+Every package declares the **ambient capabilities** it requires. Capabilities
+are a **separate effect pass** (decided — `docs/caps.md`, *not* a merged
+`{errors, caps}` fixpoint); they share the inferred-by-default / annotation-
+narrows *shape* of error effects but have their own pass, lattice, and storage.
+The full capability spec — lattice, the `needs` clause at fn/method/class/module
+sites, the `CAP_SITES` single-source attribution table, caps on function types,
+and FFI taint — lives in `docs/caps.md`. The surface:
 
 ```jinn
 capabilities
