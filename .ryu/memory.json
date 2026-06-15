@@ -517,6 +517,25 @@
       "ts_created": "2026-06-15T11:28:42+00:00",
       "ts_accessed": "2026-06-15T11:28:42+00:00",
       "access_count": 0
+    },
+    "lamp_deploy_2-34_done": {
+      "key": "lamp_deploy_2-34_done",
+      "value": "Task 2-34 DONE in docs/lamp.md. NEW MODEL: outputs have TWO orthogonal axes (\u00a72.3.1). AXIS1 kind: lib/bin/app (hosted: alloc+sched+OS) + os (freestanding bootable image, IS the OS, no syscalls, for arch '...') + raw (bare-metal firmware, reset vector, for mcu '...'). AXIS2 substrate dials (opt-outs, inferred from used surface, pinnable): runtimeless / threadless (no scheduler, Perceus still works) / heapless (no allocator, errors if reachable alloc under pin). libjn (\u00a71.0) is layered (freestanding\u2192alloc\u2192syscall\u2192scheduler); lamp links only reached layers. Only lib/bin/app publishable; only app deployable. NEW \u00a79 Deployments (pushed maintainer surface to \u00a710): lamp deploy/rollback/targets, deployments manifest block (env ladder + for-each per-tenant fleets), project.deploy.lock content-addressed deployment record, plan-then-apply transaction w/ compile-checked store migrations (task 2-31-9 schema fingerprints), atomic rollback, local+host+driver platforms. Doc now \u00a70-14, all refs resolve.",
+      "kind": "decision",
+      "tags": [
+        "lamp",
+        "deploy",
+        "task_2-34",
+        "output-kinds",
+        "freestanding",
+        "done"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T11:31:58+00:00",
+      "ts_accessed": "2026-06-15T11:31:58+00:00",
+      "access_count": 0
     }
   }
 }
