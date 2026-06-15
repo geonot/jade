@@ -46,8 +46,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-10T11:03:19+00:00",
-      "ts_accessed": "2026-06-14T06:54:34+00:00",
-      "access_count": 4
+      "ts_accessed": "2026-06-15T11:02:25+00:00",
+      "access_count": 5
     },
     "store_error_design": {
       "key": "store_error_design",
@@ -286,8 +286,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-14T02:42:37+00:00",
-      "ts_accessed": "2026-06-14T06:54:46+00:00",
-      "access_count": 2
+      "ts_accessed": "2026-06-15T11:02:25+00:00",
+      "access_count": 3
     },
     "task_2-6-5-2_impl": {
       "key": "task_2-6-5-2_impl",
@@ -298,8 +298,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-14T03:31:10+00:00",
-      "ts_accessed": "2026-06-15T10:11:02+00:00",
-      "access_count": 6
+      "ts_accessed": "2026-06-15T11:02:25+00:00",
+      "access_count": 7
     },
     "task_2-6-5-3_findings": {
       "key": "task_2-6-5-3_findings",
@@ -322,8 +322,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T05:01:19+00:00",
-      "ts_accessed": "2026-06-15T10:11:02+00:00",
-      "access_count": 4
+      "ts_accessed": "2026-06-15T11:02:25+00:00",
+      "access_count": 5
     },
     "task_5_fmt_spec": {
       "key": "task_5_fmt_spec",
@@ -381,8 +381,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T10:12:41+00:00",
-      "ts_accessed": "2026-06-15T10:12:41+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-15T11:02:25+00:00",
+      "access_count": 1
     },
     "lamp_abi_hash_must_be_merkle": {
       "key": "lamp_abi_hash_must_be_merkle",
@@ -399,8 +399,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T10:12:41+00:00",
-      "ts_accessed": "2026-06-15T10:12:41+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-15T11:02:25+00:00",
+      "access_count": 1
     },
     "lamp_cap_promotion_invariant": {
       "key": "lamp_cap_promotion_invariant",
@@ -417,8 +417,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T10:12:41+00:00",
-      "ts_accessed": "2026-06-15T10:12:41+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-15T11:02:25+00:00",
+      "access_count": 1
     },
     "lamp_prereqs_doc": {
       "key": "lamp_prereqs_doc",
@@ -437,7 +437,27 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T10:24:23+00:00",
-      "ts_accessed": "2026-06-15T10:24:23+00:00",
+      "ts_accessed": "2026-06-15T11:02:25+00:00",
+      "access_count": 1
+    },
+    "lamp_spec_directive_2-33": {
+      "key": "lamp_spec_directive_2-33",
+      "value": "USER DIRECTIVE (20yr devops/build-release veteran). Spec lamp top-to-bottom: clean/beautiful/works-by-default/sensibly-inferred, flexible for extreme moves, smooth in 98% common case. EXPLICIT ORDER, each fully specced: (1) SEPARATE caps from error-handling pass \u2014 caps its OWN clean pass (NOT bolted onto a unified {errors,caps} fixpoint as prereqs \u00a72.4 hedged; user wants clean separation). (2) Fully spec caps. (3) package/module scopage. (4) resolution and hashing. (5) config-block sugar that is ALSO regular compilable jinn (config blocks, object constructors, maps). Resolve \u00a75 open-Q register Q1-Q9 with DECISIONS not hedges. Deliverable = decided spec docs amending docs/lamp.md + docs/lamp-prereqs.md. Conventions: is=binding as=annotation *name=fn; inferred-by-default, annotation narrows (mirror error-effect ! E shape).",
+      "kind": "decision",
+      "tags": [
+        "lamp",
+        "caps",
+        "scope",
+        "resolution",
+        "hashing",
+        "config-sugar",
+        "task_2-33"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T11:03:13+00:00",
+      "ts_accessed": "2026-06-15T11:03:13+00:00",
       "access_count": 0
     }
   }

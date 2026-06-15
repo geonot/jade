@@ -1,0 +1,14 @@
+title: 'Spec: package / module scopage and identity'
+status: pending
+atomic: true
+priority: high
+blocked_by:
+- 2-33-1
+created_at: '2026-06-15T04:03:13'
+updated_at: '2026-06-15T04:03:13'
+result: ''
+description: 'Decided spec for first-class PackageId (name/owner_scope/version/semantic_hash),
+  path-scoped resolution (foo:baz:bar), reexport consent, multi-version coexistence
+  (resolve Q4: defer to post-traits, hard-reject now), workspace flattening, retiring
+  prefix_module with single-package fast path. Output: docs/scope.md (or amend lamp.md
+  §5.7.1).'

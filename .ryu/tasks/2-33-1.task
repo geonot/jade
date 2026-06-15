@@ -1,0 +1,21 @@
+title: 'Spec: capabilities as a clean, separate effect pass'
+status: complete
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-15T04:03:13'
+updated_at: '2026-06-15T04:05:11'
+result: 'docs/caps.md written. Decided: caps are their OWN pass (not merged with errset),
+  sharing only the SCC fixpoint utility. `needs` clause (twin of `! E`) at fn/method/class/module
+  sites, inferred-by-default + narrows. Closed lattice w/ scoped containment. CAP_SITES
+  single-source table; missing runtime attribution = build error (Q7). Q1 resolved:
+  promote iff cap row EMPTY (stricter than state-free, airtight). Q6 resolved: cap
+  row part of function TYPE, propagates through HOFs/actors, no laundering. FFI taint
+  one-directional, --deny enforced by undischargeable effect.'
+description: 'Fully spec the capability system as its OWN pass, distinct from error-effects.
+  Lattice + closed cap classes, path/resource scoping + containment, the four declaration
+  sites (module/class/fn/method) with idiomatic inferred-by-default + annotation-narrows
+  syntax, derivation pass (SCC fixpoint, separate from errset), primitive cap-attribution
+  table (single source of truth like store_decorators.rs), caps on function TYPES
+  (Q6 soundness), runtime cap-tagging as build-error-if-missing (Q7), and resolve
+  Q1 (state-as-cap soundness: decide opt-in @promotable vs free). Output: docs/caps.md.'

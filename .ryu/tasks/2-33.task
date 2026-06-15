@@ -1,0 +1,14 @@
+title: 'lamp: decided top-to-bottom spec (caps/scope/resolution+hash/config-sugar)'
+status: pending
+atomic: false
+priority: high
+blocked_by: []
+created_at: '2026-06-15T04:02:48'
+updated_at: '2026-06-15T04:02:48'
+result: ''
+description: 'Turn docs/lamp-prereqs.md''s open-question register into DECIDED spec.
+  User directive: clean, beautiful, works-by-default, sensibly-inferred, flexible
+  for extreme cases but smooth 98%. Deliver decided spec docs (new docs/ files + amendments
+  to lamp.md/lamp-prereqs.md). ORDER, each fully specced: (1) caps as a CLEAN SEPARATE
+  pass from error-effects; (2) package/module scopage; (3) resolution + hashing; (4)
+  config-block sugar that compiles as regular jinn. Resolve Q1-Q9 with decisions.'
