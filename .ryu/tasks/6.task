@@ -1,11 +1,25 @@
 title: Fix 5 codegen bugs surfaced by examples/log_ingest.jn
-status: pending
+status: complete
 atomic: false
 priority: high
 blocked_by: []
 created_at: '2026-06-15T07:52:02'
-updated_at: '2026-06-15T07:52:02'
-result: ''
+updated_at: '2026-06-15T08:39:22'
+result: 'Fixed all 5 codegen/typer bugs surfaced by examples/log_ingest.jn, with 6
+  conformance tests in tests/error_effects.rs (all green), full suite clean except
+  3 pre-existing column_* failures (unrelated @simple @column decorator-exclusion).
+  Fixes: (1) ternary `cond ? err X` guard — parser parse_primary now consumes `err
+  <variant>` as a raise (Expr::Call __err_raise) lowered via propagate_err_value;
+  (2) qualified variant `Enum.Variant(x)`/`Enum.Nullary` — typer lower_expr_field/lower_expr_call
+  normalize to bare variant via is_enum_variant_of; (3) enum value interpolation/to_string
+  — new conversions.rs enum_to_string switch-on-tag renders variant name, wired in
+  emit_to_string for Type::Enum and Type::Struct-that-is-enum; (4) explicit `return
+  <v>` in fallible fn now auto-wraps Ok (dispatch.rs Ret arm mirrors tail-wrap); (5)
+  fn returning enum / fallible fn returning struct payload — root cause was codegen
+  declaration ordering: enum payload sizes computed from opaque (bodyless) structs
+  giving size 0. Fixed by new type_size_of(&Type) structural size + two-phase decl
+  (opaque structs+enums, set struct bodies+metadata, then enum bodies) + declare_tagged_union
+  reuses pre-created opaque type.'
 description: 'Writing idiomatic Jinn (examples/log_ingest.jn) surfaced 5 real compiler
   bugs. All have minimal repros (see memory bug_ternary_err_guard_codegen). Definition
   of done: each repro compiles AND runs correctly; add conformance tests.

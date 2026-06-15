@@ -1,4 +1,5 @@
 # Changelog
+- **[103]** (2026-06-15 14:52) fmt.md §4.5: reconcile ? / ! / !! with error-effects.md (quaternary arm semantics, $/err bindings, propagation default, J1008/J3110); add examples/log_ingest.jn (idiomatic checked-error ingestion pipeline, runs clean)
 - **[102]** (2026-06-15 14:28) docs/fmt.md: formalize ? / ! / !! as the unified indentation-aware conditional (§4.5, rules J0014/J0015/J1006/J1007/J3110/J3111)
 - **[101]** (2026-06-15 14:05) driver: add explicit `jinn compile <file>` subcommand; rename toolchain CLI name to jinn
 - **[100]** (2026-06-15 12:53) scope pillar foundation (task 2-32-3-1): src/pkgid.rs interned PkgId/ScopePath + side table per scope.md §1.1

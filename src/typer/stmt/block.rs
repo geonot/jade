@@ -14,7 +14,7 @@ impl Typer {
         self.lower_block_no_scope_with_tail(block, ret_ty, None)
     }
 
-    fn is_result_variant_expr(e: &ast::Expr) -> bool {
+    pub(crate) fn is_result_variant_expr(e: &ast::Expr) -> bool {
         let name = match e {
             ast::Expr::Call(callee, _, _) => match callee.as_ref() {
                 ast::Expr::Ident(n, _) => n.as_str(),

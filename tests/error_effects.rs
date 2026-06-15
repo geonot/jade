@@ -300,3 +300,51 @@ fn err_raise_propagates_to_result_return() {
         "99\n-1",
     );
 }
+
+#[test]
+fn ternary_err_guard_raises() {
+    expect(
+        "err E\n    Bad\n    Code(i64)\n\n*g(d as i64) returns i64 ! E\n    d < 0 ? err Bad\n    d > 100 ? err Code(d)\n    d\n\n*main()\n    g(5) ? log($) !! log(-1)\n    g(-1) ? log($) !! log(-2)\n    g(200) ? log($) !! log(-3)\n",
+        "5\n-2\n-3",
+    );
+}
+
+#[test]
+fn qualified_variant_construction_and_match() {
+    expect(
+        "enum Sev\n    Info\n    Warn\n    Error\n\n*main()\n    a is Sev.Warn\n    match a\n        Warn ? log(1)\n        _ ? log(0)\n    log('{Sev.Error}')\n",
+        "1\nError",
+    );
+}
+
+#[test]
+fn enum_value_interpolation_renders_variant_name() {
+    expect(
+        "err E\n    Bad\n    Code(i64)\n\n*main()\n    a is Bad\n    b is Code(7)\n    log('{a}')\n    log('{b}')\n",
+        "Bad\nCode",
+    );
+}
+
+#[test]
+fn explicit_return_autowraps_ok_in_fallible_fn() {
+    expect(
+        "err E\n    Bad\n\n*f(x as i64) returns i64 ! E\n    if x equals 0\n        return 0\n    x\n\n*main()\n    f(0) ? log($) !! log(-1)\n    f(7) ? log($) !! log(-1)\n",
+        "0\n7",
+    );
+}
+
+#[test]
+fn fn_returning_enum_stored_in_struct_field() {
+    expect(
+        "enum Sev\n    Info\n    Warn\n\n*pick(n as i64) returns Sev\n    n > 0 ? Warn ! Info\n\ntype Rec\n    sev as Sev\n\n*main()\n    r is Rec(sev is pick(1))\n    match r.sev\n        Warn ? log(1)\n        _ ? log(0)\n    log('{r.sev}')\n",
+        "1\nWarn",
+    );
+}
+
+#[test]
+fn fallible_fn_returning_struct_payload_intact() {
+    expect(
+        "err E\n    Bad\n\ntype Rec\n    a as i64\n    b as i64\n\n*mk(x as i64) returns Rec ! E\n    if x < 0\n        err Bad\n    Rec(a is x, b is x * 2)\n\n*main()\n    mk(21) ? log($.b) !! log(-1)\n",
+        "42",
+    );
+}

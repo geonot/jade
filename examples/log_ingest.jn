@@ -21,11 +21,17 @@ impl From of ParseError for IngestError
 impl From of StoreError for IngestError
     *from(e as StoreError) returns IngestError is Store(e)
 
+enum Severity
+    Info
+    Warn
+    Error
+
 type Hit
     ip as String
     path as String
     status as i64
     bytes as i64
+    sev as Severity
 
 store hits
     ip as String @index
@@ -36,18 +42,16 @@ store hits
 # Parse a non-negative decimal. No surface `parse` exists, so we fold the bytes
 # ourselves — and make the failure a value, not a panic.
 *to_int(s as String) returns i64 ! ParseError
-    if s.is_empty()
-        err BadBytes(s)
+    s.is_empty() ? err BadBytes(s)
     n is 0
     for i in 0 to s.length
         d is s.char_at(i) - 48
-        if d < 0 or d > 9
-            err BadBytes(s)
+        d < 0 or d > 9 ? err BadBytes(s)
         n is n * 10 + d
     n
 
-*severity(status as i64) returns String
-    status >= 500 ? 'error' ! status >= 400 ? 'warn' ! 'info'
+*severity(status as i64) returns Severity
+    status >= 500 ? Error ! status >= 400 ? Warn ! Info
 
 # Bytes field is either '-' (no body) or a decimal count.
 *bytes_of(field as String) returns i64 ! ParseError
@@ -59,24 +63,20 @@ store hits
 # Pull the request path out of the quoted "METHOD path PROTO" field.
 *path_of(line as String) returns String ! ParseError
     q is line.split('"')
-    if q.len() < 2
-        err BadLine(line)
+    q.len() < 2 ? err BadLine(line)
     parts is q.get(1).split(' ')
-    if parts.len() < 2
-        err BadLine(line)
+    parts.len() < 2 ? err BadLine(line)
     parts.get(1)
 
 # Common Log Format: ip ident user [time] "req" status bytes
 *parse(line as String) returns Hit ! ParseError
-    if line.trim().is_empty()
-        err Empty
+    line.trim().is_empty() ? err Empty
     f is line.split(' ')
-    if f.len() < 2
-        err BadLine(line)
+    f.len() < 2 ? err BadLine(line)
     status is to_int(f.get(f.len() - 2)) !! err BadStatus(line)
     bytes is bytes_of(f.get(f.len() - 1))
     path is path_of(line)
-    Hit(ip is f.get(0), path is path, status is status, bytes is bytes)
+    Hit(ip is f.get(0), path is path, status is status, bytes is bytes, sev is severity(status))
 
 *land(h as Hit) returns i64 ! IngestError
     insert hits h.ip, h.path, h.status, h.bytes ? $ !! err
@@ -90,8 +90,9 @@ type Report
 # the caller tallies — a malformed line never aborts the run.
 *absorb(line as String) returns i64 ! IngestError
     h is parse(line)
+    n is h.bytes
     land(h)
-    h.bytes
+    n
 
 *ingest(lines as Vec of String) returns Report
     accepted is 0
@@ -103,9 +104,9 @@ type Report
             Ok(n) ?
                 accepted += 1
                 total_bytes += n
-            Err(_) ?
+            Err(e) ?
                 rejected += 1
-                log('reject: {line}')
+                log('reject ({e}): {line}')
 
     Report(accepted is accepted, rejected is rejected, bytes is total_bytes)
 
@@ -127,5 +128,5 @@ type Report
     transaction
         delete hits where bytes equals 0
 
-    log('500-class label: {severity(503)}')
+    log('severity(503)={severity(503)}')
     log('server errors: {errors_logged()}')

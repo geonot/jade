@@ -72,6 +72,17 @@ impl<'ctx> Compiler<'ctx> {
         for td in &prog.types {
             self.ctx.opaque_struct_type(&td.name.as_str());
         }
+        for ed in &hir_prog.enums {
+            if self.module.get_struct_type(&ed.name.as_str()).is_none() {
+                self.ctx.opaque_struct_type(&ed.name.as_str());
+            }
+        }
+        for ed in &hir_prog.err_defs {
+            if self.module.get_struct_type(&ed.name.as_str()).is_none() {
+                self.ctx.opaque_struct_type(&ed.name.as_str());
+            }
+        }
+
         for td in &prog.types {
             let ltys: Vec<BasicTypeEnum<'ctx>> =
                 td.fields.iter().map(|(_, ty)| self.llvm_ty(ty)).collect();
@@ -88,6 +99,13 @@ impl<'ctx> Compiler<'ctx> {
             self.structs.insert(td.name, fields);
         }
 
+        for ed in &hir_prog.enums {
+            let _ = self.declare_enum(ed);
+        }
+        for ed in &hir_prog.err_defs {
+            self.declare_err_def(ed)?;
+        }
+
         for td in &hir_prog.types {
             let defaults: indexmap::IndexMap<Symbol, hir::Expr> = td
                 .fields
@@ -100,14 +118,6 @@ impl<'ctx> Compiler<'ctx> {
 
             self.struct_layouts
                 .insert(td.name, td.layout.clone());
-        }
-
-        for ed in &hir_prog.enums {
-            let _ = self.declare_enum(ed);
-        }
-
-        for ed in &hir_prog.err_defs {
-            self.declare_err_def(ed)?;
         }
 
         for ext in &prog.externs {

@@ -467,4 +467,80 @@ impl<'ctx> Compiler<'ctx> {
         phi.add_incoming(&[(&tv, true_bb), (&fv_val, false_bb)]);
         Ok(phi.as_basic_value())
     }
+
+    pub(crate) fn enum_to_string(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+        name: &str,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let variants = match self.enums.get(name) {
+            Some(v) => v.clone(),
+            None => return self.int_to_string(val, false),
+        };
+        let st = match self.module.get_struct_type(name) {
+            Some(s) => s,
+            None => return self.int_to_string(val, false),
+        };
+
+        let fv = self.current_fn();
+        let i32t = self.ctx.i32_type();
+        let i64t = self.ctx.i64_type();
+        let zero = i64t.const_int(0, false);
+
+        let ptr = self.entry_alloca(st.into(), "ts.e.tmp");
+        b!(self.bld.build_store(ptr, val));
+        let tag_gep = b!(self.bld.build_struct_gep(st, ptr, 0, "ts.e.tag"));
+        let tag = b!(self.bld.build_load(i32t, tag_gep, "ts.e.tv")).into_int_value();
+
+        let dispatch_bb = self.bld.get_insert_block().unwrap();
+        let merge_bb = self.ctx.append_basic_block(fv, "ts.e.m");
+        let default_bb = self.ctx.append_basic_block(fv, "ts.e.d");
+
+        let mut cases = Vec::new();
+        let mut incoming: Vec<(BasicValueEnum<'ctx>, inkwell::basic_block::BasicBlock<'ctx>)> =
+            Vec::new();
+        for (vname, _) in &variants {
+            let tag_val = match self.variant_tags.get(vname) {
+                Some((_, t)) => *t,
+                None => continue,
+            };
+            let case_bb = self
+                .ctx
+                .append_basic_block(fv, &format!("ts.e.v{tag_val}"));
+            cases.push((i32t.const_int(tag_val as u64, false), case_bb));
+            self.bld.position_at_end(case_bb);
+            let gs = b!(self.bld.build_global_string_ptr(vname, "ts.e.s"));
+            let sv = self.build_string(
+                gs.as_pointer_value(),
+                i64t.const_int(vname.len() as u64, false),
+                zero,
+                "ts.e.sv",
+            )?;
+            b!(self.bld.build_unconditional_branch(merge_bb));
+            incoming.push((sv, case_bb));
+        }
+
+        self.bld.position_at_end(dispatch_bb);
+        b!(self.bld.build_switch(tag, default_bb, &cases));
+
+        self.bld.position_at_end(default_bb);
+        let unk = b!(self.bld.build_global_string_ptr("?", "ts.e.unk"));
+        let unk_sv = self.build_string(
+            unk.as_pointer_value(),
+            i64t.const_int(1, false),
+            zero,
+            "ts.e.unk",
+        )?;
+        b!(self.bld.build_unconditional_branch(merge_bb));
+        incoming.push((unk_sv, default_bb));
+
+        self.bld.position_at_end(merge_bb);
+        let phi = b!(self.bld.build_phi(self.string_type(), "ts.e.res"));
+        let refs: Vec<(&dyn inkwell::values::BasicValue<'ctx>, _)> = incoming
+            .iter()
+            .map(|(v, bb)| (v as &dyn inkwell::values::BasicValue<'ctx>, *bb))
+            .collect();
+        phi.add_incoming(&refs);
+        Ok(phi.as_basic_value())
+    }
 }

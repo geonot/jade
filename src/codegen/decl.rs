@@ -59,7 +59,7 @@ impl<'ctx> Compiler<'ctx> {
                 {
                     8
                 } else {
-                    self.type_store_size(self.llvm_ty(t)) as usize
+                    self.type_size_of(t) as usize
                 };
                 payload_bytes += (size + 7) & !7;
             }
@@ -69,8 +69,12 @@ impl<'ctx> Compiler<'ctx> {
             resolved.push((vname.clone(), ftys.clone()));
         }
 
+        let st = self
+            .module
+            .get_struct_type(name)
+            .unwrap_or_else(|| self.ctx.opaque_struct_type(name));
+
         if max_payload == 0 {
-            let st = self.ctx.opaque_struct_type(name);
             st.set_body(&[i32t.into()], false);
             self.enums.insert(name.into(), resolved);
             return Ok(());
@@ -86,7 +90,6 @@ impl<'ctx> Compiler<'ctx> {
                         && !Self::is_recursive_field(field_ty, name);
                 if is_ptr_like {
                     let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
-                    let st = self.ctx.opaque_struct_type(name);
                     st.set_body(&[ptr.into()], false);
                     self.enums.insert(name.into(), resolved);
                     return Ok(());
@@ -95,7 +98,6 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         let payload_ty = self.ctx.i8_type().array_type(max_payload as u32);
-        let st = self.ctx.opaque_struct_type(name);
         st.set_body(&[i32t.into(), payload_ty.into()], false);
         self.enums.insert(name.into(), resolved);
         Ok(())

@@ -12,6 +12,24 @@ impl Typer {
     ) -> Result<hir::Expr, String> {
         match expr {
             ast::Expr::Call(callee, args, span) => {
+                if let ast::Expr::Ident(n, _) = callee.as_ref()
+                    && n.as_str() == "__err_raise"
+                    && args.len() == 1
+                {
+                    return self.lower_err_raise_expr(&args[0], *span, expected);
+                }
+                if let ast::Expr::Field(obj, field, fspan) = callee.as_ref()
+                    && let ast::Expr::Ident(ref ename, _) = **obj
+                    && self.find_var(&ename.as_str()).is_none()
+                    && self.is_enum_variant_of(ename, field)
+                {
+                    let bare = ast::Expr::Call(
+                        Box::new(ast::Expr::Ident(*field, *fspan)),
+                        args.clone(),
+                        *span,
+                    );
+                    return self.lower_expr_expected(&bare, expected);
+                }
                 if let ast::Expr::OfCall(inner, type_arg_expr, _) = callee.as_ref()
                     && let ast::Expr::Ident(ctor_name, _) = inner.as_ref() {
                         let is_struct_ctor = self.generic_types.contains_key(ctor_name)
@@ -196,6 +214,43 @@ impl Typer {
         }
     }
 
+    pub(in crate::typer) fn lower_err_raise_expr(
+        &mut self,
+        variant: &ast::Expr,
+        span: ast::Span,
+        expected: Option<&Type>,
+    ) -> Result<hir::Expr, String> {
+        let err_val = self.lower_expr(variant)?;
+        let prop = self.propagate_err_value(err_val, span)?;
+        let ty = expected.cloned().unwrap_or(Type::Void);
+        Ok(hir::Expr {
+            kind: hir::ExprKind::Block(vec![
+                prop,
+                hir::Stmt::Expr(hir::Expr {
+                    kind: hir::ExprKind::Unreachable,
+                    ty: ty.clone(),
+                    span,
+                }),
+            ]),
+            ty,
+            span,
+        })
+    }
+
+    pub(in crate::typer) fn is_enum_variant_of(&self, enum_name: &Symbol, variant: &Symbol) -> bool {
+        if !self.enums.contains_key(enum_name) && !self.generic_enums.contains_key(enum_name) {
+            return false;
+        }
+        match self.variant_tags.get(variant) {
+            Some((en, _)) => en == enum_name,
+            None => self
+                .generic_enums
+                .get(enum_name)
+                .map(|ed| ed.variants.iter().any(|v| &v.name == variant))
+                .unwrap_or(false),
+        }
+    }
+
     #[allow(clippy::type_complexity, clippy::if_same_then_else)]
     pub(in crate::typer) fn lower_expr_field(
         &mut self,
@@ -205,6 +260,13 @@ impl Typer {
         let _ = expected;
         match expr {
             ast::Expr::Field(obj, field, span) => {
+                if let ast::Expr::Ident(ref name, _) = **obj
+                    && self.find_var(&name.as_str()).is_none()
+                    && self.is_enum_variant_of(name, field)
+                {
+                    let callee = ast::Expr::Ident(*field, *span);
+                    return self.lower_expr_expected(&callee, expected);
+                }
                 if let ast::Expr::Ident(ref name, _) = **obj
                     && self.modules.contains(name) && self.find_var(&name.as_str()).is_none() {
                         let qualified_name = Symbol::intern(&format!("{}_{}", name, field));

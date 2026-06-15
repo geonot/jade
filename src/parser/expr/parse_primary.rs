@@ -8,6 +8,14 @@ impl Parser {
         match self.peek() {
             Token::Err => {
                 self.advance();
+                if matches!(self.peek(), Token::Ident(_)) {
+                    let variant = self.parse_postfix()?;
+                    return Ok(Expr::Call(
+                        Box::new(Expr::Ident("__err_raise".into(), sp)),
+                        vec![variant],
+                        sp,
+                    ));
+                }
                 Ok(Expr::Ident("err".into(), sp))
             }
 

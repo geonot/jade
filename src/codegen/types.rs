@@ -114,6 +114,67 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
+    pub(crate) fn type_size_of(&self, ty: &Type) -> u64 {
+        match ty {
+            Type::I8 | Type::U8 | Type::Bool | Type::Void => 1,
+            Type::I16 | Type::U16 => 2,
+            Type::I32 | Type::U32 | Type::F32 => 4,
+            Type::I64 | Type::U64 | Type::F64 => 8,
+            Type::String => self.type_store_size(self.string_type().into()),
+            Type::Ptr(_)
+            | Type::ActorRef(_)
+            | Type::Coroutine(_)
+            | Type::Channel(_)
+            | Type::Generator(_)
+            | Type::Vec(_)
+            | Type::Map(_, _)
+            | Type::Fn(_, _) => 8,
+            Type::Array(et, n) => self.type_size_of(et).next_multiple_of(8) * (*n as u64),
+            Type::Tuple(tys) => tys
+                .iter()
+                .map(|t| self.type_size_of(t).next_multiple_of(8))
+                .sum::<u64>()
+                .max(1),
+            Type::Alias(_, inner) | Type::Newtype(_, inner) => self.type_size_of(inner),
+            Type::Struct(name, _) => {
+                if let Some(fields) = self.structs.get(name) {
+                    fields
+                        .iter()
+                        .map(|(_, t)| self.type_size_of(t).next_multiple_of(8))
+                        .sum::<u64>()
+                        .max(1)
+                } else if let Some(st) = self.module.get_struct_type(&name.as_str())
+                    && !st.get_field_types().is_empty()
+                {
+                    self.type_store_size(st.into())
+                } else {
+                    8
+                }
+            }
+            Type::Enum(name) => {
+                if let Some(variants) = self.enums.get(name) {
+                    let max_payload = variants
+                        .iter()
+                        .map(|(_, ftys)| {
+                            ftys.iter()
+                                .map(|t| self.type_size_of(t).next_multiple_of(8))
+                                .sum::<u64>()
+                        })
+                        .max()
+                        .unwrap_or(0);
+                    if max_payload == 0 { 4 } else { 8 + max_payload }
+                } else if let Some(st) = self.module.get_struct_type(&name.as_str())
+                    && !st.get_field_types().is_empty()
+                {
+                    self.type_store_size(st.into())
+                } else {
+                    8
+                }
+            }
+            _ => 8,
+        }
+    }
+
     pub(crate) fn type_abi_align(&self, ty: BasicTypeEnum<'ctx>) -> u64 {
         match ty {
             BasicTypeEnum::IntType(it) => {

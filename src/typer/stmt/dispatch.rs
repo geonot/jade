@@ -753,6 +753,25 @@ impl Typer {
             }
 
             ast::Stmt::Ret(val, span) => {
+                let resolved_ret = self.infer_ctx.shallow_resolve(ret_ty);
+                if let (Some(e), Some(result_enum)) =
+                    (val.as_ref(), self.result_enum_of(&resolved_ret))
+                {
+                    let result_ty = Type::Enum(result_enum);
+                    let he = if Self::is_result_variant_expr(e) {
+                        self.lower_expr_expected(e, Some(&result_ty))?
+                    } else {
+                        let ok_inner = self.ok_inner_ty_pub(result_enum);
+                        self.lower_expr_expected(e, Some(&ok_inner))?
+                    };
+                    let val_ty = self.infer_ctx.resolve(&he.ty);
+                    let he = if self.result_enum_of(&val_ty).is_some() {
+                        he
+                    } else {
+                        self.auto_wrap_ok(he, result_enum)
+                    };
+                    return Ok(hir::Stmt::Ret(Some(he), result_ty, *span));
+                }
                 let hval = val
                     .as_ref()
                     .map(|e| self.lower_expr_expected(e, Some(ret_ty)))
