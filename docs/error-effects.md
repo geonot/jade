@@ -173,6 +173,14 @@ Propagation makes the enclosing function fallible; its inferred error union
 grows to include the propagated error (after conversion). Fallibility is thus
 inferred, never declared involuntarily.
 
+This holds uniformly across positions: a bound `v is foo()`, a bare
+statement `foo()`, and a fallible store mutation `insert s a, b` all propagate
+the same way inside a fallible function. A bare `insert s a, b` therefore needs
+no `? $ !! err` ceremony — it propagates a store error (converted via `From`)
+and yields the insert's result, and as a tail expression auto-wraps to `Ok`.
+Inside a non-fallible function (including `main`), a store mutation with no
+handler is fire-and-forget: its error is discarded, per R4.
+
 Let `decl(f)` be the declared error union (from `! E`, if present) and `inf(f)`
 the inferred union (from the body). The typer computes `inf(f)` and checks:
 

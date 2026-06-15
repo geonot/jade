@@ -90,7 +90,7 @@ impl Typer {
         Ok(Some(r))
     }
 
-    fn enclosing_fn_is_fallible(&mut self) -> bool {
+    pub(in crate::typer) fn enclosing_fn_is_fallible(&mut self) -> bool {
         let Some(ret) = self.current_fn_ret_ty.clone() else {
             return false;
         };

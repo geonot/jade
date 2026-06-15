@@ -27,6 +27,16 @@ impl Typer {
         matches!(name.as_str(), "Ok" | "Err" | "Some" | "Nothing")
     }
 
+    pub(crate) fn expr_is_fallible_producer(e: &ast::Expr) -> bool {
+        matches!(
+            e,
+            ast::Expr::Call(..)
+                | ast::Expr::Method(..)
+                | ast::Expr::StoreInsert(..)
+                | ast::Expr::StoreUpdate(..)
+        )
+    }
+
     pub(crate) fn lower_block_no_scope_with_tail(
         &mut self,
         block: &ast::Block,
@@ -44,15 +54,20 @@ impl Typer {
                         let result_ty = Type::Enum(result_enum);
                         let he = if Self::is_result_variant_expr(e) {
                             self.lower_expr_expected(e, Some(&result_ty))?
+                        } else if Self::expr_is_fallible_producer(e) {
+                            self.lower_expr(e)?
                         } else {
                             let ok_inner = self.ok_inner_ty_pub(result_enum);
                             self.lower_expr_expected(e, Some(&ok_inner))?
                         };
                         let val_ty = self.infer_ctx.resolve(&he.ty);
-                        let he = if self.result_enum_of(&val_ty).is_some() {
-                            he
-                        } else {
-                            self.auto_wrap_ok(he, result_enum)
+                        let he = match self.result_enum_of(&val_ty) {
+                            Some(val_enum) if val_enum == result_enum => he,
+                            Some(_) => match self.implicit_propagate(he.clone())? {
+                                Some(v) => self.auto_wrap_ok(v, result_enum),
+                                None => he,
+                            },
+                            None => self.auto_wrap_ok(he, result_enum),
                         };
                         let stmt = hir::Stmt::Expr(he);
                         self.record_take_moves_in_stmt(&stmt);
@@ -65,6 +80,23 @@ impl Typer {
                     stmts.push(stmt);
                     continue;
                 }
+            if idx == block_len - 1
+                && let (Some(expected), crate::ast::Stmt::StoreInsert(store, values, span)) =
+                    (tail_expected, s)
+            {
+                let resolved_expected = self.infer_ctx.shallow_resolve(expected);
+                if let Some(result_enum) = self.result_enum_of(&resolved_expected) {
+                    let insert = self.lower_expr_store_insert(store, values, *span)?;
+                    let he = match self.implicit_propagate(insert.clone())? {
+                        Some(v) => self.auto_wrap_ok(v, result_enum),
+                        None => insert,
+                    };
+                    let stmt = hir::Stmt::Expr(he);
+                    self.record_take_moves_in_stmt(&stmt);
+                    stmts.push(stmt);
+                    continue;
+                }
+            }
             if idx == block_len - 1
                 && let (Some(expected), crate::ast::Stmt::If(i)) = (tail_expected, s) {
                     let hi = self.lower_if_with_tail(i, ret_ty, Some(expected))?;

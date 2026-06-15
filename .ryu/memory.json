@@ -678,6 +678,23 @@
       "ts_created": "2026-06-15T19:27:44+00:00",
       "ts_accessed": "2026-06-15T19:27:44+00:00",
       "access_count": 0
+    },
+    "pre_existing_fail_simple_column_decorator": {
+      "key": "pre_existing_fail_simple_column_decorator",
+      "value": "PRE-EXISTING test failures (NOT a regression): tests/integration.rs column_sum/column_min/column_max use `store nums @simple @column` but the compiler rejects 'decorators @simple and @column cannot be combined'. Verified failing on stashed pre-change binary too. Fix: update those 3 test sources to use a valid decorator combo (drop @simple or @column), OR allow the combination. Separate from insert-propagation cleanup.",
+      "kind": "pitfall",
+      "tags": [
+        "test",
+        "store",
+        "decorator",
+        "pre-existing"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T19:52:21+00:00",
+      "ts_accessed": "2026-06-15T19:52:21+00:00",
+      "access_count": 0
     }
   }
 }

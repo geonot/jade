@@ -77,7 +77,7 @@ store hits
     Hit(f.get(0), path, status, bytes, severity(status))
 
 *land(h as Hit) returns i64 ! IngestError
-    insert hits h.ip, h.path, h.status, h.bytes ? $ !! err
+    insert hits h.ip, h.path, h.status, h.bytes
 
 type Report
     accepted as i64

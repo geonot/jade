@@ -611,6 +611,17 @@ impl Typer {
                         return Ok(hir::Stmt::Assign(target, he, *mspan));
                     }
                 }
+                let he = if matches!(
+                    e,
+                    ast::Expr::Quaternary(..) | ast::Expr::Ternary(..)
+                ) {
+                    he
+                } else {
+                    match self.implicit_propagate(he.clone())? {
+                        Some(v) => v,
+                        None => he,
+                    }
+                };
                 Ok(hir::Stmt::Expr(he))
             }
 
@@ -920,6 +931,13 @@ impl Typer {
             }
 
             ast::Stmt::StoreInsert(store, values, span) => {
+                if self.enclosing_fn_is_fallible() {
+                    let insert = self.lower_expr_store_insert(store, values, *span)?;
+                    if let Some(prop) = self.implicit_propagate(insert.clone())? {
+                        return Ok(hir::Stmt::Expr(prop));
+                    }
+                    return Ok(hir::Stmt::Expr(insert));
+                }
                 let hvalues = self.lower_store_insert_values(store, values)?;
                 Ok(hir::Stmt::StoreInsert(*store, hvalues, *span))
             }

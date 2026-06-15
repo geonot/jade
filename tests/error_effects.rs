@@ -348,3 +348,27 @@ fn fallible_fn_returning_struct_payload_intact() {
         "42",
     );
 }
+
+#[test]
+fn bare_fallible_call_stmt_propagates() {
+    expect(
+        "err E\n    Bad\n\n*may_fail(x as i64) returns i64 ! E\n    x < 0 ? err Bad\n    x * 2\n\n*chain(x as i64) returns i64 ! E\n    may_fail(x)\n    99\n\n*main()\n    chain(5) ? log($) !! log(-1)\n    chain(-1) ? log($) !! log(-2)\n",
+        "99\n-2",
+    );
+}
+
+#[test]
+fn bare_insert_propagates_and_yields_result() {
+    expect(
+        "err AppErr\n    S(StoreError)\n\nimpl From of StoreError for AppErr\n    *from(e as StoreError) returns AppErr is S(e)\n\nstore items\n    name as String\n    qty as i64\n\n*land(n as String, q as i64) returns i64 ! AppErr\n    insert items n, q\n\n*main()\n    land('a', 7) ? log('ok') !! log('err')\n",
+        "ok",
+    );
+}
+
+#[test]
+fn bare_fallible_call_tail_autowraps_ok() {
+    expect(
+        "err E\n    Bad\n\n*inner(x as i64) returns i64 ! E\n    x < 0 ? err Bad\n    x + 1\n\n*outer(x as i64) returns i64 ! E\n    inner(x)\n\n*main()\n    outer(10) ? log($) !! log(-1)\n    outer(-1) ? log($) !! log(-2)\n",
+        "11\n-2",
+    );
+}
