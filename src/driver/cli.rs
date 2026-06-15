@@ -4,7 +4,12 @@ use clap::{Parser as ClapParser, Subcommand};
 
 
 #[derive(ClapParser)]
-#[command(name = "jinnc", version = "0.0.0", about = "The Jinn compiler")]
+#[command(
+    name = "jinn",
+    bin_name = "jinn",
+    version = "0.0.0",
+    about = "The Jinn toolchain"
+)]
 pub(super) struct Cli {
     #[command(subcommand)]
     pub(super) command: Option<Cmd>,
@@ -84,6 +89,48 @@ pub(super) struct Cli {
 
 #[derive(Subcommand)]
 pub(super) enum Cmd {
+    Compile {
+        input: PathBuf,
+        #[arg(short, long, default_value = "a.out")]
+        output: PathBuf,
+        #[arg(long, hide = true)]
+        emit_ir: bool,
+        #[arg(long)]
+        emit_llvm: bool,
+        #[arg(long)]
+        emit_hir: bool,
+        #[arg(long)]
+        emit_mir: bool,
+        #[arg(long)]
+        emit_obj: bool,
+        #[arg(long, default_value = "3")]
+        opt: u8,
+        #[arg(long)]
+        lto: bool,
+        #[arg(long)]
+        lib: bool,
+        #[arg(long)]
+        link: Vec<PathBuf>,
+        #[arg(long)]
+        debug: bool,
+        #[arg(long)]
+        test: bool,
+        #[arg(long)]
+        emit_interface: bool,
+        #[arg(long)]
+        dump_tokens: bool,
+        #[arg(long)]
+        dump_ast: bool,
+        #[arg(long)]
+        standalone: bool,
+        #[arg(long)]
+        target: Option<String>,
+        #[arg(long)]
+        cpu: Option<String>,
+        #[arg(long)]
+        features: Option<String>,
+    },
+
     Init {
         name: Option<String>,
     },

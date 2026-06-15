@@ -72,11 +72,58 @@ fn init_tracing(cli: &Cli) {
 }
 
 pub fn run() {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
     init_tracing(&cli);
+
+    if let Some(Cmd::Compile {
+        input,
+        output,
+        emit_ir,
+        emit_llvm,
+        emit_hir,
+        emit_mir,
+        emit_obj,
+        opt,
+        lto,
+        lib,
+        link,
+        debug,
+        test,
+        emit_interface,
+        dump_tokens,
+        dump_ast,
+        standalone,
+        target,
+        cpu,
+        features,
+    }) = cli.command
+    {
+        cli.input = Some(input);
+        cli.output = output;
+        cli.emit_ir = emit_ir;
+        cli.emit_llvm = emit_llvm;
+        cli.emit_hir = emit_hir;
+        cli.emit_mir = emit_mir;
+        cli.emit_obj = emit_obj;
+        cli.opt = opt;
+        cli.lto = lto;
+        cli.lib = lib;
+        cli.link = link;
+        cli.debug = debug;
+        cli.test = test;
+        cli.emit_interface = emit_interface;
+        cli.dump_tokens = dump_tokens;
+        cli.dump_ast = dump_ast;
+        cli.standalone = standalone;
+        cli.target = target.or(cli.target);
+        cli.cpu = cpu.or(cli.cpu);
+        cli.features = features.or(cli.features);
+        cli.command = None;
+    }
 
     if let Some(cmd) = cli.command {
         match cmd {
+            Cmd::Compile { .. } => unreachable!(),
             Cmd::Init { name } => cmd_init(name),
             Cmd::Fetch => cmd_fetch(),
             Cmd::Update => cmd_update(),
