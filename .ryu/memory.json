@@ -324,6 +324,18 @@
       "ts_created": "2026-06-15T05:01:19+00:00",
       "ts_accessed": "2026-06-15T05:01:19+00:00",
       "access_count": 0
+    },
+    "task_5_fmt_spec": {
+      "key": "task_5_fmt_spec",
+      "value": "Task 5 DONE. Two docs written: docs/idiomatic.md (Part1 anti-pattern catalog) + docs/fmt.md (Part2 jinn fmt+lint spec).\nKEY FINDINGS from corpus scan: (1) BIGGEST smell = C-style loop(0, $ < xs.len(), $ + 1) + xs.get($) \u2014 88 occurrences / 41 files; idiom is `loop xs` ($ elem, $$ idx) or `for i in 0 to n`. (2) 963 redundant `self.` in std/ but guide_tour.jn uses ZERO (implicit self is canonical). (3) 356 `i is i + 1` manual increments. (4) O(n\u00b2) `out is out + \u2026` string accumulation everywhere (use StringBuilder/join). (5) int-flag-as-bool (cross is 0/1). (6) else{if} ladders -> elif. (7) tail `return` noise.\nEXISTING STATE: src/fmt.rs (648L) already an AST reprinter wired via Cmd::Fmt in src/driver/mod.rs -> crate::fmt::format_source. CRITICAL FLAW: lexer (src/lexer/mod.rs `b'#' => skip_line()`) DISCARDS comments, so reprinter silently deletes all comments \u2014 unsafe. No lint, no idempotency, no check/diff mode.\nSPEC DESIGN: 4 tiers (T1 lexical/CST always-safe, T2 flow-shape closed-match, T3 type-aware opt-in verified, T4 lint suggest-only). Rule ids J0xxx/J1xxx/J2xxx/J3xxx. Phase 0 = stop dropping comments + trivia table. Verifier re-parses+normalizes to prove behavior preservation. J3105 = is/equals confusion bug lint (standout).",
+      "kind": "decision",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T05:19:22+00:00",
+      "ts_accessed": "2026-06-15T05:19:22+00:00",
+      "access_count": 0
     }
   }
 }

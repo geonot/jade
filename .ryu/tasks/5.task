@@ -1,0 +1,33 @@
+title: jinn fmt + lint technical spec with idiomatic syntax refinement
+status: complete
+atomic: false
+priority: high
+blocked_by: []
+created_at: '2026-06-14T22:14:03'
+updated_at: '2026-06-14T22:19:29'
+result: 'Delivered docs/idiomatic.md (Part 1: evidence-backed anti-pattern catalog
+  with remediations, severity tiers S1-S3, grounded in real file:line citations) and
+  docs/fmt.md (Part 2: jinn fmt + jinn lint technical spec). Spec covers: layered
+  architecture reusing the jinnc frontend, lossless CST/trivia (fixing the existing
+  comment-eating reprinter in src/fmt.rs), a 4-tier rule engine (T1 lexical / T2 flow-shape
+  / T3 type-aware / T4 lint) with stable rule ids, configuration, CLI (--check/--diff/--stdin/--type-aware/--fix),
+  a verified behavior-preservation + idempotency safety model, bug lints (incl. the
+  is/equals confusion J3105), a testing strategy mirroring conformance suites, and
+  a phased rollout.'
+description: 'Two-part deliverable:
+
+  PART 1: Research the existing Jinn code corpus (tests, snippets/, apps/, benchmarks/,
+  std/, libjn/, conformance suites) to catalog anti-patterns, unsightly idioms, ugly
+  syntax, and non-idiomatic constructs. For each, document why it''s bad and propose
+  an idiomatic remediation that leverages inference, implicit declarations, and the
+  intelligent compiler. Output: a syntax refinement / course-correction document.
+
+  PART 2: Design a technical spec for `jinn fmt` — a formatter like rustfmt but more
+  powerful, that rewrites un-idiomatic / smelly Jinn into clean idiomatic Jinn with
+  NO behavior change, plus an integrated lint (`jinn lint`) that finds bugs and syntax
+  issues. Spec should cover architecture (reuse compiler frontend: lexer/parser/HIR),
+  rule taxonomy, fix/rewrite engine, configuration, CLI, idempotency/safety guarantees,
+  and integration with jinnc.
+
+  Definition of done: docs/fmt.md (the spec) and docs/idiomatic.md (Part 1 refinement
+  catalog) written, grounded in real examples from the codebase with file:line citations.'
