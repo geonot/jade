@@ -18,8 +18,11 @@ mod implicit;
 mod index;
 mod modules;
 mod packages;
+mod dag;
 
 pub(super) use implicit::*;
 pub(super) use index::*;
 pub(super) use modules::*;
 pub(super) use packages::*;
+#[allow(unused_imports)]
+pub(super) use dag::*;

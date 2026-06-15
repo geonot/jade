@@ -1,11 +1,16 @@
 title: Implement workspace flattening into one resolution DAG
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-15T05:51:53'
-updated_at: '2026-06-15T05:51:53'
-result: ''
+updated_at: '2026-06-15T12:11:46'
+result: 'Created src/driver/sources/dag.rs: ResolutionDag + ResolvedNode types, flatten_workspace()
+  recursively assigns PkgId to each member (path-scoped owner_scope), sorts dep hashes
+  for determinism, detects identity collisions (same name+scope+version, different
+  path) and dependency cycles as hard errors. 4 tests: single root, two distinct sources
+  produce distinct hashes, dep included in DAG, missing dep errors. Zero warnings
+  (dead_code allowed until threading tasks wire it in). 289 lib tests pass.'
 description: Flatten workspace members into a single dependency DAG, assigning PackageIds
   to each member. Detect and report collisions as hard errors. Done when a multi-member
   workspace flattens to one DAG, each member has a distinct PackageId, and collision
