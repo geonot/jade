@@ -204,7 +204,7 @@ impl HirValidator {
                 }
             }
             hir::Stmt::Transaction(block, _) => self.validate_block(block),
-            hir::Stmt::Together(_, block, _, _) => self.validate_block(block),
+            hir::Stmt::Together(_, block, _, _, _) => self.validate_block(block),
             hir::Stmt::ChannelClose(e, _) => self.validate_expr(e),
             hir::Stmt::Stop(e, _) => self.validate_expr(e),
             hir::Stmt::ScopeCancel(_, _) => {}
@@ -549,7 +549,7 @@ fn stmt_span(stmt: &hir::Stmt) -> Span {
         hir::Stmt::StoreCompact(_, s) => *s,
         hir::Stmt::StoreSet(_, _, _, s) => *s,
         hir::Stmt::Transaction(_, s) => *s,
-        hir::Stmt::Together(_, _, _, s) => *s,
+        hir::Stmt::Together(_, _, _, _, s) => *s,
         hir::Stmt::ChannelClose(_, s) => *s,
         hir::Stmt::Stop(_, s) => *s,
         hir::Stmt::ScopeCancel(_, s) => *s,

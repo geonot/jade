@@ -370,7 +370,7 @@ impl PrettyPrinter {
                 self.block(blk);
                 self.pop();
             }
-            Stmt::Together(name, blk, _, _) => {
+            Stmt::Together(name, blk, _, _, _) => {
                 match name {
                     Some(n) => self.line(&format!("together {n}:")),
                     None => self.line("together:"),

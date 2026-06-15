@@ -415,48 +415,17 @@ impl<'ctx> Compiler<'ctx> {
 
     pub(super) fn emit_scope_build_err(
         &mut self,
-        err_enum: &str,
+        _err_enum: &str,
         word_vid: mir::ValueId,
         result_ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let i32t = self.ctx.i32_type();
         let word = self.val(word_vid).into_int_value();
-        let err_tag = b!(self.bld.build_int_truncate(word, i32t, "err.tag"));
-
-        let result_enum = match result_ty {
-            Type::Enum(n) => *n,
-            _ => return Err(format!("__scope_build_err: result type is not an enum: {result_ty}")),
-        };
-
-        let result_err_tag = self
-            .enums
-            .get(&result_enum)
-            .and_then(|vs| vs.iter().position(|(n, _)| n == "Err"))
-            .map(|i| i as u64)
-            .unwrap_or(1);
-
-        let result_llvm = self.llvm_ty(result_ty).into_struct_type();
-        let err_enum_sym = crate::intern::Symbol::intern(err_enum);
-        let err_llvm = self.llvm_ty(&Type::Enum(err_enum_sym)).into_struct_type();
-
-        let mut err_val: BasicValueEnum<'ctx> = err_llvm.const_zero().into();
-        err_val = b!(self.bld.build_insert_value(
-            err_val.into_struct_value(),
-            err_tag,
-            0,
-            "err.enum"
-        ))
-        .into_struct_value()
-        .into();
-
-        let alloca = self.entry_alloca(result_llvm.into(), "scope.err.result");
-        let tag_ptr = b!(self.bld.build_struct_gep(result_llvm, alloca, 0, "res.tag"));
-        b!(self
-            .bld
-            .build_store(tag_ptr, i32t.const_int(result_err_tag, false)));
-        let payload_ptr = b!(self.bld.build_struct_gep(result_llvm, alloca, 1, "res.payload"));
-        b!(self.bld.build_store(payload_ptr, err_val));
-        let loaded = b!(self.bld.build_load(result_llvm, alloca, "scope.err.load"));
+        let result_llvm = self.llvm_ty(result_ty);
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        let boxed = b!(self.bld.build_int_to_ptr(word, ptr, "scope.err.box.ptr"));
+        let loaded = b!(self.bld.build_load(result_llvm, boxed, "scope.err.load"));
+        let free_fn = self.ensure_free();
+        b!(self.bld.build_call(free_fn, &[boxed.into()], ""));
         Ok(loaded)
     }
 

@@ -415,8 +415,17 @@ impl Typer {
             hir::Stmt::Transaction(block, _) => {
                 self.resolve_block(block);
             }
-            hir::Stmt::Together(_, block, _, _) => {
+            hir::Stmt::Together(_, block, _, handler, _) => {
                 self.resolve_block(block);
+                if let Some(h) = handler {
+                    h.err_ty = self.infer_ctx.resolve(&h.err_ty);
+                    if let Some(ok) = &mut h.ok_arm {
+                        self.resolve_block(ok);
+                    }
+                    if let Some(err) = &mut h.err_arm {
+                        self.resolve_block(err);
+                    }
+                }
             }
             hir::Stmt::ChannelClose(e, _) => self.resolve_expr(e),
             hir::Stmt::Stop(e, _) => self.resolve_expr(e),

@@ -128,7 +128,7 @@ pub enum Stmt {
     StoreSave(Symbol, Span),
     StoreCompact(Symbol, Span),
     Transaction(Block, Span),
-    Together(Option<Symbol>, Block, Span),
+    Together(Option<Symbol>, Block, TogetherHandler, Span),
     ChannelClose(Expr, Span),
     Stop(Expr, Span),
     Join(Expr, Span),
@@ -164,7 +164,7 @@ impl Stmt {
             Stmt::StoreSave(_, s) => *s,
             Stmt::StoreCompact(_, s) => *s,
             Stmt::Transaction(_, s) => *s,
-            Stmt::Together(_, _, s) => *s,
+            Stmt::Together(_, _, _, s) => *s,
             Stmt::ChannelClose(_, s) => *s,
             Stmt::Stop(_, s) => *s,
             Stmt::Join(_, s) => *s,
@@ -478,6 +478,12 @@ pub struct While {
     pub cond: Expr,
     pub body: Block,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TogetherHandler {
+    pub ok_arm: Option<Box<Expr>>,
+    pub err_arm: Option<Box<Expr>>,
 }
 
 #[derive(Debug, Clone)]

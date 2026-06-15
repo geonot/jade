@@ -102,55 +102,6 @@ impl Typer {
         }
     }
 
-    fn collect_errreturn_enums(
-        body: &[hir::Stmt],
-        out: &mut std::collections::BTreeSet<crate::intern::Symbol>,
-    ) {
-        for stmt in body {
-            match stmt {
-                hir::Stmt::ErrReturn(e, _, _) => {
-                    if let Type::Enum(n) | Type::Struct(n, _) = &e.ty {
-                        out.insert(*n);
-                    }
-                }
-                hir::Stmt::If(i) => {
-                    Self::collect_errreturn_enums(&i.then, out);
-                    for (_, b) in &i.elifs {
-                        Self::collect_errreturn_enums(b, out);
-                    }
-                    if let Some(els) = &i.els {
-                        Self::collect_errreturn_enums(els, out);
-                    }
-                }
-                hir::Stmt::While(w) => Self::collect_errreturn_enums(&w.body, out),
-                hir::Stmt::For(f) => Self::collect_errreturn_enums(&f.body, out),
-                hir::Stmt::Loop(l) => Self::collect_errreturn_enums(&l.body, out),
-                hir::Stmt::Match(m) => {
-                    for a in &m.arms {
-                        Self::collect_errreturn_enums(&a.body, out);
-                    }
-                }
-                hir::Stmt::Expr(e) | hir::Stmt::Bind(hir::Bind { value: e, .. }) => {
-                    Self::collect_errreturn_enums_expr(e, out);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn collect_errreturn_enums_expr(
-        e: &hir::Expr,
-        out: &mut std::collections::BTreeSet<crate::intern::Symbol>,
-    ) {
-        if let hir::ExprKind::Block(stmts) = &e.kind {
-            Self::collect_errreturn_enums(stmts, out);
-        }
-        if let hir::ExprKind::Ternary(_, a, b) = &e.kind {
-            Self::collect_errreturn_enums_expr(a, out);
-            Self::collect_errreturn_enums_expr(b, out);
-        }
-    }
-
     pub(in crate::typer) fn lower_expr_dispatch_block(
         &mut self,
         expr: &ast::Expr,
@@ -159,24 +110,7 @@ impl Typer {
         let _ = expected;
         match expr {
             ast::Expr::DispatchBlock(name, body, span) => {
-                let in_scope = name.as_str() == "__anon";
-                let prev_ret = if in_scope {
-                    self.current_fn_ret_ty.take()
-                } else {
-                    None
-                };
-                let hbody = self.lower_block_no_scope(body, &Type::Void);
-                if in_scope {
-                    self.current_fn_ret_ty = prev_ret;
-                }
-                let hbody = hbody?;
-                if in_scope {
-                    let mut errs = std::collections::BTreeSet::new();
-                    Self::collect_errreturn_enums(&hbody, &mut errs);
-                    for en in errs {
-                        self.current_fn_error_types.insert(en);
-                    }
-                }
+                let hbody = self.lower_block_no_scope(body, &Type::Void)?;
                 let yield_ty = self.infer_coroutine_yield_type(&hbody);
                 let coro_ty = Type::Coroutine(Box::new(yield_ty));
                 let coro_name = if name.as_str() == "__anon" {

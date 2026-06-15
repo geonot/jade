@@ -727,7 +727,7 @@ impl<'ctx> Compiler<'ctx> {
                 if self.cur_fn_is_scheduler_task {
                     if let Some(vid) = val {
                         let v = self.val(*vid);
-                        let errval = self.coerce_to_i64(v);
+                        let errval = self.box_scope_error(v);
                         let f = crate::codegen::fn_or_die(
                             &self.module,
                             "jinn_scope_record_current_error",

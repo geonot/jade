@@ -179,8 +179,14 @@ fn collect_calls_stmt(stmt: &ast::Stmt, calls: &mut HashSet<Symbol>) {
         ast::Stmt::Transaction(block, _) => {
             collect_calls_block(block, calls);
         }
-        ast::Stmt::Together(_, block, _) => {
+        ast::Stmt::Together(_, block, handler, _) => {
             collect_calls_block(block, calls);
+            if let Some(e) = &handler.ok_arm {
+                collect_calls_expr(e, calls);
+            }
+            if let Some(e) = &handler.err_arm {
+                collect_calls_expr(e, calls);
+            }
         }
         ast::Stmt::SimFor(f, _) => {
             collect_calls_expr(&f.iter, calls);

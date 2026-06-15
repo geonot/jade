@@ -169,7 +169,7 @@ fn collect_var_refs_stmt(stmt: &hir::Stmt, refs: &mut HashSet<Symbol>) {
         }
         hir::Stmt::SimBlock(body, _)
         | hir::Stmt::Transaction(body, _)
-        | hir::Stmt::Together(_, body, _, _) => {
+        | hir::Stmt::Together(_, body, _, _, _) => {
             collect_var_refs_block(body, refs);
         }
         hir::Stmt::StoreInsert(_, exprs, _) => {

@@ -423,7 +423,7 @@ impl<'ctx> Compiler<'ctx> {
                     | Stmt::Stop(_, _)
                     | Stmt::ScopeCancel(_, _)
                     | Stmt::Join(_, _)
-                    | Stmt::Together(_, _, _, _)
+                    | Stmt::Together(..)
                     | Stmt::SimFor(_, _)
                     | Stmt::SimBlock(_, _)
             )
@@ -447,7 +447,7 @@ impl<'ctx> Compiler<'ctx> {
                     Stmt::Match(m) => {
                         scan_expr(&m.subject) || m.arms.iter().any(|a| scan_block(&a.body))
                     }
-                    Stmt::Together(_, b, _, _) | Stmt::Transaction(b, _) | Stmt::Defer(b, _) => {
+                    Stmt::Together(_, b, _, _, _) | Stmt::Transaction(b, _) | Stmt::Defer(b, _) => {
                         scan_block(b)
                     }
                     Stmt::Ret(Some(e), _, _) => scan_expr(e),

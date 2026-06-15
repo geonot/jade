@@ -395,7 +395,7 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             out.push_str("transaction\n");
             format_block(out, body, level + 1);
         }
-        Stmt::Together(name, body, _) => {
+        Stmt::Together(name, body, _, _) => {
             indent(out, level);
             match name {
                 Some(n) => out.push_str(&format!("together {n}\n")),

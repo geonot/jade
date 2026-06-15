@@ -196,6 +196,7 @@ impl Lowerer {
         name: Option<Symbol>,
         body: &[hir::Stmt],
         errs: &[Symbol],
+        handler: Option<&hir::TogetherHandler>,
         span: crate::ast::Span,
     ) -> ValueId {
         let scope = self.emit(
@@ -218,7 +219,7 @@ impl Lowerer {
             span,
         );
 
-        if errs.is_empty() {
+        if errs.is_empty() && handler.is_none() {
             return self.emit(
                 InstKind::Call(Symbol::intern("__scope_join"), vec![scope]),
                 Type::Void,
@@ -226,11 +227,8 @@ impl Lowerer {
             );
         }
 
-        let result_ty = self
-            .func
-            .ret_ty
-            .clone();
-        let err_enum = errs[0];
+        let result_ty = self.func.ret_ty.clone();
+        let err_enum = errs.first().copied().unwrap_or_else(|| Symbol::intern("Void"));
         let got = self.emit(
             InstKind::Call(Symbol::intern("__scope_join_take_error"), vec![scope]),
             Type::I64,
@@ -253,17 +251,40 @@ impl Lowerer {
                 Symbol::intern(&format!("__scope_build_err_{err_enum}")),
                 vec![got],
             ),
-            result_ty,
+            result_ty.clone(),
             span,
         );
-        self.lower_deferred_in_reverse();
-        self.set_terminator(Terminator::Return(Some(err_result)));
-        let dead = self.new_block("scope.err.dead");
-        self.switch_to(dead);
-        self.mark_dead_block(dead);
+
+        match handler {
+            Some(h) if h.err_arm.is_some() => {
+                if let Some(err_arm) = &h.err_arm {
+                    let err_inner = self.emit(
+                        InstKind::FieldGet(err_result, Symbol::intern("_0")),
+                        h.err_ty.clone(),
+                        span,
+                    );
+                    self.write_var(Symbol::intern("err"), self.current_block, err_inner);
+                    let _ = h.err_bind;
+                    self.lower_block_stmts(err_arm);
+                }
+                self.set_terminator(Terminator::Goto(cont_bb));
+            }
+            _ => {
+                self.lower_deferred_in_reverse();
+                self.set_terminator(Terminator::Return(Some(err_result)));
+                let dead = self.new_block("scope.err.dead");
+                self.switch_to(dead);
+                self.mark_dead_block(dead);
+            }
+        }
 
         self.seal_block(cont_bb);
         self.switch_to(cont_bb);
+        if let Some(h) = handler
+            && let Some(ok_arm) = &h.ok_arm
+        {
+            self.lower_block_stmts(ok_arm);
+        }
         self.emit(InstKind::Void, Type::Void, span)
     }
 

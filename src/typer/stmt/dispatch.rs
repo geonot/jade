@@ -989,7 +989,7 @@ impl Typer {
                 Ok(hir::Stmt::Transaction(hbody, *span))
             }
 
-            ast::Stmt::Together(name, body, span) => {
+            ast::Stmt::Together(name, body, handler, span) => {
                 if let Some(n) = name {
                     self.scope_names.push(*n);
                 }
@@ -999,12 +999,70 @@ impl Typer {
                 if name.is_some() {
                     self.scope_names.pop();
                 }
+                let hbody = hbody?;
                 let errs: Vec<Symbol> = self
                     .current_fn_error_types
                     .difference(&before)
                     .cloned()
                     .collect();
-                Ok(hir::Stmt::Together(*name, hbody?, errs, *span))
+
+                let hhandler = if handler.ok_arm.is_some() || handler.err_arm.is_some() {
+                    let err_ty = errs
+                        .first()
+                        .map(|e| Type::Enum(*e))
+                        .unwrap_or(Type::Void);
+                    let err_bind = self.fresh_id();
+
+                    let h_ok = if let Some(ok) = &handler.ok_arm {
+                        let dollar_id = self.fresh_id();
+                        self.dollar_stack.push((dollar_id, Type::Void));
+                        self.push_scope();
+                        self.define_var(
+                            "$",
+                            VarInfo {
+                                def_id: dollar_id,
+                                ty: Type::Void,
+                                ownership: Ownership::Owned,
+                                scheme: None,
+                            },
+                        );
+                        let he = self.lower_expr(ok);
+                        self.pop_scope();
+                        self.dollar_stack.pop();
+                        Some(vec![hir::Stmt::Expr(he?)])
+                    } else {
+                        None
+                    };
+
+                    let h_err = if let Some(err) = &handler.err_arm {
+                        self.push_scope();
+                        self.define_var(
+                            "err",
+                            VarInfo {
+                                def_id: err_bind,
+                                ty: err_ty.clone(),
+                                ownership: Ownership::Owned,
+                                scheme: None,
+                            },
+                        );
+                        let he = self.lower_expr(err);
+                        self.pop_scope();
+                        Some(vec![hir::Stmt::Expr(he?)])
+                    } else {
+                        None
+                    };
+
+                    Some(hir::TogetherHandler {
+                        err_bind,
+                        err_ty,
+                        err_arm: h_err,
+                        ok_arm: h_ok,
+                    })
+                } else {
+                    None
+                };
+
+                Ok(hir::Stmt::Together(*name, hbody, errs, hhandler, *span))
             }
 
             ast::Stmt::ChannelClose(ch, span) => {

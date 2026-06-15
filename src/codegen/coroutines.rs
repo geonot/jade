@@ -65,4 +65,37 @@ impl<'ctx> Compiler<'ctx> {
             _ => i64t.const_int(0, false),
         }
     }
+
+    pub(crate) fn box_scope_error(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+    ) -> inkwell::values::IntValue<'ctx> {
+        let i64t = self.ctx.i64_type();
+        if let BasicValueEnum::IntValue(iv) = val
+            && iv.get_type().get_bit_width() <= 64
+        {
+            return self.coerce_to_i64(val);
+        }
+        let size_iv = match val.get_type() {
+            inkwell::types::BasicTypeEnum::StructType(t) => t.size_of(),
+            inkwell::types::BasicTypeEnum::ArrayType(t) => t.size_of(),
+            inkwell::types::BasicTypeEnum::IntType(t) => Some(t.size_of()),
+            inkwell::types::BasicTypeEnum::FloatType(t) => Some(t.size_of()),
+            inkwell::types::BasicTypeEnum::PointerType(t) => Some(t.size_of()),
+            inkwell::types::BasicTypeEnum::VectorType(t) => t.size_of(),
+            inkwell::types::BasicTypeEnum::ScalableVectorType(t) => t.size_of(),
+        }
+        .unwrap_or(i64t.const_int(16, false));
+        let malloc_fn = self.ensure_malloc();
+        let mem = self
+            .bld
+            .build_call(malloc_fn, &[size_iv.into()], "scope.err.box")
+            .unwrap()
+            .try_as_basic_value()
+            .basic()
+            .expect("ICE: malloc returned void")
+            .into_pointer_value();
+        self.bld.build_store(mem, val).unwrap();
+        self.bld.build_ptr_to_int(mem, i64t, "box.p2i").unwrap()
+    }
 }

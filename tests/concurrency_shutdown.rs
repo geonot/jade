@@ -493,6 +493,80 @@ err Boom
     );
 }
 
+/// A scope re-raises with `From` conversion (R1/R3): the child raises `Boom`,
+/// but the enclosing function's error type is `AppError`, and an
+/// `impl From of Boom for AppError` exists. The scope-site re-raise must apply
+/// that conversion, surfacing the child's error wrapped as `AppError::Wrapped`.
+#[test]
+fn scope_error_propagates_with_from() {
+    expect(
+        "\
+err Boom
+    Bad
+
+err Other
+    Nope
+
+err AppError
+    Wrapped(Boom)
+    Via(Other)
+
+impl From of Boom for AppError
+    *from(e as Boom) returns AppError
+        Wrapped(e)
+
+*risky() returns i64 ! Boom
+    err Bad
+
+*work() returns i64 ! AppError
+    together
+        dispatch
+            x is risky() ? $ !! err
+            log(1)
+    0
+
+*main()
+    match work()
+        Ok(v) ? log(v)
+        Err(e) ? match e
+            Wrapped(_) ? log(42)
+            Via(_) ? log(7)
+",
+        "42",
+    );
+}
+
+/// A `!!` handler arm on a `together` block (E4) handles the scope's error in
+/// place instead of propagating it. `err` is bound to the surfaced error value;
+/// here the handler logs `99` and the scope is considered handled, so the
+/// enclosing function continues and returns `Ok(0)`.
+#[test]
+fn scope_err_handler_binds_err() {
+    expect(
+        "\
+err Boom
+    Bad
+
+*risky() returns i64 ! Boom
+    err Bad
+
+*work() returns i64 ! Boom
+    together
+        dispatch
+            x is risky() ? $ !! err
+            log(1)
+    !! log(99)
+    0
+
+*main()
+    match work()
+        Ok(v) ? log(v)
+        Err(e) ? log(-1)
+",
+        "99\n0",
+    );
+}
+
 /// A failing child cancels its siblings (E1): the failing task records the
 /// error and cancels the scope, so a looping sibling unwinds at its next
 /// suspension point instead of running to completion. The would-be million

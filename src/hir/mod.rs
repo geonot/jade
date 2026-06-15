@@ -348,7 +348,7 @@ pub enum Stmt {
     StoreSave(Symbol, Span),
     StoreCompact(Symbol, Span),
     Transaction(Block, Span),
-    Together(Option<Symbol>, Block, Vec<Symbol>, Span),
+    Together(Option<Symbol>, Block, Vec<Symbol>, Option<TogetherHandler>, Span),
     ChannelClose(Expr, Span),
     Stop(Expr, Span),
     ScopeCancel(Symbol, Span),
@@ -626,6 +626,14 @@ pub struct While {
     pub cond: Expr,
     pub body: Block,
     pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct TogetherHandler {
+    pub err_bind: DefId,
+    pub err_ty: Type,
+    pub err_arm: Option<Block>,
+    pub ok_arm: Option<Block>,
 }
 
 #[derive(Debug, Clone)]

@@ -207,7 +207,7 @@ fn seed_binds_in_stmt(stmt: &Stmt, info: &mut EscapeInfo) {
         }
         Loop(l) => seed_binds_in_block(&l.body, info),
         SimBlock(b, _) | Defer(b, _) | Transaction(b, _) => seed_binds_in_block(b, info),
-        Together(_, b, _, _) => seed_binds_in_block(b, info),
+        Together(_, b, _, _, _) => seed_binds_in_block(b, info),
         Match(m) => {
             seed_binds_in_expr(&m.subject, info);
             for arm in &m.arms {
@@ -476,7 +476,7 @@ impl<'a> EscapeWalk<'a> {
             }
             Loop(l) => self.walk_block(&l.body),
             SimBlock(b, _) | Defer(b, _) | Transaction(b, _) => self.walk_block(b),
-            Together(_, b, _, _) => self.walk_block(b),
+            Together(_, b, _, _, _) => self.walk_block(b),
             Match(m) => {
                 self.walk_expr_consumer(&m.subject, BindContext::LocalRead);
                 for arm in &m.arms {

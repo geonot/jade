@@ -10,8 +10,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-05T15:03:25+00:00",
-      "ts_accessed": "2026-06-14T02:26:43+00:00",
-      "access_count": 2
+      "ts_accessed": "2026-06-14T06:54:34+00:00",
+      "access_count": 3
     },
     "quaternary_design": {
       "key": "quaternary_design",
@@ -34,8 +34,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-06T07:29:11+00:00",
-      "ts_accessed": "2026-06-14T02:26:15+00:00",
-      "access_count": 2
+      "ts_accessed": "2026-06-14T06:54:34+00:00",
+      "access_count": 3
     },
     "structured_concurrency_design": {
       "key": "structured_concurrency_design",
@@ -46,8 +46,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-10T11:03:19+00:00",
-      "ts_accessed": "2026-06-14T02:26:15+00:00",
-      "access_count": 3
+      "ts_accessed": "2026-06-14T06:54:34+00:00",
+      "access_count": 4
     },
     "store_error_design": {
       "key": "store_error_design",
@@ -214,8 +214,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-13T21:03:03+00:00",
-      "ts_accessed": "2026-06-14T02:26:15+00:00",
-      "access_count": 1
+      "ts_accessed": "2026-06-14T06:54:34+00:00",
+      "access_count": 2
     },
     "concurrency_impl_arch": {
       "key": "concurrency_impl_arch",
@@ -262,8 +262,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-13T22:41:02+00:00",
-      "ts_accessed": "2026-06-13T22:41:02+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-14T06:54:34+00:00",
+      "access_count": 1
     },
     "task_2-6-4_impl": {
       "key": "task_2-6-4_impl",
@@ -274,8 +274,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-14T02:23:28+00:00",
-      "ts_accessed": "2026-06-14T02:26:15+00:00",
-      "access_count": 1
+      "ts_accessed": "2026-06-14T06:54:34+00:00",
+      "access_count": 2
     },
     "task_2-6-5_progress": {
       "key": "task_2-6-5_progress",
@@ -286,8 +286,8 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-14T02:42:37+00:00",
-      "ts_accessed": "2026-06-14T02:42:37+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-14T06:54:46+00:00",
+      "access_count": 2
     },
     "task_2-6-5-2_impl": {
       "key": "task_2-6-5-2_impl",
@@ -298,7 +298,31 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-14T03:31:10+00:00",
-      "ts_accessed": "2026-06-14T03:31:10+00:00",
+      "ts_accessed": "2026-06-14T06:54:46+00:00",
+      "access_count": 2
+    },
+    "task_2-6-5-3_findings": {
+      "key": "task_2-6-5-3_findings",
+      "value": "Task 2-6-5-3 CORE PROBLEM: scope error model carries a bare i64 tag word. emit_scope_build_err (magic.rs:416) reconstructs Result::Err{tag=word} with NO payload. WORKS only when child err enum == enclosing err enum AND fieldless. BREAKS when (a) enclosing err type != child err type (needs From conversion), or (b) err variant has a payload (Wrapped(Boom)) -> reconstructing {tag=1} no-payload produces garbage + codegen panic at values.rs:399 (expected IntValue). Child task Return(val) coerce_to_i64 + jinn_scope_record_current_error loses payload. FIX DESIGN: child must propagate to ENCLOSING fn's Result-err type (apply From at child site, like propagate_err_value with real ret_ty), then BOX the full Result-err value on heap, record pointer(i64) on scope; scope re-raise loads boxed value back and returns it. Handles arbitrary payloads + From.",
+      "kind": "pitfall",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-14T06:57:26+00:00",
+      "ts_accessed": "2026-06-14T06:57:26+00:00",
+      "access_count": 0
+    },
+    "task_2-19_lamp_design": {
+      "key": "task_2-19_lamp_design",
+      "value": "Task 2-19 = lamp (Jinn package manager) spec. Deliverable: docs/lamp.md technical spec. CURRENT STATE: src/pkg.rs (Package/SemVer/Dependency, project.jn manifest parse), src/lock.rs (Lockfile nested entries name/url/version/commit), src/driver/cmd_pkg.rs (git-based fetch/update/publish/package via git tags + tar.gz). Single binary jinnc with subcommands. KEY DESIGN PILLARS for spec: (1) one quintessential curated package per facet (no npm sprawl) \u2014 std/libjn/ext tiers; ext = community packages vendored under jinn project purview. (2) supply-chain security first: lockfile w/ content hashes, sigstore-style signing, capability/effect manifests, vendoring, reproducible builds, SBOM. (3) binary library format (.jnlib): compiled MIR/object + interface metadata + debug variant. (4) one tool `lamp` (not jinnc) doing package/install/publish/version/scaffold, server (decentralized/distributed), bug tracking + changelog/patch-notes/close. AVOID npm/yarn/bun/npx fragmentation. Single tool, single lockfile, single manifest (project.jn).",
+      "kind": "decision",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T05:01:19+00:00",
+      "ts_accessed": "2026-06-15T05:01:19+00:00",
       "access_count": 0
     }
   }

@@ -127,7 +127,38 @@ impl Parser {
         };
         self.expect(Token::Newline)?;
         let body = self.parse_block()?;
-        Ok(Stmt::Together(name, body, sp))
+        let handler = self.parse_together_handler()?;
+        Ok(Stmt::Together(name, body, handler, sp))
+    }
+
+    fn parse_together_handler(&mut self) -> Result<crate::ast::TogetherHandler, ParseError> {
+        let mut handler = crate::ast::TogetherHandler::default();
+        loop {
+            match self.peek() {
+                Token::Question if handler.ok_arm.is_none() => {
+                    self.advance();
+                    handler.ok_arm = Some(Box::new(self.parse_pipeline()?));
+                }
+                Token::BangBang if handler.err_arm.is_none() => {
+                    self.advance();
+                    handler.err_arm = Some(Box::new(self.parse_pipeline()?));
+                }
+                Token::Bang => {
+                    return Err(self.error(
+                        "`!` (nothing) arm is not valid on a `together` scope; a scope is fallible, not optional — use `!!` to handle its error",
+                    ));
+                }
+                _ => break,
+            }
+            if matches!(self.peek(), Token::Newline)
+                && matches!(self.peek_at(1), Token::Question | Token::BangBang | Token::Bang)
+            {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        Ok(handler)
     }
 
     pub(in crate::parser) fn parse_store_filter(&mut self) -> Result<StoreFilter, ParseError> {
