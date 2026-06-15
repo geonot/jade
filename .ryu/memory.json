@@ -419,6 +419,26 @@
       "ts_created": "2026-06-15T10:12:41+00:00",
       "ts_accessed": "2026-06-15T10:12:41+00:00",
       "access_count": 0
+    },
+    "lamp_prereqs_doc": {
+      "key": "lamp_prereqs_doc",
+      "value": "docs/lamp-prereqs.md (task 2-32) = compiler prereqs for lamp (docs/lamp.md). Four workstreams + open-Q register. COMPILER REALITY found: (1) modules are flattened by string prefix (resolve.rs::prefix_module -> module_name), NO scoped identity/version/owner; (2) effect system is ERROR-ONLY (errset.rs + scc.rs fixpoint), NO capability lattice at all (only LSP completion strings mention \"capability\"); (3) interface.rs is v1 flat IType header, NO ownership/effect/Perceus metadata, NO hashing. TASKS: 2-32-1 resolve Q1-Q9 spec amendments (blocks 2,3,4); 2-32-2 caps (generalize errset to {errors,caps} record); 2-32-3 path-scoped PackageId replacing prefix_module; 2-32-4 interface.jhi v2 + api/abi/object Merkle ladder; 2-32-5 config-block sugar (independent). Build order: caps->scope->interface->ladder; config-sugar parallel. 2-19 now blocked_by 2-32. HIGHEST-RISK claims: Q1 (state-is-a-cap purity proof for promotion \u2014 recommend conservative @promotable opt-in), Q2 (abi hash per-target not target-independent), Q6 (caps through fn-typed values/actor sends \u2014 effect rows on fn types).",
+      "kind": "decision",
+      "tags": [
+        "lamp",
+        "task_2-32",
+        "prereqs",
+        "capabilities",
+        "scope",
+        "hashing",
+        "interface"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T10:24:23+00:00",
+      "ts_accessed": "2026-06-15T10:24:23+00:00",
+      "access_count": 0
     }
   }
 }

@@ -1,0 +1,21 @@
+title: Config-block syntax sugar for project.jn
+status: pending
+atomic: false
+priority: medium
+blocked_by: []
+created_at: '2026-06-15T03:24:10'
+updated_at: '2026-06-15T03:24:10'
+result: ''
+description: 'Design+implement the declarative config-block construct so project.jn
+  parses via the real Jinn parser (docs/lamp-prereqs.md §4, lamp.md §2/§2.1) instead
+  of a bespoke pkg.rs reader. An indentation-scoped block of `key is <literal|list|nested-block>`
+  plus a whitelisted set of declarative connector keywords (requires, from, git, rev,
+  opt, with, enables). Pin the exact grammar incl. multi-setting lines (`release is
+  opt 3, debug-info false`) and clause lists (`postgres is requires ext/pq, enables
+  ''metrics''`) without colliding with expression-statement parsing (Q3). Restriction
+  enforcement (§2.1: no calls, no control flow, no *name defs) as a validation/lint
+  pass yielding precise diagnostics. Make construct general but initially wire only
+  the manifest schema; document provisional status in docs/stability.md. Independent
+  of 2-32-1..4 — can proceed in parallel. Definition of done: the full lamp.md §2
+  example manifest parses+validates with precise errors on violations; tests pin the
+  grammar.'

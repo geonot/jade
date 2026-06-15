@@ -1,4 +1,5 @@
 # Changelog
+- **[87]** (2026-06-15 10:12) lamp: add §5.7 path-scoped identity, hash unification, and the compatibility ladder
 - **[86]** (2026-06-15 08:38) lamp.md: specify transitive-dependency model for .jnb binaries (§5.6) — packed-by-reference + dedup, ABI-pinned MVS, used-surface hashing, requires-isolated escape hatch; reconcile §3.4/§5.2/§11/§12/§13
 - **[85]** (2026-06-15 08:16) lamp spec rev2: project.lock, .jnb, multi-output + members, libjn dereferenced, TUF/FFI/MVS-lock fixes
 - **[84]** (2026-06-15 05:19) docs: add idiomatic.md (anti-pattern catalog) + fmt.md (jinn fmt+lint spec)

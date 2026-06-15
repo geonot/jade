@@ -1,0 +1,18 @@
+title: lamp compiler prerequisites (capabilities, scope, hash ladder, config sugar)
+status: pending
+atomic: false
+priority: high
+blocked_by: []
+created_at: '2026-06-15T03:23:35'
+updated_at: '2026-06-15T03:23:35'
+result: ''
+description: 'Deep compiler/language machinery that docs/lamp.md assumes but jinnc
+  lacks. Spec: docs/lamp-prereqs.md. Four workstreams: (1) formalized capability/effect
+  system with module/class/fn/method declaration sites and call-graph derivation;
+  (2) path-scoped package/module identity (foo:baz:bar) replacing the string prefix_module
+  model; (3) interface.jhi v2 + the three-hash ladder (api/abi/object) with the rigorous
+  recursive Merkle abi hash and used-surface hashing; (4) config-block syntax sugar
+  for project.jn. Plus resolving the §5 open-questions register (Q1-Q9) as amendments
+  to docs/lamp.md before code lands. Definition of done: all four subtrees complete,
+  open questions resolved+documented, lamp.md updated where the prereqs change its
+  data model. Blocks task 2-19 (lamp implementation).'

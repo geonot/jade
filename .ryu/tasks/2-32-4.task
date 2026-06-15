@@ -1,0 +1,26 @@
+title: interface.jhi v2 + three-hash ladder (api/abi/object, Merkle)
+status: pending
+atomic: false
+priority: high
+blocked_by:
+- 2-32-1
+- 2-32-2
+- 2-32-3
+created_at: '2026-06-15T03:24:10'
+updated_at: '2026-06-15T03:24:10'
+result: ''
+description: 'Upgrade src/interface.rs from v1 flat IType header to interface.jhi
+  v2: serialized typed HIR/MIR surface with generic signatures + HM constraints, value-semantics/borrow/as
+  annotations, effect+capability rows, Perceus refcount obligations, enough for cross-.jnb
+  inlining (docs/lamp-prereqs.md §3). Then the three-hash ladder: api hash (names+arity+nominal
+  identities, warn-only), abi hash (RECURSIVE MERKLE CLOSURE over full transitive
+  type/ownership/effect graph with cycle handling via SCC fixpoint: field layout/order/size,
+  Perceus owned-vs-borrowed glue, cap/effect signature, calling-convention determinants),
+  object hash (final object bytes, store keying + dedup + --verify). Used-surface
+  hashing: abi hash for a dep edge is over only the subset the consumer''s MIR references
+  (deterministic fold over the import set). Semantic hashes (api/abi) over canonical
+  deterministic MIR; object hash over binary. Pin Merkle cycle algorithm so two compilers
+  agree byte-for-byte. Blocked by 2-32-1 (Q2 per-target vs target-independent, Q9
+  cross-toolchain stability) and 2-32-2 (effect rows) and 2-32-3 (identity in symbols).
+  Definition of done: interface v2 round-trips, three hashes computed, used-surface
+  fast-path test (minor bump keeps hash stable), conformance tests.'

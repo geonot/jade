@@ -1,0 +1,18 @@
+title: Resolve lamp.md open questions (Q1-Q9) as spec amendments
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-06-15T03:24:10'
+updated_at: '2026-06-15T03:24:10'
+result: ''
+description: 'Before code lands, resolve the §5 open-questions register in docs/lamp-prereqs.md
+  and fold decisions back into docs/lamp.md so spec and compiler never diverge. Critical
+  ones: Q1 (is "state is a capability" provably free, or downgrade promotion to explicit
+  @promotable opt-in until runtime/stdlib state sources are exhaustively cap-tagged);
+  Q2 (abi hash target-independent vs per-target — recommend per-target, interface.jhi
+  records target->abi-hash, drop "target-independent" for abi rung); Q6 (caps carried
+  through function-typed values / actor sends — effect rows on fn types); Q7 (runtime
+  cap-attribution table as single source of truth, missing attribution = build error).
+  Also Q3,Q4,Q5,Q8,Q9. Definition of done: each Q has a recorded decision; docs/lamp.md
+  amended; docs/lamp-prereqs.md §5 marked resolved with links.'

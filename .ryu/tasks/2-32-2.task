@@ -1,0 +1,22 @@
+title: Formalize capability/effect system
+status: pending
+atomic: false
+priority: high
+blocked_by:
+- 2-32-1
+created_at: '2026-06-15T03:24:10'
+updated_at: '2026-06-15T03:24:10'
+result: ''
+description: 'Build the capability system (docs/lamp-prereqs.md §2). Subtasks will
+  cover: capability lattice (fs.read/write path-scoped, net.client/server, process.spawn,
+  env.read, clock, time, random, ffi.unsafe, state) with containment relation; declaration
+  syntax at module/class/fn/method scope (lean: inferred-by-default, annotation narrows,
+  same model as error effects); generalize the error-effect machinery (errset.rs +
+  SCC fixpoint in scc.rs) into a {errors, caps} effect record with one fixpoint; primitive
+  cap-attribution table (single source of truth a la store_decorators.rs) mapping
+  runtime/std surfaces to caps with missing-attribution=build-error; derivation pass
+  (call-graph least-fixpoint) + derived-subset-of-declared check with precise diagnostics;
+  FFI taint one-directional containment + --deny enforcement at compile time. Caps
+  live on the typed signature (reach interface.jhi + abi hash). Blocked by 2-32-1
+  (Q1/Q6/Q7 decisions). Definition of done: caps declarable+inferred+checked at all
+  four scopes with conformance tests.'

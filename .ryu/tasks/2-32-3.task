@@ -1,0 +1,22 @@
+title: Path-scoped package/module identity
+status: pending
+atomic: false
+priority: high
+blocked_by:
+- 2-32-1
+created_at: '2026-06-15T03:24:10'
+updated_at: '2026-06-15T03:24:10'
+result: ''
+description: 'Replace the string prefix_module model with first-class path-scoped
+  package identity (docs/lamp-prereqs.md §1). PackageId{name, owner_scope, version,
+  semantic_hash} threaded through resolve -> HIR -> MIR -> codegen mangling. Path-scoped
+  resolution (use bar in baz -> foo:baz:bar; local, no global arbitration). Symbol
+  mangling <pkgid-hash>_<module>_<name> replacing flat module_name. Reexport consent
+  (use baz/bar legal only when baz declares reexport bar; reach-in = hard error).
+  Multi-version coexistence (use foo@1 as foo1 / use foo@2 as foo2 -> distinct non-unifiable
+  identities, separate cap unions). Workspace flattening (members -> one DAG, collisions
+  hard error). Retire prefix_module; keep single-package fast path assigning root
+  PackageId. Decide PackageId home (lean: interned handle + side table). Blocked by
+  2-32-1 (Q4 multi-version/coherence decision). Definition of done: scoped identity
+  end-to-end with tests for path resolution, reexport consent, and (deferred-or-implemented
+  per Q4) multi-version.'
