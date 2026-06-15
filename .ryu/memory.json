@@ -336,6 +336,18 @@
       "ts_created": "2026-06-15T05:19:22+00:00",
       "ts_accessed": "2026-06-15T05:19:22+00:00",
       "access_count": 0
+    },
+    "task_2-19_rev2_requirements": {
+      "key": "task_2-19_rev2_requirements",
+      "value": "Lamp spec rev2 requirements from user: (1) binary format extension = .jnb (was .jnlib); (2) lockfile = project.lock (was jinn.lock); (3) manifest = project.jn (unchanged); (4) MUST support multiple packages/executables published from ONE project, with standalone referencing OR hierarchical referencing (parent includes children) \u2014 this is the workspace + multi-output model, was weak in v1; (5) libjn is a libc REPLACEMENT, orthogonal to packaging \u2014 must NOT be framed as a curation tier; drop libjn from the tier table; (6) rigorous critique + remediation + go-big novel features welcome.",
+      "kind": "decision",
+      "tags": [],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T08:12:55+00:00",
+      "ts_accessed": "2026-06-15T08:12:55+00:00",
+      "access_count": 0
     }
   }
 }

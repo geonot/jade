@@ -1,4 +1,5 @@
 # Changelog
+- **[84]** (2026-06-15 05:19) docs: add idiomatic.md (anti-pattern catalog) + fmt.md (jinn fmt+lint spec)
 - **[82]** (2026-06-15 05:04) docs(lamp): comprehensive technical spec for the Jinn package system (task 2-19 design)
 - **[80]** (2026-06-14 03:31) 2-6-5-2: scope task records propagated error; together surfaces it (E1/E5) + conformance tests
 - **[79]** (2026-06-14 02:42) 2-6-5-1: runtime scope error slot (first-error-wins CAS + take); decompose 2-6-5 into subtasks
