@@ -372,3 +372,27 @@ fn bare_fallible_call_tail_autowraps_ok() {
         "11\n-2",
     );
 }
+
+#[test]
+fn ternary_mixed_fallible_arm_reconciles() {
+    expect(
+        "err E\n    Bad\n\n*ti(ok as bool) returns i64 ! E\n    if ok\n        5\n    else\n        err Bad\n\n*bo(z as bool, ok as bool) returns i64 ! E\n    z ? 0 ! ti(ok)\n\n*main()\n    bo(true, true) ? log($) !! log(-1)\n    bo(false, true) ? log($) !! log(-1)\n    bo(false, false) ? log($) !! log(-2)\n",
+        "0\n5\n-2",
+    );
+}
+
+#[test]
+fn plain_struct_return_payload_intact() {
+    expect(
+        "type P\n    x as i64\n    y as i64\n\n*mk returns P\n    P(1, 2)\n\n*main()\n    a is mk()\n    log(a.x)\n    log(a.y)\n",
+        "1\n2",
+    );
+}
+
+#[test]
+fn match_on_fallible_struct_return() {
+    expect(
+        "err E\n    Bad\n\ntype P\n    x as i64\n    y as i64\n\n*mk(n as i64) returns P ! E\n    if n < 0\n        err Bad\n    P(n, n * 2)\n\n*main()\n    match mk(3)\n        Ok(p) ? log(p.y)\n        Err(e) ? log(-1)\n    match mk(-1)\n        Ok(p) ? log(p.y)\n        Err(e) ? log(-2)\n",
+        "6\n-2",
+    );
+}

@@ -22,17 +22,31 @@ impl Typer {
         }
         self.register_prelude_types();
 
+        for d in &prog.decls {
+            let name = match d {
+                ast::Decl::Type(td) if td.type_params.is_empty() => Some(td.name),
+                ast::Decl::Enum(ed) if ed.type_params.is_empty() => Some(ed.name),
+                ast::Decl::ErrDef(ed) => Some(ed.name),
+                ast::Decl::Actor(ad) => Some(ad.name),
+                ast::Decl::Store(sd) => Some(sd.name),
+                _ => None,
+            };
+            if let Some(name) = name {
+                self.declared_type_names.insert(name);
+            }
+        }
+
         let mut alias_map: std::collections::HashMap<Symbol, Type> =
             std::collections::HashMap::new();
         for d in &prog.decls {
             match d {
-                ast::Decl::Fn(f) if Self::is_generic_fn(f) => {
+                ast::Decl::Fn(f) if self.is_generic_fn(f) => {
                     if !f.type_bounds.is_empty() {
                         self.generic_bounds
                             .insert(f.name, f.type_bounds.clone());
                     }
                     self.generic_fns
-                        .insert(f.name, Self::normalize_generic_fn(f));
+                        .insert(f.name, self.normalize_generic_fn(f));
                 }
                 ast::Decl::Fn(f) => {
                     let has_untyped_params = f.params.iter().any(|p| p.ty.is_none());
@@ -310,7 +324,7 @@ impl Typer {
             .iter()
             .filter_map(|d| {
                 if let ast::Decl::Fn(f) = d
-                    && !Self::is_generic_fn(f) && !(self.test_mode && f.name == "main") {
+                    && !self.is_generic_fn(f) && !(self.test_mode && f.name == "main") {
                         return Some(f);
                     }
                 None

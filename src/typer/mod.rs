@@ -132,6 +132,7 @@ pub struct Typer {
     pub(crate) root_pkg_id: Option<crate::pkgid::PkgId>,
     pub(crate) dep_pkg_ids: std::collections::HashMap<crate::intern::Symbol, crate::pkgid::PkgId>,
     pub(crate) scoped_use_map: crate::pkgid::ScopedUseMap,
+    pub(crate) declared_type_names: std::collections::HashSet<Symbol>,
 }
 
 #[derive(Debug, Clone)]
@@ -204,6 +205,7 @@ impl Typer {
             fn_param_access: IndexMap::new(),
             moved_fields: std::collections::HashMap::new(),
             moved_vars: std::collections::HashSet::new(),
+            declared_type_names: std::collections::HashSet::new(),
             const_vars: std::collections::HashSet::new(),
             suppress_moved_field_check: 0,
             current_method_type: None,

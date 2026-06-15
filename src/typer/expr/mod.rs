@@ -142,6 +142,8 @@ impl Typer {
                 let ht = self.lower_expr_expected(then, expected)?;
                 let he = self.lower_expr_expected(els, expected)?;
 
+                let (ht, he) = self.reconcile_ternary_arms(ht, he)?;
+
                 let ty = match (&ht.ty, &he.ty) {
                     (Type::Void, _) => he.ty.clone(),
                     (_, Type::Void) => ht.ty.clone(),

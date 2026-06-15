@@ -248,7 +248,7 @@ impl Typer {
         name
     }
 
-    pub(crate) fn effective_type_params(f: &ast::Fn) -> Vec<Symbol> {
+    pub(crate) fn effective_type_params(&self, f: &ast::Fn) -> Vec<Symbol> {
         if !f.type_params.is_empty() {
             return f.type_params.clone();
         }
@@ -261,6 +261,7 @@ impl Typer {
         if let Some(ret) = &f.ret {
             Self::collect_type_params_from(ret, &mut tps);
         }
+        tps.retain(|n| !self.declared_type_names.contains(n));
         tps
     }
 
@@ -297,8 +298,8 @@ impl Typer {
         }
     }
 
-    pub(crate) fn is_generic_fn(f: &ast::Fn) -> bool {
-        !Self::effective_type_params(f).is_empty()
+    pub(crate) fn is_generic_fn(&self, f: &ast::Fn) -> bool {
+        !self.effective_type_params(f).is_empty()
     }
 
     pub(crate) fn monomorphize_struct(
@@ -364,9 +365,9 @@ impl Typer {
         Ok(mangled)
     }
 
-    pub(crate) fn normalize_generic_fn(f: &ast::Fn) -> ast::Fn {
+    pub(crate) fn normalize_generic_fn(&self, f: &ast::Fn) -> ast::Fn {
         let mut gf = f.clone();
-        gf.type_params = Self::effective_type_params(f);
+        gf.type_params = self.effective_type_params(f);
         gf
     }
 

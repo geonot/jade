@@ -626,7 +626,7 @@
     },
     "bug_bare_struct_return_zeroed": {
       "key": "bug_bare_struct_return_zeroed",
-      "value": "OPEN BUG (found v108, while making log_ingest.jn idiomatic). Two related struct-return codegen/typer bugs, distinct from the 5 log_ingest fixes (those were all fallible-path). REPRO: (1) NON-FALLIBLE bare struct return: `*mk returns P\\n  P(1,2)` then `a is mk(); a.x` => fields read 0. Same for explicit `return P(1,2)` and bind-then-return `r is P(1,2)\\n r`. Inline `P(1,2)` + field access in SAME fn is correct. So it's the struct-return ABI (sret) on non-fallible fns dropping/zeroing the payload. (2) `match` on a FALLIBLE struct return `*mk returns P ! E` with `Ok(p)?/Err(e)?` => 'hir: non-exhaustive match on I64' (typer not seeing it as Result<P,E>, or match desugar mistyping). WORKAROUND that WORKS: fallible struct return consumed via ternary `mk(21) ? log($.b) !! log(-1)` is correct (pinned by tests/error_effects.rs fallible_fn_returning_struct_payload_intact). Positional construction `P(x, y*2)` works everywhere. NEEDS: new task to fix sret on plain struct-return fns + Result-typing of `match` on fallible struct returns.",
+      "value": "RESOLVED (task 7, v111). Both struct-return bugs (zeroed `*mk returns P`, and 'non-exhaustive match on I64' for `*mk returns P ! E`) had ONE root cause: parser (src/parser/expr/primary.rs ident_to_type) turns ANY single-uppercase-letter type name into Type::Param, so a struct named `P` made `mk` look generic => monomorphized as mk__G_i64 with ret type collapsed to i64 (struct payload zeroed; Result<P,E> mistyped). FIX in typer: lower/mod.rs pre-scans declared type/enum/err/actor/store names into self.declared_type_names BEFORE the generic-fn pass; effective_type_params/is_generic_fn/normalize_generic_fn are now &self instance methods that retain-filter declared type names out of inferred type params. Conformance: tests/error_effects.rs plain_struct_return_payload_intact, match_on_fallible_struct_return.",
       "kind": "pitfall",
       "tags": [
         "bug",
@@ -634,18 +634,20 @@
         "sret",
         "struct-return",
         "match",
-        "open"
+        "monomorphization",
+        "resolved",
+        "v111"
       ],
-      "confidence": 0.9,
+      "confidence": 0.95,
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T19:24:59+00:00",
-      "ts_accessed": "2026-06-15T19:24:59+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-15T20:11:49+00:00",
+      "access_count": 1
     },
     "bug_ternary_mixed_fallible_arm_phi_ice": {
       "key": "bug_ternary_mixed_fallible_arm_phi_ice",
-      "value": "OPEN BUG (found v108). ICE in src/codegen/mir_codegen/mod.rs:633 'phi node type mismatch: StructType Result__G_i64_E vs IntType i64'. REPRO (minimal): fn `*bo(f) returns i64 ! E\\n  f equals '-' ? 0 ! ti(f)` where ti is fallible `returns i64 ! E`. The ternary `cond ? <plain i64> ! <fallible call>` has one arm plain i64 and other arm Result<i64,E>; typer should unify both arms to the fn's fallible result (auto-wrap 0 as Ok, propagate the call) but codegen emits a phi merging i64 and Result. The if/else form `if cond\\n 0\\n else\\n ti(f)` compiles fine (whole-fn tail auto-wrap reconciles). NEEDS FIX: ternary arm unification must auto-wrap-ok the plain arm + propagate the fallible arm to a common Result type before the phi, mirroring block.rs tail auto_wrap_ok / dispatch.rs Ret arm. Likely in typer access.rs ternary lowering and/or codegen phi build for ?/! arms.",
+      "value": "RESOLVED (task 7, v111). ICE 'phi node type mismatch Result__G_i64_E vs i64' on ternary `cond ? <plain i64> ! <fallible call>`. FIX: typer reconcile_ternary_arms (src/typer/expr/quaternary.rs) called from expr/mod.rs ternary lowering: when arms' fallible-ness differs AND enclosing fn is fallible, run implicit_propagate on the fallible arm (unwrap Ok / return Err) so both arms become the ok-inner type before the phi. Conformance: tests/error_effects.rs ternary_mixed_fallible_arm_reconciles.",
       "kind": "pitfall",
       "tags": [
         "bug",
@@ -653,14 +655,15 @@
         "phi",
         "ternary",
         "error-effects",
-        "open"
+        "resolved",
+        "v111"
       ],
-      "confidence": 0.9,
+      "confidence": 0.95,
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-15T19:26:12+00:00",
-      "ts_accessed": "2026-06-15T19:26:12+00:00",
-      "access_count": 0
+      "ts_accessed": "2026-06-15T20:11:49+00:00",
+      "access_count": 1
     },
     "pitfall_inline_fallible_struct_arg": {
       "key": "pitfall_inline_fallible_struct_arg",

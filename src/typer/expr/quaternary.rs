@@ -51,6 +51,48 @@ impl Typer {
         }
     }
 
+    pub(in crate::typer) fn reconcile_ternary_arms(
+        &mut self,
+        ht: hir::Expr,
+        he: hir::Expr,
+    ) -> Result<(hir::Expr, hir::Expr), String> {
+        let tt = self.infer_ctx.shallow_resolve(&ht.ty);
+        let et = self.infer_ctx.shallow_resolve(&he.ty);
+        let t_fallible = self.is_fallible_ty(&tt);
+        let e_fallible = self.is_fallible_ty(&et);
+        if t_fallible == e_fallible {
+            return Ok((ht, he));
+        }
+        if !self.enclosing_fn_is_fallible() {
+            return Ok((ht, he));
+        }
+        let ht = if t_fallible {
+            self.implicit_propagate(ht.clone())?.unwrap_or(ht)
+        } else {
+            ht
+        };
+        let he = if e_fallible {
+            self.implicit_propagate(he.clone())?.unwrap_or(he)
+        } else {
+            he
+        };
+        Ok((ht, he))
+    }
+
+    fn is_fallible_ty(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Enum(n) => {
+                let s = n.as_str();
+                s.starts_with("Result_")
+                    || s == "Result"
+                    || s.starts_with("Option_")
+                    || s == "Option"
+            }
+            Type::Struct(n, _) => n.as_str() == "Result" || n.as_str() == "Option",
+            _ => false,
+        }
+    }
+
     pub(in crate::typer) fn implicit_propagate(
         &mut self,
         value: hir::Expr,

@@ -1,11 +1,21 @@
 title: Fix ternary mixed-fallible-arm phi ICE + struct-return bugs
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []
 created_at: '2026-06-15T12:26:54'
-updated_at: '2026-06-15T12:26:54'
-result: ''
+updated_at: '2026-06-15T13:13:02'
+result: 'Fixed all 3 codegen/typer bugs. (1) Ternary mixed-fallible-arm phi ICE: added
+  reconcile_ternary_arms in src/typer/expr/quaternary.rs, called from expr/mod.rs
+  ternary lowering — propagates the fallible arm to its ok-inner type when arms''
+  fallible-ness differs inside a fallible fn. (2)+(3) Shared root cause: parser turns
+  single-uppercase-letter type names into Type::Param, so a struct named P made `*mk
+  returns P` look generic (monomorphized to mk__G_i64, ret type collapsed to i64 ->
+  zeroed struct return + non-exhaustive-match-on-I64). Fixed by pre-scanning declared
+  type/enum/err/actor/store names into Typer.declared_type_names and making effective_type_params/is_generic_fn/normalize_generic_fn
+  instance methods that filter declared names. +3 conformance tests in tests/error_effects.rs
+  (ternary_mixed_fallible_arm_reconciles, plain_struct_return_payload_intact, match_on_fallible_struct_return).
+  Zero warnings; full suite green except 3 pre-existing unrelated @column failures.'
 description: 'Three related codegen/typer bugs found making log_ingest.jn idiomatic
   (v108). (1) ICE mir_codegen/mod.rs:633 phi mismatch when a ternary `cond ? <plain
   i64> ! <fallible call>` mixes an i64 arm with a Result<i64,E> arm — typer must unify
