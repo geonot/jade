@@ -569,6 +569,23 @@
       "ts_created": "2026-06-15T12:49:11+00:00",
       "ts_accessed": "2026-06-15T12:49:11+00:00",
       "access_count": 0
+    },
+    "task_2-32-3-1_pkgid_landed": {
+      "key": "task_2-32-3-1_pkgid_landed",
+      "value": "Task 2-32-3-1 DONE. src/pkgid.rs = PackageId foundation per scope.md \u00a71.1. PkgId(u32) + ScopePath(u32) interned handles, thread_local Tables side-table (scope_segments + pkgs vecs, dedup lookups). PackageRecord{name:Symbol, owner_scope:ScopePath, version:SemVer (reused from pkg.rs), semantic_hash:[u8;32]}. ScopePath::root()=id 0 empty, intern(&[Symbol])/child(name)/segments()/render() => `foo:baz`. PkgId::intern dedups on (name,scope,version.to_string()) so distinct versions=distinct ids; PkgId::root(name)=single-package fast path (empty scope, 0.0.0, zero hash); fully_qualified()=`foo:baz:bar`; mangle_prefix()=hash[..4] hex. Registered in lib.rs after ownership. 7 tests green. REMAINING pillar-3 work (subtasks 2-32-3-2..13): semantic_hash compute (needs interface pillar 2-32-4 Merkle), thread PkgId through resolver/HIR/MIR/codegen mangling, path-scoped use resolution, reexport consent, multi-version reject (scope.md \u00a75 defer-to-traits), retire prefix_module (src/resolve.rs prefix_module string-mangling). This is the large surgical cross-cutting body still to do.",
+      "kind": "decision",
+      "tags": [
+        "scope",
+        "pkgid",
+        "task_2-32-3",
+        "landed"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T12:52:15+00:00",
+      "ts_accessed": "2026-06-15T12:52:15+00:00",
+      "access_count": 0
     }
   }
 }
