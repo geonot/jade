@@ -360,9 +360,17 @@ pub struct Fn {
     pub ret: Option<Type>,
 
     pub error_types: Vec<Type>,
+    pub needs: Option<Vec<CapAnnot>>,
     pub body: Block,
     pub is_generator: bool,
     pub attrs: FnAttrs,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct CapAnnot {
+    pub class: String,
+    pub scope: Option<String>,
     pub span: Span,
 }
 

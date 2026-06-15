@@ -1,4 +1,5 @@
 # Changelog
+- **[95]** (2026-06-15 11:31) lamp spec: deployments (§9) + two-axis output model (kind lib/bin/app/os/raw × substrate runtimeless/threadless/heapless)
 - **[93]** (2026-06-15 11:10) lamp: decided top-to-bottom spec — separate cap pass, scope identity, interface v2 + hash ladder, config-block sugar (resolves Q1-Q9)
 - **[88]** (2026-06-15 10:24) docs: lamp compiler prerequisites (lamp-prereqs.md) + task 2-32 tree
 - **[87]** (2026-06-15 10:12) lamp: add §5.7 path-scoped identity, hash unification, and the compatibility ladder

@@ -125,6 +125,8 @@ impl Parser {
             while !self.check(Token::Newline)
                 && !self.check(Token::Returns)
                 && !self.check(Token::Is)
+                && !self.check(Token::Bang)
+                && !self.at_needs_kw()
                 && !self.eof()
             {
                 params.push(self.parse_fn_param_no_default(params.len(), true)?);
@@ -147,6 +149,8 @@ impl Parser {
             error_types.push(self.parse_type()?);
         }
 
+        let needs = self.parse_needs_clause()?;
+
         let body = self.parse_body()?;
         let is_generator = body_contains_yield(&body);
 
@@ -157,11 +161,58 @@ impl Parser {
             params,
             ret,
             error_types,
+            needs,
             body,
             is_generator,
             attrs: FnAttrs::default(),
             span: sp,
         })
+    }
+
+    fn at_needs_kw(&self) -> bool {
+        matches!(self.peek(), Token::Ident(n) if n.as_str() == "needs")
+    }
+
+    pub(in crate::parser) fn parse_needs_clause(
+        &mut self,
+    ) -> Result<Option<Vec<CapAnnot>>, ParseError> {
+        if !self.at_needs_kw() {
+            return Ok(None);
+        }
+        self.advance();
+        let mut annots = Vec::new();
+        if matches!(self.peek(), Token::Ident(n) if n.as_str() == "pure") {
+            self.advance();
+            return Ok(Some(annots));
+        }
+        if self.check(Token::LParen) {
+            self.advance();
+            self.expect(Token::RParen)?;
+            return Ok(Some(annots));
+        }
+        loop {
+            let sp = self.span();
+            let mut class = self.ident()?.to_string();
+            while self.check(Token::Dot) {
+                self.advance();
+                class.push('.');
+                class.push_str(&self.ident()?.to_string());
+            }
+            let scope = if let Token::Str(s) = self.peek() {
+                let s = s.clone();
+                self.advance();
+                Some(s)
+            } else {
+                None
+            };
+            annots.push(CapAnnot { class, scope, span: sp });
+            if self.check(Token::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        Ok(Some(annots))
     }
 
     pub(in crate::parser) fn parse_fn_param(

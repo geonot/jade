@@ -1,11 +1,15 @@
 title: Resolve lamp.md open questions (Q1-Q9) as spec amendments
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []
 created_at: '2026-06-15T03:24:10'
-updated_at: '2026-06-15T03:24:10'
-result: ''
+updated_at: '2026-06-15T05:49:19'
+result: Q1-Q9 resolved as decided spec across docs/caps.md, scope.md, interface-hash.md,
+  config-blocks.md (already authored; verified complete and self-consistent). Q1=empty-row
+  promotion rule, Q2=per-target abi hash, Q3=config-block LL(1) grammar, Q4=defer
+  multi-version, Q5=independent floor+hash constraints, Q6=caps on fn types, Q7=missing-attribution
+  build error, Q8=rolled-up cap summary, Q9=abi stable within minor.
 description: 'Before code lands, resolve the §5 open-questions register in docs/lamp-prereqs.md
   and fold decisions back into docs/lamp.md so spec and compiler never diverge. Critical
   ones: Q1 (is "state is a capability" provably free, or downgrade promotion to explicit

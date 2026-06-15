@@ -502,6 +502,7 @@ impl Typer {
                 params,
                 ret,
                 error_types: Vec::new(),
+                needs: None,
                 body: body.clone(),
                 is_generator: false,
                 attrs: ast::FnAttrs::default(),

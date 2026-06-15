@@ -325,6 +325,8 @@ impl Typer {
 
         self.seed_inferred_fallibility(&non_generic_fns);
 
+        super::caps::analyze(&non_generic_fns)?;
+
         let mut lowered_fn_names = std::collections::HashSet::new();
         for scc in &sccs {
             if scc.len() > 1 {

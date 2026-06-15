@@ -2,6 +2,8 @@ pub mod ast;
 pub mod bind;
 pub mod builtin_methods;
 pub mod cache;
+pub mod cap_sites;
+pub mod caps;
 pub mod codegen;
 pub mod comptime;
 pub mod diagnostic;

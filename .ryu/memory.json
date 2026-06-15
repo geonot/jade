@@ -536,6 +536,39 @@
       "ts_created": "2026-06-15T11:31:58+00:00",
       "ts_accessed": "2026-06-15T11:31:58+00:00",
       "access_count": 0
+    },
+    "task_2-32-2_plan": {
+      "key": "task_2-32-2_plan",
+      "value": "Capabilities pillar (task 2-32-2, spec docs/caps.md) build plan, 5 layers. (1) src/caps.rs: Capability enum (closed lattice: FsRead/FsWrite(opt path), NetClient/Server, ProcessSpawn, EnvRead, Clock, Time, Random, FfiUnsafe, State(opt region)); CapSet (BTreeSet, join=union); CapRow{caps:CapSet, ffi_tainted:bool}; containment via path-prefix for scoped + region eq for state; empty-row promotion predicate. (2) src/cap_sites.rs: CAP_SITES const table [(symbol, Capability, path_arg)] mirroring store_decorators.rs SSOT pattern; missing-attribution=build error (Q7). (3) src/typer/caps.rs: derive pass after errset, reuse scc::build_call_graph+tarjan_scc, least-fixpoint union over SCCs, primitive caps from CAP_SITES; check derived-contains-declared naming offending cap+call path. (4) AST: add needs clause to ast::Fn (parse after `! E` in parser/decl/fn.rs). (5) wire in typer/lower/mod.rs after seed_inferred_fallibility. errset.rs is the model; scc.rs reused verbatim.",
+      "kind": "decision",
+      "tags": [
+        "caps",
+        "task_2-32-2",
+        "plan"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T11:42:53+00:00",
+      "ts_accessed": "2026-06-15T11:42:53+00:00",
+      "access_count": 0
+    },
+    "task_2-32-2_caps_landed": {
+      "key": "task_2-32-2_caps_landed",
+      "value": "Task 2-32-2 (capabilities pillar, spec docs/caps.md) LANDED end-to-end. Files: (1) src/caps.rs = Capability closed-lattice enum (FsRead/FsWrite(Option<path>), NetClient/Server, ProcessSpawn, EnvRead, Clock, Time, Random, FfiUnsafe, State(Option<region>)), CapSet (BTreeSet, join=union, contained_in returns uncovered, subsumed_by does path-prefix containment w/ normalize_path strip ./.., state region eq, unscoped=top), CapRow{caps,ffi_tainted}, is_promotable = empty-row rule (caps.md \u00a74.1). (2) src/cap_sites.rs = CAP_SITES SSOT const table mirroring store_decorators.rs; lookup + capability_of(path literal). (3) src/typer/caps.rs = analyze(&[&ast::Fn]) pass: reuses scc::build_call_graph+tarjan_scc, primitive_caps_expr detects both Call(QualifiedIdent) AND Method(Field-chain) forms (std.net.connect parses as Method(Field(Ident(std),net),connect)), least-fixpoint union over SCCs, then derived\u2291declared check w/ shortest_intro_path BFS diagnostic. (4) AST ast::Fn gained needs:Option<Vec<CapAnnot{class,scope,span}>>; parse_needs_clause in parser/decl/fn.rs (contextual `needs` ident kw, `needs pure`/`needs ()`=empty checked; param no-paren loop now stops at Bang + at_needs_kw). (5) wired in typer/lower/mod.rs after seed_inferred_fallibility via super::caps::analyze(&non_generic_fns)?. CapAnalysis.rows = #[allow(dead_code)], will feed interface-hash pillar (2-32-4). 21 tests (9 caps + 4 cap_sites + 8 pass). Zero new warnings/clippy. 3 column_* integration failures are PRE-EXISTING (unrelated @simple+@column decorator exclusion), not regressions.",
+      "kind": "decision",
+      "tags": [
+        "caps",
+        "task_2-32-2",
+        "landed",
+        "done"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T12:49:11+00:00",
+      "ts_accessed": "2026-06-15T12:49:11+00:00",
+      "access_count": 0
     }
   }
 }
