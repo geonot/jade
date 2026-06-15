@@ -586,6 +586,24 @@
       "ts_created": "2026-06-15T12:52:15+00:00",
       "ts_accessed": "2026-06-15T13:49:32+00:00",
       "access_count": 5
+    },
+    "fmt_conditional_operator_4.5": {
+      "key": "fmt_conditional_operator_4.5",
+      "value": "docs/fmt.md \u00a74.5 added: Jinn's `? / ! / !!` is THE conditional \u2014 no separate statement-`if`. ONE indentation-aware decision construct: `?`=predicate+then, `!`=else, `!!`=error arm (ONLY on error-carrying scrutinee; compile-error on bool). Arms glyph-tagged \u21d2 arity unambiguous at marker; absent arm = guard; inline when single-expr (on operator line); indented block when \u22652 statements. Empty then-arm `foo ? ! no()` \u2192 `not foo ? no()` (J0015). Never paren-`;`-chain in arms (J1007 rewrites to indented block). New rule ids: J0014 spacing, J0015 empty-then, J1006 inline/block collapse, J1007 paren-chain\u2192block, J3110 `!!`-on-bool bug, J3111 deep chain\u2192match. J3003 retargeted to \u00a74.5/J3111. Ternary IS the conditional in Jinn because `?` is block-aware and subsumes if/else/guard/match.",
+      "kind": "decision",
+      "tags": [
+        "fmt",
+        "conditionals",
+        "ternary",
+        "syntax",
+        "docs"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-15T14:28:08+00:00",
+      "ts_accessed": "2026-06-15T14:28:08+00:00",
+      "access_count": 0
     }
   }
 }

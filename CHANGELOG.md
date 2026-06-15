@@ -1,4 +1,5 @@
 # Changelog
+- **[101]** (2026-06-15 14:05) driver: add explicit `jinn compile <file>` subcommand; rename toolchain CLI name to jinn
 - **[100]** (2026-06-15 12:53) scope pillar foundation (task 2-32-3-1): src/pkgid.rs interned PkgId/ScopePath + side table per scope.md §1.1
 - **[99]** (2026-06-15 05:52) scope pillar foundation (task 2-32-3-1): src/pkgid.rs — interned PkgId/ScopePath handles + side table per scope.md §1.1; PackageRecord{name,owner_scope,version,semantic_hash}; path-scoped `foo:baz:bar` rendering, version-distinct identities, hash-prefix mangling, single-package root fast path. 7 tests.
 - **[98]** (2026-06-15 12:49) caps pillar (task 2-32-2): lattice + SSOT cap-sites table + SCC-fixpoint derivation pass + `needs` clause; resolves lamp prereq Q1/Q6/Q7
