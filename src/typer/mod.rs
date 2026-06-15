@@ -128,6 +128,8 @@ pub struct Typer {
     pub(crate) escape_tiers: std::collections::HashMap<DefId, crate::escape::Tier>,
 
     pub(crate) dollar_stack: Vec<(DefId, Type)>,
+
+    pub(crate) root_pkg_id: Option<crate::pkgid::PkgId>,
 }
 
 #[derive(Debug, Clone)]
@@ -212,11 +214,16 @@ impl Typer {
             last_inferred_errors: std::collections::BTreeSet::new(),
             escape_tiers: std::collections::HashMap::new(),
             dollar_stack: Vec::new(),
+            root_pkg_id: None,
         }
     }
 
     pub fn set_source_dir(&mut self, dir: PathBuf) {
         self.source_dir = Some(dir);
+    }
+
+    pub fn set_root_pkg_id(&mut self, id: crate::pkgid::PkgId) {
+        self.root_pkg_id = Some(id);
     }
 
     pub fn set_test_mode(&mut self, enabled: bool) {

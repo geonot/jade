@@ -10,6 +10,8 @@ use crate::intern::Symbol;
 use crate::lexer::Lexer;
 use crate::ownership::OwnershipVerifier;
 use crate::parser::Parser;
+use crate::pkgid::{PackageRecord, PkgId, ScopePath, compute_semantic_hash};
+use crate::pkg::SemVer;
 use crate::typer::Typer;
 
 use super::cli::strip_codegen_prefix;
@@ -69,8 +71,35 @@ pub(super) fn compile_and_link(
         }
     }
 
+    let pkg_name = input
+        .file_stem()
+        .map(|s| Symbol::intern(&s.to_string_lossy()))
+        .unwrap_or_else(|| Symbol::intern("main"));
+    let root_pkg_id = {
+        let mut all_sources: Vec<u8> = src.as_bytes().to_vec();
+        for path in &loaded {
+            if let Ok(extra) = std::fs::read(path.as_str()) {
+                all_sources.extend_from_slice(&extra);
+            }
+        }
+        let hash = compute_semantic_hash(
+            pkg_name,
+            ScopePath::root(),
+            &SemVer { major: 0, minor: 0, patch: 0 },
+            &all_sources,
+            &[],
+        );
+        PkgId::intern(PackageRecord {
+            name: pkg_name,
+            owner_scope: ScopePath::root(),
+            version: SemVer { major: 0, minor: 0, patch: 0 },
+            semantic_hash: hash,
+        })
+    };
+
     let mut typer = Typer::new();
     typer.set_source_dir(base_dir.to_path_buf());
+    typer.set_root_pkg_id(root_pkg_id);
     if test_mode {
         typer.set_test_mode(true);
     }
