@@ -1,12 +1,20 @@
 title: 'Spec: package / module scopage and identity'
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by:
 - 2-33-1
 created_at: '2026-06-15T04:03:13'
-updated_at: '2026-06-15T04:03:13'
-result: ''
+updated_at: '2026-06-15T04:06:17'
+result: 'docs/scope.md written. PackageId{name,owner_scope,version,semantic_hash}
+  interned in new src/pkgid.rs (u32 handle + side table), ScopePath = interned dotted
+  symbol. Path-scoped local resolution, single-package fast path (root PackageId,
+  zero cost, replaces prefix_module). Mangling = pkgid_hash prefix; promotion = same
+  mangled name. Unification predicate uses caps.md empty-row rule. reexport consent
+  for path imports. Q4 resolved: accept `as foo1/as foo2` parse but hard-reject live
+  two-major instantiation until traits/coherence; PackageId already distinct so lifting
+  is additive. Workspace flattening one DAG/one lock, global-unique output names.
+  Boundary flag restated.'
 description: 'Decided spec for first-class PackageId (name/owner_scope/version/semantic_hash),
   path-scoped resolution (foo:baz:bar), reexport consent, multi-version coexistence
   (resolve Q4: defer to post-traits, hard-reject now), workspace flattening, retiring
