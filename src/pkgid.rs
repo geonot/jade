@@ -186,6 +186,45 @@ impl std::fmt::Display for PkgId {
 ///        consumer's owner scope, per scope.md §2.1).
 pub type ScopedUseMap = HashMap<(PkgId, Symbol), PkgId>;
 
+/// Failure of a path-scoped `use` resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UseResolveError {
+    /// `use <name>` had no matching `requires` entry in the consumer's manifest.
+    /// Carries the consumer's fully-qualified path and the unresolved name so
+    /// the diagnostic can point at the right `project.jn`.
+    Unresolved { consumer: String, name: Symbol },
+}
+
+impl std::fmt::Display for UseResolveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UseResolveError::Unresolved { consumer, name } => write!(
+                f,
+                "unresolved import 'use {name}' in package '{consumer}': add '{name}' to its \
+                 project.jn requires"
+            ),
+        }
+    }
+}
+
+/// Resolve a plain `use <name>` against the consumer's own manifest, per
+/// scope.md §2.1 ("local, deterministic, no global arbitration").
+///
+/// The lookup is keyed strictly by `(consumer, name)`: the same `name` resolves
+/// to a *different* `PkgId` for a different consumer, and there is **no global
+/// fallback** — a name absent from the consumer's `requires` is a hard error,
+/// never silently borrowed from another scope.
+pub fn resolve_use(
+    map: &ScopedUseMap,
+    consumer: PkgId,
+    name: Symbol,
+) -> Result<PkgId, UseResolveError> {
+    map.get(&(consumer, name)).copied().ok_or_else(|| UseResolveError::Unresolved {
+        consumer: consumer.fully_qualified(),
+        name,
+    })
+}
+
 pub fn compute_semantic_hash(
     name: Symbol,
     scope: ScopePath,
@@ -377,6 +416,60 @@ mod tests {
         let h1 = compute_semantic_hash(sym("foo"), scope, &version, src, &[d1, d2]);
         let h2 = compute_semantic_hash(sym("foo"), scope, &version, src, &[d2, d1]);
         assert_ne!(h1, h2);
+    }
+
+    fn scoped(name: &str, scope: &[Symbol]) -> PkgId {
+        PkgId::intern(PackageRecord {
+            name: sym(name),
+            owner_scope: ScopePath::intern(scope),
+            version: ver(1),
+            semantic_hash: [name.len() as u8; 32],
+        })
+    }
+
+    #[test]
+    fn use_resolves_locally_no_global_arbitration() {
+        // foo (root) -> baz ; baz -> bar.  baz's `use bar` resolves to foo:baz:bar.
+        let foo = PkgId::root(sym("foo"));
+        let baz = scoped("baz", &[sym("foo")]);
+        let bar_under_baz = scoped("bar", &[sym("foo"), sym("baz")]);
+        let mut map = ScopedUseMap::new();
+        map.insert((baz, sym("bar")), bar_under_baz);
+        let got = resolve_use(&map, baz, sym("bar")).unwrap();
+        assert_eq!(got, bar_under_baz);
+        assert_eq!(got.fully_qualified(), "foo:baz:bar");
+        // foo never declared `use bar`: no global fallback to baz's bar.
+        assert!(resolve_use(&map, foo, sym("bar")).is_err());
+    }
+
+    #[test]
+    fn same_name_distinct_per_consumer() {
+        // Both foo and baz `use bar`, but they bind DIFFERENT scoped identities.
+        let foo = PkgId::root(sym("foo"));
+        let baz = scoped("baz", &[sym("foo")]);
+        let bar_under_foo = scoped("bar", &[sym("foo")]);
+        let bar_under_baz = scoped("bar", &[sym("foo"), sym("baz")]);
+        let mut map = ScopedUseMap::new();
+        map.insert((foo, sym("bar")), bar_under_foo);
+        map.insert((baz, sym("bar")), bar_under_baz);
+        let from_foo = resolve_use(&map, foo, sym("bar")).unwrap();
+        let from_baz = resolve_use(&map, baz, sym("bar")).unwrap();
+        assert_ne!(from_foo, from_baz);
+        assert_eq!(from_foo.fully_qualified(), "foo:bar");
+        assert_eq!(from_baz.fully_qualified(), "foo:baz:bar");
+    }
+
+    #[test]
+    fn unresolved_use_names_the_consumer() {
+        let foo = PkgId::root(sym("foo"));
+        let map = ScopedUseMap::new();
+        let err = resolve_use(&map, foo, sym("missing")).unwrap_err();
+        match err {
+            UseResolveError::Unresolved { consumer, name } => {
+                assert_eq!(consumer, "foo");
+                assert_eq!(name, sym("missing"));
+            }
+        }
     }
 
     #[test]

@@ -32,6 +32,8 @@ pub fn resolve_scoped_pkg_ids(dag: &ResolutionDag) -> ScopedUseMap {
     map
 }
 
+
+
 #[derive(Debug, Clone)]
 pub struct ResolvedNode {
     pub pkg_id: PkgId,
@@ -255,6 +257,38 @@ mod tests {
         let dep = Dependency { name: "helper".into(), url: "https://example.com/helper".into(), version: ver(1) };
         let dag = flatten_workspace(sym("myapp"), root_dir.path(), &[dep], &pkg_paths).unwrap();
         assert_eq!(dag.nodes.len(), 2);
+    }
+
+    #[test]
+    fn scoped_use_map_resolves_dep_locally() {
+        let root_dir = TempDir::new().unwrap();
+        let dep_dir = TempDir::new().unwrap();
+        write_src(root_dir.path(), "main.jn", "*main\n  log 1\n");
+        write_src(dep_dir.path(), "lib.jn", "fn helper\n  42\n");
+
+        let mut pkg_paths = HashMap::new();
+        pkg_paths.insert(sym("helper"), dep_dir.path().to_path_buf());
+
+        let dep = Dependency {
+            name: "helper".into(),
+            url: "https://example.com/helper".into(),
+            version: ver(1),
+        };
+        let dag = flatten_workspace(sym("myapp"), root_dir.path(), &[dep], &pkg_paths).unwrap();
+        let map = resolve_scoped_pkg_ids(&dag);
+
+        let consumer = dag
+            .nodes
+            .iter()
+            .find(|n| n.pkg_id.name() == sym("myapp"))
+            .unwrap()
+            .pkg_id;
+        let resolved =
+            crate::pkgid::resolve_use(&map, consumer, sym("helper")).unwrap();
+        assert_eq!(resolved.name(), sym("helper"));
+        assert_eq!(resolved.fully_qualified(), "myapp:helper");
+        // Local: a name the consumer never required does not resolve.
+        assert!(crate::pkgid::resolve_use(&map, consumer, sym("nope")).is_err());
     }
 
     #[test]

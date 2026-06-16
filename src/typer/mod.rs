@@ -246,6 +246,41 @@ impl Typer {
         self.scoped_use_map = map;
     }
 
+    /// Resolve a plain `use <name>` against the current package's own manifest,
+    /// per scope.md §2.1 (local, deterministic, no global arbitration).
+    ///
+    /// Returns `Ok(None)` for the single-package fast path (§2.2: no scoped map,
+    /// or `name` is not a package dependency at all — e.g. a local module),
+    /// `Ok(Some(pkg_id))` when `name` resolves to a scoped dependency, and
+    /// `Err` when `name` is a known dependency of *some other* scope but absent
+    /// from this consumer's manifest (a global-arbitration attempt).
+    pub(crate) fn resolve_scoped_use(
+        &self,
+        name: Symbol,
+    ) -> Result<Option<crate::pkgid::PkgId>, String> {
+        let Some(consumer) = self.root_pkg_id else {
+            return Ok(None);
+        };
+        if self.scoped_use_map.is_empty() {
+            return Ok(None);
+        }
+        match crate::pkgid::resolve_use(&self.scoped_use_map, consumer, name) {
+            Ok(id) => Ok(Some(id)),
+            Err(_) => {
+                if self.scoped_use_map.keys().any(|(_, n)| *n == name) {
+                    Err(format!(
+                        "unresolved import 'use {name}' in package '{}': '{name}' is a \
+                         dependency of another scope but not of this one; add it to this \
+                         package's project.jn requires (resolution is local, scope.md §2.1)",
+                        consumer.fully_qualified()
+                    ))
+                } else {
+                    Ok(None)
+                }
+            }
+        }
+    }
+
     pub fn set_test_mode(&mut self, enabled: bool) {
         self.test_mode = enabled;
     }

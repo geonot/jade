@@ -1195,12 +1195,17 @@ impl Typer {
                 let hbody = self.lower_block_no_scope(body, ret_ty)?;
                 Ok(hir::Stmt::SimBlock(hbody, *span))
             }
-            ast::Stmt::UseLocal(u) => Ok(hir::Stmt::UseLocal(
-                u.path.clone(),
-                u.imports.clone(),
-                u.alias,
-                u.span,
-            )),
+            ast::Stmt::UseLocal(u) => {
+                if u.path.len() == 1 {
+                    self.resolve_scoped_use(u.path[0])?;
+                }
+                Ok(hir::Stmt::UseLocal(
+                    u.path.clone(),
+                    u.imports.clone(),
+                    u.alias,
+                    u.span,
+                ))
+            }
         }
     }
 }

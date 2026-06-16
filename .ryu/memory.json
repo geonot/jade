@@ -698,6 +698,24 @@
       "ts_created": "2026-06-15T19:52:21+00:00",
       "ts_accessed": "2026-06-15T19:52:21+00:00",
       "access_count": 0
+    },
+    "task_2-32-3-6_impl": {
+      "key": "task_2-32-3-6_impl",
+      "value": "Task 2-32-3-6 DONE: path-scoped use resolution (scope.md \u00a72.1, local/deterministic/no-global-arbitration). Pure query in src/pkgid.rs: resolve_use(map:&ScopedUseMap, consumer:PkgId, name:Symbol)->Result<PkgId,UseResolveError>. Keyed strictly by (consumer,name) \u2014 no global fallback. UseResolveError::Unresolved{consumer:String,name} names the consumer's project.jn. Typer integration: Typer::resolve_scoped_use(name) in src/typer/mod.rs uses root_pkg_id as consumer + scoped_use_map; Ok(None)=single-package fast path (\u00a72.2: no root_pkg_id or empty map), Ok(Some(id))=local resolve, Err only when name is a dep of ANOTHER scope but not this one (global-arbitration attempt). Wired into src/typer/stmt/dispatch.rs UseLocal lowering for single-segment paths only (multi-seg use baz/bar=reexport reach-in=task 2-32-3-7). dag.rs resolve_scoped_pkg_ids builds map from DAG (dep owner_scope=consumer child scope). Tests: 3 in pkgid.rs + scoped_use_map_resolves_dep_locally in dag.rs. 293 lib tests pass. NOTE: integration column_max/min/sum fail PRE-EXISTING (env), unrelated.",
+      "kind": "decision",
+      "tags": [
+        "scope",
+        "pkgid",
+        "use-resolution",
+        "task_2-32-3",
+        "landed"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-16T17:16:19+00:00",
+      "ts_accessed": "2026-06-16T17:16:19+00:00",
+      "access_count": 0
     }
   }
 }
