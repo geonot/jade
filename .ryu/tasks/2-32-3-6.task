@@ -1,11 +1,25 @@
 title: Implement path-scoped use resolution
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-15T05:51:53'
-updated_at: '2026-06-15T05:51:53'
-result: ''
+updated_at: '2026-06-16T10:16:35'
+result: 'Implemented path-scoped use resolution per scope.md §2.1 (local, deterministic,
+  no global arbitration). Added pure query resolve_use(map, consumer, name) -> Result<PkgId,
+  UseResolveError> in src/pkgid.rs, keyed strictly by (consumer, name) with no global
+  fallback; UseResolveError::Unresolved names the consumer''s project.jn. Typer::resolve_scoped_use
+  in src/typer/mod.rs uses root_pkg_id as the consumer against the threaded scoped_use_map:
+  Ok(None) preserves the single-package fast path (§2.2: no root_pkg_id or empty map),
+  Ok(Some(id)) on local resolve, Err only when a name belongs to another scope''s
+  manifest but not this one (a global-arbitration attempt). Wired into UseLocal lowering
+  (src/typer/stmt/dispatch.rs) for single-segment imports; multi-segment reach-in
+  (use baz/bar) is left for the reexport-consent task 2-32-3-7. Tests: use_resolves_locally_no_global_arbitration,
+  same_name_distinct_per_consumer, unresolved_use_names_the_consumer (pkgid.rs) +
+  scoped_use_map_resolves_dep_locally (dag.rs) prove a name resolves differently per
+  consumer and that absent names error rather than borrow from another scope. cargo
+  build --release zero warnings; 293 lib tests pass. (Pre-existing integration column_*
+  failures are env-related and unrelated.)'
 description: Implement path-scoped resolution semantics where 'use bar in baz' resolves
   to foo:baz:bar locally with no global arbitration. Done when path-scoped use statements
   resolve to the correct scoped target and tests cover local resolution without global
