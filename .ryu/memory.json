@@ -789,6 +789,24 @@
       "ts_created": "2026-06-17T13:07:10+00:00",
       "ts_accessed": "2026-06-17T13:07:10+00:00",
       "access_count": 0
+    },
+    "task_2-32-3-10_impl": {
+      "key": "task_2-32-3-10_impl",
+      "value": "Task 2-32-3-10 DONE (PackageId through MIR, scope.md \u00a71). IMPL: mir::Program gained pkg_id:Option<PkgId> + module_pkgs:HashMap<Symbol,PkgId> (copied straight from hir::Program). mir::Function gained pkg_id:Option<PkgId>. In src/mir/lower/mod.rs lower_program, after collecting all functions, attribute each via f.pkg_id = prog.owner_pkg_id(f.name) (recovers identity from prefix_module name prefix, falls back to root). Function::new (lower/ctx.rs) inits pkg_id:None; verify.rs test Program/Function literals updated. This feeds 2-32-3-11 codegen mangling. 2 tests in src/typer/tests.rs (HIR->MIR lowering): mir_carries_no_pkg_id_for_legacy_single_package, mir_propagates_root_and_dependency_pkg_ids. 309 lib tests pass. Pre-existing integration failures column_max/min/sum unrelated.",
+      "kind": "decision",
+      "tags": [
+        "scope",
+        "pkgid",
+        "mir",
+        "task_2-32-3-10",
+        "landed"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-17T13:12:30+00:00",
+      "ts_accessed": "2026-06-17T13:12:30+00:00",
+      "access_count": 0
     }
   }
 }

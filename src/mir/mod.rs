@@ -37,6 +37,12 @@ pub fn actor_sleep_fn_name(actor: Symbol) -> String {
 pub struct Function {
     pub name: Symbol,
     pub def_id: DefId,
+
+    /// Identity of the package this function belongs to (scope.md §1), recovered
+    /// in MIR lowering from the HIR program's package attribution. `None` for
+    /// legacy single-package builds and synthesized functions with no package
+    /// origin. Codegen mangling (§1.2) derives the `pkgid_hash` prefix from this.
+    pub pkg_id: Option<crate::pkgid::PkgId>,
     pub params: Vec<Param>,
     pub ret_ty: Type,
     pub blocks: Vec<BasicBlock>,
@@ -342,6 +348,13 @@ pub struct Program {
     pub types: Vec<TypeDef>,
     pub externs: Vec<ExternDecl>,
     pub globals: Vec<GlobalDef>,
+
+    /// Root package identity, carried through from `hir::Program` (scope.md §1).
+    pub pkg_id: Option<crate::pkgid::PkgId>,
+
+    /// Per-module dependency package identities, carried through from
+    /// `hir::Program::module_pkgs` (scope.md §1.1).
+    pub module_pkgs: std::collections::HashMap<Symbol, crate::pkgid::PkgId>,
 }
 
 #[derive(Debug, Clone)]

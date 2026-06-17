@@ -74,6 +74,7 @@ impl Lowerer {
         let func = Function {
             name: name.into(),
             def_id,
+            pkg_id: None,
             params: Vec::new(),
             ret_ty: Type::Void,
             blocks: vec![BasicBlock {

@@ -386,6 +386,7 @@ mod tests {
         Function {
             name: Symbol::intern("test_fn"),
             def_id: DefId(0),
+            pkg_id: None,
             params: vec![Param {
                 value: ValueId(0),
                 name: Symbol::intern("p"),
@@ -586,6 +587,8 @@ mod tests {
             types: vec![],
             externs: vec![],
             globals: vec![],
+            pkg_id: None,
+            module_pkgs: std::collections::HashMap::new(),
         };
         let errs = verify_program(&prog).unwrap_err();
         assert!(errs.iter().any(|e| e.contains("[fn test_fn]")));
