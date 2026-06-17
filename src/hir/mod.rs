@@ -88,6 +88,35 @@ pub struct Program {
     pub newtypes: Vec<(Symbol, Type, Span)>,
     pub migrations: Vec<crate::ast::MigrationDef>,
     pub globals: Vec<Global>,
+
+    /// Identity of the package this program's own (non-imported) items belong
+    /// to (scope.md §1). `None` only for the legacy single-package builds that
+    /// never assigned a root `PkgId`. Codegen mangling (§1.2) derives the
+    /// `pkgid_hash` prefix from this.
+    pub pkg_id: Option<crate::pkgid::PkgId>,
+
+    /// Owning `PkgId` for items pulled in from a dependency, keyed by the module
+    /// name that `prefix_module` stamped onto them (scope.md §1.1). An item whose
+    /// name prefix matches a key here belongs to that dependency package; any
+    /// other item belongs to `pkg_id` (the root). Lets downstream stages recover
+    /// per-item package identity without a separate annotation on every node.
+    pub module_pkgs: std::collections::HashMap<Symbol, crate::pkgid::PkgId>,
+}
+
+impl Program {
+    /// Resolve the owning `PkgId` of a top-level item by its (already
+    /// module-prefixed) symbol name. Returns the dependency package whose module
+    /// prefix the name carries, else the root `pkg_id`.
+    pub fn owner_pkg_id(&self, name: Symbol) -> Option<crate::pkgid::PkgId> {
+        let n = name.as_str();
+        for (module, id) in &self.module_pkgs {
+            let prefix = format!("{}_", module.as_str());
+            if n.starts_with(&prefix) {
+                return Some(*id);
+            }
+        }
+        self.pkg_id
+    }
 }
 
 #[derive(Debug, Clone)]

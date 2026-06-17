@@ -551,6 +551,8 @@ impl Typer {
             newtypes: Vec::new(),
             migrations: Vec::new(),
             globals: Vec::new(),
+            pkg_id: self.root_pkg_id,
+            module_pkgs: self.dep_pkg_ids.clone(),
         };
 
         let global_entries: Vec<_> = self.globals.clone().into_iter().collect();

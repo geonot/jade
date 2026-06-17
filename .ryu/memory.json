@@ -771,6 +771,24 @@
       "ts_created": "2026-06-17T08:18:55+00:00",
       "ts_accessed": "2026-06-17T08:18:55+00:00",
       "access_count": 0
+    },
+    "task_2-32-3-9_impl": {
+      "key": "task_2-32-3-9_impl",
+      "value": "Task 2-32-3-9 DONE (HIR carries PackageId, scope.md \u00a71). IMPL: hir::Program gained two fields \u2014 pkg_id:Option<PkgId> (root package identity; None for legacy single-package builds that never set a root) and module_pkgs:HashMap<Symbol,PkgId> (module-name-symbol -> dep PkgId, cloned from typer.dep_pkg_ids). Program::owner_pkg_id(name) recovers per-item ownership: matches the item's prefix_module name prefix (\"<module>_\") against module_pkgs keys, else falls back to pkg_id. Populated in src/typer/lower/mod.rs lower_program at the single hir::Program{} construction site (pkg_id: self.root_pkg_id, module_pkgs: self.dep_pkg_ids.clone()). Rationale: prefix_module (src/resolve.rs, AST-level, pre-typing) already stamps \"<module>_\" onto imported items; rather than annotate every HIR node, recover identity from the existing name prefix + small side map. Foundation 2-32-3-11 (codegen mangling <pkgid_hash>_<module>_<name>) consumes this. 3 tests in src/typer/tests.rs. 307 lib tests pass. Pre-existing integration failures column_max/min/sum verified unrelated (fail on clean checkout).",
+      "kind": "decision",
+      "tags": [
+        "scope",
+        "pkgid",
+        "hir",
+        "task_2-32-3-9",
+        "landed"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-17T13:07:10+00:00",
+      "ts_accessed": "2026-06-17T13:07:10+00:00",
+      "access_count": 0
     }
   }
 }
