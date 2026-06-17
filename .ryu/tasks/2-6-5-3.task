@@ -1,12 +1,24 @@
 title: 'Typer: together as fallible expression — scope error union + From at site'
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by:
 - 2-6-5-2
 created_at: '2026-06-13T19:30:22'
-updated_at: '2026-06-13T19:30:22'
-result: ''
+updated_at: '2026-06-17T12:11:42'
+result: 'together is a fallible expression: scope error union computed as the delta
+  of the enclosing fn''s inferred error types over the child body (reusing the existing
+  SCC/From inference), with From conversion applied at the child site (child dispatch
+  body typed against the enclosing fn''s Result-err type). The boxed full Result-err
+  value carries arbitrary payloads + converted error types correctly. Quaternary arms
+  on together: `!!` binds err and handles in place (scope_err_handler_binds_err passes),
+  `?` ok-arm allowed ($ is Unit), bare `!` rejected with a diagnostic. Fixed a real
+  CFG bug: with both `?` and `!!` arms the error path fell through into the ok-arm
+  (running both, with a null-ptr Branch ICE); restructured lower_together into a prop_bb/ok_bb/done_bb
+  diamond so ok-arm runs only on a clean join and err-arm only on a failing child.
+  DoD: scope_error_propagates_with_from passes; `!!` handler compiles and binds err.
+  Added scope_quaternary_error_runs_only_err_arm and scope_quaternary_ok_runs_only_ok_arm.
+  22 concurrency tests + full suite green, zero warnings.'
 description: 'E3/E6: make the `together` block a fallible expression whose error union
   is the union of its child bodies'' error unions. Reuse the existing function error-inference
   machinery (SCC least-fixpoint, From graph from the locked error model). The scope

@@ -1,4 +1,5 @@
 # Changelog
+- **[130]** (2026-06-17 19:11) together as fallible expr: fix ?/!! arm CFG so ok-arm is success-only, err-arm error-only; add quaternary conformance tests (task 2-6-5-3)
 - **[129]** (2026-06-17 19:01) fix: enum niche-pack GEP crash, @simple+@column orthogonality, enum-name annotation classification
 
 Three root-cause fixes behind the column_* and store_transactions integration
