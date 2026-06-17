@@ -72,7 +72,50 @@ pub fn flatten_workspace(
         &mut dag,
         &mut visiting,
     )?;
+    reject_multi_version(&dag)?;
     Ok(dag)
+}
+
+/// scope.md §5 / lamp.md §5.7.6: multi-version coexistence is deferred to
+/// post-traits. The `PackageId` model already represents two live majors of the
+/// same package distinctly (the version field forks the identity), so this is
+/// the *only* thing holding the door shut — and lifting it later is purely
+/// additive once the coherence/orphan rule lands.
+///
+/// Detect any package name that resolves to two **distinct major versions**
+/// anywhere in the DAG and hard-reject with an honest diagnostic. Two instances
+/// of the same major (only minor/patch differing) are not a coexistence hazard —
+/// the resolver already unifies on the single highest compatible version per
+/// major — so we key strictly on `name + major`.
+fn reject_multi_version(dag: &ResolutionDag) -> Result<(), String> {
+    let mut majors: HashMap<Symbol, HashSet<u32>> = HashMap::new();
+    for node in &dag.nodes {
+        let rec = node.pkg_id.record();
+        majors.entry(rec.name).or_default().insert(rec.version.major);
+    }
+    for node in &dag.nodes {
+        let rec = node.pkg_id.record();
+        if let Some(set) = majors.get(&rec.name) {
+            if set.len() > 1 {
+                let mut found: Vec<String> = dag
+                    .nodes
+                    .iter()
+                    .map(|n| n.pkg_id.record())
+                    .filter(|r| r.name == rec.name)
+                    .map(|r| r.version.to_string())
+                    .collect();
+                found.sort();
+                found.dedup();
+                return Err(format!(
+                    "multi-version coexistence of '{}' ({}) is not yet supported; it is \
+                     gated on coherence/traits (lamp.md §5.7.6). Pick one major.",
+                    rec.name,
+                    found.join(" and ")
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn source_bytes_for(path: &std::path::Path) -> Vec<u8> {
@@ -389,6 +432,69 @@ mod tests {
         // baz is bar's parent: a direct `use bar` from baz satisfies the ceiling.
         let got = crate::pkgid::resolve_path_use(&map, baz, &[sym("bar")]).unwrap();
         assert_eq!(got.fully_qualified(), "foo:baz:bar");
+    }
+
+    // scope.md §5: root requires foo@1 directly and a sibling dep requires
+    // foo@2 transitively. Two live majors of the same package => hard reject.
+    #[test]
+    fn two_live_majors_hard_rejected() {
+        let root = TempDir::new().unwrap();
+        let mid = TempDir::new().unwrap();
+        let foo = TempDir::new().unwrap();
+
+        write_src(root.path(), "main.jn", "*main\n  log 1\n");
+        write_manifest(
+            root.path(),
+            "name is 'root'\nversion is '1.0.0'\n\
+             require('foo', 'x', '1.2.0')\nrequire('mid', 'x', '1.0.0')\n",
+        );
+        write_src(mid.path(), "lib.jn", "fn m\n  1\n");
+        write_manifest(
+            mid.path(),
+            "name is 'mid'\nversion is '1.0.0'\nrequire('foo', 'x', '2.0.0')\n",
+        );
+        write_src(foo.path(), "lib.jn", "fn f\n  1\n");
+        write_manifest(foo.path(), "name is 'foo'\nversion is '1.0.0'\n");
+
+        let mut pkg_paths = HashMap::new();
+        pkg_paths.insert(sym("mid"), mid.path().to_path_buf());
+        pkg_paths.insert(sym("foo"), foo.path().to_path_buf());
+
+        let root_deps = vec![
+            Dependency { name: "foo".into(), url: "x".into(), version: SemVer { major: 1, minor: 2, patch: 0 } },
+            Dependency { name: "mid".into(), url: "x".into(), version: ver(1) },
+        ];
+        let err = flatten_workspace(sym("root"), root.path(), &root_deps, &pkg_paths)
+            .unwrap_err();
+        assert!(err.contains("multi-version coexistence of 'foo'"), "{err}");
+        assert!(err.contains("1.2.0"), "{err}");
+        assert!(err.contains("2.0.0"), "{err}");
+        assert!(err.contains("coherence/traits"), "{err}");
+    }
+
+    // Same package at differing minor/patch under one major is NOT a hazard:
+    // it is the ordinary single-version resolution and must be accepted.
+    #[test]
+    fn same_major_minor_diff_accepted() {
+        let root = TempDir::new().unwrap();
+        let foo = TempDir::new().unwrap();
+        write_src(root.path(), "main.jn", "*main\n  log 1\n");
+        write_manifest(
+            root.path(),
+            "name is 'root'\nversion is '1.0.0'\nrequire('foo', 'x', '1.2.0')\n",
+        );
+        write_src(foo.path(), "lib.jn", "fn f\n  1\n");
+        write_manifest(foo.path(), "name is 'foo'\nversion is '1.0.0'\n");
+
+        let mut pkg_paths = HashMap::new();
+        pkg_paths.insert(sym("foo"), foo.path().to_path_buf());
+
+        let root_deps = vec![Dependency {
+            name: "foo".into(),
+            url: "x".into(),
+            version: SemVer { major: 1, minor: 2, patch: 0 },
+        }];
+        assert!(flatten_workspace(sym("root"), root.path(), &root_deps, &pkg_paths).is_ok());
     }
 
     #[test]

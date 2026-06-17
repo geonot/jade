@@ -117,6 +117,10 @@ pub(super) fn compile_and_link(
         };
         match flatten_workspace(pkg_name, base_dir, &root_deps, &packages) {
             Ok(dag) => resolve_scoped_pkg_ids(&dag),
+            // A multi-version coexistence violation (scope.md §5) is a hard,
+            // documented build error and must abort. Other resolution failures
+            // are tolerated here (partial/non-package builds resolve leniently).
+            Err(e) if e.starts_with("multi-version coexistence of") => die(&e),
             Err(_) => Default::default(),
         }
     };

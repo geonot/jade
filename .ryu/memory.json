@@ -753,6 +753,24 @@
       "ts_created": "2026-06-17T07:14:15+00:00",
       "ts_accessed": "2026-06-17T07:14:15+00:00",
       "access_count": 0
+    },
+    "task_2-32-3-8_impl": {
+      "key": "task_2-32-3-8_impl",
+      "value": "Task 2-32-3-8 DONE: multi-version coexistence HARD-REJECTED now (scope.md \u00a75 / lamp.md \u00a75.7.6 deferral choice (a)). IMPL: src/driver/sources/dag.rs reject_multi_version(dag) \u2014 scans resolved DAG, keys on (name, major); >1 major for same name => Err with EXACT diagnostic \"multi-version coexistence of '{name}' ({v1} and {v2}) is not yet supported; it is gated on coherence/traits (lamp.md \u00a75.7.6). Pick one major.\" Same-major minor/patch diff = accepted. Called at end of flatten_workspace. PIPELINE: src/driver/pipeline.rs match now does `Err(e) if e.starts_with(\"multi-version coexistence of\") => die(&e)` \u2014 fatal; other resolution errs still tolerated. Tests: two_live_majors_hard_rejected, same_major_minor_diff_accepted. PkgId forks identity on version field => lifting guard post-traits is purely additive. PITFALL: column_max/min/sum integration tests FAIL pre-existing (unrelated @simple+@column store decorator combo).",
+      "kind": "decision",
+      "tags": [
+        "scope",
+        "multiversion",
+        "pkgid",
+        "task_2-32-3-8",
+        "landed"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-17T08:18:55+00:00",
+      "ts_accessed": "2026-06-17T08:18:55+00:00",
+      "access_count": 0
     }
   }
 }
