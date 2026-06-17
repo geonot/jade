@@ -1,11 +1,17 @@
 title: Thread PackageId through MIR
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-15T05:51:53'
-updated_at: '2026-06-15T05:51:53'
-result: ''
+updated_at: '2026-06-17T06:13:04'
+result: PackageId now propagates HIR -> MIR. mir::Program carries pkg_id:Option<PkgId>
+  + module_pkgs (copied from hir::Program); mir::Function gained pkg_id:Option<PkgId>,
+  assigned in lower_program via prog.owner_pkg_id(f.name) so each lowered function
+  (including methods, trait-impl methods, actor handlers) is attributed to its owning
+  package. Function::new and verify.rs literals updated. 2 HIR->MIR propagation tests
+  added; 309 lib tests pass; zero-warning release build; no new regressions (column_*
+  failures pre-existing). Foundation for codegen mangling 2-32-3-11.
 description: Propagate PackageId identity from HIR into MIR lowering. Done when MIR
   carries PackageId identity for symbols and MIR lowering tests confirm correct propagation.
   Depends on HIR threading subtask.

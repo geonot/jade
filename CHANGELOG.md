@@ -1,4 +1,5 @@
 # Changelog
+- **[121]** (2026-06-17 13:12) task 2-32-3-10: Thread PackageId through MIR — mir::Program carries pkg_id+module_pkgs; mir::Function carries pkg_id, attributed via owner_pkg_id during lowering. 2 MIR propagation tests.
 - **[119]** (2026-06-17 13:07) task 2-32-3-9: Thread PackageId through HIR — hir::Program carries root pkg_id + module_pkgs side map; owner_pkg_id() recovers per-item package identity from prefix_module name prefixes. 3 HIR identity tests.
 - **[117]** (2026-06-17 08:19) [task 2-32-3-8] hard-reject multi-version coexistence (scope.md §5): reject_multi_version guard in flatten_workspace keys on (name,major), exact deferral diagnostic; pipeline surfaces it fatally via die; same-major minor/patch accepted; conformance tests for reject + negative control
 - **[116]** (2026-06-17 07:14) [task 2-32-3-7] visibility ceiling replaces reexport consent: target-declared public/internal, ScopePath prefix enforcement, resolve_path_use for multi-segment use; docs + tests in lockstep
