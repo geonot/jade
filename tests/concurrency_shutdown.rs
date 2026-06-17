@@ -600,3 +600,65 @@ err Boom
         "99",
     );
 }
+
+/// A `together` with both a `?` (success) arm and a `!!` (error) arm runs the
+/// arms with quaternary semantics: the `?` arm fires only when the scope joined
+/// cleanly, the `!!` arm only when a child failed — never both. Here the child
+/// fails, so only `99` is logged (not `7`), and `work` returns `Ok(0)`.
+#[test]
+fn scope_quaternary_error_runs_only_err_arm() {
+    expect(
+        "\
+err Boom
+    Bad
+
+*risky() returns i64 ! Boom
+    err Bad
+
+*work() returns i64 ! Boom
+    together
+        dispatch
+            x is risky() ? $ !! err
+            log(1)
+    ? log(7)
+    !! log(99)
+    0
+
+*main()
+    match work()
+        Ok(v) ? log(v)
+        Err(e) ? log(-1)
+",
+        "99\n0",
+    );
+}
+
+/// Mirror of the above on the success path: the child succeeds, the scope joins
+/// cleanly, so only the `?` arm fires (logs `7`) and the `!!` arm is skipped.
+#[test]
+fn scope_quaternary_ok_runs_only_ok_arm() {
+    expect(
+        "\
+err Boom
+    Bad
+
+*risky() returns i64 ! Boom
+    42
+
+*work() returns i64 ! Boom
+    together
+        dispatch
+            x is risky() ? $ !! err
+            log(1)
+    ? log(7)
+    !! log(99)
+    0
+
+*main()
+    match work()
+        Ok(v) ? log(v)
+        Err(e) ? log(-1)
+",
+        "1\n7\n0",
+    );
+}

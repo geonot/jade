@@ -1,4 +1,26 @@
 # Changelog
+- **[129]** (2026-06-17 19:01) fix: enum niche-pack GEP crash, @simple+@column orthogonality, enum-name annotation classification
+
+Three root-cause fixes behind the column_* and store_transactions integration
+failures:
+
+1. codegen/decl.rs: remove the orphaned 2-variant enum niche-packing that laid
+   payload-bearing enums out as a bare pointer while variant_init/field_get
+   always assume the uniform {tag, payload} layout — crashed any 2-variant enum
+   with a String/Struct/Enum payload ("GEP index out of range"). All
+   payload-bearing enums now use the uniform tagged-union layout.
+
+2. typer/mono.rs: reclassify a bare named annotation Struct(name)->Enum(name)
+   when name is a known enum, so From-impl signatures over err enums match
+   their enum call sites instead of being typed as structs.
+
+3. store_decorators.rs: @simple and @column are orthogonal (schema shape vs
+   physical layout); drop the bogus mutual exclusion.
+
+Update 4 store_transactions tests to the spec-correct idiom (error-effects.md
+R1/R2): a closed err union that propagates a bare `insert` must carry
+StoreError, via an S(StoreError) variant + impl From of StoreError. Add 2
+conformance tests pinning the layout fix. Full suite green.
 - **[127]** (2026-06-17 16:16) tests: end-to-end conformance for path-scoped package identity (scope.md)
 
 Add tests/scoped_identity.rs driving real `jinnc build` against hermetic

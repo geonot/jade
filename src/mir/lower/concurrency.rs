@@ -241,8 +241,9 @@ impl Lowerer {
             span,
         );
         let prop_bb = self.new_block("scope.err.prop");
-        let cont_bb = self.new_block("scope.err.cont");
-        self.set_terminator(Terminator::Branch(has_err, prop_bb, cont_bb));
+        let ok_bb = self.new_block("scope.err.ok");
+        let done_bb = self.new_block("scope.err.done");
+        self.set_terminator(Terminator::Branch(has_err, prop_bb, ok_bb));
 
         self.seal_block(prop_bb);
         self.switch_to(prop_bb);
@@ -267,7 +268,7 @@ impl Lowerer {
                     let _ = h.err_bind;
                     self.lower_block_stmts(err_arm);
                 }
-                self.set_terminator(Terminator::Goto(cont_bb));
+                self.set_terminator(Terminator::Goto(done_bb));
             }
             _ => {
                 self.lower_deferred_in_reverse();
@@ -278,13 +279,17 @@ impl Lowerer {
             }
         }
 
-        self.seal_block(cont_bb);
-        self.switch_to(cont_bb);
+        self.seal_block(ok_bb);
+        self.switch_to(ok_bb);
         if let Some(h) = handler
             && let Some(ok_arm) = &h.ok_arm
         {
             self.lower_block_stmts(ok_arm);
         }
+        self.set_terminator(Terminator::Goto(done_bb));
+
+        self.seal_block(done_bb);
+        self.switch_to(done_bb);
         self.emit(InstKind::Void, Type::Void, span)
     }
 
