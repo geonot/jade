@@ -4,6 +4,7 @@ use crate::ast::Decl;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::pkg::{Dependency, SemVer};
+use crate::pkgid::Visibility;
 
 #[derive(Debug, Default)]
 pub(super) struct ProjectConfig {
@@ -13,6 +14,7 @@ pub(super) struct ProjectConfig {
     pub(super) opt: Option<u8>,
     pub(super) lto: Option<bool>,
     pub(super) requires: Vec<Dependency>,
+    pub(super) visibility: Visibility,
 }
 
 impl ProjectConfig {
@@ -92,6 +94,19 @@ impl ProjectConfig {
             "lto" => {
                 if let Expr::Bool(b, _) = val {
                     cfg.lto = Some(*b);
+                }
+            }
+            "visibility" => {
+                let word = match val {
+                    Expr::Str(s, _) => Some(s.clone()),
+                    Expr::Ident(s, _) => Some(s.as_str().to_string()),
+                    _ => None,
+                };
+                if let Some(w) = word {
+                    cfg.visibility = match w.as_str() {
+                        "internal" => Visibility::Internal,
+                        _ => Visibility::Public,
+                    };
                 }
             }
             _ => {}

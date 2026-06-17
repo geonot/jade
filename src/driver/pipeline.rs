@@ -96,6 +96,7 @@ pub(super) fn compile_and_link(
             owner_scope: ScopePath::root(),
             version: SemVer { major: 0, minor: 0, patch: 0 },
             semantic_hash: hash,
+            visibility: crate::pkgid::Visibility::Public,
         })
     };
 

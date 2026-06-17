@@ -281,6 +281,32 @@ impl Typer {
         }
     }
 
+    /// Resolve a multi-segment path import `use seg0/seg1/.../segN` against the
+    /// scoped graph, enforcing the final target's visibility ceiling
+    /// (scope.md §4). Single-package builds (no scoped map) are a no-op.
+    pub(crate) fn resolve_scoped_path_use(
+        &self,
+        path: &[Symbol],
+    ) -> Result<Option<crate::pkgid::PkgId>, String> {
+        let Some(consumer) = self.root_pkg_id else {
+            return Ok(None);
+        };
+        if self.scoped_use_map.is_empty() {
+            return Ok(None);
+        }
+        match crate::pkgid::resolve_path_use(&self.scoped_use_map, consumer, path) {
+            Ok(id) => Ok(Some(id)),
+            Err(crate::pkgid::UseResolveError::Unresolved { .. }) => {
+                // First hop absent from the consumer's manifest: in the
+                // single-package / local-module case this is not a package
+                // reference at all, so stay silent (scope.md §2.2). A genuine
+                // arbitration attempt is caught by `resolve_scoped_use`.
+                Ok(None)
+            }
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
     pub fn set_test_mode(&mut self, enabled: bool) {
         self.test_mode = enabled;
     }

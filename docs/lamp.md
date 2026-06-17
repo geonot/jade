@@ -897,11 +897,12 @@ bar[blake3:7d1a…]{foo:baz}(1.2.0)
 ```
 
 A consumer may reach a transitive dependency explicitly with a **path import**,
-`use baz/bar`, which binds `foo:baz:bar` directly. This is allowed only when
-`baz` **re-exports** `bar` (a manifest `reexport bar` declaration); an
-un-re-exported reach-in is a hard error, because a private implementation detail
-of `baz` (which `bar` it happens to use) must not silently become part of
-`foo`'s build — the npm reach-in fragility, closed by requiring consent.
+`use baz/bar`, which binds `foo:baz:bar` directly. Reach-in is **open by
+default**; consent lives on the **target**, which declares its own visibility
+ceiling in its manifest (`visibility internal` confines it to its own
+owner-scope subtree). A reach-in from outside an `internal` target's subtree is a
+hard error naming the target's manifest. See `scope.md` §4 for the full
+predicate.
 
 #### 5.7.2 The unification pass — promote provably-identical packages
 

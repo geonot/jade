@@ -1198,6 +1198,8 @@ impl Typer {
             ast::Stmt::UseLocal(u) => {
                 if u.path.len() == 1 {
                     self.resolve_scoped_use(u.path[0])?;
+                } else if u.path.len() > 1 {
+                    self.resolve_scoped_path_use(&u.path)?;
                 }
                 Ok(hir::Stmt::UseLocal(
                     u.path.clone(),

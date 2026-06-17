@@ -714,7 +714,44 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-06-16T17:16:19+00:00",
-      "ts_accessed": "2026-06-16T17:16:19+00:00",
+      "ts_accessed": "2026-06-17T06:50:05+00:00",
+      "access_count": 1
+    },
+    "task_2-32-3-7_visibility_design": {
+      "key": "task_2-32-3-7_visibility_design",
+      "value": "Task 2-32-3-7 PIVOTED (user directive): DROP reexport-consent entirely. Replace with a VISIBILITY CEILING declared in the TARGET package's own manifest. Two rungs: public (default, no declaration => any consumer may path-import it) and internal (visible only within the target's own owner-scope subtree). Enforcement = ScopePath prefix check in the scoped-use resolver: import of target T (owner_scope S_t) by consumer scope S_c is legal iff T is public OR S_c is within S_t's subtree (consumer scope prefixed by target's owner_scope, i.e. reachable by the target's parent and descendants, NOT a grandparent/sibling/external). Reach-in to an internal target from outside = hard error naming target's manifest. Rationale: consent on the party with knowledge, default-open matches reality, closed lattice fits cap/effect convention, cheap prefix check. Docs updated in lockstep: scope.md \u00a74, config-blocks.md, lamp.md, lamp-prereqs.md.",
+      "kind": "decision",
+      "tags": [
+        "scope",
+        "visibility",
+        "internal",
+        "task_2-32-3-7",
+        "reexport-dropped"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-17T06:58:18+00:00",
+      "ts_accessed": "2026-06-17T06:58:18+00:00",
+      "access_count": 0
+    },
+    "task_2-32-3-7_impl": {
+      "key": "task_2-32-3-7_impl",
+      "value": "Task 2-32-3-7 DONE (v115). reexport-consent DROPPED, replaced by self-declared VISIBILITY CEILING on target package. IMPL: (1) src/pkgid.rs: Visibility enum {Public(default), Internal}; PackageRecord.visibility field; ScopePath::is_prefix_of (subtree test); resolve_path_use(map, consumer, path[]) resolves multi-seg use hop-by-hop (each hop keyed (current_pkgid, seg) in ScopedUseMap) then gates final target: legal iff Public OR target.owner_scope.is_prefix_of(consumer.owner_scope.child(consumer.name)). New UseResolveError variants UnresolvedHop + VisibilityCeiling. (2) src/typer/mod.rs: resolve_scoped_path_use wrapper (Unresolved first-hop => Ok(None) silent for local-module/single-pkg). (3) src/typer/stmt/dispatch.rs UseLocal: path.len()>1 => resolve_scoped_path_use. (4) src/driver/project.rs: ProjectConfig.visibility parsed from `visibility is 'internal'`/bare ident. (5) src/driver/sources/dag.rs: resolve_node takes visibility param, load_visibility helper, threaded into PackageRecord. (6) packages.rs build_pkg_id_map reads visibility too. Docs lockstep: scope.md \u00a74 (visibility ceiling + \u00a74.1 predicate), config-blocks.md (visibility connector), lamp.md \u00a75.7.1, lamp-prereqs.md. TESTS: 24 pkgid unit (5 new: scope_prefix_check, path_use_resolves_two_hops, path_use_missing_hop_errors, public/internal reach-in) + 8 dag (3 new e2e via real temp project.jn: e2e_public_reach_in_resolves, e2e_internal_reach_in_is_hard_error, e2e_internal_reach_in_allowed_from_parent). Full suite green except 3 PRE-EXISTING @column integration failures (confirmed fail on clean HEAD, unrelated).",
+      "kind": "decision",
+      "tags": [
+        "scope",
+        "visibility",
+        "pkgid",
+        "task_2-32-3-7",
+        "landed",
+        "v115"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-17T07:14:15+00:00",
+      "ts_accessed": "2026-06-17T07:14:15+00:00",
       "access_count": 0
     }
   }

@@ -43,7 +43,7 @@ value          := literal | list | map | path | nested-record
 list           := "[" value ("," value)* "]"
 map            := "{" (key "is" value ("," key "is" value)*)? "}"
 connector      := "requires" | "from" | "path" | "git" | "rev"
-               | "opt" | "with" | "enables" | "reexport"   # closed, schema-driven
+               | "opt" | "with" | "enables" | "visibility"  # closed, schema-driven
 ```
 
 ### 1.2 Why this does not collide with expression-statement parsing (the Q3 crux)
@@ -187,7 +187,9 @@ features
 - `capabilities` is the module-ceiling config block from `caps.md` §2.3 — it is a
   config block like any other, its entries the cap classes, its connectors the
   path scopes.
-- `reexport` (`scope.md` §4) is a `requires`-position connector.
+- `visibility` (`scope.md` §4) is a top-level manifest key declaring the
+  package's own visibility ceiling (`public` (default) | `internal`); the
+  resolver reads it on the *target* package, never on the consumer.
 
 `name`/`version` desugar to record fields; the resolver reads the record, never
 "runs" the manifest.
@@ -232,7 +234,7 @@ data, proven so by the lint, and lamp never has an execution path for it.
 ## 7. Cross-references
 
 - `capabilities` block → `caps.md` §2.3.
-- `requires`/`provides`/`members`/`reexport` semantics → `scope.md` §4, §6;
+- `requires`/`provides`/`members`/`visibility` semantics → `scope.md` §4, §6;
   lamp.md §2.2–§2.5.
 - Restriction rationale (no install-time execution) → lamp.md §6.4.
 - Provisional stabilization → `docs/stability.md`.

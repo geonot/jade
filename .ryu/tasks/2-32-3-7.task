@@ -1,11 +1,21 @@
 title: Implement reexport consent enforcement
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-15T05:51:53'
-updated_at: '2026-06-15T05:51:53'
-result: ''
+updated_at: '2026-06-17T00:14:23'
+result: 'Reexport-consent dropped per user directive; replaced with a self-declared
+  visibility ceiling on the target package (scope.md §4). Two rungs: public (default,
+  reach-in open) / internal (visible only within the target''s own owner-scope subtree).
+  Implemented Visibility enum + PackageRecord.visibility + ScopePath::is_prefix_of
+  + resolve_path_use (multi-segment hop-by-hop resolution gated by a ScopePath prefix
+  check) in pkgid.rs; wired into the typer (resolve_scoped_path_use, UseLocal multi-segment
+  lowering); parsed `visibility` manifest key in ProjectConfig and threaded it through
+  dag.rs/packages.rs into PackageRecord. Docs updated in lockstep (scope.md, config-blocks.md,
+  lamp.md, lamp-prereqs.md). +11 tests (5 pkgid unit, 3 dag end-to-end via real project.jn
+  manifests, 3 reused). Build warning-clean; full suite green except 3 pre-existing
+  unrelated @column integration failures.'
 description: Enforce that 'use baz/bar' is legal only when baz explicitly declares
   reexport of bar; any reach-in without consent is a hard error. Done when reexport
   declarations are parsed/recognized, consented reexports resolve, and reach-in attempts

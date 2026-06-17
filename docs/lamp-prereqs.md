@@ -97,9 +97,11 @@ PackageId { name: Symbol, owner_scope: ScopePath, version: SemVer, semantic_hash
   `foo:bar`. Distinct identities, purely local resolution (no global
   arbitration). Symbol mangling becomes `<pkgid-hash>_<module>_<name>` instead
   of today's flat `module_name`.
-- **Re-export consent.** `use baz/bar` (path import) is legal *only* when `baz`
-  declares `reexport bar`; an un-re-exported reach-in is a hard error (§5.7.1).
-  Requires a `reexport` manifest/AST notion the compiler enforces at resolve.
+- **Visibility ceiling.** `use baz/bar` (path import) is open by default; the
+  *target* `bar` may declare `visibility internal` in its own manifest, confining
+  it to its owner-scope subtree. A reach-in from outside that subtree is a hard
+  error (scope.md §4). Requires a `visibility` manifest/AST notion the compiler
+  enforces at resolve via a `ScopePath` prefix check.
 - **Multi-version coexistence.** `use foo@1.2.0 as foo1` / `use foo@2.0.0 as
   foo2` must produce two non-unifiable identities with separately-mangled
   symbols and separate cap unions (§5.7.6). The orphan/coherence guard (reject

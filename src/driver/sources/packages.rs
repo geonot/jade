@@ -59,11 +59,22 @@ fn build_pkg_id_map(path_map: &HashMap<Symbol, PathBuf>) -> HashMap<Symbol, PkgI
             &src,
             &[],
         );
+        let visibility = {
+            let project_jn = path.join("project.jn");
+            if project_jn.exists() {
+                crate::driver::project::ProjectConfig::from_file(&project_jn)
+                    .map(|c| c.visibility)
+                    .unwrap_or_default()
+            } else {
+                crate::pkgid::Visibility::Public
+            }
+        };
         let pkg_id = PkgId::intern(PackageRecord {
             name,
             owner_scope: ScopePath::root(),
             version: SemVer { major: 0, minor: 0, patch: 0 },
             semantic_hash: hash,
+            visibility,
         });
         ids.insert(name, pkg_id);
     }

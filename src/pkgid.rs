@@ -10,12 +10,28 @@ pub struct ScopePath(u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PkgId(u32);
 
+/// A package's self-declared visibility ceiling (scope.md §4). Declared in the
+/// package's *own* manifest; the resolver reads it on the target of a path
+/// import, never on the consumer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Visibility {
+    /// Reachable by any consumer via path import (the default — reach-in is
+    /// open unless the target opts into a tighter ceiling).
+    #[default]
+    Public,
+    /// Reachable only within the package's own owner-scope subtree: its parent
+    /// scope and that scope's descendants. A reach-in from a grandparent,
+    /// sibling, or external package is a hard error.
+    Internal,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageRecord {
     pub name: Symbol,
     pub owner_scope: ScopePath,
     pub version: SemVer,
     pub semantic_hash: [u8; 32],
+    pub visibility: Visibility,
 }
 
 struct Tables {
@@ -91,6 +107,22 @@ impl ScopePath {
         self.0 == 0
     }
 
+    /// True when `self` is an ancestor-or-equal of `other`: every segment of
+    /// `self`, in order, is a prefix of `other`'s segments. The root scope is a
+    /// prefix of everything. Used for the visibility-ceiling subtree test
+    /// (scope.md §4.1).
+    pub fn is_prefix_of(self, other: ScopePath) -> bool {
+        if self == other {
+            return true;
+        }
+        TABLES.with(|t| {
+            let t = t.borrow();
+            let a = &t.scope_segments[self.0 as usize];
+            let b = &t.scope_segments[other.0 as usize];
+            a.len() <= b.len() && a.iter().zip(b.iter()).all(|(x, y)| x == y)
+        })
+    }
+
     pub fn render(self) -> String {
         Symbol::join_vec(&self.segments(), ":")
     }
@@ -127,6 +159,7 @@ impl PkgId {
                 patch: 0,
             },
             semantic_hash: [0u8; 32],
+            visibility: Visibility::Public,
         })
     }
 
@@ -140,6 +173,10 @@ impl PkgId {
 
     pub fn owner_scope(self) -> ScopePath {
         TABLES.with(|t| t.borrow().pkgs[self.0 as usize].owner_scope)
+    }
+
+    pub fn visibility(self) -> Visibility {
+        TABLES.with(|t| t.borrow().pkgs[self.0 as usize].visibility)
     }
 
     pub fn fully_qualified(self) -> String {
@@ -193,6 +230,20 @@ pub enum UseResolveError {
     /// Carries the consumer's fully-qualified path and the unresolved name so
     /// the diagnostic can point at the right `project.jn`.
     Unresolved { consumer: String, name: Symbol },
+    /// A path import `use a/b/...` could not resolve one hop: `via` (the
+    /// intermediary's fully-qualified path) does not declare `requires next`.
+    UnresolvedHop {
+        consumer: String,
+        via: String,
+        next: Symbol,
+    },
+    /// A path import reached a target declared `visibility internal` from
+    /// outside the target's owner-scope subtree (scope.md §4.1).
+    VisibilityCeiling {
+        consumer: String,
+        target: String,
+        target_scope: String,
+    },
 }
 
 impl std::fmt::Display for UseResolveError {
@@ -202,6 +253,26 @@ impl std::fmt::Display for UseResolveError {
                 f,
                 "unresolved import 'use {name}' in package '{consumer}': add '{name}' to its \
                  project.jn requires"
+            ),
+            UseResolveError::UnresolvedHop {
+                consumer,
+                via,
+                next,
+            } => write!(
+                f,
+                "path import in package '{consumer}' cannot reach '{next}': package '{via}' does \
+                 not declare 'requires {next}' in its project.jn"
+            ),
+            UseResolveError::VisibilityCeiling {
+                consumer,
+                target,
+                target_scope,
+            } => write!(
+                f,
+                "package '{target}' is declared 'visibility internal' and is reachable only from \
+                 within its scope '{target_scope}'; package '{consumer}' is outside that subtree. \
+                 Relax the ceiling in '{target}'s project.jn, or import it from within \
+                 '{target_scope}'"
             ),
         }
     }
@@ -223,6 +294,59 @@ pub fn resolve_use(
         consumer: consumer.fully_qualified(),
         name,
     })
+}
+
+/// Resolve a path import `use seg0/seg1/.../segN` from `consumer`, hop by hop,
+/// then enforce the final target's visibility ceiling (scope.md §4).
+///
+/// Each hop resolves `seg_{i+1}` against the *current* intermediary's manifest
+/// (keyed `(current_pkg_id, seg_{i+1})` in the scoped map), so the parent-scoped
+/// nesting of scope.md §2.1 is preserved at every step. A single-segment path
+/// degrades to `resolve_use`.
+///
+/// The ceiling check (§4.1) applies only to the final target: the import is
+/// legal iff the target is `Public` or the consumer's owner scope is within the
+/// target's owner-scope subtree.
+pub fn resolve_path_use(
+    map: &ScopedUseMap,
+    consumer: PkgId,
+    path: &[Symbol],
+) -> Result<PkgId, UseResolveError> {
+    let mut current = consumer;
+    for (i, seg) in path.iter().enumerate() {
+        match map.get(&(current, *seg)).copied() {
+            Some(next) => current = next,
+            None => {
+                return Err(if i == 0 {
+                    UseResolveError::Unresolved {
+                        consumer: consumer.fully_qualified(),
+                        name: *seg,
+                    }
+                } else {
+                    UseResolveError::UnresolvedHop {
+                        consumer: consumer.fully_qualified(),
+                        via: current.fully_qualified(),
+                        next: *seg,
+                    }
+                });
+            }
+        }
+    }
+
+    if matches!(current.visibility(), Visibility::Internal) {
+        // The consumer's own home scope is its owner_scope extended by its name.
+        let consumer_scope = consumer.owner_scope().child(consumer.name());
+        let target_scope = current.owner_scope();
+        if !target_scope.is_prefix_of(consumer_scope) {
+            return Err(UseResolveError::VisibilityCeiling {
+                consumer: consumer.fully_qualified(),
+                target: current.fully_qualified(),
+                target_scope: target_scope.render(),
+            });
+        }
+    }
+
+    Ok(current)
 }
 
 pub fn compute_semantic_hash(
@@ -298,6 +422,7 @@ mod tests {
             owner_scope: ScopePath::intern(&[sym("foo"), sym("baz")]),
             version: ver(1),
             semantic_hash: [7u8; 32],
+            visibility: Visibility::Public,
         };
         let a = PkgId::intern(rec.clone());
         let b = PkgId::intern(rec);
@@ -312,12 +437,14 @@ mod tests {
             owner_scope: scope,
             version: ver(1),
             semantic_hash: [0u8; 32],
+            visibility: Visibility::Public,
         });
         let v2 = PkgId::intern(PackageRecord {
             name: sym("foo"),
             owner_scope: scope,
             version: ver(2),
             semantic_hash: [0u8; 32],
+            visibility: Visibility::Public,
         });
         assert_ne!(v1, v2);
     }
@@ -329,6 +456,7 @@ mod tests {
             owner_scope: ScopePath::intern(&[sym("foo"), sym("baz")]),
             version: ver(1),
             semantic_hash: [0u8; 32],
+            visibility: Visibility::Public,
         });
         assert_eq!(scoped.fully_qualified(), "foo:baz:bar");
         let root = PkgId::root(sym("bar"));
@@ -342,6 +470,7 @@ mod tests {
             owner_scope: ScopePath::root(),
             version: ver(1),
             semantic_hash: [0xab, 0xcd, 0xef, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            visibility: Visibility::Public,
         });
         assert_eq!(p.mangle_prefix(), "abcdef01");
     }
@@ -424,7 +553,105 @@ mod tests {
             owner_scope: ScopePath::intern(scope),
             version: ver(1),
             semantic_hash: [name.len() as u8; 32],
+            visibility: Visibility::Public,
         })
+    }
+
+    fn scoped_vis(name: &str, scope: &[Symbol], vis: Visibility) -> PkgId {
+        PkgId::intern(PackageRecord {
+            name: sym(name),
+            owner_scope: ScopePath::intern(scope),
+            version: ver(1),
+            semantic_hash: [name.len() as u8; 32],
+            visibility: vis,
+        })
+    }
+
+    #[test]
+    fn scope_prefix_check() {
+        let foo = ScopePath::intern(&[sym("foo")]);
+        let foobaz = ScopePath::intern(&[sym("foo"), sym("baz")]);
+        let foobar = ScopePath::intern(&[sym("foo"), sym("bar")]);
+        assert!(ScopePath::root().is_prefix_of(foobaz));
+        assert!(foo.is_prefix_of(foobaz));
+        assert!(foobaz.is_prefix_of(foobaz));
+        assert!(!foobaz.is_prefix_of(foo));
+        assert!(!foobaz.is_prefix_of(foobar));
+    }
+
+    #[test]
+    fn path_use_resolves_two_hops() {
+        // foo (root) -> baz ; baz -> bar.  foo's `use baz/bar` resolves to foo:baz:bar.
+        let foo = PkgId::root(sym("foo"));
+        let baz = scoped("baz", &[sym("foo")]);
+        let bar = scoped("bar", &[sym("foo"), sym("baz")]);
+        let mut map = ScopedUseMap::new();
+        map.insert((foo, sym("baz")), baz);
+        map.insert((baz, sym("bar")), bar);
+        let got = resolve_path_use(&map, foo, &[sym("baz"), sym("bar")]).unwrap();
+        assert_eq!(got, bar);
+        assert_eq!(got.fully_qualified(), "foo:baz:bar");
+    }
+
+    #[test]
+    fn path_use_missing_hop_errors() {
+        let foo = PkgId::root(sym("foo"));
+        let baz = scoped("baz", &[sym("foo")]);
+        let mut map = ScopedUseMap::new();
+        map.insert((foo, sym("baz")), baz);
+        // baz never declares `requires qux`.
+        let err = resolve_path_use(&map, foo, &[sym("baz"), sym("qux")]).unwrap_err();
+        match err {
+            UseResolveError::UnresolvedHop { via, next, .. } => {
+                assert_eq!(via, "foo:baz");
+                assert_eq!(next, sym("qux"));
+            }
+            other => panic!("expected UnresolvedHop, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn public_reach_in_allowed_from_grandparent() {
+        // bar is public (default): foo (the grandparent) may reach foo:baz:bar.
+        let foo = PkgId::root(sym("foo"));
+        let baz = scoped("baz", &[sym("foo")]);
+        let bar = scoped_vis("bar", &[sym("foo"), sym("baz")], Visibility::Public);
+        let mut map = ScopedUseMap::new();
+        map.insert((foo, sym("baz")), baz);
+        map.insert((baz, sym("bar")), bar);
+        assert!(resolve_path_use(&map, foo, &[sym("baz"), sym("bar")]).is_ok());
+    }
+
+    #[test]
+    fn internal_reach_in_rejected_from_grandparent() {
+        // bar is internal to foo:baz: foo (grandparent, scope `foo`) is outside.
+        let foo = PkgId::root(sym("foo"));
+        let baz = scoped("baz", &[sym("foo")]);
+        let bar = scoped_vis("bar", &[sym("foo"), sym("baz")], Visibility::Internal);
+        let mut map = ScopedUseMap::new();
+        map.insert((foo, sym("baz")), baz);
+        map.insert((baz, sym("bar")), bar);
+        let err = resolve_path_use(&map, foo, &[sym("baz"), sym("bar")]).unwrap_err();
+        match err {
+            UseResolveError::VisibilityCeiling { target, target_scope, consumer } => {
+                assert_eq!(consumer, "foo");
+                assert_eq!(target, "foo:baz:bar");
+                assert_eq!(target_scope, "foo:baz");
+            }
+            other => panic!("expected VisibilityCeiling, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn internal_reach_in_allowed_from_within_subtree() {
+        // baz (scope `foo:baz` — bar's own parent) may import its own internal bar.
+        let baz = scoped("baz", &[sym("foo")]);
+        let bar = scoped_vis("bar", &[sym("foo"), sym("baz")], Visibility::Internal);
+        let mut map = ScopedUseMap::new();
+        map.insert((baz, sym("bar")), bar);
+        // baz's home scope is foo:baz; bar's owner_scope is foo:baz => prefix holds.
+        let got = resolve_path_use(&map, baz, &[sym("bar")]).unwrap();
+        assert_eq!(got, bar);
     }
 
     #[test]
@@ -469,6 +696,7 @@ mod tests {
                 assert_eq!(consumer, "foo");
                 assert_eq!(name, sym("missing"));
             }
+            other => panic!("expected Unresolved, got {other:?}"),
         }
     }
 

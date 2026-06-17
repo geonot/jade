@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use crate::intern::Symbol;
 use crate::pkg::{Dependency, SemVer};
-use crate::pkgid::{PackageRecord, PkgId, ScopePath, ScopedUseMap, compute_semantic_hash};
+use crate::pkgid::{PackageRecord, PkgId, ScopePath, ScopedUseMap, Visibility, compute_semantic_hash};
 
 /// For each package A with a `use B` in its manifest, record the scoped PkgId
 /// that `B` resolves to from A's perspective.
@@ -67,6 +67,7 @@ pub fn flatten_workspace(
         &SemVer { major: 0, minor: 0, patch: 0 },
         root_path,
         root_deps,
+        load_visibility(root_path),
         pkg_paths,
         &mut dag,
         &mut visiting,
@@ -99,6 +100,7 @@ fn resolve_node(
     version: &SemVer,
     path: &std::path::Path,
     deps: &[Dependency],
+    visibility: Visibility,
     pkg_paths: &HashMap<Symbol, PathBuf>,
     dag: &mut ResolutionDag,
     visiting: &mut HashSet<(Symbol, String)>,
@@ -130,12 +132,14 @@ fn resolve_node(
             }
         };
         let child_deps = load_child_deps(&dep_path);
+        let child_vis = load_visibility(&dep_path);
         let dep_id = resolve_node(
             dep_name,
             child_scope,
             &dep.version,
             &dep_path,
             &child_deps,
+            child_vis,
             pkg_paths,
             dag,
             visiting,
@@ -155,6 +159,7 @@ fn resolve_node(
         owner_scope,
         version: version.clone(),
         semantic_hash: hash,
+        visibility,
     });
 
     if let Some(&existing_idx) = dag.by_id.get(&pkg_id) {
@@ -193,6 +198,17 @@ fn load_child_deps(pkg_path: &std::path::Path) -> Vec<Dependency> {
     match crate::driver::project::ProjectConfig::from_file(&project_jn) {
         Ok(cfg) => cfg.requires,
         Err(_) => Vec::new(),
+    }
+}
+
+fn load_visibility(pkg_path: &std::path::Path) -> Visibility {
+    let project_jn = pkg_path.join("project.jn");
+    if !project_jn.exists() {
+        return Visibility::Public;
+    }
+    match crate::driver::project::ProjectConfig::from_file(&project_jn) {
+        Ok(cfg) => cfg.visibility,
+        Err(_) => Visibility::Public,
     }
 }
 
@@ -289,6 +305,90 @@ mod tests {
         assert_eq!(resolved.fully_qualified(), "myapp:helper");
         // Local: a name the consumer never required does not resolve.
         assert!(crate::pkgid::resolve_use(&map, consumer, sym("nope")).is_err());
+    }
+
+    fn write_manifest(dir: &std::path::Path, body: &str) {
+        std::fs::write(dir.join("project.jn"), body).unwrap();
+    }
+
+    // foo (root) -> baz -> bar. Build the scoped graph from real manifests and
+    // exercise the path-import + visibility-ceiling resolver end to end.
+    fn build_three_tier(bar_visibility: &str) -> (ResolutionDag, PkgId) {
+        let root = TempDir::new().unwrap();
+        let baz = TempDir::new().unwrap();
+        let bar = TempDir::new().unwrap();
+        let root = Box::leak(Box::new(root));
+        let baz = Box::leak(Box::new(baz));
+        let bar = Box::leak(Box::new(bar));
+
+        write_src(root.path(), "main.jn", "*main\n  log 1\n");
+        write_manifest(
+            root.path(),
+            "name is 'foo'\nversion is '1.0.0'\nrequire('baz', 'x', '1.0.0')\n",
+        );
+        write_src(baz.path(), "lib.jn", "fn b\n  1\n");
+        write_manifest(
+            baz.path(),
+            "name is 'baz'\nversion is '1.0.0'\nrequire('bar', 'x', '1.0.0')\n",
+        );
+        write_src(bar.path(), "lib.jn", "fn r\n  2\n");
+        write_manifest(
+            bar.path(),
+            &format!("name is 'bar'\nversion is '1.0.0'\nvisibility is '{bar_visibility}'\n"),
+        );
+
+        let mut pkg_paths = HashMap::new();
+        pkg_paths.insert(sym("baz"), baz.path().to_path_buf());
+        pkg_paths.insert(sym("bar"), bar.path().to_path_buf());
+
+        let root_deps = vec![Dependency {
+            name: "baz".into(),
+            url: "x".into(),
+            version: ver(1),
+        }];
+        let dag = flatten_workspace(sym("foo"), root.path(), &root_deps, &pkg_paths).unwrap();
+        let foo = dag
+            .nodes
+            .iter()
+            .find(|n| n.pkg_id.name() == sym("foo"))
+            .unwrap()
+            .pkg_id;
+        (dag, foo)
+    }
+
+    #[test]
+    fn e2e_public_reach_in_resolves() {
+        let (dag, foo) = build_three_tier("public");
+        let map = resolve_scoped_pkg_ids(&dag);
+        let got =
+            crate::pkgid::resolve_path_use(&map, foo, &[sym("baz"), sym("bar")]).unwrap();
+        assert_eq!(got.fully_qualified(), "foo:baz:bar");
+    }
+
+    #[test]
+    fn e2e_internal_reach_in_is_hard_error() {
+        let (dag, foo) = build_three_tier("internal");
+        let map = resolve_scoped_pkg_ids(&dag);
+        let err = crate::pkgid::resolve_path_use(&map, foo, &[sym("baz"), sym("bar")])
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("visibility internal"), "{msg}");
+        assert!(msg.contains("foo:baz:bar"), "{msg}");
+    }
+
+    #[test]
+    fn e2e_internal_reach_in_allowed_from_parent() {
+        let (dag, _foo) = build_three_tier("internal");
+        let map = resolve_scoped_pkg_ids(&dag);
+        let baz = dag
+            .nodes
+            .iter()
+            .find(|n| n.pkg_id.name() == sym("baz"))
+            .unwrap()
+            .pkg_id;
+        // baz is bar's parent: a direct `use bar` from baz satisfies the ceiling.
+        let got = crate::pkgid::resolve_path_use(&map, baz, &[sym("bar")]).unwrap();
+        assert_eq!(got.fully_qualified(), "foo:baz:bar");
     }
 
     #[test]

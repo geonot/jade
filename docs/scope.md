@@ -112,19 +112,40 @@ generic-fan-out bloat: equal hash ⇒ equal monomorphization ⇒ one copy.
 
 ---
 
-## 4. Re-export consent
+## 4. Visibility ceiling — reach-in, default-open
 
 A consumer may reach a transitive dependency with a **path import** `use
-baz/bar`, binding `foo:baz:bar` directly. This is legal **only when `baz`
-declares `reexport bar`** in its manifest (a first-class manifest key, enforced
-at resolve). An un-re-exported reach-in is a hard error: a private implementation
-detail of `baz` (which `bar` it happens to use) must not silently become part of
-`foo`'s build. `reexport` is the affirmative, consent-based version of npm's
-fragile reach-in.
+baz/bar`, binding `foo:baz:bar` directly. Reach-in is **open by default**: most
+of it is harmless, and forcing every intermediary (`baz`) to enumerate every
+transitive dep it is willing to expose is per-edge bookkeeping on the wrong
+party — `baz` does not necessarily know whether `bar` is a stable surface.
 
-The resolver records re-export edges as part of the scoped graph; a `use baz/bar`
-that finds no `reexport bar` on `baz` errors naming `baz`'s manifest as the place
-to add consent.
+Consent therefore lives on the **target** (`bar`), the one party that knows
+whether it is a public surface or a private implementation detail. `bar`
+declares its own **visibility ceiling** in *its own* manifest:
+
+- **`public` (default)** — no declaration; any consumer may path-import it.
+- **`internal`** — visible only within `bar`'s own owner-scope subtree: its
+  parent scope and that scope's descendants. A reach-in from a grandparent, a
+  sibling, or an external package is a **hard error**.
+
+This is `pub(in path)` / package-private applied at the package-identity layer,
+not the symbol layer. It is a closed two-rung lattice (`public > internal`),
+consistent with the cap/effect lattices.
+
+### 4.1 The enforcement predicate (decided)
+
+A `use <path>` binding target `T` (owner scope `S_t`) is requested by a consumer
+whose own scope is `S_c`. The import is legal **iff**
+
+> `T` is `public`  **or**  `S_c` is within `S_t`'s subtree
+> (`S_c == S_t` or `S_t` is a prefix of `S_c`).
+
+`S_t` is `T`'s `owner_scope` (e.g. `bar`'s is `foo:baz`), so "within the subtree"
+means the consumer lives at `bar`'s parent (`baz`) or deeper. A `ScopePath`
+prefix compare — local, deterministic, monotone, no graph state. An illegal
+reach-in errors naming `T`'s own manifest as the place to relax the ceiling, and
+the consumer's scope as the offending site.
 
 ---
 
@@ -199,7 +220,7 @@ type's `PackageId`, and abi-hash equality is the precondition the flag gates.
 
 - `semantic_hash` / abi rung definition → `interface-hash.md` §3.3.
 - Cap rows that gate promotion → `caps.md` §4.1 (empty-row rule).
-- `reexport`, `requires`, `members` as manifest config blocks →
+- `visibility`, `requires`, `members` as manifest config blocks →
   `config-blocks.md` §4.
 - Retiring `prefix_module` → `src/resolve.rs` (implementation note, phase 2 of
   lamp.md §12).
