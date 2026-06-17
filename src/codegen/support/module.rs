@@ -20,6 +20,7 @@ impl<'ctx> Compiler<'ctx> {
             source: String::new(),
             hints: PerceusHints::default(),
             lib_mode: false,
+            is_multi_package: false,
             debug: false,
             di_builder: None,
             di_compile_unit: None,

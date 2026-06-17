@@ -807,6 +807,25 @@
       "ts_created": "2026-06-17T13:12:30+00:00",
       "ts_accessed": "2026-06-17T13:12:30+00:00",
       "access_count": 0
+    },
+    "task_2-32-3-11_impl": {
+      "key": "task_2-32-3-11_impl",
+      "value": "Task 2-32-3-11 DONE (codegen PackageId mangling, scope.md \u00a71.3). SCHEME: <pkgid_hash>_<module>_<name>. func.name is already <module>_<name> (prefix_module); codegen PREPENDS <pkgid_hash>_ (= PkgId::mangle_prefix() = 8 hex chars / first 4 bytes of semantic_hash). KEY INSIGHT: call resolution in codegen goes through self.fns keyed by Symbol/name-string, NEVER by the LLVM symbol name \u2014 so mangling only the add_function string arg (decoupled from lookup) is safe and sufficient. IMPL: src/codegen/mir_codegen/mod.rs Compiler::mangle_symbol(func) -> String; applied at the two non-main add_function sites in declare_mir_fn (coroutine + regular). New field Compiler.is_multi_package (src/codegen/mod.rs, init false in support/module.rs), set in compile_program = !prog.module_pkgs.is_empty(). GUARDS (zero-change for 98%): mangle only when is_multi_package && !lib_mode && name!=\"main\" && pkg_id.is_some(); single-package fast path (module_pkgs empty / no pkg_id) emits BARE names unchanged \u2014 verified via --emit-llvm (@helper/@main bare). main never mangled (C entry); lib_mode never mangled (FFI surface). 6 unit tests in mangle_tests mod. CRITICAL DESIGN FACT discovered: PkgId::intern key = (name, owner_scope, version) \u2014 does NOT include semantic_hash. So multi-version coexistence (\u00a75.7.6) flows from distinct VERSIONS, not from source-hash diffs at same version (same name+scope+ver = same identity by construction; a hash mismatch there is rejected upstream by lamp lock). Promotion (equal hash, \u00a73) = same key = same PkgId = same symbol, for free. 315 lib tests + access_semantics + concurrency_shutdown green; column_* integration failures pre-existing/unrelated.",
+      "kind": "decision",
+      "tags": [
+        "scope",
+        "pkgid",
+        "codegen",
+        "mangling",
+        "task_2-32-3-11",
+        "landed"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-17T13:31:23+00:00",
+      "ts_accessed": "2026-06-17T13:31:23+00:00",
+      "access_count": 0
     }
   }
 }

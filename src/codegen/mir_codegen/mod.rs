@@ -66,6 +66,9 @@ impl<'ctx> Compiler<'ctx> {
         hints: PerceusHints,
     ) -> Result<(), String> {
         self.hints = hints;
+        // Multi-package builds mangle symbols by owning package (scope.md §1.3);
+        // single-package builds (no dependency modules) keep bare names.
+        self.is_multi_package = !prog.module_pkgs.is_empty();
         self.setup_target()?;
         self.declare_builtins();
 
@@ -331,9 +334,36 @@ impl<'ctx> Compiler<'ctx> {
         self.module.verify().map_err(|e| e.to_string())
     }
 
+    /// Compute the emitted LLVM symbol name for a MIR function (scope.md §1.3).
+    ///
+    /// The MIR `func.name` is already the `prefix_module` form `<module>_<name>`.
+    /// In a package build with more than one distinct package we prepend the
+    /// owning package's `<pkgid_hash>_` so two non-promotable instances of the
+    /// same module mangle distinctly (§3 / §5.7.6 multi-version coexistence),
+    /// while two promoted instances — equal `semantic_hash` — share one prefix
+    /// and therefore one symbol.
+    ///
+    /// The single-package fast path (§2.2: `module_pkgs` empty, or no `pkg_id`)
+    /// emits the bare `<module>_<name>` unchanged, so 98% of programs see zero
+    /// change. `main` is never mangled (it is the C entry point), and library
+    /// builds never mangle (their symbols are the FFI surface).
+    fn mangle_symbol(&self, func: &mir::Function) -> String {
+        let bare = func.name.as_str();
+        if self.is_multi_package
+            && !self.lib_mode
+            && func.name != "main"
+            && let Some(pkg_id) = func.pkg_id
+        {
+            format!("{}_{}", pkg_id.mangle_prefix(), bare)
+        } else {
+            bare
+        }
+    }
+
     fn declare_mir_fn(&mut self, func: &mir::Function) -> Result<(), String> {
         let ptys: Vec<Type> = func.params.iter().map(|p| p.ty.clone()).collect();
         let ret = func.ret_ty.clone();
+        let sym_name = self.mangle_symbol(func);
 
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
 
@@ -342,7 +372,7 @@ impl<'ctx> Compiler<'ctx> {
             let ft = void.fn_type(&[ptr_ty.into()], false);
             let fv = self
                 .module
-                .add_function(&func.name.as_str(), ft, Some(Linkage::Internal));
+                .add_function(&sym_name, ft, Some(Linkage::Internal));
             self.tag_fn(fv);
             self.apply_fn_attrs(fv, &func.attrs);
             self.fns.insert(func.name, (fv, ptys, ret));
@@ -446,7 +476,7 @@ impl<'ctx> Compiler<'ctx> {
             }
         } else {
             let ft = self.mk_fn_type(&ret, &lp, false);
-            let fv = self.module.add_function(&func.name.as_str(), ft, None);
+            let fv = self.module.add_function(&sym_name, ft, None);
             self.tag_fn(fv);
             self.apply_fn_attrs(fv, &func.attrs);
             self.fns.insert(func.name, (fv, ptys, ret));
@@ -810,5 +840,127 @@ impl<'ctx> Compiler<'ctx> {
                         .unwrap();
                 }
         v
+    }
+}
+
+#[cfg(test)]
+mod mangle_tests {
+    use super::*;
+    use crate::pkg::SemVer;
+    use crate::pkgid::{PackageRecord, PkgId, ScopePath, Visibility};
+    use inkwell::context::Context;
+
+    fn pkg_id_ver(name: &str, ver: SemVer, src: &str) -> PkgId {
+        let nm = Symbol::intern(name);
+        let hash = crate::pkgid::compute_semantic_hash(
+            nm,
+            ScopePath::root(),
+            &ver,
+            src.as_bytes(),
+            &[],
+        );
+        PkgId::intern(PackageRecord {
+            name: nm,
+            owner_scope: ScopePath::root(),
+            version: ver,
+            semantic_hash: hash,
+            visibility: Visibility::Public,
+        })
+    }
+
+    fn pkg_id(name: &str, src: &str) -> PkgId {
+        pkg_id_ver(name, SemVer { major: 0, minor: 0, patch: 0 }, src)
+    }
+
+    fn mir_fn(name: &str, pkg_id: Option<PkgId>) -> mir::Function {
+        mir::Function {
+            name: Symbol::intern(name),
+            def_id: crate::hir::DefId(0),
+            pkg_id,
+            params: Vec::new(),
+            ret_ty: Type::Void,
+            blocks: Vec::new(),
+            entry: mir::BlockId(0),
+            span: crate::ast::Span::dummy(),
+            next_value: 0,
+            next_block: 0,
+            attrs: crate::ast::FnAttrs::default(),
+            is_coroutine: false,
+            scheduler_task: false,
+            cancel_cleanup: None,
+            perceus: mir::PerceusMeta::default(),
+        }
+    }
+
+    #[test]
+    fn single_package_emits_bare_names() {
+        let ctx = Context::create();
+        let mut c = Compiler::new(&ctx, "m");
+        c.is_multi_package = false; // single-package fast path (scope.md §2.2)
+        let root = pkg_id("app", "fn main");
+        assert_eq!(c.mangle_symbol(&mir_fn("greeter_hello", Some(root))), "greeter_hello");
+    }
+
+    #[test]
+    fn multi_package_prepends_pkgid_hash() {
+        let ctx = Context::create();
+        let mut c = Compiler::new(&ctx, "m");
+        c.is_multi_package = true;
+        let dep = pkg_id("greeter", "fn hello returns 1");
+        let sym = c.mangle_symbol(&mir_fn("greeter_hello", Some(dep)));
+        // Format: <pkgid_hash>_<module>_<name>, hash is 8 hex chars (4 bytes).
+        assert!(sym.ends_with("_greeter_hello"), "got {sym}");
+        let prefix = sym.strip_suffix("_greeter_hello").unwrap();
+        assert_eq!(prefix.len(), 8, "pkgid_hash prefix must be 8 hex chars, got {prefix:?}");
+        assert!(prefix.chars().all(|c| c.is_ascii_hexdigit()), "got {prefix:?}");
+        assert_eq!(prefix, dep.mangle_prefix());
+    }
+
+    #[test]
+    fn distinct_packages_mangle_distinctly() {
+        let ctx = Context::create();
+        let mut c = Compiler::new(&ctx, "m");
+        c.is_multi_package = true;
+        // Same module name, two coexisting versions => distinct PkgId =>
+        // distinct symbols (scope.md §5.7.6 multi-version coexistence).
+        let v1 = pkg_id_ver("greeter", SemVer { major: 1, minor: 0, patch: 0 }, "fn hello returns 1");
+        let v2 = pkg_id_ver("greeter", SemVer { major: 2, minor: 0, patch: 0 }, "fn hello returns 2");
+        assert_ne!(v1, v2, "distinct versions must intern to distinct PkgIds");
+        let s1 = c.mangle_symbol(&mir_fn("greeter_hello", Some(v1)));
+        let s2 = c.mangle_symbol(&mir_fn("greeter_hello", Some(v2)));
+        assert_ne!(s1, s2, "non-promotable instances must mangle distinctly");
+    }
+
+    #[test]
+    fn equal_hash_instances_share_one_symbol() {
+        let ctx = Context::create();
+        let mut c = Compiler::new(&ctx, "m");
+        c.is_multi_package = true;
+        // Byte-identical packages => equal semantic_hash => promoted to one
+        // symbol (scope.md §3: promotion *is* "they mangle to the same name").
+        let a = pkg_id("greeter", "fn hello returns 1");
+        let b = pkg_id("greeter", "fn hello returns 1");
+        let sa = c.mangle_symbol(&mir_fn("greeter_hello", Some(a)));
+        let sb = c.mangle_symbol(&mir_fn("greeter_hello", Some(b)));
+        assert_eq!(sa, sb);
+    }
+
+    #[test]
+    fn main_is_never_mangled() {
+        let ctx = Context::create();
+        let mut c = Compiler::new(&ctx, "m");
+        c.is_multi_package = true;
+        let root = pkg_id("app", "fn main");
+        assert_eq!(c.mangle_symbol(&mir_fn("main", Some(root))), "main");
+    }
+
+    #[test]
+    fn lib_mode_is_never_mangled() {
+        let ctx = Context::create();
+        let mut c = Compiler::new(&ctx, "m");
+        c.is_multi_package = true;
+        c.lib_mode = true; // FFI surface keeps stable names
+        let dep = pkg_id("greeter", "fn hello returns 1");
+        assert_eq!(c.mangle_symbol(&mir_fn("greeter_hello", Some(dep))), "greeter_hello");
     }
 }

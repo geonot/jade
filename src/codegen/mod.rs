@@ -98,6 +98,10 @@ pub struct Compiler<'ctx> {
     pub(crate) source: String,
     pub(crate) hints: PerceusHints,
     pub(crate) lib_mode: bool,
+    /// True when the program links more than one distinct package (scope.md
+    /// §1.3): symbols are then mangled `<pkgid_hash>_<module>_<name>`. False for
+    /// the single-package fast path, which emits bare names unchanged.
+    pub(crate) is_multi_package: bool,
     pub(crate) debug: bool,
     pub(crate) di_builder: Option<DebugInfoBuilder<'ctx>>,
     pub(crate) di_compile_unit: Option<DICompileUnit<'ctx>>,
