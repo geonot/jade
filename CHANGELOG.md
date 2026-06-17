@@ -1,4 +1,12 @@
 # Changelog
+- **[127]** (2026-06-17 16:16) tests: end-to-end conformance for path-scoped package identity (scope.md)
+
+Add tests/scoped_identity.rs driving real `jinnc build` against hermetic
+multi-package fixtures (private HOME, pre-populated git cache, no network).
+Covers single-version scoped resolution build+run, public transitive reach-in,
+internal reach-in hard error (visibility ceiling, scope.md §4.1), two-live-
+majors hard reject with the documented diagnostic (§5), and same-major
+minor-diff acceptance.
 - **[125]** (2026-06-17 14:05) task 2-32-3-12: Retire prefix_module identity model — carry package ownership first-class per item
 
 Replaces the legacy "the module name prefix IS the package identity" model

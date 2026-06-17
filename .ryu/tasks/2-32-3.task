@@ -1,12 +1,12 @@
 title: Path-scoped package/module identity
-status: pending
+status: complete
 atomic: false
 priority: high
 blocked_by:
 - 2-32-1
 created_at: '2026-06-15T03:24:10'
-updated_at: '2026-06-15T03:24:10'
-result: ''
+updated_at: '2026-06-17T09:16:46'
+result: All subtasks complete
 description: 'Replace the string prefix_module model with first-class path-scoped
   package identity (docs/lamp-prereqs.md §1). PackageId{name, owner_scope, version,
   semantic_hash} threaded through resolve -> HIR -> MIR -> codegen mangling. Path-scoped

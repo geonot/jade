@@ -1,11 +1,22 @@
 title: End-to-end tests for scoped identity, resolution, and reexport
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-15T05:51:53'
-updated_at: '2026-06-15T05:51:53'
-result: ''
+updated_at: '2026-06-17T09:16:46'
+result: 'Added tests/scoped_identity.rs: 5 hermetic end-to-end conformance tests driving
+  the real `jinnc build` binary against on-disk multi-package projects (private HOME
+  + pre-populated git cache, no network). Covers the four scope.md behaviors observable
+  at the build boundary: (1) single-version scoped dep build+run §2.1/2.2; (2) public
+  transitive reach-in via `use baz/bar` §4; (3) internal reach-in hard error with
+  the documented visibility-ceiling diagnostic §4.1; (4) two-live-majors hard reject
+  with the documented multi-version diagnostic §5; plus same-major minor-diff acceptance.
+  All 5 pass. No source changes required (the full scoped-identity pipeline was already
+  landed through v126). Verified green: lib 318, bulk 912, access_semantics 11, concurrency
+  20, std_stable 2, traits 7. Pre-existing unrelated failures (integration.rs column_max/min/sum
+  @column aggregation) confirmed independent of this work and recorded as a separate
+  pitfall.'
 description: 'Add integration tests covering scoped identity end-to-end: path resolution,
   reexport consent (legal and reach-in error cases), and multi-version (deferred-or-implemented
   per Q4). Done when the full test suite passes and satisfies the definition of done.
