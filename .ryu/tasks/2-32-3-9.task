@@ -1,11 +1,16 @@
 title: Thread PackageId through HIR
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-15T05:51:53'
-updated_at: '2026-06-15T05:51:53'
-result: ''
+updated_at: '2026-06-17T06:07:35'
+result: HIR now carries PackageId identity. hir::Program gained pkg_id:Option<PkgId>
+  (root identity) and module_pkgs:HashMap<Symbol,PkgId> (dep module -> PkgId), populated
+  in lower_program from the Typer's root_pkg_id/dep_pkg_ids. Program::owner_pkg_id(name)
+  recovers per-item package ownership via prefix_module name prefixes, falling back
+  to the root — the foundation codegen mangling (2-32-3-11) needs. 3 HIR identity-preservation
+  tests added; 307 lib tests pass, zero-warning release build, no new regressions.
 description: Propagate PackageId identity into the HIR representation so symbols carry
   their package-scoped identity. Done when HIR nodes reference PackageIds and HIR-level
   tests confirm identity preservation. Depends on resolver threading subtask.
