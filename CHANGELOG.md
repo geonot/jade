@@ -1,4 +1,5 @@
 # Changelog
+- **[123]** (2026-06-17 13:31) task 2-32-3-11: PackageId-based symbol mangling in codegen — <pkgid_hash>_<module>_<name> for multi-package builds, bare names on the single-package fast path; main/lib FFI never mangled. 6 mangling tests.
 - **[121]** (2026-06-17 13:12) task 2-32-3-10: Thread PackageId through MIR — mir::Program carries pkg_id+module_pkgs; mir::Function carries pkg_id, attributed via owner_pkg_id during lowering. 2 MIR propagation tests.
 - **[119]** (2026-06-17 13:07) task 2-32-3-9: Thread PackageId through HIR — hir::Program carries root pkg_id + module_pkgs side map; owner_pkg_id() recovers per-item package identity from prefix_module name prefixes. 3 HIR identity tests.
 - **[117]** (2026-06-17 08:19) [task 2-32-3-8] hard-reject multi-version coexistence (scope.md §5): reject_multi_version guard in flatten_workspace keys on (name,major), exact deferral diagnostic; pipeline surfaces it fatally via die; same-major minor/patch accepted; conformance tests for reject + negative control
