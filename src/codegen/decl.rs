@@ -80,23 +80,6 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(());
         }
 
-        if variants.len() == 2 {
-            let empty_idx = variants.iter().position(|(_, fs, _)| fs.is_empty());
-            let payload_idx = variants.iter().position(|(_, fs, _)| fs.len() == 1);
-            if let (Some(_ei), Some(pi)) = (empty_idx, payload_idx) {
-                let field_ty = &variants[pi].1[0];
-                let is_ptr_like = matches!(field_ty, Type::String | Type::Fn(_, _))
-                    || matches!(field_ty, Type::Struct(_, _) | Type::Enum(_))
-                        && !Self::is_recursive_field(field_ty, name);
-                if is_ptr_like {
-                    let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
-                    st.set_body(&[ptr.into()], false);
-                    self.enums.insert(name.into(), resolved);
-                    return Ok(());
-                }
-            }
-        }
-
         let payload_ty = self.ctx.i8_type().array_type(max_payload as u32);
         st.set_body(&[i32t.into(), payload_ty.into()], false);
         self.enums.insert(name.into(), resolved);

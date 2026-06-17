@@ -112,6 +112,9 @@ impl Typer {
                         return Type::Struct(mangled, vec![]);
                     }
                 }
+                if nargs.is_empty() && self.enums.contains_key(name) {
+                    return Type::Enum(*name);
+                }
                 Type::Struct(*name, nargs)
             }
             Type::Array(inner, n) => {

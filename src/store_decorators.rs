@@ -29,7 +29,7 @@ pub const STORE_DECORATORS: &[StoreDecoratorSpec] = &[
     StoreDecoratorSpec {
         name: "simple",
         arg: ArgKind::None,
-        excludes: &["versioned", "kv", "graph", "vector", "timeseries", "column"],
+        excludes: &["versioned", "kv", "graph", "vector", "timeseries"],
         summary: "Plain record store with no built-in sid/uuid/audit columns.",
     },
     StoreDecoratorSpec {
@@ -107,7 +107,7 @@ pub const STORE_DECORATORS: &[StoreDecoratorSpec] = &[
     StoreDecoratorSpec {
         name: "column",
         arg: ArgKind::None,
-        excludes: &["simple", "kv"],
+        excludes: &["kv"],
         summary: "Columnar storage layout.",
     },
 ];

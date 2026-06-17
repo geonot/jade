@@ -74,7 +74,7 @@ fn commit_on_normal_completion() {
 #[test]
 fn rollback_on_escaping_error_discards_inserts() {
     expect(
-        "err OpErr\n    Boom\n\nstore ledger\n    amount as i64\n\n*apply(ok as bool) returns Result of i64, OpErr\n    transaction\n        insert ledger 10\n        insert ledger 20\n        if not ok\n            err Boom\n        insert ledger 30\n    Ok(count ledger)\n\n*main\n    match apply(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    log(count ledger)\n    match apply(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n",
+        "err OpErr\n    Boom\n    S(StoreError)\n\nimpl From of StoreError for OpErr\n    *from(e as StoreError) returns OpErr is S(e)\n\nstore ledger\n    amount as i64\n\n*apply(ok as bool) returns Result of i64, OpErr\n    transaction\n        insert ledger 10\n        insert ledger 20\n        if not ok\n            err Boom\n        insert ledger 30\n    Ok(count ledger)\n\n*main\n    match apply(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    log(count ledger)\n    match apply(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n",
         "-1\n0\n3",
     );
 }
@@ -90,7 +90,7 @@ fn rollback_restores_sets_and_deletes() {
 #[test]
 fn rollback_restores_secondary_index() {
     expect(
-        "err TErr\n    Nope\n\nstore people\n    name as String @index\n    age as i64\n\n*addp(ok as bool) returns Result of i64, TErr\n    transaction\n        insert people 'zoe', 30\n        if not ok\n            err Nope\n    Ok(1)\n\n*main\n    match addp(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    log(count people)\n    r is people where name equals 'zoe'\n    log r.age\n    match addp(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    r2 is people where name equals 'zoe'\n    log r2.age\n",
+        "err TErr\n    Nope\n    S(StoreError)\n\nimpl From of StoreError for TErr\n    *from(e as StoreError) returns TErr is S(e)\n\nstore people\n    name as String @index\n    age as i64\n\n*addp(ok as bool) returns Result of i64, TErr\n    transaction\n        insert people 'zoe', 30\n        if not ok\n            err Nope\n    Ok(1)\n\n*main\n    match addp(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    log(count people)\n    r is people where name equals 'zoe'\n    log r.age\n    match addp(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    r2 is people where name equals 'zoe'\n    log r2.age\n",
         "-1\n0\n0\n1\n30",
     );
 }
@@ -106,7 +106,7 @@ fn return_mid_block_commits_partial_work() {
 #[test]
 fn nested_transactions_join_outermost() {
     expect(
-        "err NE\n    Whoops\n\nstore stock\n    qty as i64\n\n*inner(ok as bool) returns Result of i64, NE\n    transaction\n        insert stock 2\n        if not ok\n            err Whoops\n    Ok(2)\n\n*outer(ok as bool) returns Result of i64, NE\n    transaction\n        insert stock 1\n        v is inner(ok)\n        insert stock 3\n    Ok(v)\n\n*main\n    match outer(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    log(count stock)\n    match outer(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    log(count stock)\n",
+        "err NE\n    Whoops\n    S(StoreError)\n\nimpl From of StoreError for NE\n    *from(e as StoreError) returns NE is S(e)\n\nstore stock\n    qty as i64\n\n*inner(ok as bool) returns Result of i64, NE\n    transaction\n        insert stock 2\n        if not ok\n            err Whoops\n    Ok(2)\n\n*outer(ok as bool) returns Result of i64, NE\n    transaction\n        insert stock 1\n        v is inner(ok)\n        insert stock 3\n    Ok(v)\n\n*main\n    match outer(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    log(count stock)\n    match outer(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    log(count stock)\n",
         "-1\n0\n2\n3",
     );
 }
@@ -180,7 +180,7 @@ fn committed_transaction_survives_process_restart() {
 #[test]
 fn rollback_then_retry_succeeds_cleanly() {
     expect(
-        "err RErr\n    Fail\n\nstore jobs\n    pri as i64\n\n*enqueue(ok as bool) returns Result of i64, RErr\n    transaction\n        insert jobs 7\n        if not ok\n            err Fail\n    Ok(7)\n\n*main\n    match enqueue(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match enqueue(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match enqueue(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    log(count jobs)\n    r is jobs where pri equals 7\n    log r.pri\n",
+        "err RErr\n    Fail\n    S(StoreError)\n\nimpl From of StoreError for RErr\n    *from(e as StoreError) returns RErr is S(e)\n\nstore jobs\n    pri as i64\n\n*enqueue(ok as bool) returns Result of i64, RErr\n    transaction\n        insert jobs 7\n        if not ok\n            err Fail\n    Ok(7)\n\n*main\n    match enqueue(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match enqueue(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match enqueue(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    log(count jobs)\n    r is jobs where pri equals 7\n    log r.pri\n",
         "-1\n-1\n7\n1\n7",
     );
 }

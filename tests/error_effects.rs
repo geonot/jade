@@ -365,6 +365,30 @@ fn bare_insert_propagates_and_yields_result() {
     );
 }
 
+// A multi-variant error enum carrying a by-value enum payload (`StoreError`)
+// must lay out with the uniform tagged-union representation so that a bare
+// `insert` propagation and `From` conversion through it round-trip correctly.
+// Regression: a 2-variant enum (one empty, one single-payload) was wrongly
+// niche-packed into a single pointer, while variant_init/field_get assumed the
+// `{tag, payload}` layout, crashing codegen with "GEP index out of range".
+#[test]
+fn insert_propagation_through_multivariant_from_enum() {
+    expect(
+        "err RErr\n    Fail\n    S(StoreError)\n\nimpl From of StoreError for RErr\n    *from(e as StoreError) returns RErr is S(e)\n\nstore jobs\n    pri as i64\n\n*enqueue(ok as bool) returns Result of i64, RErr\n    insert jobs 7\n    if not ok\n        err Fail\n    Ok(7)\n\n*main\n    match enqueue(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match enqueue(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n",
+        "-1\n7",
+    );
+}
+
+// A plain 2-variant enum whose payload is itself a payload-less (by-value)
+// enum must construct and match without the niche-packing GEP crash.
+#[test]
+fn two_variant_enum_with_byvalue_enum_payload() {
+    expect(
+        "enum Box\n    Empty\n    Has(StoreError)\n\n*main\n    b is Has(Duplicate)\n    match b\n        Empty ? log 0\n        Has(e) ? log 1\n",
+        "1",
+    );
+}
+
 #[test]
 fn bare_fallible_call_tail_autowraps_ok() {
     expect(

@@ -881,23 +881,26 @@
       "ts_accessed": "2026-06-17T16:16:11+00:00",
       "access_count": 0
     },
-    "bug_column_aggregation_integration_failing": {
-      "key": "bug_column_aggregation_integration_failing",
-      "value": "PRE-EXISTING (as of v127, NOT mine): tests/integration.rs column_max/column_min/column_sum FAIL. @column store aggregation: `store nums @simple @column / val as i64` then nums.sum/min/max(val) produces wrong/no output. Verified failing on clean checkout independent of any scope work. Needs a dedicated fix task in the store/column codegen area.",
+    "bug_enum_niche_pack_gep_ice": {
+      "key": "bug_enum_niche_pack_gep_ice",
+      "value": "RESOLVED (v129). Two root-cause codegen/typer bugs behind the column_* and store_transactions integration failures (originally misfiled as @column aggregation + WAL regressions):\n\n(1) DECORATOR EXCLUSION: src/store_decorators.rs wrongly made @simple and @column mutually exclusive. They are orthogonal: @simple = schema shape (no built-in sid/uuid/audit cols), @column = physical layout. insert.rs codegen reads is_simple AND is_column together. FIX: removed simple<->column from each other's `excludes` (simple keeps versioned/kv/graph/vector/timeseries; column keeps only kv).\n\n(2) ENUM NICHE-PACK GEP ICE (the big one): src/codegen/decl.rs::declare_tagged_union had an orphaned 2-variant niche optimization \u2014 a 2-variant enum (one empty variant + one single-payload variant) whose payload `is_ptr_like` (String/Fn/Struct/Enum) was laid out as a bare single-pointer `{ptr}` struct. But variant_init/field_get codegen (aggregates.rs:107) ALWAYS does build_struct_gep(st, ptr, 1, \"payload\") assuming the uniform `{i32 tag, [N x i8] payload}` 2-field layout. Nothing read the packed layout => pure inconsistency. Crashed `Some(String)`, `Has(StoreError)`, any From-through-insert with multi-variant err enum, with inkwell \"GEP index out of range\". FIX: deleted the niche-pack block entirely; all payload-bearing enums use the uniform tagged layout.\n\n(3) ENUM-AS-STRUCT mismatch (contributing): src/typer/mono.rs::monomorphize_named_annotation only reclassified Struct(name)->Enum(name) when there were concrete generic args; bare enum names (e.g. `StoreError`, `AppErr` in a From sig) stayed Struct, producing fn signatures `AppErr_from_StoreError(e: Struct(StoreError)) -> Struct(AppErr)` mismatching the Enum call sites. FIX: added `if nargs.is_empty() && self.enums.contains_key(name) { return Type::Enum(name) }`.\n\nAlso updated 4 store_transactions tests (rollback_on_escaping_error_discards_inserts, rollback_restores_secondary_index, nested_transactions_join_outermost, rollback_then_retry_succeeds_cleanly): they declared a closed custom err union (OpErr/TErr/NE/RErr) and `insert` inside, which per error-effects.md R1/R2 (v110 implicit insert propagation) MUST include StoreError or provide a From. Added `S(StoreError)` variant + `impl From of StoreError for <Err>` (the documented idiom from error_effects.rs:363). NOT a compiler bug \u2014 stale tests. 2 new conformance tests in error_effects.rs pin the layout fix. FULL SUITE GREEN.",
       "kind": "pitfall",
       "tags": [
         "bug",
+        "codegen",
+        "enum",
+        "niche",
+        "gep",
+        "decorator",
         "store",
-        "column",
-        "aggregation",
-        "integration",
-        "pre-existing"
+        "resolved",
+        "v129"
       ],
       "confidence": 0.9,
       "source": "agent",
       "pinned": false,
-      "ts_created": "2026-06-17T16:16:19+00:00",
-      "ts_accessed": "2026-06-17T16:16:19+00:00",
+      "ts_created": "2026-06-17T19:00:24+00:00",
+      "ts_accessed": "2026-06-17T19:00:24+00:00",
       "access_count": 0
     }
   }
