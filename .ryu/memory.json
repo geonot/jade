@@ -861,6 +861,44 @@
       "ts_created": "2026-06-17T14:05:09+00:00",
       "ts_accessed": "2026-06-17T14:05:09+00:00",
       "access_count": 0
+    },
+    "task_2-32-3-13_impl": {
+      "key": "task_2-32-3-13_impl",
+      "value": "Task 2-32-3-13 DONE (v127). End-to-end conformance for path-scoped identity: NEW tests/scoped_identity.rs (5 tests, all green). Drives real `jinnc build` against hermetic multi-package fixtures: HOME=tempdir, git cache pre-populated (git init+commit each dep at ~/.cache/jinn/cache/example.com/<name>/<ver>/, keyed by url+version so NO network), JINN_ALLOW_NON_HTTPS_DEPS=1. Tests: (1) single_version_dep_builds_and_runs \u00a72.1/2.2; (2) public_transitive_reach_in_builds \u00a74 (use baz/bar); (3) internal_transitive_reach_in_is_hard_error \u00a74.1 (visibility ceiling diag names main:baz:bar + main:baz + remedy); (4) two_live_majors_rejected \u00a75 (root foo@1.2.0 + mid->foo@2.0.0, documented multi-version diag); (5) same_major_minor_diff_accepted (1.2.0+1.0.0 ok, name+major keying).\nARCH FINDING: multi-version reject + scoped_use_map ONLY fire through compile_and_link (src/driver/pipeline.rs) = `jinnc build`/run/test. The bare `jinnc <file>` path (legacy compile() in src/driver/mod.rs ~line 376) does NOT call flatten_workspace. So scoped-identity enforcement requires `jinnc build` (needs entry/source/main.jn + project.jn in cwd). pkg_paths from cache.rs::build_package_map is keyed by name only (Symbol), so two majors collapse to one path but version comes from the Dependency, giving distinct DAG nodes => reject still fires correctly.\nPRE-EXISTING UNRELATED FAILURE: tests/integration.rs column_max/column_min/column_sum FAIL on clean checkout (verified by removing scoped_identity.rs). @column store aggregation regression, NOT scope-related, separate task. Lib 318 green, bulk 912 green, access_semantics 11, concurrency 20, std_stable 2, traits 7 all green.",
+      "kind": "decision",
+      "tags": [
+        "scope",
+        "pkgid",
+        "e2e",
+        "tests",
+        "task_2-32-3-13",
+        "landed"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-17T16:16:11+00:00",
+      "ts_accessed": "2026-06-17T16:16:11+00:00",
+      "access_count": 0
+    },
+    "bug_column_aggregation_integration_failing": {
+      "key": "bug_column_aggregation_integration_failing",
+      "value": "PRE-EXISTING (as of v127, NOT mine): tests/integration.rs column_max/column_min/column_sum FAIL. @column store aggregation: `store nums @simple @column / val as i64` then nums.sum/min/max(val) produces wrong/no output. Verified failing on clean checkout independent of any scope work. Needs a dedicated fix task in the store/column codegen area.",
+      "kind": "pitfall",
+      "tags": [
+        "bug",
+        "store",
+        "column",
+        "aggregation",
+        "integration",
+        "pre-existing"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-06-17T16:16:19+00:00",
+      "ts_accessed": "2026-06-17T16:16:19+00:00",
+      "access_count": 0
     }
   }
 }
