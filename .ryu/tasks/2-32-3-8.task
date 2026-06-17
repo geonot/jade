@@ -1,11 +1,24 @@
 title: Implement multi-version coexistence with distinct identities
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-15T05:51:53'
-updated_at: '2026-06-15T05:51:53'
-result: ''
+updated_at: '2026-06-17T01:19:10'
+result: 'Multi-version coexistence is hard-rejected per scope.md §5 deferral (choice
+  a). reject_multi_version(dag) in src/driver/sources/dag.rs scans the resolved DAG
+  keyed on (name, major); two distinct live majors of one package => Err with the
+  exact documented diagnostic ("multi-version coexistence of ''foo'' (1.2.0 and 2.0.0)
+  is not yet supported; it is gated on coherence/traits (lamp.md §5.7.6). Pick one
+  major."). Same-major minor/patch differences are accepted (ordinary single-version
+  resolution). Wired into flatten_workspace; src/driver/pipeline.rs now surfaces the
+  violation fatally via die() instead of swallowing it, while other lenient resolution
+  failures are preserved. Two conformance tests added: two_live_majors_hard_rejected
+  and same_major_minor_diff_accepted. Build is warning-clean; lib + access_semantics
+  + concurrency_shutdown suites green. The PkgId model already forks identity on the
+  version field, so lifting the guard once the trait/orphan rule lands is purely additive.
+  (Note: pre-existing, unrelated column_max/min/sum integration failures from an @simple+@column
+  store-decorator combo, present before this change.)'
 description: Support 'use foo@1 as foo1' / 'use foo@2 as foo2' producing distinct
   non-unifiable identities with separate capability unions. Implementation may be
   deferred or implemented per the Q4 decision from 2-32-1. Done when either multi-version
