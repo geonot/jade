@@ -1,4 +1,24 @@
 # Changelog
+- **[125]** (2026-06-17 14:05) task 2-32-3-12: Retire prefix_module identity model — carry package ownership first-class per item
+
+Replaces the legacy "the module name prefix IS the package identity" model
+(scope.md §0) with carried, first-class attribution. The prior recovery
+(hir::Program::owner_pkg_id scanning starts_with("<module>_") on every query)
+was the last vestige of string-as-identity; it is replaced by an exact
+item_symbol->PkgId map (item_pkgs) built ONCE at HIR construction after
+monomorphization via the new pure pkgid::build_item_pkgs (longest-prefix-wins
+for nested module names). owner_pkg_id is now an O(1) exact lookup.
+
+- HIR/MIR field module_pkgs -> item_pkgs (exact, per-item)
+- codegen is_multi_package keys on item_pkgs
+- resolve::prefix_module -> flatten_module: now a pure namespace-flattening
+  utility with NO identity semantics (renaming kept; it is the only namespace
+  mechanism and §2.2 requires the single-package fast path unchanged)
+- 3 new build_item_pkgs unit tests + updated HIR/MIR identity tests
+- scope.md §8 implementation note updated to record the retirement
+
+Build clean (zero warnings); 318 lib + pkgid + access_semantics +
+concurrency_shutdown + std_stable_subset green; multi-module e2e verified.
 - **[123]** (2026-06-17 13:31) task 2-32-3-11: PackageId-based symbol mangling in codegen — <pkgid_hash>_<module>_<name> for multi-package builds, bare names on the single-package fast path; main/lib FFI never mangled. 6 mangling tests.
 - **[121]** (2026-06-17 13:12) task 2-32-3-10: Thread PackageId through MIR — mir::Program carries pkg_id+module_pkgs; mir::Function carries pkg_id, attributed via owner_pkg_id during lowering. 2 MIR propagation tests.
 - **[119]** (2026-06-17 13:07) task 2-32-3-9: Thread PackageId through HIR — hir::Program carries root pkg_id + module_pkgs side map; owner_pkg_id() recovers per-item package identity from prefix_module name prefixes. 3 HIR identity tests.

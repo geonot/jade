@@ -1,11 +1,19 @@
 title: Retire prefix_module model
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-15T05:51:53'
-updated_at: '2026-06-15T05:51:53'
-result: ''
+updated_at: '2026-06-17T08:35:16'
+result: Retired the prefix_module identity model. Package ownership is now carried
+  first-class per item via an exact item_symbol->PkgId map (hir/mir::Program.item_pkgs),
+  built once at HIR construction by pkgid::build_item_pkgs (longest-prefix-wins).
+  owner_pkg_id is an O(1) exact lookup, replacing the per-query starts_with string
+  scan. resolve::prefix_module renamed to flatten_module — now a pure namespace-flattening
+  utility with no identity semantics. codegen is_multi_package keys on item_pkgs.
+  Build clean (zero warnings); 318 lib + pkgid + conformance suites green; multi-module
+  e2e verified (use util -> util.double=42). The single-package fast path is unchanged
+  per scope.md §2.2.
 description: Remove the legacy string prefix_module model and all code paths depending
   on it, ensuring everything routes through PackageId. Done when prefix_module is
   fully removed, the build compiles, and no remaining references exist. Depends on
