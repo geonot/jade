@@ -222,5 +222,10 @@ type's `PackageId`, and abi-hash equality is the precondition the flag gates.
 - Cap rows that gate promotion → `caps.md` §4.1 (empty-row rule).
 - `visibility`, `requires`, `members` as manifest config blocks →
   `config-blocks.md` §4.
-- Retiring `prefix_module` → `src/resolve.rs` (implementation note, phase 2 of
-  lamp.md §12).
+- Retiring `prefix_module` → done. The string-as-identity model is gone:
+  package ownership is carried first-class per item in `hir::Program::item_pkgs`
+  / `mir::Program::item_pkgs`, built once by `crate::pkgid::build_item_pkgs`
+  (longest-prefix-wins), never re-derived from a name prefix at query time. The
+  former renamer survives only as `src/resolve.rs::flatten_module`, a mechanical
+  namespace-flattening step with no identity semantics (kept because it is the
+  only namespace mechanism and §2.2 requires the single-package path unchanged).

@@ -79,10 +79,9 @@ pub fn lower_program(prog: &hir::Program) -> Program {
             ty: g.ty.clone(),
         })
         .collect();
-    // Attribute each lowered function to its owning package (scope.md §1).
-    // `owner_pkg_id` recovers identity from the `prefix_module` name prefix the
-    // HIR carries, falling back to the root package. Synthesized functions whose
-    // names match no module prefix fall through to the root, which is correct:
+    // Attribute each lowered function to its owning package (scope.md §1) via
+    // the HIR's exact per-item map, falling back to the root. Synthesized
+    // functions absent from the map fall through to the root, which is correct:
     // they are emitted on the root package's behalf.
     for f in &mut functions {
         f.pkg_id = prog.owner_pkg_id(f.name);
@@ -93,7 +92,7 @@ pub fn lower_program(prog: &hir::Program) -> Program {
         externs,
         globals,
         pkg_id: prog.pkg_id,
-        module_pkgs: prog.module_pkgs.clone(),
+        item_pkgs: prog.item_pkgs.clone(),
     }
 }
 

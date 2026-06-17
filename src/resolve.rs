@@ -2,7 +2,15 @@ use crate::ast::{self, Decl, Expr, Stmt};
 use crate::intern::Symbol;
 use std::collections::HashMap;
 
-pub fn prefix_module(decls: Vec<Decl>, module: &str) -> Vec<Decl> {
+/// Flatten a module's top-level items into the global namespace by renaming each
+/// `*name` to `module_name` and each `Type` reference accordingly.
+///
+/// This is a purely mechanical name-flattening step with **no identity
+/// semantics**: package ownership is carried first-class as a `PkgId`
+/// (scope.md §1, `crate::pkgid::build_item_pkgs`), never recovered from the
+/// names this stamps. The legacy "the prefix *is* the identity" model
+/// (scope.md §0) is retired.
+pub fn flatten_module(decls: Vec<Decl>, module: &str) -> Vec<Decl> {
     let mut rename_map: HashMap<Symbol, String> = HashMap::new();
     for d in &decls {
         match d {

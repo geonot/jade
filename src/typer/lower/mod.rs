@@ -552,7 +552,7 @@ impl Typer {
             migrations: Vec::new(),
             globals: Vec::new(),
             pkg_id: self.root_pkg_id,
-            module_pkgs: self.dep_pkg_ids.clone(),
+            item_pkgs: std::collections::HashMap::new(),
         };
 
         let global_entries: Vec<_> = self.globals.clone().into_iter().collect();
@@ -631,6 +631,26 @@ impl Typer {
                 .join("\n");
             return Err(format!("strict type checking failed:\n{combined}"));
         }
+        // Attribute every top-level item to its owning dependency package
+        // exactly once (scope.md §1.1), after monomorphization so generated
+        // dependency instances are captured too. This is the sole consultation
+        // of the module-flattening name prefix; the result is carried per item,
+        // retiring the legacy `prefix_module` string-identity recovery (§0).
+        program.item_pkgs = {
+            let names = program
+                .fns
+                .iter()
+                .map(|f| &f.name)
+                .chain(program.types.iter().map(|t| &t.name))
+                .chain(program.enums.iter().map(|e| &e.name))
+                .chain(program.externs.iter().map(|e| &e.name))
+                .chain(program.err_defs.iter().map(|e| &e.name))
+                .chain(program.actors.iter().map(|a| &a.name))
+                .chain(program.stores.iter().map(|s| &s.name))
+                .chain(program.supervisors.iter().map(|s| &s.name))
+                .chain(program.globals.iter().map(|g| &g.name));
+            crate::pkgid::build_item_pkgs(&self.dep_pkg_ids, names)
+        };
         for w in &self.warnings {
             eprintln!("warning: {w}");
         }

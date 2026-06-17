@@ -352,9 +352,10 @@ pub struct Program {
     /// Root package identity, carried through from `hir::Program` (scope.md §1).
     pub pkg_id: Option<crate::pkgid::PkgId>,
 
-    /// Per-module dependency package identities, carried through from
-    /// `hir::Program::module_pkgs` (scope.md §1.1).
-    pub module_pkgs: std::collections::HashMap<Symbol, crate::pkgid::PkgId>,
+    /// Exact per-item dependency package identities, carried through from
+    /// `hir::Program::item_pkgs` (scope.md §1.1). Empty on the single-package
+    /// fast path; non-empty iff this build links items from a dependency.
+    pub item_pkgs: std::collections::HashMap<Symbol, crate::pkgid::PkgId>,
 }
 
 #[derive(Debug, Clone)]

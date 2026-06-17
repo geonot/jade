@@ -1442,7 +1442,7 @@ fn hir_carries_no_pkg_id_for_legacy_single_package() {
     // The legacy harness never assigns a root PkgId; the field is absent.
     let hir = type_check("*main()\n    log(1)\n");
     assert!(hir.pkg_id.is_none());
-    assert!(hir.module_pkgs.is_empty());
+    assert!(hir.item_pkgs.is_empty());
 }
 
 #[test]
@@ -1459,9 +1459,9 @@ fn hir_carries_root_pkg_id_when_set() {
 
 #[test]
 fn hir_owner_pkg_id_attributes_imported_items_to_dependency() {
-    // Simulate `prefix_module`: an item imported from module `helper` carries a
-    // `helper_` name prefix. With `helper` mapped to its own PkgId, ownership of
-    // that item must resolve to the dependency, while a local item stays root.
+    // An item flattened in from dependency module `helper` carries a `helper_`
+    // name prefix. With `helper` mapped to its own PkgId, `item_pkgs` attributes
+    // that exact item to the dependency, while a local item stays root.
     let prog = parse("*helper_doit()\n    log(2)\n*main()\n    log(1)\n");
     let root = test_pkg_id("myapp");
     let dep = test_pkg_id("helper");
@@ -1473,7 +1473,7 @@ fn hir_owner_pkg_id_attributes_imported_items_to_dependency() {
     let hir = typer.lower_program(&prog).unwrap();
 
     assert_eq!(hir.pkg_id, Some(root));
-    assert_eq!(hir.module_pkgs.get(&Symbol::intern("helper")), Some(&dep));
+    assert_eq!(hir.item_pkgs.get(&Symbol::intern("helper_doit")), Some(&dep));
     assert_eq!(hir.owner_pkg_id(Symbol::intern("helper_doit")), Some(dep));
     assert_eq!(hir.owner_pkg_id(Symbol::intern("main")), Some(root));
     // Distinct packages keep distinct identities through HIR.
@@ -1489,7 +1489,7 @@ fn mir_carries_no_pkg_id_for_legacy_single_package() {
     let hir = typer.lower_program(&prog).unwrap();
     let mir = crate::mir::lower::lower_program(&hir);
     assert!(mir.pkg_id.is_none());
-    assert!(mir.module_pkgs.is_empty());
+    assert!(mir.item_pkgs.is_empty());
     for f in &mir.functions {
         assert!(f.pkg_id.is_none());
     }
@@ -1510,7 +1510,7 @@ fn mir_propagates_root_and_dependency_pkg_ids() {
 
     // Program-level identity carries through HIR -> MIR unchanged.
     assert_eq!(mir.pkg_id, Some(root));
-    assert_eq!(mir.module_pkgs.get(&Symbol::intern("helper")), Some(&dep));
+    assert_eq!(mir.item_pkgs.get(&Symbol::intern("helper_doit")), Some(&dep));
 
     // Each lowered function is attributed to its owning package.
     let doit = mir

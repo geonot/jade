@@ -588,7 +588,7 @@ mod tests {
             externs: vec![],
             globals: vec![],
             pkg_id: None,
-            module_pkgs: std::collections::HashMap::new(),
+            item_pkgs: std::collections::HashMap::new(),
         };
         let errs = verify_program(&prog).unwrap_err();
         assert!(errs.iter().any(|e| e.contains("[fn test_fn]")));

@@ -68,7 +68,7 @@ impl<'ctx> Compiler<'ctx> {
         self.hints = hints;
         // Multi-package builds mangle symbols by owning package (scope.md §1.3);
         // single-package builds (no dependency modules) keep bare names.
-        self.is_multi_package = !prog.module_pkgs.is_empty();
+        self.is_multi_package = !prog.item_pkgs.is_empty();
         self.setup_target()?;
         self.declare_builtins();
 
@@ -336,14 +336,14 @@ impl<'ctx> Compiler<'ctx> {
 
     /// Compute the emitted LLVM symbol name for a MIR function (scope.md §1.3).
     ///
-    /// The MIR `func.name` is already the `prefix_module` form `<module>_<name>`.
+    /// The MIR `func.name` is already the module-flattened form `<module>_<name>`.
     /// In a package build with more than one distinct package we prepend the
     /// owning package's `<pkgid_hash>_` so two non-promotable instances of the
     /// same module mangle distinctly (§3 / §5.7.6 multi-version coexistence),
     /// while two promoted instances — equal `semantic_hash` — share one prefix
     /// and therefore one symbol.
     ///
-    /// The single-package fast path (§2.2: `module_pkgs` empty, or no `pkg_id`)
+    /// The single-package fast path (§2.2: `item_pkgs` empty, or no `pkg_id`)
     /// emits the bare `<module>_<name>` unchanged, so 98% of programs see zero
     /// change. `main` is never mangled (it is the C entry point), and library
     /// builds never mangle (their symbols are the FFI surface).

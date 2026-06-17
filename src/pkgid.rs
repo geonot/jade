@@ -349,6 +349,39 @@ pub fn resolve_path_use(
     Ok(current)
 }
 
+/// Build the exact per-item owning-`PkgId` map (scope.md §1.1) that replaces the
+/// legacy `prefix_module` string-identity model.
+///
+/// Module flattening renames a dependency module `m`'s items to `m_<name>`.
+/// Given `dep_pkgs` (module symbol → its `PkgId`) and the flattened top-level
+/// `item_names`, this attributes each item to the dependency whose module prefix
+/// it carries — **once, here** — so downstream queries are an exact lookup rather
+/// than a per-call prefix scan. Items matching no dependency prefix are omitted
+/// (they belong to the root package and fall through to it). When two module
+/// prefixes are both prefixes of a name (e.g. `a` and `a_b`), the longest match
+/// wins, so `a_b`'s items attribute to `a_b`, not `a`.
+pub fn build_item_pkgs<'a>(
+    dep_pkgs: &HashMap<Symbol, PkgId>,
+    item_names: impl Iterator<Item = &'a Symbol>,
+) -> HashMap<Symbol, PkgId> {
+    if dep_pkgs.is_empty() {
+        return HashMap::new();
+    }
+    let mut prefixes: Vec<(String, PkgId)> = dep_pkgs
+        .iter()
+        .map(|(m, id)| (format!("{}_", m.as_str()), *id))
+        .collect();
+    prefixes.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    let mut out = HashMap::new();
+    for name in item_names {
+        let n = name.as_str();
+        if let Some((_, id)) = prefixes.iter().find(|(p, _)| n.starts_with(p.as_str())) {
+            out.insert(*name, *id);
+        }
+    }
+    out
+}
+
 pub fn compute_semantic_hash(
     name: Symbol,
     scope: ScopePath,
@@ -698,6 +731,43 @@ mod tests {
             }
             other => panic!("expected Unresolved, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn build_item_pkgs_empty_deps_is_empty() {
+        let names = [sym("main"), sym("helper_doit")];
+        let out = build_item_pkgs(&HashMap::new(), names.iter());
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn build_item_pkgs_attributes_by_module_prefix() {
+        let dep = scoped("helper", &[]);
+        let mut deps = HashMap::new();
+        deps.insert(sym("helper"), dep);
+        let names = [sym("main"), sym("helper_doit"), sym("helper_aux")];
+        let out = build_item_pkgs(&deps, names.iter());
+        // Dependency items are attributed; root items are omitted (fall to root).
+        assert_eq!(out.get(&sym("helper_doit")), Some(&dep));
+        assert_eq!(out.get(&sym("helper_aux")), Some(&dep));
+        assert_eq!(out.get(&sym("main")), None);
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn build_item_pkgs_longest_prefix_wins() {
+        // Modules `a` and `a_b` both prefix `a_b_thing`; the longer must win so
+        // `a_b`'s items never get mis-attributed to `a`.
+        let a = scoped("a", &[]);
+        let ab = scoped("a_b", &[]);
+        assert_ne!(a, ab);
+        let mut deps = HashMap::new();
+        deps.insert(sym("a"), a);
+        deps.insert(sym("a_b"), ab);
+        let names = [sym("a_thing"), sym("a_b_thing")];
+        let out = build_item_pkgs(&deps, names.iter());
+        assert_eq!(out.get(&sym("a_thing")), Some(&a));
+        assert_eq!(out.get(&sym("a_b_thing")), Some(&ab));
     }
 
     #[test]

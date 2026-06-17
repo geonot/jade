@@ -106,7 +106,7 @@ pub(in crate::driver) fn resolve_implicit_imports(
                 }
             importable.push(d);
         }
-        for pd in prefix_module(importable, &mod_name) {
+        for pd in flatten_module(importable, &mod_name) {
             prog.decls.push(pd);
         }
         prog.decls.push(Decl::Use(crate::ast::UseDecl {

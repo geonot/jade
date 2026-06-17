@@ -126,7 +126,7 @@ pub(in crate::driver) fn resolve_modules(
                         .into_iter()
                         .filter(|d| should_import_decl(d, &imports))
                         .collect();
-                    for pd in prefix_module(importable, &name.as_str()) {
+                    for pd in flatten_module(importable, &name.as_str()) {
                         prog.decls.push(pd);
                     }
                     continue;
@@ -189,7 +189,7 @@ pub(in crate::driver) fn resolve_modules(
                 own_importable.push(d);
             }
         }
-        for pd in prefix_module(own_importable, &name.as_str()) {
+        for pd in flatten_module(own_importable, &name.as_str()) {
             prog.decls.push(pd);
         }
         for d in transitive {
@@ -307,7 +307,7 @@ pub(in crate::driver) fn merge_source_files(
                 }
             importable.push(d);
         }
-        for pd in prefix_module(importable, &mod_name) {
+        for pd in flatten_module(importable, &mod_name) {
             prog.decls.push(pd);
         }
     }

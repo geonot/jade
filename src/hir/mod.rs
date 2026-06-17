@@ -95,27 +95,23 @@ pub struct Program {
     /// `pkgid_hash` prefix from this.
     pub pkg_id: Option<crate::pkgid::PkgId>,
 
-    /// Owning `PkgId` for items pulled in from a dependency, keyed by the module
-    /// name that `prefix_module` stamped onto them (scope.md §1.1). An item whose
-    /// name prefix matches a key here belongs to that dependency package; any
-    /// other item belongs to `pkg_id` (the root). Lets downstream stages recover
-    /// per-item package identity without a separate annotation on every node.
-    pub module_pkgs: std::collections::HashMap<Symbol, crate::pkgid::PkgId>,
+    /// Exact per-item owning `PkgId` for items pulled in from a dependency
+    /// (scope.md §1.1), keyed by the item's own (already module-flattened)
+    /// symbol name. This is the first-class identity attribution that replaces
+    /// the legacy `prefix_module` string model (§0): an item's package is
+    /// *carried* here, not re-derived from its name prefix at each query. Any
+    /// name absent from this map — every root item and every compiler-synthesized
+    /// item — belongs to `pkg_id` (the root). Empty on the single-package fast
+    /// path (§2.2).
+    pub item_pkgs: std::collections::HashMap<Symbol, crate::pkgid::PkgId>,
 }
 
 impl Program {
-    /// Resolve the owning `PkgId` of a top-level item by its (already
-    /// module-prefixed) symbol name. Returns the dependency package whose module
-    /// prefix the name carries, else the root `pkg_id`.
+    /// Resolve the owning `PkgId` of a top-level item by its symbol name. An
+    /// exact lookup into `item_pkgs` (no string-prefix scan): dependency items
+    /// were attributed at HIR construction, everything else is the root package.
     pub fn owner_pkg_id(&self, name: Symbol) -> Option<crate::pkgid::PkgId> {
-        let n = name.as_str();
-        for (module, id) in &self.module_pkgs {
-            let prefix = format!("{}_", module.as_str());
-            if n.starts_with(&prefix) {
-                return Some(*id);
-            }
-        }
-        self.pkg_id
+        self.item_pkgs.get(&name).copied().or(self.pkg_id)
     }
 }
 

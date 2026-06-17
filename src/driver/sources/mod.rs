@@ -9,7 +9,7 @@ use crate::lexer::Lexer;
 use crate::lock::Lockfile;
 use crate::parser::Parser;
 use crate::pkg::{Package, SemVer};
-use crate::resolve::prefix_module;
+use crate::resolve::flatten_module;
 
 use super::cli::*;
 use super::project::*;
