@@ -51,11 +51,20 @@ static inline void scope_unlock(jinn_scope_t *s) {
     atomic_store_explicit(&s->lock, 0, memory_order_release);
 }
 
-jinn_scope_t *jinn_scope_current(void) {
+/*
+ * Both accessors are noinline on purpose, for the same reason as
+ * jinn_worker_self (see jinn_rt.h): callers that resume after a
+ * `jinn_context_swap` may be running on a different thread than the one that
+ * parked them, so the TLS block address must be re-derived by the callee
+ * rather than reused from a callee-saved register. Reading or writing
+ * `tl_scope` directly from a function that spans a park would touch the
+ * *parking* thread's slot.
+ */
+__attribute__((noinline)) jinn_scope_t *jinn_scope_current(void) {
     return tl_scope;
 }
 
-void jinn_scope_set_current(jinn_scope_t *s) {
+__attribute__((noinline)) void jinn_scope_set_current(jinn_scope_t *s) {
     tl_scope = s;
 }
 
@@ -243,7 +252,9 @@ static int jinn_scope_join_no_free(jinn_scope_t *s) {
             break;
         }
         scope_wake_cancelled(s);
-        jinn_worker_t *w = tl_worker;
+        /* Re-derived per iteration: parking below can resume us on another
+         * worker, and `w->sched_ctx` must be *this* thread's scheduler. */
+        jinn_worker_t *w = jinn_worker_self();
         if (!w || !w->current) {
             /* Parent is *main / a non-coroutine thread: spin-yield so the
              * scheduler can run children to completion. */
@@ -270,8 +281,10 @@ static int jinn_scope_join_no_free(jinn_scope_t *s) {
 void jinn_scope_join(jinn_scope_t *s) {
     if (!s) return;
     jinn_scope_join_no_free(s);
-    /* Pop scope, restore the enclosing one, and free. */
-    tl_scope = s->prev;
+    /* Pop scope, restore the enclosing one, and free. Via the setter, not
+     * `tl_scope` directly: the join above may have parked us and resumed us on
+     * a different thread. */
+    jinn_scope_set_current(s->prev);
     free(s);
 }
 
@@ -282,7 +295,8 @@ int64_t jinn_scope_join_take_error(jinn_scope_t *s) {
     int had = jinn_scope_join_no_free(s);
     int64_t word = had ? atomic_load_explicit(&s->error_val, memory_order_acquire)
                        : INT64_MIN;
-    tl_scope = s->prev;
+    /* Setter, not `tl_scope` directly — the join may have migrated us. */
+    jinn_scope_set_current(s->prev);
     free(s);
     return word;
 }

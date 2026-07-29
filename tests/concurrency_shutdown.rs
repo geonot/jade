@@ -461,6 +461,41 @@ fn defer_runs_on_cancellation() {
     );
 }
 
+/// Regression guard: a child that is *already parked* on a full channel when
+/// the scope is cancelled must still observe the cancellation and unwind.
+///
+/// The `usleep` is load-bearing — it makes the child reach `send` and park
+/// before `stop s` runs. Waking it goes through the global inject queue (the
+/// waker is `*main`, not a worker), so the child is almost always resumed on a
+/// *different* worker than the one it parked on. That migration used to hang:
+/// the runtime cached the `tl_worker` TLS block address in a callee-saved
+/// register, and `jinn_context_swap` restores those registers as part of the
+/// coroutine context, so after migration `jinn_chan_send` kept reading the
+/// original thread's worker. That worker is idle, its `current` is NULL, which
+/// reads as "not on a coroutine" — so the send took the non-coroutine backoff
+/// path and spun forever, never re-checking cancellation. Without the fix this
+/// hangs ~90% of the time; see `jinn_worker_self` in runtime/jinn_rt.h.
+#[test]
+fn parked_sender_observes_cancellation_after_worker_migration() {
+    expect(
+        "\
+extern *usleep(us as i32) returns i32
+
+*main
+    sig is channel of i64(1)
+    together s
+        dispatch
+            defer log('cleaned')
+            for i in 0 to 1000000
+                send sig, i
+        extern.usleep(20000)
+        stop s
+    log('done')
+",
+        "cleaned\ndone",
+    );
+}
+
 // ── Scope error propagation (task 2-6-5) ────────────────────────────────
 
 /// A child task that propagates an error records it on the scope; the failing

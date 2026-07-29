@@ -167,7 +167,9 @@ void jinn_chan_wake_coro(jinn_chan_t *ch, jinn_coro_t *c) {
 
 int jinn_chan_send(jinn_chan_t *ch, const void *data) {
     for (;;) {
-        jinn_worker_t *wc = tl_worker;
+        /* Re-derived every iteration, never cached across the park below: a
+         * resumed coroutine may be running on a different worker now. */
+        jinn_worker_t *wc = jinn_worker_self();
         if (wc && wc->current
             && atomic_load_explicit(&wc->current->cancelled, memory_order_acquire)) {
             return 0;
@@ -203,7 +205,7 @@ int jinn_chan_send(jinn_chan_t *ch, const void *data) {
         }
 
         /* Buffer full — park this coroutine */
-        jinn_worker_t *w = tl_worker;
+        jinn_worker_t *w = jinn_worker_self();
         if (!w || !w->current) {
             /* Called from non-coroutine context — spin-wait then retry */
             chan_unlock(ch);
@@ -246,7 +248,8 @@ int jinn_chan_send(jinn_chan_t *ch, const void *data) {
 
 int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
     for (;;) {
-        jinn_worker_t *wc = tl_worker;
+        /* Re-derived every iteration — see jinn_chan_send. */
+        jinn_worker_t *wc = jinn_worker_self();
         if (wc && wc->current
             && atomic_load_explicit(&wc->current->cancelled, memory_order_acquire)) {
             memset(data_out, 0, ch->elem_size);
@@ -285,7 +288,7 @@ int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
         }
 
         /* Park this coroutine */
-        jinn_worker_t *w = tl_worker;
+        jinn_worker_t *w = jinn_worker_self();
         if (!w || !w->current) {
             /* Called from non-coroutine context — spin-wait then retry */
             chan_unlock(ch);

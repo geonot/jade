@@ -20,6 +20,16 @@ jinn_sched_t g_sched;
 /* Thread-local: current worker */
 _Thread_local jinn_worker_t *tl_worker = NULL;
 
+/*
+ * Re-derive the running thread's worker. See the contract in jinn_rt.h: this
+ * must stay out-of-line and noinline so that callers which resume after a
+ * `jinn_context_swap` cannot reuse a TLS block address cached in a
+ * callee-saved register (that address belongs to whichever thread parked them).
+ */
+__attribute__((noinline)) jinn_worker_t *jinn_worker_self(void) {
+    return tl_worker;
+}
+
 /* ── RNG for steal target selection ─────────────────────────────── */
 
 static uint32_t jinn_xorshift(uint64_t *state) {
@@ -322,8 +332,17 @@ void jinn_sched_shutdown(void) {
     jinn_sched_wake_all();
 
     if (atomic_load(&g_sched.started)) {
+        /* Two passes, and the order matters. Freeing worker i's deque as soon
+         * as worker i is joined is a use-after-free: workers i+1..N are still
+         * running, and both jinn_find_work and jinn_worker_park's spin phase
+         * steal from *every* peer queue. A steal on a destroyed deque reads
+         * `dq->buffer[t & (capacity - 1)]` with buffer == NULL — a fault near
+         * address 0, seen as a rare SIGSEGV in jinn_deque_steal at exit.
+         * Nothing can steal once every worker thread has been joined. */
         for (int i = 0; i < g_sched.num_workers; i++) {
             pthread_join(g_sched.workers[i].thread, NULL);
+        }
+        for (int i = 0; i < g_sched.num_workers; i++) {
             jinn_deque_destroy(&g_sched.workers[i].run_queue);
         }
     }

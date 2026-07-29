@@ -79,23 +79,33 @@ jinn_join_t *jinn_join_create(void) {
  * creating it on first access. mailbox layout:
  *   { ptr channel @0, i32 alive @1, <state> @2, ptr join @last }.
  * The compiler passes the address of the join slot.
+ *
+ * Lazy creation races: the joiner (e.g. *main) and the exiting actor's
+ * signal path can both observe an empty slot concurrently. Publish via CAS
+ * so both sides converge on a single latch — otherwise the signaller can
+ * mark a latch the joiner never sees, and the joiner waits forever.
  */
 jinn_join_t *jinn_join_get(void *join_slot_ptr) {
-    jinn_join_t **slot = (jinn_join_t **)join_slot_ptr;
-    if (!*slot) {
-        *slot = jinn_join_create();
+    _Atomic(jinn_join_t *) *slot = (_Atomic(jinn_join_t *) *)join_slot_ptr;
+    jinn_join_t *j = atomic_load_explicit(slot, memory_order_acquire);
+    if (!j) {
+        jinn_join_t *fresh = jinn_join_create();
+        jinn_join_t *expected = NULL;
+        if (atomic_compare_exchange_strong_explicit(
+                slot, &expected, fresh,
+                memory_order_acq_rel, memory_order_acquire)) {
+            j = fresh;
+        } else {
+            free(fresh);
+            j = expected;
+        }
     }
-    return *slot;
+    return j;
 }
 
 /* Signal completion: mark done and wake all waiters. */
 void jinn_join_signal(void *join_slot_ptr) {
-    jinn_join_t **slot = (jinn_join_t **)join_slot_ptr;
-    jinn_join_t *j = *slot;
-    if (!j) {
-        j = jinn_join_create();
-        *slot = j;
-    }
+    jinn_join_t *j = jinn_join_get(join_slot_ptr);
     join_lock(j);
     atomic_store_explicit(&j->done, 1, memory_order_release);
     jinn_coro_t *w = j->waitq;
@@ -117,7 +127,9 @@ void jinn_actor_join(void *join_slot_ptr) {
         if (atomic_load_explicit(&j->done, memory_order_acquire)) {
             return;
         }
-        jinn_worker_t *wk = tl_worker;
+        /* Re-derived per iteration: parking below can resume us on another
+         * worker, and `wk->sched_ctx` must be *this* thread's scheduler. */
+        jinn_worker_t *wk = jinn_worker_self();
         if (!wk || !wk->current) {
             /* Non-coroutine context (e.g. *main): spin-yield to scheduler. */
             jinn_sched_yield();

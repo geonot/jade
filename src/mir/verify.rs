@@ -175,7 +175,14 @@ pub fn verify_function(f: &Function) -> Result<(), Vec<String>> {
             Terminator::Return(opt) => match opt {
                 Some(v) => {
                     check_val(*v, &format!("return in {}", bb_label), &value_ty, &mut errors);
+                    // A scheduler-task coroutine (structured-concurrency child)
+                    // uses `Return(Some(err))` as the scope-error convention:
+                    // codegen boxes the value and records it on the enclosing
+                    // scope (`jinn_scope_record_current_error`), then returns
+                    // void. The value is typed against the *enclosing*
+                    // function's Result type, not this coroutine's ret_ty.
                     if let Some(ty) = value_ty.get(v)
+                        && !(f.is_coroutine && f.scheduler_task)
                         && !ty_compatible(ty, &f.ret_ty)
                     {
                         errors.push(format!(

@@ -190,6 +190,27 @@ void jinn_sched_unpark(jinn_coro_t *c);
 jinn_coro_t  *jinn_current_coro(void);
 jinn_worker_t *jinn_current_worker(void);
 
+/*
+ * jinn_worker_self: the worker running the calling thread, re-derived now.
+ *
+ * MUST be used instead of reading `tl_worker` directly by any code that may
+ * run *after* a `jinn_context_swap` — i.e. anything in a park/resume loop.
+ *
+ * Why: a compiler materialises the thread pointer once per function and keeps
+ * the TLS block address in a callee-saved register. `jinn_context_swap` saves
+ * and restores callee-saved registers as part of the coroutine context, so a
+ * coroutine that parks on worker A and is resumed on worker B (work-stealing,
+ * or the global inject queue) comes back with that register still pointing at
+ * *A's* TLS block. Every later `tl_worker` read in the same function then
+ * yields the wrong worker — typically one that is idle, whose `current` is
+ * NULL, which reads as "not on a coroutine" and silently disables parking and
+ * cancellation checks.
+ *
+ * This accessor is deliberately out-of-line and noinline: the call re-derives
+ * the thread pointer on the thread that is actually running.
+ */
+jinn_worker_t *jinn_worker_self(void);
+
 /* ── Channels ────────────────────────────────────────────────────── */
 
 struct jinn_chan {

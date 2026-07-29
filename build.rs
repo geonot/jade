@@ -10,7 +10,18 @@ fn main() {
         "runtime/context_x86_64.S"
     };
 
-    cc::Build::new()
+    // JINN_RT_DEBUG=1 builds the C runtime at -O0 with debug info, so gdb can
+    // show real frames and locals instead of optimized-away ones. Off by
+    // default; default builds are byte-for-byte unaffected. Note that -O0
+    // changes scheduler timing enough that races often stop reproducing — for
+    // those, debug the -O2 build (it already carries -g in the dev profile).
+    let rt_debug = env::var("JINN_RT_DEBUG").is_ok();
+    let rt_opt = if rt_debug { 0 } else { 2 };
+    let mut rt_build = cc::Build::new();
+    if rt_debug {
+        rt_build.debug(true);
+    }
+    rt_build
         .file("runtime/coro.c")
         .file("runtime/deque.c")
         .file("runtime/sched.c")
@@ -40,7 +51,7 @@ fn main() {
         .file("runtime/random.c")
         .file("runtime/signals.c")
         .file(asm_file)
-        .opt_level(2)
+        .opt_level(rt_opt)
         .warnings(true)
         .flag("-Wall")
         .flag("-Wextra")
@@ -49,6 +60,7 @@ fn main() {
         .flag("-Wmissing-prototypes")
         .flag("-Wno-unused-parameter")
         .compile("jinn_rt");
+    println!("cargo:rerun-if-env-changed=JINN_RT_DEBUG");
 
     println!("cargo:rustc-link-search=native={out}");
     println!("cargo:rustc-link-lib=static=jinn_rt");

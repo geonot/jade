@@ -272,10 +272,15 @@ int jinn_select(jinn_select_case_t *cases, int n, int has_default) {
 
         unlock_all(cases, lock_order, limit);
 
-        /* Park — scheduler will resume us when the channel we're on fires */
-        w->held_chan_lock = NULL;
-        w->last_action = SCHED_ACTION_PARK;
-        jinn_context_swap(&self->ctx, &w->sched_ctx);
+        /* Park — scheduler will resume us when the channel we're on fires.
+         * The worker is re-derived on every attempt and never carried across
+         * the swap: a previous attempt may have resumed us on a different
+         * worker, and parking must use *this* thread's scheduler context. */
+        jinn_worker_t *pw = jinn_worker_self();
+        if (!pw) pw = w; /* unreachable for a coroutine; keep prior behaviour */
+        pw->held_chan_lock = NULL;
+        pw->last_action = SCHED_ACTION_PARK;
+        jinn_context_swap(&self->ctx, &pw->sched_ctx);
 
         /* Woken — re-lock all channels and scan for readiness */
         lock_all(cases, lock_order, limit);
