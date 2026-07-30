@@ -5,10 +5,7 @@ use super::Compiler;
 use super::b;
 
 impl<'ctx> Compiler<'ctx> {
-    pub(crate) fn compile_str_literal(
-        &mut self,
-        s: &str,
-    ) -> Result<BasicValueEnum<'ctx>, String> {
+    pub(crate) fn compile_str_literal(&mut self, s: &str) -> Result<BasicValueEnum<'ctx>, String> {
         if s.len() <= 23 {
             let st = self.string_type();
             let i8t = self.ctx.i8_type();
@@ -104,7 +101,9 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(body_bb);
         let bp = unsafe { b!(self.bld.build_gep(i8t, data, &[i], "scc.bp")) };
         let byte = b!(self.bld.build_load(i8t, bp, "scc.b")).into_int_value();
-        let masked = b!(self.bld.build_and(byte, i8t.const_int(0xC0, false), "scc.m"));
+        let masked = b!(self
+            .bld
+            .build_and(byte, i8t.const_int(0xC0, false), "scc.m"));
         let is_lead = b!(self.bld.build_int_compare(
             IntPredicate::NE,
             masked,
@@ -113,7 +112,9 @@ impl<'ctx> Compiler<'ctx> {
         ));
         let lead_i64 = b!(self.bld.build_int_z_extend(is_lead, i64t, "scc.li"));
         let n_next = b!(self.bld.build_int_add(n, lead_i64, "scc.nn"));
-        let i_next = b!(self.bld.build_int_add(i, i64t.const_int(1, false), "scc.in"));
+        let i_next = b!(self
+            .bld
+            .build_int_add(i, i64t.const_int(1, false), "scc.in"));
         phi_i.add_incoming(&[(&i_next, body_bb)]);
         phi_n.add_incoming(&[(&n_next, body_bb)]);
         b!(self.bld.build_unconditional_branch(cond_bb));

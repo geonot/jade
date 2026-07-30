@@ -504,9 +504,7 @@ impl<'ctx> Compiler<'ctx> {
                 Some((_, t)) => *t,
                 None => continue,
             };
-            let case_bb = self
-                .ctx
-                .append_basic_block(fv, &format!("ts.e.v{tag_val}"));
+            let case_bb = self.ctx.append_basic_block(fv, &format!("ts.e.v{tag_val}"));
             cases.push((i32t.const_int(tag_val as u64, false), case_bb));
             self.bld.position_at_end(case_bb);
             let gs = b!(self.bld.build_global_string_ptr(vname, "ts.e.s"));

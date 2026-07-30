@@ -35,7 +35,11 @@ fn compile_and_run(src: &str) -> String {
 }
 
 fn expect(src: &str, expected: &str) {
-    assert_eq!(compile_and_run(src).trim(), expected.trim(), "source:\n{src}");
+    assert_eq!(
+        compile_and_run(src).trim(),
+        expected.trim(),
+        "source:\n{src}"
+    );
 }
 
 fn compile_fails(src: &str) -> String {
@@ -180,8 +184,7 @@ fn err_raise_undeclared_error_is_error() {
         "err FileError\n    NotFound\n\nerr NetError\n    Timeout\n\n*load(ok as bool) returns Result of i64, NetError\n    if ok\n        Ok(1)\n    else\n        err NotFound\n\n*main()\n    log(0)\n",
     );
     assert!(
-        out.contains("no conversion `FileError -> NetError`")
-            || out.contains("FileError"),
+        out.contains("no conversion `FileError -> NetError`") || out.contains("FileError"),
         "expected undeclared-error/soundness diagnostic, got:\n{out}"
     );
 }
@@ -226,7 +229,9 @@ const READ_RES: &str = "err FileError\n    NotFound\n    Denied\n\n*read(ok as b
 #[test]
 fn quaternary_success_arm_binds_dollar() {
     expect(
-        &format!("{READ_RES}*main()\n    read(true) ? log($) !! log(-1)\n    read(false) ? log($) !! log(-1)\n"),
+        &format!(
+            "{READ_RES}*main()\n    read(true) ? log($) !! log(-1)\n    read(false) ? log($) !! log(-1)\n"
+        ),
         "42\n-1",
     );
 }
@@ -234,7 +239,9 @@ fn quaternary_success_arm_binds_dollar() {
 #[test]
 fn quaternary_fallback_value_on_error() {
     expect(
-        &format!("{READ_RES}*main()\n    a is read(true) ? $ !! 7\n    log(a)\n    b is read(false) ? $ !! 7\n    log(b)\n"),
+        &format!(
+            "{READ_RES}*main()\n    a is read(true) ? $ !! 7\n    log(a)\n    b is read(false) ? $ !! 7\n    log(b)\n"
+        ),
         "42\n7",
     );
 }
@@ -242,7 +249,9 @@ fn quaternary_fallback_value_on_error() {
 #[test]
 fn quaternary_err_arm_binds_err_value() {
     expect(
-        &format!("{READ_RES}*describe(e as FileError) returns i64\n    match e\n        NotFound ? 404\n        Denied ? 403\n\n*main()\n    read(false) ? log($) !! log(describe(err))\n"),
+        &format!(
+            "{READ_RES}*describe(e as FileError) returns i64\n    match e\n        NotFound ? 404\n        Denied ? 403\n\n*main()\n    read(false) ? log($) !! log(describe(err))\n"
+        ),
         "404",
     );
 }
@@ -250,7 +259,9 @@ fn quaternary_err_arm_binds_err_value() {
 #[test]
 fn quaternary_explicit_propagation_with_bang_bang_err() {
     expect(
-        &format!("{READ_RES}*load(ok as bool) returns Result of i64, FileError\n    raw is read(ok) ? $ !! err\n    Ok(raw + 1)\n\n*main()\n    match load(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match load(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n"),
+        &format!(
+            "{READ_RES}*load(ok as bool) returns Result of i64, FileError\n    raw is read(ok) ? $ !! err\n    Ok(raw + 1)\n\n*main()\n    match load(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match load(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n"
+        ),
         "43\n-1",
     );
 }
@@ -258,7 +269,9 @@ fn quaternary_explicit_propagation_with_bang_bang_err() {
 #[test]
 fn implicit_propagation_on_bare_result_bind() {
     expect(
-        &format!("{READ_RES}*load(ok as bool) returns Result of i64, FileError\n    raw is read(ok)\n    Ok(raw + 1)\n\n*main()\n    match load(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match load(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n"),
+        &format!(
+            "{READ_RES}*load(ok as bool) returns Result of i64, FileError\n    raw is read(ok)\n    Ok(raw + 1)\n\n*main()\n    match load(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match load(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n"
+        ),
         "43\n-1",
     );
 }
@@ -288,7 +301,9 @@ fn quaternary_propagation_converts_via_from() {
 #[test]
 fn quaternary_multiline_arm_form() {
     expect(
-        &format!("{READ_RES}*main()\n    read(true)\n        ? log($)\n        !! log(-1)\n    read(false)\n        ? log($)\n        !! log(-1)\n"),
+        &format!(
+            "{READ_RES}*main()\n    read(true)\n        ? log($)\n        !! log(-1)\n    read(false)\n        ? log($)\n        !! log(-1)\n"
+        ),
         "42\n-1",
     );
 }

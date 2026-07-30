@@ -74,14 +74,16 @@ pub(super) fn eval_block(
                     for (ec, eb) in &i.elifs {
                         let ec_val = eval_expr(ec, env, pure_fns, depth)?;
                         if let ConstVal::Bool(true) = ec_val
-                            && let Some(v) = eval_block(eb, env, pure_fns, depth) {
-                                return Some(v);
-                            }
-                    }
-                    if let Some(els) = &i.els
-                        && let Some(v) = eval_block(els, env, pure_fns, depth) {
+                            && let Some(v) = eval_block(eb, env, pure_fns, depth)
+                        {
                             return Some(v);
                         }
+                    }
+                    if let Some(els) = &i.els
+                        && let Some(v) = eval_block(els, env, pure_fns, depth)
+                    {
+                        return Some(v);
+                    }
                 }
             }
             Stmt::Expr(e) => {

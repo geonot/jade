@@ -117,7 +117,9 @@ impl Parser {
                             self.advance();
                             n
                         }
-                        _ => return Err(self.error(&format!("@{attr} expects an integer argument"))),
+                        _ => {
+                            return Err(self.error(&format!("@{attr} expects an integer argument")));
+                        }
                     };
                     self.expect(Token::RParen)?;
                     match &*attr_s {
@@ -143,7 +145,8 @@ impl Parser {
             decorators.push(dec);
         }
 
-        if let Err(e) = crate::store_decorators::validate_store_decorators(&name.as_str(), &decorators)
+        if let Err(e) =
+            crate::store_decorators::validate_store_decorators(&name.as_str(), &decorators)
         {
             return Err(self.error(&e));
         }

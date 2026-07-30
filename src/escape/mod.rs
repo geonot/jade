@@ -494,7 +494,9 @@ impl<'a> EscapeWalk<'a> {
                 }
             }
             GlobalStore(_, e, _) => self.walk_expr_consumer(e, BindContext::StoredInContainer),
-            ChannelClose(e, _) | Stop(e, _) | Join(e, _) => self.walk_expr_consumer(e, BindContext::LocalRead),
+            ChannelClose(e, _) | Stop(e, _) | Join(e, _) => {
+                self.walk_expr_consumer(e, BindContext::LocalRead)
+            }
             ScopeCancel(_, _) => {}
             Drop(_, _, _, _)
             | Nop(_)

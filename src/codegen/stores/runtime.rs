@@ -255,16 +255,21 @@ impl<'ctx> Compiler<'ctx> {
             self.module
                 .add_function("jinn_store_compact_if", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jinn_store_check_schema").is_none() {
+        if self
+            .module
+            .get_function("jinn_store_check_schema")
+            .is_none()
+        {
             let void_ty = self.ctx.void_type();
-            let ft = void_ty.fn_type(
-                &[ptr.into(), i64t.into(), i64t.into(), ptr.into()],
-                false,
-            );
+            let ft = void_ty.fn_type(&[ptr.into(), i64t.into(), i64t.into(), ptr.into()], false);
             self.module
                 .add_function("jinn_store_check_schema", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jinn_store_stamp_schema").is_none() {
+        if self
+            .module
+            .get_function("jinn_store_stamp_schema")
+            .is_none()
+        {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into(), i64t.into(), i64t.into()], false);
             self.module
@@ -361,7 +366,11 @@ impl<'ctx> Compiler<'ctx> {
             self.module
                 .add_function("jinn_vec_nearest", ft, Some(Linkage::External));
         }
-        if self.module.get_function("jinn_vec_nearest_scored").is_none() {
+        if self
+            .module
+            .get_function("jinn_vec_nearest_scored")
+            .is_none()
+        {
             let ft = i64t.fn_type(
                 &[ptr.into(), ptr.into(), i64t.into(), ptr.into(), ptr.into()],
                 false,
@@ -524,7 +533,8 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         let is_versioned = sd
-            .decorators.contains(&crate::ast::StoreDecorator::Versioned);
+            .decorators
+            .contains(&crate::ast::StoreDecorator::Versioned);
         if is_versioned {
             let ver_global =
                 self.module
@@ -533,8 +543,7 @@ impl<'ctx> Compiler<'ctx> {
             ver_global.set_initializer(&ptr_ty.const_null());
         }
 
-        let is_kv = sd
-            .decorators.contains(&crate::ast::StoreDecorator::Kv);
+        let is_kv = sd.decorators.contains(&crate::ast::StoreDecorator::Kv);
         if is_kv {
             let kv_global =
                 self.module

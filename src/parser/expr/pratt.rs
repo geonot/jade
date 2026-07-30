@@ -23,9 +23,9 @@ impl Parser {
     }
 
     fn parse_inline_handler_arms(&mut self, subject: Expr) -> Result<Expr, ParseError> {
-        if !matches!(self.peek(), Token::Question | Token::BangBang)
-            && !(matches!(self.peek(), Token::Bang) && !self.suppress_bang_else)
-        {
+        let starts_arm = matches!(self.peek(), Token::Question | Token::BangBang)
+            || (matches!(self.peek(), Token::Bang) && !self.suppress_bang_else);
+        if !starts_arm {
             return Ok(subject);
         }
         self.collect_handler_arms(subject, false)
@@ -40,11 +40,7 @@ impl Parser {
         self.collect_handler_arms(subject, true)
     }
 
-    fn collect_handler_arms(
-        &mut self,
-        subject: Expr,
-        multiline: bool,
-    ) -> Result<Expr, ParseError> {
+    fn collect_handler_arms(&mut self, subject: Expr, multiline: bool) -> Result<Expr, ParseError> {
         let sp = self.span();
         let mut ok_arm: Option<Expr> = None;
         let mut nothing_arm: Option<Expr> = None;

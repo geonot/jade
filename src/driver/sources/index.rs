@@ -46,25 +46,26 @@ impl EntityIndex {
         let mut idx = Self::new();
 
         if let Ok(exe) = std::env::current_exe()
-            && let Some(exe_dir) = exe.parent() {
-                let std_dir = exe_dir.join("std");
+            && let Some(exe_dir) = exe.parent()
+        {
+            let std_dir = exe_dir.join("std");
+            if std_dir.is_dir() {
+                idx.scan_dir(&std_dir);
+            }
+
+            if let Some(parent) = exe_dir.parent() {
+                let std_dir = parent.join("std");
                 if std_dir.is_dir() {
                     idx.scan_dir(&std_dir);
                 }
-
-                if let Some(parent) = exe_dir.parent() {
-                    let std_dir = parent.join("std");
+                if let Some(grandparent) = parent.parent() {
+                    let std_dir = grandparent.join("std");
                     if std_dir.is_dir() {
                         idx.scan_dir(&std_dir);
                     }
-                    if let Some(grandparent) = parent.parent() {
-                        let std_dir = grandparent.join("std");
-                        if std_dir.is_dir() {
-                            idx.scan_dir(&std_dir);
-                        }
-                    }
                 }
             }
+        }
         if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
             let std_dir = PathBuf::from(manifest).join("std");
             if std_dir.is_dir() {

@@ -206,16 +206,17 @@ impl<'ctx> Compiler<'ctx> {
                                 })
                         });
                         if let Some(name) = &struct_name
-                            && let Some(st) = self.module.get_struct_type(name) {
-                                let field_idx = self.field_index(name, &field.as_str());
-                                let gep = b!(self.bld.build_struct_gep(
-                                    st,
-                                    obj_val.into_pointer_value(),
-                                    field_idx,
-                                    &field.as_str()
-                                ));
-                                b!(self.bld.build_store(gep, v));
-                            }
+                            && let Some(st) = self.module.get_struct_type(name)
+                        {
+                            let field_idx = self.field_index(name, &field.as_str());
+                            let gep = b!(self.bld.build_struct_gep(
+                                st,
+                                obj_val.into_pointer_value(),
+                                field_idx,
+                                &field.as_str()
+                            ));
+                            b!(self.bld.build_store(gep, v));
+                        }
 
                         return Ok(Some(obj_val));
                     } else if obj_val.is_struct_value() {
@@ -240,16 +241,17 @@ impl<'ctx> Compiler<'ctx> {
                     if let Some((alloca, ty)) = self.var_allocs.get(var_name).cloned() {
                         let struct_name = self.struct_name_from_type(&ty);
                         if let Some(name) = &struct_name
-                            && let Some(st) = self.module.get_struct_type(name) {
-                                let field_idx = self.field_index(name, &field.as_str());
-                                let gep = b!(self.bld.build_struct_gep(
-                                    st,
-                                    alloca,
-                                    field_idx,
-                                    &field.as_str()
-                                ));
-                                b!(self.bld.build_store(gep, v));
-                            }
+                            && let Some(st) = self.module.get_struct_type(name)
+                        {
+                            let field_idx = self.field_index(name, &field.as_str());
+                            let gep = b!(self.bld.build_struct_gep(
+                                st,
+                                alloca,
+                                field_idx,
+                                &field.as_str()
+                            ));
+                            b!(self.bld.build_store(gep, v));
+                        }
                     }
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }

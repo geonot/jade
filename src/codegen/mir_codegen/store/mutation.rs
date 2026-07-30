@@ -135,7 +135,14 @@ impl<'ctx> Compiler<'ctx> {
                 })
                 .collect();
             self.eval_store_filter_pred(
-                rec_ptr, st, field_idx, &field_ty, primary_op, primary_pred, filter_val, &extras,
+                rec_ptr,
+                st,
+                field_idx,
+                &field_ty,
+                primary_op,
+                primary_pred,
+                filter_val,
+                &extras,
             )?
         };
         b!(self
@@ -215,10 +222,7 @@ impl<'ctx> Compiler<'ctx> {
         self.wal_write_update(store_name, rec_ptr, rec_size)?;
 
         {
-            let cur = b!(self
-                .bld
-                .build_load(i64t, upd_count_ptr, "set.updcnt.v"))
-            .into_int_value();
+            let cur = b!(self.bld.build_load(i64t, upd_count_ptr, "set.updcnt.v")).into_int_value();
             let inc = b!(self
                 .bld
                 .build_int_add(cur, i64t.const_int(1, false), "set.updcnt.inc"));
@@ -265,10 +269,8 @@ impl<'ctx> Compiler<'ctx> {
 
         self.store_unlock(fp)?;
         if statusful {
-            let updated = b!(self
-                .bld
-                .build_load(i64t, upd_count_ptr, "set.updated"))
-            .into_int_value();
+            let updated =
+                b!(self.bld.build_load(i64t, upd_count_ptr, "set.updated")).into_int_value();
             let none = b!(self.bld.build_int_compare(
                 inkwell::IntPredicate::EQ,
                 updated,
@@ -504,7 +506,8 @@ impl<'ctx> Compiler<'ctx> {
         encoded_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let (store_name, field_name, op, primary_pred, extra_specs) = Self::parse_encoded_filter(encoded_name)?;
+        let (store_name, field_name, op, primary_pred, extra_specs) =
+            Self::parse_encoded_filter(encoded_name)?;
         if args.is_empty() {
             return Ok(self.ctx.bool_type().const_int(0, false).into());
         }
@@ -598,8 +601,16 @@ impl<'ctx> Compiler<'ctx> {
                 (*lop, fi, ft, *eop, *epred, ev)
             })
             .collect();
-        let cond =
-            self.eval_store_filter_pred(rec_ptr, st, field_idx, &field_ty, op, primary_pred, filter_val, &extras)?;
+        let cond = self.eval_store_filter_pred(
+            rec_ptr,
+            st,
+            field_idx,
+            &field_ty,
+            op,
+            primary_pred,
+            filter_val,
+            &extras,
+        )?;
         b!(self.bld.build_conditional_branch(cond, match_bb, next_bb));
 
         self.bld.position_at_end(match_bb);

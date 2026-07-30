@@ -222,17 +222,13 @@ impl Type {
     ///   - Composites recurse into their components.
     pub fn canonical(&self) -> Type {
         match self {
-            Type::Struct(n, _) if n.as_str() == "String" || n.as_str() == "string" => {
-                Type::String
-            }
+            Type::Struct(n, _) if n.as_str() == "String" || n.as_str() == "string" => Type::String,
             Type::Alias(_, inner) => inner.canonical(),
             Type::Array(inner, n) => Type::Array(Box::new(inner.canonical()), *n),
             Type::Vec(inner) => Type::Vec(Box::new(inner.canonical())),
             Type::Map(k, v) => Type::Map(Box::new(k.canonical()), Box::new(v.canonical())),
             Type::Tuple(ts) => Type::Tuple(ts.iter().map(|t| t.canonical()).collect()),
-            Type::Struct(n, args) => {
-                Type::Struct(*n, args.iter().map(|t| t.canonical()).collect())
-            }
+            Type::Struct(n, args) => Type::Struct(*n, args.iter().map(|t| t.canonical()).collect()),
             Type::Fn(ps, r) => Type::Fn(
                 ps.iter().map(|t| t.canonical()).collect(),
                 Box::new(r.canonical()),

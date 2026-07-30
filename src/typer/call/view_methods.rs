@@ -13,85 +13,30 @@ impl Typer {
         span: crate::ast::Span,
     ) -> Result<Option<hir::Expr>, String> {
         if let ast::Expr::Ident(name, _) = obj
-            && let Some((source, clauses)) = self.view_defs.get(&name.as_str()).cloned() {
-                let schema = self
-                    .store_schemas
-                    .get(&source.as_str())
-                    .ok_or_else(|| format!("view '{name}' references unknown store '{source}'"))?
-                    .clone();
+            && let Some((source, clauses)) = self.view_defs.get(&name.as_str()).cloned()
+        {
+            let schema = self
+                .store_schemas
+                .get(&source.as_str())
+                .ok_or_else(|| format!("view '{name}' references unknown store '{source}'"))?
+                .clone();
 
-                let where_exprs: Vec<(ast::Expr, ast::Span)> = clauses
-                    .iter()
-                    .filter_map(|c| {
-                        if let ast::QueryClause::Where(expr, cspan) = c {
-                            Some((expr.clone(), *cspan))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                if where_exprs.is_empty() {
-                    match method {
-                        "count" => {
-                            return Ok(Some(hir::Expr {
-                                kind: hir::ExprKind::StoreCount(source),
-                                ty: Type::I64,
-                                span,
-                            }));
-                        }
-                        "all" => {
-                            let struct_name = Symbol::intern(&format!("__store_{source}"));
-                            return Ok(Some(hir::Expr {
-                                kind: hir::ExprKind::StoreAll(source),
-                                ty: Type::Ptr(Box::new(Type::Struct(struct_name, vec![]))),
-                                span,
-                            }));
-                        }
-                        "select" | "first" => {
-                            if args.is_empty() {
-                                return Err(format!("view .{method}() requires a filter argument"));
-                            }
-                            let filter_expr = &args[0];
-                            let ast_filter = Self::expr_to_store_filter(filter_expr, span)?;
-                            let hfilter =
-                                self.lower_store_filter(&ast_filter, &schema, &source.as_str())?;
-                            let struct_name = Symbol::intern(&format!("__store_{source}"));
-                            return Ok(Some(hir::Expr {
-                                kind: hir::ExprKind::StoreQuery(source, Box::new(hfilter)),
-                                ty: Type::Struct(struct_name, vec![]),
-                                span,
-                            }));
-                        }
-                        "exists" => {
-                            if args.is_empty() {
-                                return Err("view .exists() requires a filter argument".into());
-                            }
-                            let filter_expr = &args[0];
-                            let ast_filter = Self::expr_to_store_filter(filter_expr, span)?;
-                            let hfilter =
-                                self.lower_store_filter(&ast_filter, &schema, &source.as_str())?;
-                            return Ok(Some(hir::Expr {
-                                kind: hir::ExprKind::StoreExists(source, Box::new(hfilter)),
-                                ty: Type::Bool,
-                                span,
-                            }));
-                        }
-                        _ => {
-                            return Err(format!(
-                                "views support .count(), .all(), .select(), .first(), .exists(); got .{method}()"
-                            ));
-                        }
+            let where_exprs: Vec<(ast::Expr, ast::Span)> = clauses
+                .iter()
+                .filter_map(|c| {
+                    if let ast::QueryClause::Where(expr, cspan) = c {
+                        Some((expr.clone(), *cspan))
+                    } else {
+                        None
                     }
-                }
+                })
+                .collect();
 
-                let ast_filter = Self::merge_where_clauses(&where_exprs)?;
-                let hfilter = self.lower_store_filter(&ast_filter, &schema, &source.as_str())?;
-
+            if where_exprs.is_empty() {
                 match method {
                     "count" => {
                         return Ok(Some(hir::Expr {
-                            kind: hir::ExprKind::ViewCount(source, Box::new(hfilter)),
+                            kind: hir::ExprKind::StoreCount(source),
                             ty: Type::I64,
                             span,
                         }));
@@ -99,12 +44,19 @@ impl Typer {
                     "all" => {
                         let struct_name = Symbol::intern(&format!("__store_{source}"));
                         return Ok(Some(hir::Expr {
-                            kind: hir::ExprKind::ViewAll(source, Box::new(hfilter)),
+                            kind: hir::ExprKind::StoreAll(source),
                             ty: Type::Ptr(Box::new(Type::Struct(struct_name, vec![]))),
                             span,
                         }));
                     }
                     "select" | "first" => {
+                        if args.is_empty() {
+                            return Err(format!("view .{method}() requires a filter argument"));
+                        }
+                        let filter_expr = &args[0];
+                        let ast_filter = Self::expr_to_store_filter(filter_expr, span)?;
+                        let hfilter =
+                            self.lower_store_filter(&ast_filter, &schema, &source.as_str())?;
                         let struct_name = Symbol::intern(&format!("__store_{source}"));
                         return Ok(Some(hir::Expr {
                             kind: hir::ExprKind::StoreQuery(source, Box::new(hfilter)),
@@ -113,6 +65,13 @@ impl Typer {
                         }));
                     }
                     "exists" => {
+                        if args.is_empty() {
+                            return Err("view .exists() requires a filter argument".into());
+                        }
+                        let filter_expr = &args[0];
+                        let ast_filter = Self::expr_to_store_filter(filter_expr, span)?;
+                        let hfilter =
+                            self.lower_store_filter(&ast_filter, &schema, &source.as_str())?;
                         return Ok(Some(hir::Expr {
                             kind: hir::ExprKind::StoreExists(source, Box::new(hfilter)),
                             ty: Type::Bool,
@@ -126,6 +85,48 @@ impl Typer {
                     }
                 }
             }
+
+            let ast_filter = Self::merge_where_clauses(&where_exprs)?;
+            let hfilter = self.lower_store_filter(&ast_filter, &schema, &source.as_str())?;
+
+            match method {
+                "count" => {
+                    return Ok(Some(hir::Expr {
+                        kind: hir::ExprKind::ViewCount(source, Box::new(hfilter)),
+                        ty: Type::I64,
+                        span,
+                    }));
+                }
+                "all" => {
+                    let struct_name = Symbol::intern(&format!("__store_{source}"));
+                    return Ok(Some(hir::Expr {
+                        kind: hir::ExprKind::ViewAll(source, Box::new(hfilter)),
+                        ty: Type::Ptr(Box::new(Type::Struct(struct_name, vec![]))),
+                        span,
+                    }));
+                }
+                "select" | "first" => {
+                    let struct_name = Symbol::intern(&format!("__store_{source}"));
+                    return Ok(Some(hir::Expr {
+                        kind: hir::ExprKind::StoreQuery(source, Box::new(hfilter)),
+                        ty: Type::Struct(struct_name, vec![]),
+                        span,
+                    }));
+                }
+                "exists" => {
+                    return Ok(Some(hir::Expr {
+                        kind: hir::ExprKind::StoreExists(source, Box::new(hfilter)),
+                        ty: Type::Bool,
+                        span,
+                    }));
+                }
+                _ => {
+                    return Err(format!(
+                        "views support .count(), .all(), .select(), .first(), .exists(); got .{method}()"
+                    ));
+                }
+            }
+        }
 
         Ok(None)
     }

@@ -32,10 +32,7 @@ impl<'ctx> Compiler<'ctx> {
         let original_params = original_type.get_param_types();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let mut wrapper_params: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()];
-        wrapper_params.extend(
-            original_params
-                .iter().copied(),
-        );
+        wrapper_params.extend(original_params.iter().copied());
         let wrapper_ft = match original_type.get_return_type() {
             Some(ret) => ret.fn_type(&wrapper_params, false),
             None => self.ctx.void_type().fn_type(&wrapper_params, false),
@@ -77,5 +74,4 @@ impl<'ctx> Compiler<'ctx> {
         }
         wrapper_fv.as_global_value().as_pointer_value()
     }
-
 }

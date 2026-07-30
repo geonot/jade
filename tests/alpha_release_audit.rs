@@ -290,7 +290,6 @@ fn alpha_audit_native_stack_overflow_diagnostic() {
     );
 }
 
-
 fn run_expect_trap(src: &str, needle: &str) {
     let (dir, out) = compile_source(src, &[]);
     let output = Command::new(&out)
@@ -471,11 +470,7 @@ fn alpha_audit_keyword_method_names_after_dot() {
 
     let dir = tempfile::tempdir().unwrap();
     let jinn = dir.path().join("test.jn");
-    std::fs::write(
-        &jinn,
-        "*main\n    ch is channel of i64\n    ch.close()\n",
-    )
-    .unwrap();
+    std::fs::write(&jinn, "*main\n    ch is channel of i64\n    ch.close()\n").unwrap();
     let output = Command::new(jinnc())
         .arg(&jinn)
         .arg("-o")

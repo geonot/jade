@@ -113,8 +113,7 @@ fn walk_expr(e: &ast::Expr, f: &mut impl FnMut(&ast::Expr)) {
         | ast::Expr::Yield(e, _)
         | ast::Expr::ChannelRecv(e, _)
         | ast::Expr::Field(e, _, _) => f(e),
-        ast::Expr::Method(recv, _, args, _)
-        | ast::Expr::Send(recv, _, args, _) => {
+        ast::Expr::Method(recv, _, args, _) | ast::Expr::Send(recv, _, args, _) => {
             f(recv);
             for a in args {
                 f(a);
@@ -204,9 +203,7 @@ fn primitive_caps_block(block: &[ast::Stmt], out: &mut CapSet) {
     }
 }
 
-pub(in crate::typer) fn analyze(
-    fns: &[&ast::Fn],
-) -> Result<CapAnalysis, String> {
+pub(in crate::typer) fn analyze(fns: &[&ast::Fn]) -> Result<CapAnalysis, String> {
     let call_graph = scc::build_call_graph(fns);
     let sccs = scc::tarjan_scc(&call_graph);
 

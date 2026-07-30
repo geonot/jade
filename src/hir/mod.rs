@@ -30,8 +30,7 @@ impl DefId {
     pub const BUILTIN: DefId = DefId(0);
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Ownership {
     #[default]
     Owned,
@@ -42,7 +41,6 @@ pub enum Ownership {
 
     Raw,
 }
-
 
 impl Ownership {
     pub fn is_borrow(self) -> bool {
@@ -373,7 +371,13 @@ pub enum Stmt {
     StoreSave(Symbol, Span),
     StoreCompact(Symbol, Span),
     Transaction(Block, Span),
-    Together(Option<Symbol>, Block, Vec<Symbol>, Option<TogetherHandler>, Span),
+    Together(
+        Option<Symbol>,
+        Block,
+        Vec<Symbol>,
+        Option<TogetherHandler>,
+        Span,
+    ),
     ChannelClose(Expr, Span),
     Stop(Expr, Span),
     ScopeCancel(Symbol, Span),

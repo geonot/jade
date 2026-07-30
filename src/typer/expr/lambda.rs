@@ -78,9 +78,10 @@ impl Typer {
         self.pop_scope();
 
         if let Some(hir::Stmt::Expr(e)) = hbody.last()
-            && e.ty != Type::Void {
-                let _ = self.infer_ctx.unify(&ret_ty, &e.ty);
-            }
+            && e.ty != Type::Void
+        {
+            let _ = self.infer_ctx.unify(&ret_ty, &e.ty);
+        }
 
         let final_ret = if ret.is_some() || expected_ret.is_some() {
             ret_ty

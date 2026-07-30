@@ -141,8 +141,7 @@ impl Typer {
         sd: &ast::StoreDef,
     ) -> Result<hir::StoreDef, String> {
         let id = self.fresh_id();
-        let is_simple = sd
-            .decorators.contains(&ast::StoreDecorator::Simple);
+        let is_simple = sd.decorators.contains(&ast::StoreDecorator::Simple);
         let dummy_span = ast::Span::dummy();
 
         let mut fields: Vec<hir::StoreField> = Vec::new();
@@ -165,8 +164,7 @@ impl Typer {
             fields.push(builtin("deleted", Type::I64));
         }
 
-        let is_versioned = sd
-            .decorators.contains(&ast::StoreDecorator::Versioned);
+        let is_versioned = sd.decorators.contains(&ast::StoreDecorator::Versioned);
         if is_versioned {
             fields.push(hir::StoreField {
                 name: "__version".into(),
@@ -222,10 +220,7 @@ impl Typer {
         &mut self,
         ib: &ast::ImplBlock,
     ) -> Result<hir::TraitImpl, String> {
-        let is_static_trait = ib
-            .trait_name
-            .map(|t| t.as_str() == "From")
-            .unwrap_or(false);
+        let is_static_trait = ib.trait_name.map(|t| t.as_str() == "From").unwrap_or(false);
         let mut hir_methods = Vec::new();
         for m in &ib.methods {
             let takes_self = m.params.first().map(|p| p.name == "self").unwrap_or(false);
@@ -382,12 +377,7 @@ impl Typer {
         let inferred_err: Vec<Symbol> = self.current_fn_error_types.iter().cloned().collect();
         self.last_inferred_errors = self.current_fn_error_types.clone();
         if !declared_err_names.is_empty() {
-            self.check_error_soundness(
-                f.name,
-                &inferred_err,
-                &declared_err_names,
-                f.span,
-            )?;
+            self.check_error_soundness(f.name, &inferred_err, &declared_err_names, f.span)?;
         }
 
         let mut error_types: Vec<Type> = Vec::new();
@@ -422,10 +412,8 @@ impl Typer {
 
         let final_body = if f.is_generator && f.name != "main" {
             let body_span = f.span;
-            let captures: Vec<(Symbol, Type)> = params
-                .iter()
-                .map(|p| (p.name, p.ty.clone()))
-                .collect();
+            let captures: Vec<(Symbol, Type)> =
+                params.iter().map(|p| (p.name, p.ty.clone())).collect();
             let gen_expr = hir::Expr {
                 kind: hir::ExprKind::GeneratorCreate(
                     id,
@@ -642,7 +630,9 @@ impl Typer {
 
         if m.ret.is_none() {
             if let Some(tail_ty) = self.hir_tail_type(&body) {
-                let r = self.infer_ctx.unify_at(&ret, &tail_ty, m.span, "static method tail");
+                let r = self
+                    .infer_ctx
+                    .unify_at(&ret, &tail_ty, m.span, "static method tail");
                 self.collect_unify_error(r);
             } else {
                 let _ = self.infer_ctx.unify(&ret, &Type::Void);

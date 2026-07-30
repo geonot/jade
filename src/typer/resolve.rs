@@ -152,18 +152,12 @@ impl Typer {
             );
         }
         self.fns.insert(f.name, (id, ptys, ret));
-        self.fn_param_names.insert(
-            f.name,
-            f.params.iter().map(|p| p.name.as_str()).collect(),
-        );
-        self.fn_defaults.insert(
-            f.name,
-            f.params.iter().map(|p| p.default.clone()).collect(),
-        );
-        self.fn_param_access.insert(
-            f.name,
-            f.params.iter().map(|p| p.access_mod).collect(),
-        );
+        self.fn_param_names
+            .insert(f.name, f.params.iter().map(|p| p.name.as_str()).collect());
+        self.fn_defaults
+            .insert(f.name, f.params.iter().map(|p| p.default.clone()).collect());
+        self.fn_param_access
+            .insert(f.name, f.params.iter().map(|p| p.access_mod).collect());
     }
 
     pub(crate) fn declare_method_sig_by_ptr(&mut self, type_name: &str, m: &ast::Fn) {
@@ -197,8 +191,7 @@ impl Typer {
         let ret = m.ret.clone().unwrap_or_else(|| self.infer_ctx.fresh_var());
         let id = self.fresh_id();
         self.fns.insert(method_name, (id, ptys, ret));
-        let accs: Vec<Option<ast::AccessMod>> =
-            m.params.iter().map(|p| p.access_mod).collect();
+        let accs: Vec<Option<ast::AccessMod>> = m.params.iter().map(|p| p.access_mod).collect();
         self.fn_param_access.insert(method_name, accs);
         self.fn_param_names.insert(
             method_name,
@@ -262,8 +255,7 @@ impl Typer {
         let mut variants = Vec::new();
         for (tag, v) in ed.variants.iter().enumerate() {
             let ftys: Vec<Type> = v.fields.iter().map(|f| f.ty.clone()).collect();
-            self.variant_tags
-                .insert(v.name, (ed.name, tag as u32));
+            self.variant_tags.insert(v.name, (ed.name, tag as u32));
             variants.push((v.name, ftys));
         }
         self.enums.insert(ed.name, variants);
@@ -276,16 +268,14 @@ impl Typer {
         let ptys: Vec<Type> = ef.params.iter().map(|(_, t)| t.clone()).collect();
         let id = self.fresh_id();
 
-        self.externs
-            .insert(ef.name, (id, ptys, ef.ret.clone()));
+        self.externs.insert(ef.name, (id, ptys, ef.ret.clone()));
     }
 
     pub(crate) fn declare_err_def_sig(&mut self, ed: &ast::ErrDef) {
         let mut variants = Vec::new();
         for (tag, v) in ed.variants.iter().enumerate() {
             let ftys = v.fields.clone();
-            self.variant_tags
-                .insert(v.name, (ed.name, tag as u32));
+            self.variant_tags.insert(v.name, (ed.name, tag as u32));
             variants.push((v.name, ftys));
         }
         self.enums.insert(ed.name, variants);
@@ -345,10 +335,8 @@ impl Typer {
         self.traits.insert(td.name, sigs);
         self.trait_defs.insert(td.name, td.clone());
         if !td.assoc_types.is_empty() {
-            self.trait_assoc_types.insert(
-                td.name,
-                td.assoc_types.iter().map(|s| s.as_str()).collect(),
-            );
+            self.trait_assoc_types
+                .insert(td.name, td.assoc_types.iter().map(|s| s.as_str()).collect());
         }
     }
 
@@ -404,11 +392,8 @@ impl Typer {
                 }
             }
 
-            let synthesized = self.synthesize_default_methods(
-                *trait_name,
-                ib.type_name,
-                &impl_method_names,
-            );
+            let synthesized =
+                self.synthesize_default_methods(*trait_name, ib.type_name, &impl_method_names);
             if !synthesized.is_empty() {
                 self.trait_default_methods
                     .insert((ib.type_name, *trait_name), synthesized);
@@ -420,22 +405,17 @@ impl Typer {
                 .push(trait_name.as_str());
 
             if !ib.trait_type_args.is_empty() {
-                self.trait_impl_type_args.insert(
-                    (ib.type_name, *trait_name),
-                    ib.trait_type_args.clone(),
-                );
+                self.trait_impl_type_args
+                    .insert((ib.type_name, *trait_name), ib.trait_type_args.clone());
             }
 
             for (assoc_name, assoc_ty) in &ib.assoc_type_bindings {
                 self.assoc_types
                     .insert((ib.type_name, *assoc_name), assoc_ty.clone());
             }
-        } 
+        }
 
-        let is_static_trait = ib
-            .trait_name
-            .map(|t| t.as_str() == "From")
-            .unwrap_or(false);
+        let is_static_trait = ib.trait_name.map(|t| t.as_str() == "From").unwrap_or(false);
         for m in &ib.methods {
             self.methods
                 .entry(ib.type_name)
@@ -450,8 +430,10 @@ impl Typer {
         }
 
         if let Some(trait_name) = ib.trait_name
-            && let Some(synthesized) =
-                self.trait_default_methods.get(&(ib.type_name, trait_name)).cloned()
+            && let Some(synthesized) = self
+                .trait_default_methods
+                .get(&(ib.type_name, trait_name))
+                .cloned()
         {
             for m in &synthesized {
                 self.methods
@@ -527,15 +509,17 @@ impl Typer {
         for fname in &fn_keys {
             for sname in &struct_names {
                 let prefix = format!("{}_", sname);
-                if fname.starts_with(&prefix) && fname.len() > prefix.len()
+                if fname.starts_with(&prefix)
+                    && fname.len() > prefix.len()
                     && let Some((_, ptys, _)) = self.fns.get(fname)
-                        && let Some(Type::TypeVar(_)) = ptys.first()
-                            && let Some(ast_fn) = self.inferable_fns.get(fname)
-                                && ast_fn.params.first().is_some_and(|p| p.name == "self") {
-                                    let self_ty = Type::Struct(*sname, vec![]);
-                                    let tv = ptys[0].clone();
-                                    let _ = self.infer_ctx.unify(&tv, &self_ty);
-                                }
+                    && let Some(Type::TypeVar(_)) = ptys.first()
+                    && let Some(ast_fn) = self.inferable_fns.get(fname)
+                    && ast_fn.params.first().is_some_and(|p| p.name == "self")
+                {
+                    let self_ty = Type::Struct(*sname, vec![]);
+                    let tv = ptys[0].clone();
+                    let _ = self.infer_ctx.unify(&tv, &self_ty);
+                }
             }
         }
 

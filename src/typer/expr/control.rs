@@ -31,12 +31,13 @@ impl Typer {
                     _ => Type::Void,
                 };
                 if let Some(ref els) = hi.els
-                    && let Some(hir::Stmt::Expr(e)) = els.last() {
-                        let r =
-                            self.infer_ctx
-                                .unify_at(&ty, &e.ty, i.span, "if-expression branches");
-                        self.collect_unify_error(r);
-                    }
+                    && let Some(hir::Stmt::Expr(e)) = els.last()
+                {
+                    let r = self
+                        .infer_ctx
+                        .unify_at(&ty, &e.ty, i.span, "if-expression branches");
+                    self.collect_unify_error(r);
+                }
                 for (_, branch) in &hi.elifs {
                     if let Some(hir::Stmt::Expr(e)) = branch.last() {
                         let r = self.infer_ctx.unify_at(&ty, &e.ty, i.span, "elif branch");

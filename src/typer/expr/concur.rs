@@ -87,11 +87,12 @@ impl Typer {
                 let ty = hi.ty.clone();
 
                 if let Some(ref ret) = self.current_fn_ret_ty
-                    && let Type::Generator(inner_ty) = ret {
-                        let _ =
-                            self.infer_ctx
-                                .unify_at(inner_ty, &ty, *span, "yield expression type");
-                    }
+                    && let Type::Generator(inner_ty) = ret
+                {
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(inner_ty, &ty, *span, "yield expression type");
+                }
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Yield(Box::new(hi)),
                     ty,

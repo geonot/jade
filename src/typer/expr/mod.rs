@@ -420,12 +420,13 @@ impl Typer {
         }
 
         if let (Type::Array(arr_elem, len), Type::Vec(vec_elem)) = (&et, &tt)
-            && **arr_elem == **vec_elem {
-                let elem_ty = (**arr_elem).clone();
-                let len = *len as u64;
-                expr.ty = et.clone();
-                return Self::make_coerce(expr, CoercionKind::ArrayToVec { elem_ty, len }, tt);
-            }
+            && **arr_elem == **vec_elem
+        {
+            let elem_ty = (**arr_elem).clone();
+            let len = *len as u64;
+            expr.ty = et.clone();
+            return Self::make_coerce(expr, CoercionKind::ArrayToVec { elem_ty, len }, tt);
+        }
         expr
     }
 }

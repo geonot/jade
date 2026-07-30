@@ -12,7 +12,8 @@ impl Typer {
                 if !f.error_types.is_empty() || f.name.as_str() == "main" {
                     continue;
                 }
-                let mut errs: std::collections::BTreeSet<Symbol> = std::collections::BTreeSet::new();
+                let mut errs: std::collections::BTreeSet<Symbol> =
+                    std::collections::BTreeSet::new();
                 for s in &f.body {
                     self.scan_stmt_for_errors(s, &mut errs);
                 }
@@ -73,18 +74,16 @@ impl Typer {
             _ => return None,
         };
         match args.get(1) {
-            Some(Type::Enum(en)) | Some(Type::Struct(en, _)) if self.err_enum_names.contains(en) => {
+            Some(Type::Enum(en)) | Some(Type::Struct(en, _))
+                if self.err_enum_names.contains(en) =>
+            {
                 Some(*en)
             }
             _ => None,
         }
     }
 
-    fn scan_expr_for_errors(
-        &self,
-        e: &ast::Expr,
-        errs: &mut std::collections::BTreeSet<Symbol>,
-    ) {
+    fn scan_expr_for_errors(&self, e: &ast::Expr, errs: &mut std::collections::BTreeSet<Symbol>) {
         if let ast::Expr::Call(callee, args, _) = e {
             if let ast::Expr::Ident(name, _) = callee.as_ref()
                 && let Some(en) = self.err_enum_of_callee(*name)
@@ -98,11 +97,7 @@ impl Typer {
         }
     }
 
-    fn scan_stmt_for_errors(
-        &self,
-        s: &ast::Stmt,
-        errs: &mut std::collections::BTreeSet<Symbol>,
-    ) {
+    fn scan_stmt_for_errors(&self, s: &ast::Stmt, errs: &mut std::collections::BTreeSet<Symbol>) {
         match s {
             ast::Stmt::ErrReturn(e, _) => {
                 if let Some(en) = self.err_enum_of_variant_expr(e) {

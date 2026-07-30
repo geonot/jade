@@ -28,11 +28,8 @@ impl<'ctx> Compiler<'ctx> {
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
                     let l = self.val(lhs);
                     let r = self.val(rhs);
-                    let ptypes: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> = fv
-                        .get_type()
-                        .get_param_types()
-                        .into_iter()
-                        .collect();
+                    let ptypes: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
+                        fv.get_type().get_param_types().into_iter().collect();
                     let coerced = self.coerce_call_args(&[l, r], &[lhs, rhs], &ptypes);
                     let csv = b!(self
                         .bld
@@ -200,11 +197,8 @@ impl<'ctx> Compiler<'ctx> {
                 if let Some((fv, _, _)) = self.fns.get(&fn_name).cloned() {
                     let l = self.val(lhs);
                     let r = self.val(rhs);
-                    let ptypes: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> = fv
-                        .get_type()
-                        .get_param_types()
-                        .into_iter()
-                        .collect();
+                    let ptypes: Vec<inkwell::types::BasicMetadataTypeEnum<'ctx>> =
+                        fv.get_type().get_param_types().into_iter().collect();
                     let coerced = self.coerce_call_args(&[l, r], &[lhs, rhs], &ptypes);
                     let csv = b!(self.bld.build_call(fv, &coerced, "cmp.call"));
                     let result = self.call_result(csv);
@@ -404,40 +398,39 @@ impl<'ctx> Compiler<'ctx> {
                     }
 
                     if let Some(idx_str) = field.strip_prefix('_')
-                        && let Ok(idx) = idx_str.parse::<usize>() {
-                            let st = sv.get_type();
-                            let alloca = self.entry_alloca(st.into(), "enum.tmp");
-                            b!(self.bld.build_store(alloca, sv));
-                            let payload_gep =
-                                b!(self.bld.build_struct_gep(st, alloca, 1, "payload"));
-                            let res_llvm = self.llvm_ty(result_ty);
-                            let byte_offset = self.compute_enum_payload_offset(name, idx);
-                            let field_ptr = if byte_offset == 0 {
-                                payload_gep
-                            } else {
-                                let offset_val = self.ctx.i64_type().const_int(byte_offset, false);
-                                unsafe {
-                                    b!(self.bld.build_gep(
-                                        self.ctx.i8_type(),
-                                        payload_gep,
-                                        &[offset_val],
-                                        "payload.field"
-                                    ))
-                                }
-                            };
-
-                            let is_rec = Compiler::is_recursive_field(result_ty, name);
-                            if is_rec {
-                                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-                                let heap_ptr =
-                                    b!(self.bld.build_load(ptr_ty, field_ptr, "box.ptr"))
-                                        .into_pointer_value();
-                                let val = b!(self.bld.build_load(res_llvm, heap_ptr, field));
-                                return Ok(val);
+                        && let Ok(idx) = idx_str.parse::<usize>()
+                    {
+                        let st = sv.get_type();
+                        let alloca = self.entry_alloca(st.into(), "enum.tmp");
+                        b!(self.bld.build_store(alloca, sv));
+                        let payload_gep = b!(self.bld.build_struct_gep(st, alloca, 1, "payload"));
+                        let res_llvm = self.llvm_ty(result_ty);
+                        let byte_offset = self.compute_enum_payload_offset(name, idx);
+                        let field_ptr = if byte_offset == 0 {
+                            payload_gep
+                        } else {
+                            let offset_val = self.ctx.i64_type().const_int(byte_offset, false);
+                            unsafe {
+                                b!(self.bld.build_gep(
+                                    self.ctx.i8_type(),
+                                    payload_gep,
+                                    &[offset_val],
+                                    "payload.field"
+                                ))
                             }
-                            let val = b!(self.bld.build_load(res_llvm, field_ptr, field));
+                        };
+
+                        let is_rec = Compiler::is_recursive_field(result_ty, name);
+                        if is_rec {
+                            let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                            let heap_ptr = b!(self.bld.build_load(ptr_ty, field_ptr, "box.ptr"))
+                                .into_pointer_value();
+                            let val = b!(self.bld.build_load(res_llvm, heap_ptr, field));
                             return Ok(val);
                         }
+                        let val = b!(self.bld.build_load(res_llvm, field_ptr, field));
+                        return Ok(val);
+                    }
                 }
                 let idx = self.field_index(name, field);
                 let val = b!(self.bld.build_extract_value(sv, idx, field));
@@ -448,17 +441,16 @@ impl<'ctx> Compiler<'ctx> {
                 "FieldGet on unknown struct type for field `{field}`"
             ))
         } else if obj_val.is_pointer_value() {
-            if matches!(field, "length")
-                && matches!(&obj_ty, Some(Type::Vec(_))) {
-                    let header_ptr = obj_val.into_pointer_value();
-                    let header_ty = self.vec_header_type();
-                    let i64t = self.ctx.i64_type();
-                    let len_gep = b!(self
-                        .bld
-                        .build_struct_gep(header_ty, header_ptr, 1, "vl.lenp"));
-                    let len = b!(self.bld.build_load(i64t, len_gep, "vl.len"));
-                    return Ok(len);
-                }
+            if matches!(field, "length") && matches!(&obj_ty, Some(Type::Vec(_))) {
+                let header_ptr = obj_val.into_pointer_value();
+                let header_ty = self.vec_header_type();
+                let i64t = self.ctx.i64_type();
+                let len_gep = b!(self
+                    .bld
+                    .build_struct_gep(header_ty, header_ptr, 1, "vl.lenp"));
+                let len = b!(self.bld.build_load(i64t, len_gep, "vl.len"));
+                return Ok(len);
+            }
 
             let ptr = obj_val.into_pointer_value();
             let res_llvm = self.llvm_ty(result_ty);
@@ -497,72 +489,68 @@ impl<'ctx> Compiler<'ctx> {
                         })
                 });
             if let Some(name) = &struct_name
-                && let Some(st) = self.module.get_struct_type(&name.as_str()) {
-                    if self.enums.contains_key(name) {
-                        if field == "__tag" {
-                            let tag_gep = b!(self.bld.build_struct_gep(st, ptr, 0, "tag"));
-                            let i32t = self.ctx.i32_type();
-                            let i64t = self.ctx.i64_type();
-                            let tag_i32 = b!(self.bld.build_load(i32t, tag_gep, "tag"));
-                            let val = b!(self.bld.build_int_z_extend(
-                                tag_i32.into_int_value(),
-                                i64t,
-                                "tag.ext"
-                            ));
-                            return Ok(val.into());
-                        }
-                        if let Some(idx_str) = field.strip_prefix('_')
-                            && let Ok(idx) = idx_str.parse::<usize>() {
-                                let payload_gep =
-                                    b!(self.bld.build_struct_gep(st, ptr, 1, "payload"));
-                                let byte_offset =
-                                    self.compute_enum_payload_offset(&name.as_str(), idx);
-                                let field_ptr = if byte_offset == 0 {
-                                    payload_gep
-                                } else {
-                                    let offset_val =
-                                        self.ctx.i64_type().const_int(byte_offset, false);
-                                    unsafe {
-                                        b!(self.bld.build_gep(
-                                            self.ctx.i8_type(),
-                                            payload_gep,
-                                            &[offset_val],
-                                            "payload.field"
-                                        ))
-                                    }
-                                };
-                                let is_rec =
-                                    Compiler::is_recursive_field(result_ty, &name.as_str());
-                                if is_rec {
-                                    let ptr_ty =
-                                        self.ctx.ptr_type(inkwell::AddressSpace::default());
-                                    let heap_ptr =
-                                        b!(self.bld.build_load(ptr_ty, field_ptr, "box.ptr"))
-                                            .into_pointer_value();
-                                    let val = b!(self.bld.build_load(res_llvm, heap_ptr, field));
-                                    return Ok(val);
-                                }
-                                let val = b!(self.bld.build_load(res_llvm, field_ptr, field));
-                                return Ok(val);
-                            }
+                && let Some(st) = self.module.get_struct_type(&name.as_str())
+            {
+                if self.enums.contains_key(name) {
+                    if field == "__tag" {
+                        let tag_gep = b!(self.bld.build_struct_gep(st, ptr, 0, "tag"));
+                        let i32t = self.ctx.i32_type();
+                        let i64t = self.ctx.i64_type();
+                        let tag_i32 = b!(self.bld.build_load(i32t, tag_gep, "tag"));
+                        let val = b!(self.bld.build_int_z_extend(
+                            tag_i32.into_int_value(),
+                            i64t,
+                            "tag.ext"
+                        ));
+                        return Ok(val.into());
                     }
-                    let field_idx = self.field_index(&name.as_str(), field);
-                    let gep = b!(self.bld.build_struct_gep(st, ptr, field_idx, field));
-                    return Ok(b!(self.bld.build_load(res_llvm, gep, field)));
+                    if let Some(idx_str) = field.strip_prefix('_')
+                        && let Ok(idx) = idx_str.parse::<usize>()
+                    {
+                        let payload_gep = b!(self.bld.build_struct_gep(st, ptr, 1, "payload"));
+                        let byte_offset = self.compute_enum_payload_offset(&name.as_str(), idx);
+                        let field_ptr = if byte_offset == 0 {
+                            payload_gep
+                        } else {
+                            let offset_val = self.ctx.i64_type().const_int(byte_offset, false);
+                            unsafe {
+                                b!(self.bld.build_gep(
+                                    self.ctx.i8_type(),
+                                    payload_gep,
+                                    &[offset_val],
+                                    "payload.field"
+                                ))
+                            }
+                        };
+                        let is_rec = Compiler::is_recursive_field(result_ty, &name.as_str());
+                        if is_rec {
+                            let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                            let heap_ptr = b!(self.bld.build_load(ptr_ty, field_ptr, "box.ptr"))
+                                .into_pointer_value();
+                            let val = b!(self.bld.build_load(res_llvm, heap_ptr, field));
+                            return Ok(val);
+                        }
+                        let val = b!(self.bld.build_load(res_llvm, field_ptr, field));
+                        return Ok(val);
+                    }
                 }
+                let field_idx = self.field_index(&name.as_str(), field);
+                let gep = b!(self.bld.build_struct_gep(st, ptr, field_idx, field));
+                return Ok(b!(self.bld.build_load(res_llvm, gep, field)));
+            }
 
             Err(format!(
                 "FieldGet on pointer to unknown struct type for field `{field}`"
             ))
         } else if obj_val.is_array_value() {
             if let Some(idx_str) = field.strip_prefix('_')
-                && let Ok(idx) = idx_str.parse::<u32>() {
-                    let val =
-                        b!(self
-                            .bld
-                            .build_extract_value(obj_val.into_array_value(), idx, field));
-                    return Ok(val);
-                }
+                && let Ok(idx) = idx_str.parse::<u32>()
+            {
+                let val = b!(self
+                    .bld
+                    .build_extract_value(obj_val.into_array_value(), idx, field));
+                return Ok(val);
+            }
             Ok(obj_val)
         } else {
             Ok(obj_val)
@@ -587,46 +575,46 @@ impl<'ctx> Compiler<'ctx> {
         let header_size = i64t.const_int(24, false);
 
         if elems.is_empty()
-            && let Some(reused) = self.try_consume_vec_slot() {
-                let is_null = b!(self.bld.build_is_null(reused, "vec.reuse.null"));
-                let fv = self.current_fn();
-                let malloc_bb = self.ctx.append_basic_block(fv, "vec.reuse.malloc");
-                let cont_bb = self.ctx.append_basic_block(fv, "vec.reuse.cont");
-                let entry_bb = self
-                    .bld
-                    .get_insert_block()
-                    .expect("builder has no insert block");
-                b!(self
-                    .bld
-                    .build_conditional_branch(is_null, malloc_bb, cont_bb));
-                self.bld.position_at_end(malloc_bb);
-                let m = b!(self
-                    .bld
-                    .build_call(malloc, &[header_size.into()], "vec.hdr"))
-                .try_as_basic_value()
-                .basic()
-                .expect("ICE: call returned void")
-                .into_pointer_value();
+            && let Some(reused) = self.try_consume_vec_slot()
+        {
+            let is_null = b!(self.bld.build_is_null(reused, "vec.reuse.null"));
+            let fv = self.current_fn();
+            let malloc_bb = self.ctx.append_basic_block(fv, "vec.reuse.malloc");
+            let cont_bb = self.ctx.append_basic_block(fv, "vec.reuse.cont");
+            let entry_bb = self
+                .bld
+                .get_insert_block()
+                .expect("builder has no insert block");
+            b!(self
+                .bld
+                .build_conditional_branch(is_null, malloc_bb, cont_bb));
+            self.bld.position_at_end(malloc_bb);
+            let m = b!(self
+                .bld
+                .build_call(malloc, &[header_size.into()], "vec.hdr"))
+            .try_as_basic_value()
+            .basic()
+            .expect("ICE: call returned void")
+            .into_pointer_value();
 
-                let dgep = b!(self.bld.build_struct_gep(header_ty, m, 0, "vec.hdr.d0"));
-                b!(self.bld.build_store(dgep, ptr_ty.const_null()));
-                let lgep = b!(self.bld.build_struct_gep(header_ty, m, 1, "vec.hdr.l0"));
-                b!(self.bld.build_store(lgep, i64t.const_int(0, false)));
-                let cgep = b!(self.bld.build_struct_gep(header_ty, m, 2, "vec.hdr.c0"));
-                b!(self.bld.build_store(cgep, i64t.const_int(0, false)));
-                b!(self.bld.build_unconditional_branch(cont_bb));
-                self.bld.position_at_end(cont_bb);
-                let phi = b!(self.bld.build_phi(ptr_ty, "vec.hdr.phi"));
-                phi.add_incoming(&[(&m, malloc_bb), (&reused, entry_bb)]);
-                let header_ptr = phi.as_basic_value().into_pointer_value();
+            let dgep = b!(self.bld.build_struct_gep(header_ty, m, 0, "vec.hdr.d0"));
+            b!(self.bld.build_store(dgep, ptr_ty.const_null()));
+            let lgep = b!(self.bld.build_struct_gep(header_ty, m, 1, "vec.hdr.l0"));
+            b!(self.bld.build_store(lgep, i64t.const_int(0, false)));
+            let cgep = b!(self.bld.build_struct_gep(header_ty, m, 2, "vec.hdr.c0"));
+            b!(self.bld.build_store(cgep, i64t.const_int(0, false)));
+            b!(self.bld.build_unconditional_branch(cont_bb));
+            self.bld.position_at_end(cont_bb);
+            let phi = b!(self.bld.build_phi(ptr_ty, "vec.hdr.phi"));
+            phi.add_incoming(&[(&m, malloc_bb), (&reused, entry_bb)]);
+            let header_ptr = phi.as_basic_value().into_pointer_value();
 
-                let len_gep =
-                    b!(self
-                        .bld
-                        .build_struct_gep(header_ty, header_ptr, 1, "vec.len.reset"));
-                b!(self.bld.build_store(len_gep, i64t.const_int(0, false)));
-                return Ok(header_ptr.into());
-            }
+            let len_gep = b!(self
+                .bld
+                .build_struct_gep(header_ty, header_ptr, 1, "vec.len.reset"));
+            b!(self.bld.build_store(len_gep, i64t.const_int(0, false)));
+            return Ok(header_ptr.into());
+        }
 
         let header_ptr = b!(self
             .bld

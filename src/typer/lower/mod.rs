@@ -42,8 +42,7 @@ impl Typer {
             match d {
                 ast::Decl::Fn(f) if self.is_generic_fn(f) => {
                     if !f.type_bounds.is_empty() {
-                        self.generic_bounds
-                            .insert(f.name, f.type_bounds.clone());
+                        self.generic_bounds.insert(f.name, f.type_bounds.clone());
                     }
                     self.generic_fns
                         .insert(f.name, self.normalize_generic_fn(f));
@@ -62,25 +61,23 @@ impl Typer {
                     self.declare_fn_sig(f);
 
                     if has_untyped_params
-                        && let Some((_, ptys, ret)) = self.fns.get(&f.name).cloned() {
-                            let mut ftvs = std::collections::HashSet::new();
-                            for pt in &ptys {
-                                pt.free_type_vars(&mut ftvs);
-                            }
-                            ret.free_type_vars(&mut ftvs);
-                            let roots: Vec<u32> = ftvs.into_iter().collect();
-                            self.infer_ctx.mark_quantified(&roots);
+                        && let Some((_, ptys, ret)) = self.fns.get(&f.name).cloned()
+                    {
+                        let mut ftvs = std::collections::HashSet::new();
+                        for pt in &ptys {
+                            pt.free_type_vars(&mut ftvs);
                         }
+                        ret.free_type_vars(&mut ftvs);
+                        let roots: Vec<u32> = ftvs.into_iter().collect();
+                        self.infer_ctx.mark_quantified(&roots);
+                    }
                 }
                 ast::Decl::Type(td) if !td.type_params.is_empty() => {
                     self.generic_types.insert(td.name, td.clone());
                 }
                 ast::Decl::Type(td) => {
                     for m in &td.methods {
-                        self.methods
-                            .entry(td.name)
-                            .or_default()
-                            .push(m.clone());
+                        self.methods.entry(td.name).or_default().push(m.clone());
                     }
                     self.declare_type_def(td);
                     for m in &td.methods {
@@ -115,8 +112,7 @@ impl Typer {
                     self.declare_actor_def(ad);
                 }
                 ast::Decl::Store(sd) => {
-                    let is_simple = sd
-                        .decorators.contains(&ast::StoreDecorator::Simple);
+                    let is_simple = sd.decorators.contains(&ast::StoreDecorator::Simple);
                     let mut fields: Vec<(Symbol, Type)> = Vec::new();
 
                     if !is_simple {
@@ -152,8 +148,7 @@ impl Typer {
                     );
                     self.store_schemas.insert(sd.name, fields);
                     self.store_relations.insert(sd.name, relations);
-                    self.store_decorators
-                        .insert(sd.name, sd.decorators.clone());
+                    self.store_decorators.insert(sd.name, sd.decorators.clone());
                 }
                 ast::Decl::Trait(td) => {
                     self.declare_trait_def(td);
@@ -304,7 +299,8 @@ impl Typer {
         if self.debug_types {
             tracing::debug!(target: "jinnc::type", "running bidirectional parameter inference");
         }
-        self.infer_param_types(prog);        if self.debug_types {
+        self.infer_param_types(prog);
+        if self.debug_types {
             tracing::debug!(target: "jinnc::type", "lowering declarations to HIR");
         }
         let mut hir_fns = Vec::new();
@@ -324,9 +320,11 @@ impl Typer {
             .iter()
             .filter_map(|d| {
                 if let ast::Decl::Fn(f) = d
-                    && !self.is_generic_fn(f) && !(self.test_mode && f.name == "main") {
-                        return Some(f);
-                    }
+                    && !self.is_generic_fn(f)
+                    && !(self.test_mode && f.name == "main")
+                {
+                    return Some(f);
+                }
                 None
             })
             .collect();
@@ -361,12 +359,7 @@ impl Typer {
                                 e
                             }
                         })?;
-                        scc_fns.push((
-                            f.ret.is_none() && f.name != "main",
-                            f.span,
-                            hfn,
-                            f.name,
-                        ));
+                        scc_fns.push((f.ret.is_none() && f.name != "main", f.span, hfn, f.name));
                         scc_fn_names.push(f.name);
                         lowered_fn_names.insert(*name);
                     }
@@ -382,11 +375,7 @@ impl Typer {
                     }
                 }
                 for (_, _, hfn, fname) in scc_fns {
-                    if self
-                        .fn_schemes
-                        .get(&fname)
-                        .is_some_and(|s| !s.0.is_empty())
-                    {
+                    if self.fn_schemes.get(&fname).is_some_and(|s| !s.0.is_empty()) {
                         continue;
                     }
                     hir_fns.push(hfn);

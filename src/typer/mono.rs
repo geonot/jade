@@ -630,9 +630,10 @@ impl Typer {
         if let Some(tys) = arg_tys {
             for (i, field) in variant.fields.iter().enumerate() {
                 if let Type::Param(ref p) = field.ty
-                    && let Some(ty) = tys.get(i) {
-                        type_map.insert(*p, ty.clone());
-                    }
+                    && let Some(ty) = tys.get(i)
+                {
+                    type_map.insert(*p, ty.clone());
+                }
             }
         }
         for tp in &edef.type_params {
@@ -652,10 +653,7 @@ impl Typer {
             Type::Enum(n) => n.as_str(),
             Type::Vec(inner) => format!("Vec_{}", Self::type_name_for_bound_check(inner)),
             Type::Fn(params, ret) => {
-                let ps: Vec<_> = params
-                    .iter()
-                    .map(Self::type_name_for_bound_check)
-                    .collect();
+                let ps: Vec<_> = params.iter().map(Self::type_name_for_bound_check).collect();
                 format!(
                     "Fn_{}_{}",
                     ps.join("_"),
@@ -669,9 +667,10 @@ impl Typer {
 
     fn type_satisfies_trait(&self, type_name: &str, trait_name: &str) -> bool {
         if let Some(impls) = self.trait_impls.get(type_name)
-            && impls.contains(&trait_name.to_string()) {
-                return true;
-            }
+            && impls.contains(&trait_name.to_string())
+        {
+            return true;
+        }
         Self::builtin_trait_satisfied(type_name, trait_name)
     }
 

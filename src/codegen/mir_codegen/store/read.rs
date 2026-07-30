@@ -184,7 +184,14 @@ impl<'ctx> Compiler<'ctx> {
             })
             .collect();
         let cond = self.eval_store_filter_pred(
-            raw_ptr, rec_st, field_idx, &field_ty, op, primary_pred, filter_val, &extras,
+            raw_ptr,
+            rec_st,
+            field_idx,
+            &field_ty,
+            op,
+            primary_pred,
+            filter_val,
+            &extras,
         )?;
         b!(self.bld.build_conditional_branch(cond, copy_bb, next_bb));
 

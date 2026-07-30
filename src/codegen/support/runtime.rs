@@ -282,13 +282,14 @@ impl<'ctx> Compiler<'ctx> {
                 && let Ok(data_gep) =
                     self.bld
                         .build_struct_gep(header_ty, cur, 0, "perceus.drain.dgep")
-                    && let Ok(data_v) = self.bld.build_load(ptr_ty, data_gep, "perceus.drain.d") {
-                        let _ = self.bld.build_call(
-                            free_fn,
-                            &[data_v.into_pointer_value().into()],
-                            "perceus.drain.free.buf",
-                        );
-                    }
+                && let Ok(data_v) = self.bld.build_load(ptr_ty, data_gep, "perceus.drain.d")
+            {
+                let _ = self.bld.build_call(
+                    free_fn,
+                    &[data_v.into_pointer_value().into()],
+                    "perceus.drain.free.buf",
+                );
+            }
             let _ = self
                 .bld
                 .build_call(free_fn, &[cur.into()], "perceus.drain.free");
@@ -325,13 +326,14 @@ impl<'ctx> Compiler<'ctx> {
                 if let Ok(data_gep) =
                     self.bld
                         .build_struct_gep(header_ty, prev_ptr, 0, "vec.save.dgep")
-                    && let Ok(data_v) = self.bld.build_load(ptr_ty, data_gep, "vec.save.d") {
-                        let _ = self.bld.build_call(
-                            free_fn,
-                            &[data_v.into_pointer_value().into()],
-                            "vec.save.free.buf",
-                        );
-                    }
+                    && let Ok(data_v) = self.bld.build_load(ptr_ty, data_gep, "vec.save.d")
+                {
+                    let _ = self.bld.build_call(
+                        free_fn,
+                        &[data_v.into_pointer_value().into()],
+                        "vec.save.free.buf",
+                    );
+                }
                 let _ = self
                     .bld
                     .build_call(free_fn, &[prev_ptr.into()], "vec.save.free.hdr");
@@ -459,10 +461,7 @@ impl<'ctx> Compiler<'ctx> {
             scan_block(&f.body)
         }
         prog.fns.iter().any(scan_fn)
-            || prog
-                .types
-                .iter()
-                .any(|td| td.methods.iter().any(scan_fn))
+            || prog.types.iter().any(|td| td.methods.iter().any(scan_fn))
             || prog
                 .trait_impls
                 .iter()
@@ -532,7 +531,10 @@ impl<'ctx> Compiler<'ctx> {
 
         decl!("jinn_scope_create", ptr.fn_type(&[], false));
         decl!("jinn_scope_current", ptr.fn_type(&[], false));
-        decl!("jinn_scope_register_child", void.fn_type(&[ptr.into()], false));
+        decl!(
+            "jinn_scope_register_child",
+            void.fn_type(&[ptr.into()], false)
+        );
         decl!(
             "jinn_scope_add_actor",
             void.fn_type(&[ptr.into(), ptr.into()], false)
@@ -540,10 +542,22 @@ impl<'ctx> Compiler<'ctx> {
         decl!("jinn_scope_child_done", void.fn_type(&[ptr.into()], false));
         decl!("jinn_scope_cancel", void.fn_type(&[ptr.into()], false));
         decl!("jinn_scope_check_cancelled", i32t.fn_type(&[], false));
-        decl!("jinn_scope_record_error", void.fn_type(&[ptr.into(), i64t.into()], false));
-        decl!("jinn_scope_record_current_error", void.fn_type(&[i64t.into()], false));
-        decl!("jinn_scope_take_error", i32t.fn_type(&[ptr.into(), ptr.into()], false));
-        decl!("jinn_scope_join_take_error", i64t.fn_type(&[ptr.into()], false));
+        decl!(
+            "jinn_scope_record_error",
+            void.fn_type(&[ptr.into(), i64t.into()], false)
+        );
+        decl!(
+            "jinn_scope_record_current_error",
+            void.fn_type(&[i64t.into()], false)
+        );
+        decl!(
+            "jinn_scope_take_error",
+            i32t.fn_type(&[ptr.into(), ptr.into()], false)
+        );
+        decl!(
+            "jinn_scope_join_take_error",
+            i64t.fn_type(&[ptr.into()], false)
+        );
         decl!("jinn_scope_stop_actors", void.fn_type(&[ptr.into()], false));
         decl!("jinn_scope_join", void.fn_type(&[ptr.into()], false));
         decl!(

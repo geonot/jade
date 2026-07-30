@@ -264,7 +264,16 @@ impl<'ctx> Compiler<'ctx> {
                 let eval = self.value_map[&args[ei + 1]];
                 extras.push((*lop, eidx, ety, *eop, *epred, eval));
             }
-            self.eval_store_filter_pred(rec_ptr, st, field_idx, &field_ty, op, primary_pred, filter_val, &extras)?
+            self.eval_store_filter_pred(
+                rec_ptr,
+                st,
+                field_idx,
+                &field_ty,
+                op,
+                primary_pred,
+                filter_val,
+                &extras,
+            )?
         };
         b!(self.bld.build_conditional_branch(cond, match_bb, next_bb));
 
@@ -295,7 +304,9 @@ impl<'ctx> Compiler<'ctx> {
         Ok(result)
     }
 
-    pub(in crate::codegen) fn parse_store_pred(s: &str) -> (crate::ast::BinOp, crate::ast::FilterPred) {
+    pub(in crate::codegen) fn parse_store_pred(
+        s: &str,
+    ) -> (crate::ast::BinOp, crate::ast::FilterPred) {
         use crate::ast::{BinOp, FilterPred};
         match s {
             "eq" => (BinOp::Eq, FilterPred::Cmp),
@@ -584,8 +595,16 @@ impl<'ctx> Compiler<'ctx> {
                 (*lop, eidx, ety, *eop, *epred, eval)
             })
             .collect();
-        let cond =
-            self.eval_store_filter_pred(rec_ptr, st, field_idx, &field_ty, op, primary_pred, filter_val, &extras)?;
+        let cond = self.eval_store_filter_pred(
+            rec_ptr,
+            st,
+            field_idx,
+            &field_ty,
+            op,
+            primary_pred,
+            filter_val,
+            &extras,
+        )?;
         b!(self.bld.build_conditional_branch(cond, match_bb, next_bb));
 
         self.bld.position_at_end(match_bb);

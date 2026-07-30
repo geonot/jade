@@ -194,10 +194,9 @@ impl Parser {
             let mut names = Vec::new();
             while !self.check(Token::RBracket) && !self.eof() {
                 names.push(self.ident()?);
-                if !self.check(Token::RBracket)
-                    && self.check(Token::Comma) {
-                        self.advance();
-                    }
+                if !self.check(Token::RBracket) && self.check(Token::Comma) {
+                    self.advance();
+                }
             }
             self.expect(Token::RBracket)?;
             Some(names)

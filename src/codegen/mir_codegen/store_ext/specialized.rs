@@ -3,7 +3,13 @@ use super::*;
 impl<'ctx> Compiler<'ctx> {
     fn kv_value_is_f64(&self, store_name: &str) -> bool {
         const BUILTIN: &[&str] = &[
-            "sid", "uuid", "hash", "created", "updated", "deleted", "__version",
+            "sid",
+            "uuid",
+            "hash",
+            "created",
+            "updated",
+            "deleted",
+            "__version",
         ];
         self.store_defs
             .get(store_name)
@@ -33,11 +39,9 @@ impl<'ctx> Compiler<'ctx> {
         let key_len = self.string_len(key_val)?;
 
         let stored = if self.kv_value_is_f64(store_name) {
-            b!(self.bld.build_bit_cast(
-                val_val.into_float_value(),
-                self.ctx.i64_type(),
-                "kv.f2i"
-            ))
+            b!(self
+                .bld
+                .build_bit_cast(val_val.into_float_value(), self.ctx.i64_type(), "kv.f2i"))
         } else {
             val_val
         };
@@ -74,7 +78,9 @@ impl<'ctx> Compiler<'ctx> {
             )))
             .into_int_value();
         if self.kv_value_is_f64(store_name) {
-            let f = b!(self.bld.build_bit_cast(result, self.ctx.f64_type(), "kv.i2f"));
+            let f = b!(self
+                .bld
+                .build_bit_cast(result, self.ctx.f64_type(), "kv.i2f"));
             return Ok(f);
         }
         Ok(result.into())
@@ -228,11 +234,17 @@ impl<'ctx> Compiler<'ctx> {
                 "g.vec"
             )))
             .into_pointer_value();
-        let gv_d = b!(self.bld.build_struct_gep(header_ty, result_vec, 0, "g.vec.d"));
+        let gv_d = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_vec, 0, "g.vec.d"));
         b!(self.bld.build_store(gv_d, ptr_ty.const_null()));
-        let gv_l = b!(self.bld.build_struct_gep(header_ty, result_vec, 1, "g.vec.l"));
+        let gv_l = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_vec, 1, "g.vec.l"));
         b!(self.bld.build_store(gv_l, i64t.const_int(0, false)));
-        let gv_c = b!(self.bld.build_struct_gep(header_ty, result_vec, 2, "g.vec.c"));
+        let gv_c = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_vec, 2, "g.vec.c"));
         b!(self.bld.build_store(gv_c, i64t.const_int(0, false)));
 
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
@@ -240,7 +252,8 @@ impl<'ctx> Compiler<'ctx> {
             fseek_fn,
             &[
                 fp.into(),
-                i64t.const_int(crate::codegen::stores::HEADER_SIZE, false).into(),
+                i64t.const_int(crate::codegen::stores::HEADER_SIZE, false)
+                    .into(),
                 i32t.const_int(0, false).into(),
             ],
             ""
@@ -275,7 +288,8 @@ impl<'ctx> Compiler<'ctx> {
             fseek_fn,
             &[
                 fp.into(),
-                i64t.const_int(crate::codegen::stores::HEADER_SIZE, false).into(),
+                i64t.const_int(crate::codegen::stores::HEADER_SIZE, false)
+                    .into(),
                 i32t.const_int(0, false).into(),
             ],
             ""
@@ -394,9 +408,10 @@ impl<'ctx> Compiler<'ctx> {
             .build_int_add(cur_count, i64t.const_int(1, false), "g.mc1"));
         b!(self.bld.build_store(match_count, new_count));
 
-        let neighbor_gep = b!(self
-            .bld
-            .build_struct_gep(rec_st, rec_buf, neighbor_idx as u32, "g.np"));
+        let neighbor_gep =
+            b!(self
+                .bld
+                .build_struct_gep(rec_st, rec_buf, neighbor_idx as u32, "g.np"));
         let neighbor_val =
             match crate::codegen::store_filter::normalize_store_field_type(&neighbor_ty) {
                 crate::types::Type::String => self.read_string_from_fixed_buf(neighbor_gep)?,
@@ -578,14 +593,9 @@ impl<'ctx> Compiler<'ctx> {
         let d_val = b!(self.bld.build_load(f64t, d_gep, "vn.dval"));
 
         let undef = tuple_ty.get_undef();
-        let with0 = b!(self
-            .bld
-            .build_insert_value(undef, i_val, 0, "vn.ins0"))
-        .into_struct_value();
-        let tuple_val = b!(self
-            .bld
-            .build_insert_value(with0, d_val, 1, "vn.ins1"))
-        .into_struct_value();
+        let with0 = b!(self.bld.build_insert_value(undef, i_val, 0, "vn.ins0")).into_struct_value();
+        let tuple_val =
+            b!(self.bld.build_insert_value(with0, d_val, 1, "vn.ins1")).into_struct_value();
         self.vec_push_raw(result_vec, tuple_val.into(), tuple_ty.into(), tuple_size)?;
 
         let next_idx = b!(self
@@ -790,11 +800,17 @@ impl<'ctx> Compiler<'ctx> {
                 "fts.vec"
             )))
             .into_pointer_value();
-        let fv_d = b!(self.bld.build_struct_gep(header_ty, result_vec, 0, "fts.vec.d"));
+        let fv_d = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_vec, 0, "fts.vec.d"));
         b!(self.bld.build_store(fv_d, out_ids));
-        let fv_l = b!(self.bld.build_struct_gep(header_ty, result_vec, 1, "fts.vec.l"));
+        let fv_l = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_vec, 1, "fts.vec.l"));
         b!(self.bld.build_store(fv_l, found));
-        let fv_c = b!(self.bld.build_struct_gep(header_ty, result_vec, 2, "fts.vec.c"));
+        let fv_c = b!(self
+            .bld
+            .build_struct_gep(header_ty, result_vec, 2, "fts.vec.c"));
         b!(self.bld.build_store(fv_c, count));
         let _ = ptr_ty;
 

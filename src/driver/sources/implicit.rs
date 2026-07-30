@@ -96,14 +96,16 @@ pub(in crate::driver) fn resolve_implicit_imports(
                 continue;
             }
             if let Decl::Fn(ref f) = d
-                && f.name == "main" && f.params.is_empty() {
-                    for stmt in &f.body {
-                        if let Stmt::Bind(b) = stmt {
-                            importable.push(Decl::Const(b.name, b.value.clone(), b.span));
-                        }
+                && f.name == "main"
+                && f.params.is_empty()
+            {
+                for stmt in &f.body {
+                    if let Stmt::Bind(b) = stmt {
+                        importable.push(Decl::Const(b.name, b.value.clone(), b.span));
                     }
-                    continue;
                 }
+                continue;
+            }
             importable.push(d);
         }
         for pd in flatten_module(importable, &mod_name) {
@@ -433,7 +435,9 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
                     defs.insert(*name);
                 }
             }
-            Stmt::ChannelClose(e, _) | Stmt::Stop(e, _) | Stmt::Join(e, _) => walk_expr(e, modules, defs),
+            Stmt::ChannelClose(e, _) | Stmt::Stop(e, _) | Stmt::Join(e, _) => {
+                walk_expr(e, modules, defs)
+            }
             Stmt::StoreInsert(_, exprs, _) => {
                 for field in exprs {
                     walk_expr(&field.value, modules, defs);
@@ -448,9 +452,7 @@ fn collect_qualified_module_refs(prog: &Program) -> HashSet<Symbol> {
             Stmt::Together(_, body, _, _)
             | Stmt::Transaction(body, _)
             | Stmt::SimBlock(body, _)
-            | Stmt::Defer(body, _) => {
-                walk_block(body, modules, defs)
-            }
+            | Stmt::Defer(body, _) => walk_block(body, modules, defs),
             Stmt::SimFor(f, _) => {
                 walk_expr(&f.iter, modules, defs);
                 let mut local_defs = defs.clone();

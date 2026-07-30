@@ -1,5 +1,5 @@
 use super::*;
-use crate::pkgid::{PkgId, ScopePath, PackageRecord, compute_semantic_hash};
+use crate::pkgid::{PackageRecord, PkgId, ScopePath, compute_semantic_hash};
 
 pub(in crate::driver) fn load_packages(base_dir: &std::path::Path) -> HashMap<Symbol, PathBuf> {
     load_packages_with_ids(base_dir).0
@@ -55,7 +55,11 @@ fn build_pkg_id_map(path_map: &HashMap<Symbol, PathBuf>) -> HashMap<Symbol, PkgI
         let hash = compute_semantic_hash(
             name,
             ScopePath::root(),
-            &SemVer { major: 0, minor: 0, patch: 0 },
+            &SemVer {
+                major: 0,
+                minor: 0,
+                patch: 0,
+            },
             &src,
             &[],
         );
@@ -72,7 +76,11 @@ fn build_pkg_id_map(path_map: &HashMap<Symbol, PathBuf>) -> HashMap<Symbol, PkgI
         let pkg_id = PkgId::intern(PackageRecord {
             name,
             owner_scope: ScopePath::root(),
-            version: SemVer { major: 0, minor: 0, patch: 0 },
+            version: SemVer {
+                major: 0,
+                minor: 0,
+                patch: 0,
+            },
             semantic_hash: hash,
             visibility,
         });

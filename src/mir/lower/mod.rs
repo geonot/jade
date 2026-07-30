@@ -55,11 +55,7 @@ pub fn lower_program(prog: &hir::Program) -> Program {
         .iter()
         .map(|td| TypeDef {
             name: td.name,
-            fields: td
-                .fields
-                .iter()
-                .map(|f| (f.name, f.ty.clone()))
-                .collect(),
+            fields: td.fields.iter().map(|f| (f.name, f.ty.clone())).collect(),
         })
         .collect();
     let externs = prog
@@ -226,10 +222,16 @@ fn finish_body(
             let mut visited = std::collections::HashSet::new();
             let mut stack = vec![entry];
             while let Some(b) = stack.pop() {
-                if !visited.insert(b) { continue; }
-                if b == cur { break; }
+                if !visited.insert(b) {
+                    continue;
+                }
+                if b == cur {
+                    break;
+                }
                 for s in lowerer.func.block(b).terminator.successors() {
-                    if !visited.contains(&s) { stack.push(s); }
+                    if !visited.contains(&s) {
+                        stack.push(s);
+                    }
                 }
             }
             visited.contains(&cur)
@@ -254,14 +256,12 @@ fn finish_body(
                     .find(|i| i.dest == Some(last))
                     .map(|i| i.ty.clone())
                     .unwrap_or(Type::Void);
-                let ret_val = if is_main
-                    && matches!(ret_ty, Type::I32)
-                    && !matches!(last_ty, Type::I32)
-                {
-                    lowerer.emit(InstKind::IntConst(0), Type::I32, span)
-                } else {
-                    last
-                };
+                let ret_val =
+                    if is_main && matches!(ret_ty, Type::I32) && !matches!(last_ty, Type::I32) {
+                        lowerer.emit(InstKind::IntConst(0), Type::I32, span)
+                    } else {
+                        last
+                    };
                 lowerer.set_terminator(Terminator::Return(Some(ret_val)));
             }
         }
@@ -303,9 +303,7 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
         ty: state_ptr_ty.clone(),
     });
     let entry = lowerer.func.entry;
-    lowerer
-        .var_types
-        .insert(self_name, state_ptr_ty.clone());
+    lowerer.var_types.insert(self_name, state_ptr_ty.clone());
     lowerer
         .current_def
         .entry(entry)
@@ -345,7 +343,13 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
         map,
     });
 
-    finish_body(&mut lowerer, &handler.body, &Type::Void, handler.span, false);
+    finish_body(
+        &mut lowerer,
+        &handler.body,
+        &Type::Void,
+        handler.span,
+        false,
+    );
 
     let mut result = vec![lowerer.func];
     result.append(&mut lowerer.lambda_fns);

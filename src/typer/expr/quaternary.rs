@@ -271,12 +271,9 @@ impl Typer {
             (Type::Void, _) => bad_branch.ty.clone(),
             (_, Type::Void) => ok_branch.ty.clone(),
             _ => {
-                let _ = self.infer_ctx.unify_at(
-                    &ok_branch.ty,
-                    &bad_branch.ty,
-                    span,
-                    "quaternary arms",
-                );
+                let _ =
+                    self.infer_ctx
+                        .unify_at(&ok_branch.ty, &bad_branch.ty, span, "quaternary arms");
                 ok_branch.ty.clone()
             }
         };
@@ -451,11 +448,7 @@ impl Typer {
         }
     }
 
-    fn propagate_none_value(
-        &mut self,
-        ok_ty: &Type,
-        span: ast::Span,
-    ) -> Result<hir::Expr, String> {
+    fn propagate_none_value(&mut self, ok_ty: &Type, span: ast::Span) -> Result<hir::Expr, String> {
         let ret_ty = self.current_fn_ret_ty.clone().unwrap_or(Type::Void);
         let resolved = self.infer_ctx.shallow_resolve(&ret_ty);
         let opt_enum = match &resolved {
@@ -496,5 +489,3 @@ impl Typer {
         })
     }
 }
-
-

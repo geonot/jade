@@ -161,9 +161,7 @@ impl Typer {
                     pred: additional.pred,
                 },
             ));
-            filter
-                .extra
-                .extend(additional.extra.into_iter());
+            filter.extra.extend(additional.extra.into_iter());
         }
         Ok(filter)
     }

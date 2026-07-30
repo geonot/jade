@@ -19,9 +19,10 @@ impl Typer {
         let mut type_map = HashMap::new();
         for (i, p) in generic_fn.params.iter().enumerate() {
             if let Some(Type::Param(tp)) = &p.ty
-                && i < arg_tys.len() {
-                    type_map.insert(*tp, arg_tys[i].clone());
-                }
+                && i < arg_tys.len()
+            {
+                type_map.insert(*tp, arg_tys[i].clone());
+            }
         }
         for tp in &generic_fn.type_params {
             type_map.entry(*tp).or_insert(Type::I64);

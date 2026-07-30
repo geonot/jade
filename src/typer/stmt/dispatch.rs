@@ -51,12 +51,9 @@ impl Typer {
         } else if let (Some(tgt), Some(src)) = (target_err_enum, src_enum) {
             let from_name: Symbol = format!("{tgt}_from_{src}").into();
             if let Some((id, _ptys, fret)) = self.fns.get(&from_name).cloned() {
-                let ur = self.infer_ctx.unify_at(
-                    &fret,
-                    &err_payload,
-                    span,
-                    "From conversion result",
-                );
+                let ur =
+                    self.infer_ctx
+                        .unify_at(&fret, &err_payload, span, "From conversion result");
                 self.collect_unify_error(ur);
                 hir::Expr {
                     kind: hir::ExprKind::Call(id, from_name, vec![hv]),
@@ -98,7 +95,11 @@ impl Typer {
             ty: result_ty.clone(),
             span,
         };
-        Ok(Some(hir::Stmt::ErrReturn(err_ctor, result_ty.clone(), span)))
+        Ok(Some(hir::Stmt::ErrReturn(
+            err_ctor,
+            result_ty.clone(),
+            span,
+        )))
     }
 
     pub(in crate::typer) fn propagate_err_value(
@@ -106,10 +107,7 @@ impl Typer {
         err_val: hir::Expr,
         span: ast::Span,
     ) -> Result<hir::Stmt, String> {
-        let ret_ty = self
-            .current_fn_ret_ty
-            .clone()
-            .unwrap_or(Type::Void);
+        let ret_ty = self.current_fn_ret_ty.clone().unwrap_or(Type::Void);
         let resolved_ret = self.infer_ctx.resolve(&ret_ty);
         let result_enum: Option<Symbol> = match &resolved_ret {
             Type::Enum(rn) if self.is_result_enum(*rn) => Some(*rn),
@@ -167,9 +165,9 @@ impl Typer {
         } else if let (Some(tgt), Some(src)) = (target_err_enum, src_enum) {
             let from_name: Symbol = format!("{tgt}_from_{src}").into();
             if let Some((id, _ptys, fret)) = self.fns.get(&from_name).cloned() {
-                let ur = self
-                    .infer_ctx
-                    .unify_at(&fret, &err_payload, span, "From conversion result");
+                let ur =
+                    self.infer_ctx
+                        .unify_at(&fret, &err_payload, span, "From conversion result");
                 self.collect_unify_error(ur);
                 hir::Expr {
                     kind: hir::ExprKind::Call(id, from_name, vec![err_val]),
@@ -249,8 +247,7 @@ impl Typer {
                         .unwrap_or(false);
                     if is_field {
                         let self_expr = ast::Expr::Ident("self".into(), b.span);
-                        let field_expr =
-                            ast::Expr::Field(Box::new(self_expr), b.name, b.span);
+                        let field_expr = ast::Expr::Field(Box::new(self_expr), b.name, b.span);
                         let ht = self.lower_expr(&field_expr)?;
                         let hv = self.lower_expr_expected(&b.value, Some(&ht.ty))?;
                         let r = self
@@ -263,12 +260,13 @@ impl Typer {
                 }
 
                 if self.find_var(&b.name.as_str()).is_none()
-                    && let Some((_gexpr, _gspan)) = self.globals.get(&b.name).cloned() {
-                        let init_hir = self.lower_expr(&_gexpr)?;
-                        let global_ty = init_hir.ty.clone();
-                        let hv = self.lower_expr_expected(&b.value, Some(&global_ty))?;
-                        return Ok(hir::Stmt::GlobalStore(b.name, hv, b.span));
-                    }
+                    && let Some((_gexpr, _gspan)) = self.globals.get(&b.name).cloned()
+                {
+                    let init_hir = self.lower_expr(&_gexpr)?;
+                    let global_ty = init_hir.ty.clone();
+                    let hv = self.lower_expr_expected(&b.value, Some(&global_ty))?;
+                    return Ok(hir::Stmt::GlobalStore(b.name, hv, b.span));
+                }
                 let value = if let Some(ref ann) = b.ty {
                     let ann_ty = self.resolve_ty(ann.clone());
                     self.lower_expr_expected(&b.value, Some(&ann_ty))?
@@ -278,10 +276,8 @@ impl Typer {
                     self.lower_expr(&b.value)?
                 };
                 let value = if b.ty.is_none()
-                    && !matches!(
-                        &b.value,
-                        ast::Expr::Quaternary(..) | ast::Expr::Ternary(..)
-                    ) {
+                    && !matches!(&b.value, ast::Expr::Quaternary(..) | ast::Expr::Ternary(..))
+                {
                     match self.implicit_propagate(value.clone())? {
                         Some(v) => v,
                         None => value,
@@ -443,61 +439,59 @@ impl Typer {
 
             ast::Stmt::Assign(target, value, span) => {
                 if let ast::Expr::Field(obj, field, fspan) = target
-                    && let ast::Expr::Ident(row_name, _) = obj.as_ref() {
-                        let probe = self.lower_expr(obj.as_ref())?;
-                        let probe_ty = self.infer_ctx.shallow_resolve(&probe.ty);
-                        if let Type::Row(store) = &probe_ty {
-                            let store = *store;
-                            let schema = self
-                                .store_schemas
-                                .get(&store)
-                                .ok_or_else(|| format!("unknown store '{store}'"))?
-                                .clone();
-                            let (_, fty) = schema
-                                .iter()
-                                .find(|(n, _)| n == field)
-                                .ok_or_else(|| {
-                                    format!(
-                                        "{}: store '{}' has no field '{}'",
-                                        fspan.loc(),
-                                        store,
-                                        field,
-                                    )
-                                })?
-                                .clone();
-                            let hv = self.lower_expr_expected(value, Some(&fty))?;
-                            let r = self.infer_ctx.unify_at(
-                                &fty,
-                                &hv.ty,
-                                *span,
-                                "row field assignment",
-                            );
-                            self.collect_unify_error(r);
-                            let hv = self.maybe_coerce_to(hv, &fty);
+                    && let ast::Expr::Ident(row_name, _) = obj.as_ref()
+                {
+                    let probe = self.lower_expr(obj.as_ref())?;
+                    let probe_ty = self.infer_ctx.shallow_resolve(&probe.ty);
+                    if let Type::Row(store) = &probe_ty {
+                        let store = *store;
+                        let schema = self
+                            .store_schemas
+                            .get(&store)
+                            .ok_or_else(|| format!("unknown store '{store}'"))?
+                            .clone();
+                        let (_, fty) = schema
+                            .iter()
+                            .find(|(n, _)| n == field)
+                            .ok_or_else(|| {
+                                format!(
+                                    "{}: store '{}' has no field '{}'",
+                                    fspan.loc(),
+                                    store,
+                                    field,
+                                )
+                            })?
+                            .clone();
+                        let hv = self.lower_expr_expected(value, Some(&fty))?;
+                        let r =
+                            self.infer_ctx
+                                .unify_at(&fty, &hv.ty, *span, "row field assignment");
+                        self.collect_unify_error(r);
+                        let hv = self.maybe_coerce_to(hv, &fty);
 
-                            let sid_sym = Symbol::intern("sid");
-                            let sid_expr = hir::Expr {
-                                kind: hir::ExprKind::Field(Box::new(probe), sid_sym, 0),
-                                ty: Type::I64,
-                                span: *fspan,
-                            };
-                            let hfilter = hir::StoreFilter {
-                                field: sid_sym,
-                                op: ast::BinOp::Eq,
-                                value: sid_expr,
-                                span: *span,
-                                extra: Vec::new(),
-                                pred: ast::FilterPred::Cmp,
-                            };
-                            let _ = row_name;
-                            return Ok(hir::Stmt::StoreSet(
-                                store,
-                                vec![(*field, hv)],
-                                Box::new(hfilter),
-                                *span,
-                            ));
-                        }
+                        let sid_sym = Symbol::intern("sid");
+                        let sid_expr = hir::Expr {
+                            kind: hir::ExprKind::Field(Box::new(probe), sid_sym, 0),
+                            ty: Type::I64,
+                            span: *fspan,
+                        };
+                        let hfilter = hir::StoreFilter {
+                            field: sid_sym,
+                            op: ast::BinOp::Eq,
+                            value: sid_expr,
+                            span: *span,
+                            extra: Vec::new(),
+                            pred: ast::FilterPred::Cmp,
+                        };
+                        let _ = row_name;
+                        return Ok(hir::Stmt::StoreSet(
+                            store,
+                            vec![(*field, hv)],
+                            Box::new(hfilter),
+                            *span,
+                        ));
                     }
+                }
 
                 self.suppress_moved_field_check += 1;
                 let ht = self.lower_expr(target)?;
@@ -508,9 +502,10 @@ impl Typer {
                 let hv = self.maybe_coerce_to(hv, &ht.ty);
 
                 if let hir::ExprKind::Field(parent, field, _) = &ht.kind
-                    && let hir::ExprKind::Var(parent_id, _) = &parent.kind {
-                        self.clear_field_moved(*parent_id, field);
-                    }
+                    && let hir::ExprKind::Var(parent_id, _) = &parent.kind
+                {
+                    self.clear_field_moved(*parent_id, field);
+                }
                 Ok(hir::Stmt::Assign(ht, hv, *span))
             }
 
@@ -611,10 +606,7 @@ impl Typer {
                         return Ok(hir::Stmt::Assign(target, he, *mspan));
                     }
                 }
-                let he = if matches!(
-                    e,
-                    ast::Expr::Quaternary(..) | ast::Expr::Ternary(..)
-                ) {
+                let he = if matches!(e, ast::Expr::Quaternary(..) | ast::Expr::Ternary(..)) {
                     he
                 } else {
                     match self.implicit_propagate(he.clone())? {
@@ -682,16 +674,17 @@ impl Typer {
                         _ => {
                             let iter_ty = iter.ty.clone();
                             if let Type::Struct(tn, _) = iter_ty
-                                && self.type_implements_trait(&tn.as_str(), "Iter") {
-                                    let elem_ty = self.iter_element_type(&tn.as_str());
-                                    return self.desugar_for_iter(
-                                        f,
-                                        iter,
-                                        tn.as_str(),
-                                        elem_ty,
-                                        ret_ty,
-                                    );
-                                }
+                                && self.type_implements_trait(&tn.as_str(), "Iter")
+                            {
+                                let elem_ty = self.iter_element_type(&tn.as_str());
+                                return self.desugar_for_iter(
+                                    f,
+                                    iter,
+                                    tn.as_str(),
+                                    elem_ty,
+                                    ret_ty,
+                                );
+                            }
                             self.infer_ctx.fresh_var()
                         }
                     }
@@ -832,7 +825,10 @@ impl Typer {
                     let is_result_ret = match &resolved_ret_ty {
                         Type::Enum(rn) => {
                             let s = rn.as_str();
-                            s.starts_with("Result_") || s == "Result" || s.starts_with("Option_") || s == "Option"
+                            s.starts_with("Result_")
+                                || s == "Result"
+                                || s.starts_with("Option_")
+                                || s == "Option"
                         }
                         Type::Struct(rn, _) => rn.as_str() == "Result" || rn.as_str() == "Option",
                         _ => false,
@@ -913,12 +909,13 @@ impl Typer {
                     "early-return value (`!`)",
                 );
                 if unify_res.is_err()
-                    && let Some(en) = &enum_name {
-                        return Err(format!(
-                            "`! {0}` at {1:?} returns a value of err `{0}`, but this function returns `{2}`. In jinn, errors are values: either declare the function as `returns {0}` and pattern-match at the call site, or encode the error as a value of `{2}` (e.g., a sentinel like `! -1`).",
-                            en, span, resolved_ret
-                        ));
-                    }
+                    && let Some(en) = &enum_name
+                {
+                    return Err(format!(
+                        "`! {0}` at {1:?} returns a value of err `{0}`, but this function returns `{2}`. In jinn, errors are values: either declare the function as `returns {0}` and pattern-match at the call site, or encode the error as a value of `{2}` (e.g., a sentinel like `! -1`).",
+                        en, span, resolved_ret
+                    ));
+                }
                 self.collect_unify_error(unify_res);
 
                 let he = self.maybe_coerce_to(he, ret_ty);
@@ -949,11 +946,7 @@ impl Typer {
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
                 let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
-                Ok(hir::Stmt::StoreDelete(
-                    *store,
-                    Box::new(hfilter),
-                    *span,
-                ))
+                Ok(hir::Stmt::StoreDelete(*store, Box::new(hfilter), *span))
             }
 
             ast::Stmt::StoreDestroy(store, filter, span) => {
@@ -963,11 +956,7 @@ impl Typer {
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
                 let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
-                Ok(hir::Stmt::StoreDestroy(
-                    *store,
-                    Box::new(hfilter),
-                    *span,
-                ))
+                Ok(hir::Stmt::StoreDestroy(*store, Box::new(hfilter), *span))
             }
 
             ast::Stmt::StoreRestore(store, filter, span) => {
@@ -977,11 +966,7 @@ impl Typer {
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
                 let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
-                Ok(hir::Stmt::StoreRestore(
-                    *store,
-                    Box::new(hfilter),
-                    *span,
-                ))
+                Ok(hir::Stmt::StoreRestore(*store, Box::new(hfilter), *span))
             }
 
             ast::Stmt::StoreSave(store, span) => {
@@ -1044,10 +1029,7 @@ impl Typer {
                     .collect();
 
                 let hhandler = if handler.ok_arm.is_some() || handler.err_arm.is_some() {
-                    let err_ty = errs
-                        .first()
-                        .map(|e| Type::Enum(*e))
-                        .unwrap_or(Type::Void);
+                    let err_ty = errs.first().map(|e| Type::Enum(*e)).unwrap_or(Type::Void);
                     let err_bind = self.fresh_id();
 
                     let h_ok = if let Some(ok) = &handler.ok_arm {

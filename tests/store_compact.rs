@@ -62,7 +62,11 @@ fn compact_reclaims_tombstones_and_keeps_live_rows() {
     let src = "store people\n    name as String\n    age as i64\n\n*main\n    insert people 'zoe', 30\n    insert people 'amy', 25\n    insert people 'bob', 40\n    delete people where name equals 'amy'\n    log(count people)\n    compact people\n    log(count people)\n    r is people where name equals 'bob'\n    log r.age\n    z is people where name equals 'zoe'\n    log z.age\n";
     let bin = compile_in(dir.path(), "p", src);
     let r = run(dir.path(), &bin);
-    assert!(r.status.success(), "run: {}", String::from_utf8_lossy(&r.stderr));
+    assert!(
+        r.status.success(),
+        "run: {}",
+        String::from_utf8_lossy(&r.stderr)
+    );
     assert_eq!(out_lines(&r), vec!["2", "2", "40", "30"]);
 
     let (count, _len, fp) = header(dir.path(), "people");
@@ -97,7 +101,11 @@ fn compact_survives_reopen() {
     let reader = "store people\n    name as String\n    age as i64\n\n*main\n    log(count people)\n    r is people where name equals 'bob'\n    log r.age\n";
     let rbin = compile_in(dir.path(), "reader", reader);
     let r = run(dir.path(), &rbin);
-    assert!(r.status.success(), "reader: {}", String::from_utf8_lossy(&r.stderr));
+    assert!(
+        r.status.success(),
+        "reader: {}",
+        String::from_utf8_lossy(&r.stderr)
+    );
     assert_eq!(out_lines(&r), vec!["2", "40"]);
 }
 
@@ -107,7 +115,11 @@ fn compact_with_no_tombstones_is_a_noop() {
     let src = "store t\n    name as String\n    age as i64\n\n*main\n    insert t 'a', 1\n    insert t 'b', 2\n    compact t\n    log(count t)\n    r is t where name equals 'a'\n    log r.age\n";
     let bin = compile_in(dir.path(), "t", src);
     let r = run(dir.path(), &bin);
-    assert!(r.status.success(), "run: {}", String::from_utf8_lossy(&r.stderr));
+    assert!(
+        r.status.success(),
+        "run: {}",
+        String::from_utf8_lossy(&r.stderr)
+    );
     assert_eq!(out_lines(&r), vec!["2", "1"]);
     let (count, _, _) = header(dir.path(), "t");
     assert_eq!(count, 2);
@@ -119,7 +131,11 @@ fn compact_policy_decorator_auto_reclaims_at_threshold() {
     let src = "store people @compact(2)\n    name as String\n    age as i64\n\n*main\n    insert people 'zoe', 30\n    insert people 'amy', 25\n    insert people 'bob', 40\n    insert people 'cat', 5\n    delete people where name equals 'amy'\n    log(count people)\n    delete people where name equals 'cat'\n    log(count people)\n    r is people where name equals 'bob'\n    log r.age\n";
     let bin = compile_in(dir.path(), "p", src);
     let r = run(dir.path(), &bin);
-    assert!(r.status.success(), "run: {}", String::from_utf8_lossy(&r.stderr));
+    assert!(
+        r.status.success(),
+        "run: {}",
+        String::from_utf8_lossy(&r.stderr)
+    );
     assert_eq!(out_lines(&r), vec!["3", "2", "40"]);
 
     let (count, _, fp) = header(dir.path(), "people");

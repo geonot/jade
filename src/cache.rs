@@ -173,19 +173,20 @@ impl Cache {
         }
         let commit = if let Some(lock) = existing_lock {
             if let Some(entry) = lock.find(&dep.name)
-                && entry.version == dep.version {
-                    let dir = self.package_path(dep);
-                    if !self.is_cached(dep) {
+                && entry.version == dep.version
+            {
+                let dir = self.package_path(dep);
+                if !self.is_cached(dep) {
+                    self.fetch_pinned_commit(dep, &entry.commit)?;
+                } else {
+                    let actual = Self::read_commit(&dir)?;
+                    if actual != entry.commit {
                         self.fetch_pinned_commit(dep, &entry.commit)?;
-                    } else {
-                        let actual = Self::read_commit(&dir)?;
-                        if actual != entry.commit {
-                            self.fetch_pinned_commit(dep, &entry.commit)?;
-                        }
                     }
-                    resolving.remove(&Symbol::intern(&dep.name));
-                    return Ok(entry.clone());
                 }
+                resolving.remove(&Symbol::intern(&dep.name));
+                return Ok(entry.clone());
+            }
             self.fetch(dep)?
         } else {
             self.fetch(dep)?

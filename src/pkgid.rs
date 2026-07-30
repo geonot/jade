@@ -1,8 +1,8 @@
 use crate::intern::Symbol;
 use crate::pkg::SemVer;
+use blake3::Hasher;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use blake3::Hasher;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ScopePath(u32);
@@ -190,7 +190,10 @@ impl PkgId {
 
     pub fn mangle_prefix(self) -> String {
         let r = self.record();
-        let h: String = r.semantic_hash[..4].iter().map(|b| format!("{b:02x}")).collect();
+        let h: String = r.semantic_hash[..4]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
         h
     }
 }
@@ -290,10 +293,12 @@ pub fn resolve_use(
     consumer: PkgId,
     name: Symbol,
 ) -> Result<PkgId, UseResolveError> {
-    map.get(&(consumer, name)).copied().ok_or_else(|| UseResolveError::Unresolved {
-        consumer: consumer.fully_qualified(),
-        name,
-    })
+    map.get(&(consumer, name))
+        .copied()
+        .ok_or_else(|| UseResolveError::Unresolved {
+            consumer: consumer.fully_qualified(),
+            name,
+        })
 }
 
 /// Resolve a path import `use seg0/seg1/.../segN` from `consumer`, hop by hop,
@@ -502,7 +507,10 @@ mod tests {
             name: sym("x"),
             owner_scope: ScopePath::root(),
             version: ver(1),
-            semantic_hash: [0xab, 0xcd, 0xef, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            semantic_hash: [
+                0xab, 0xcd, 0xef, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+            ],
             visibility: Visibility::Public,
         });
         assert_eq!(p.mangle_prefix(), "abcdef01");
@@ -666,7 +674,11 @@ mod tests {
         map.insert((baz, sym("bar")), bar);
         let err = resolve_path_use(&map, foo, &[sym("baz"), sym("bar")]).unwrap_err();
         match err {
-            UseResolveError::VisibilityCeiling { target, target_scope, consumer } => {
+            UseResolveError::VisibilityCeiling {
+                target,
+                target_scope,
+                consumer,
+            } => {
                 assert_eq!(consumer, "foo");
                 assert_eq!(target, "foo:baz:bar");
                 assert_eq!(target_scope, "foo:baz");

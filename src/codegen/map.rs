@@ -414,12 +414,10 @@ impl<'ctx> Compiler<'ctx> {
                 .build_gep(i8t, entry_ptr, &[i64t.const_int(40, false)], "mk.occp"))
         };
         let occ = b!(self.bld.build_load(i8t, occ_ptr, "mk.occ")).into_int_value();
-        let is_occ = b!(self.bld.build_int_compare(
-            IntPredicate::NE,
-            occ,
-            i8t.const_int(0, false),
-            "mk.io"
-        ));
+        let is_occ =
+            b!(self
+                .bld
+                .build_int_compare(IntPredicate::NE, occ, i8t.const_int(0, false), "mk.io"));
         b!(self.bld.build_conditional_branch(is_occ, push_bb, next_bb));
 
         self.bld.position_at_end(push_bb);

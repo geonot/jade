@@ -15,9 +15,7 @@ pub(super) fn is_pure_stmt(stmt: &Stmt) -> bool {
                 && i.elifs
                     .iter()
                     .all(|(c, b)| is_pure_expr(c) && b.iter().all(is_pure_stmt))
-                && i.els
-                    .as_ref()
-                    .is_none_or(|b| b.iter().all(is_pure_stmt))
+                && i.els.as_ref().is_none_or(|b| b.iter().all(is_pure_stmt))
         }
         Stmt::Expr(e) => is_pure_expr(e),
         _ => false,
@@ -44,9 +42,7 @@ pub(super) fn is_pure_expr(expr: &Expr) -> bool {
                 && i.elifs
                     .iter()
                     .all(|(c, b)| is_pure_expr(c) && b.iter().all(is_pure_stmt))
-                && i.els
-                    .as_ref()
-                    .is_none_or(|b| b.iter().all(is_pure_stmt))
+                && i.els.as_ref().is_none_or(|b| b.iter().all(is_pure_stmt))
         }
         _ => false,
     }

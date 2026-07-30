@@ -93,9 +93,7 @@ fn emit(stmts: &[Stmt]) -> String {
             }
             Stmt::IfPush(v, x) => {
                 if declared[*v as usize] {
-                    s.push_str(&format!(
-                        "    if v{v}.len() > 0\n        v{v}.push({x})\n"
-                    ));
+                    s.push_str(&format!("    if v{v}.len() > 0\n        v{v}.push({x})\n"));
                 }
             }
         }

@@ -234,12 +234,9 @@ impl<'ctx> Compiler<'ctx> {
         msg: &str,
     ) -> Result<(), String> {
         let fv = self.current_fn();
-        let ok = b!(self.bld.build_int_compare(
-            IntPredicate::ULT,
-            idx,
-            len,
-            &format!("{tag}.ok")
-        ));
+        let ok = b!(self
+            .bld
+            .build_int_compare(IntPredicate::ULT, idx, len, &format!("{tag}.ok")));
         let ok_bb = self.ctx.append_basic_block(fv, &format!("{tag}.ok"));
         let fail_bb = self.ctx.append_basic_block(fv, &format!("{tag}.fail"));
         b!(self.bld.build_conditional_branch(ok, ok_bb, fail_bb));
@@ -281,14 +278,12 @@ impl<'ctx> Compiler<'ctx> {
         let ei = end.into_int_value();
 
         let fv = self.current_fn();
-        let start_le_end =
-            b!(self
-                .bld
-                .build_int_compare(IntPredicate::SLE, si, ei, "sl.sle"));
-        let end_le_len =
-            b!(self
-                .bld
-                .build_int_compare(IntPredicate::ULE, ei, len, "sl.elen"));
+        let start_le_end = b!(self
+            .bld
+            .build_int_compare(IntPredicate::SLE, si, ei, "sl.sle"));
+        let end_le_len = b!(self
+            .bld
+            .build_int_compare(IntPredicate::ULE, ei, len, "sl.elen"));
         let valid = b!(self.bld.build_and(start_le_end, end_le_len, "sl.valid"));
         let ok_bb = self.ctx.append_basic_block(fv, "sl.ok");
         let fail_bb = self.ctx.append_basic_block(fv, "sl.fail");

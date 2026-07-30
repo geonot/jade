@@ -174,9 +174,12 @@ impl Typer {
             "__string_from_raw" | "__string_from_ptr_len"
                 if (2..=3).contains(&args.len()) && !self.fns.contains_key(name) =>
             {
-                Some(
-                    self.lower_simple_builtin(args, hir::BuiltinFn::StringFromRaw, Type::String, span),
-                )
+                Some(self.lower_simple_builtin(
+                    args,
+                    hir::BuiltinFn::StringFromRaw,
+                    Type::String,
+                    span,
+                ))
             }
             "__string_from_ptr" if args.len() == 1 && !self.fns.contains_key(name) => Some(
                 self.lower_simple_builtin(args, hir::BuiltinFn::StringFromPtr, Type::String, span),
@@ -184,9 +187,9 @@ impl Typer {
             // `chr(code)` builds a one-byte string from an integer character code
             // (the inverse of `String.char_at`). Fundamental enough to be a
             // builtin rather than living in a single stdlib module.
-            "chr" if args.len() == 1 && !self.fns.contains_key(name) => Some(
-                self.lower_simple_builtin(args, hir::BuiltinFn::Chr, Type::String, span),
-            ),
+            "chr" if args.len() == 1 && !self.fns.contains_key(name) => {
+                Some(self.lower_simple_builtin(args, hir::BuiltinFn::Chr, Type::String, span))
+            }
             "__get_args" if args.is_empty() && !self.fns.contains_key(name) => {
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::Builtin(hir::BuiltinFn::GetArgs, vec![]),

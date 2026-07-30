@@ -14,15 +14,15 @@ use crate::resolve::flatten_module;
 use super::cli::*;
 use super::project::*;
 
+mod dag;
 mod implicit;
 mod index;
 mod modules;
 mod packages;
-mod dag;
 
+#[allow(unused_imports)]
+pub(super) use dag::*;
 pub(super) use implicit::*;
 pub(super) use index::*;
 pub(super) use modules::*;
 pub(super) use packages::*;
-#[allow(unused_imports)]
-pub(super) use dag::*;

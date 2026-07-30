@@ -239,10 +239,7 @@ impl Typer {
         self.dep_pkg_ids = ids;
     }
 
-    pub fn set_scoped_use_map(
-        &mut self,
-        map: crate::pkgid::ScopedUseMap,
-    ) {
+    pub fn set_scoped_use_map(&mut self, map: crate::pkgid::ScopedUseMap) {
         self.scoped_use_map = map;
     }
 
@@ -555,10 +552,9 @@ impl Typer {
         ty: &Type,
         access_mod: Option<crate::ast::AccessMod>,
     ) -> Result<Ownership, String> {
-        if access_mod.is_none()
-            && self.type_param_default_borrows(ty) {
-                return Ok(Ownership::Borrowed);
-            }
+        if access_mod.is_none() && self.type_param_default_borrows(ty) {
+            return Ok(Ownership::Borrowed);
+        }
         self.ownership_with_mod(ty, access_mod)
     }
 

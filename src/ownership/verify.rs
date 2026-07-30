@@ -128,9 +128,10 @@ impl OwnershipVerifier {
             }
             Stmt::Drop(def_id, _, _, span) => {
                 if let Some(state) = self.lookup(*def_id)
-                    && !state.moved {
-                        self.record_move(*def_id, *span);
-                    }
+                    && !state.moved
+                {
+                    self.record_move(*def_id, *span);
+                }
             }
             Stmt::ErrReturn(e, _, _) => {
                 self.verify_expr(e);

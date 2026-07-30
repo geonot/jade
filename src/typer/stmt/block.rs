@@ -48,38 +48,39 @@ impl Typer {
         let block_len = block.len();
         for (idx, s) in block.iter().enumerate() {
             if idx == block_len - 1
-                && let (Some(expected), crate::ast::Stmt::Expr(e)) = (tail_expected, s) {
-                    let resolved_expected = self.infer_ctx.shallow_resolve(expected);
-                    if let Some(result_enum) = self.result_enum_of(&resolved_expected) {
-                        let result_ty = Type::Enum(result_enum);
-                        let he = if Self::is_result_variant_expr(e) {
-                            self.lower_expr_expected(e, Some(&result_ty))?
-                        } else if Self::expr_is_fallible_producer(e) {
-                            self.lower_expr(e)?
-                        } else {
-                            let ok_inner = self.ok_inner_ty_pub(result_enum);
-                            self.lower_expr_expected(e, Some(&ok_inner))?
-                        };
-                        let val_ty = self.infer_ctx.resolve(&he.ty);
-                        let he = match self.result_enum_of(&val_ty) {
-                            Some(val_enum) if val_enum == result_enum => he,
-                            Some(_) => match self.implicit_propagate(he.clone())? {
-                                Some(v) => self.auto_wrap_ok(v, result_enum),
-                                None => he,
-                            },
-                            None => self.auto_wrap_ok(he, result_enum),
-                        };
-                        let stmt = hir::Stmt::Expr(he);
-                        self.record_take_moves_in_stmt(&stmt);
-                        stmts.push(stmt);
-                        continue;
-                    }
-                    let he = self.lower_expr_expected(e, Some(expected))?;
+                && let (Some(expected), crate::ast::Stmt::Expr(e)) = (tail_expected, s)
+            {
+                let resolved_expected = self.infer_ctx.shallow_resolve(expected);
+                if let Some(result_enum) = self.result_enum_of(&resolved_expected) {
+                    let result_ty = Type::Enum(result_enum);
+                    let he = if Self::is_result_variant_expr(e) {
+                        self.lower_expr_expected(e, Some(&result_ty))?
+                    } else if Self::expr_is_fallible_producer(e) {
+                        self.lower_expr(e)?
+                    } else {
+                        let ok_inner = self.ok_inner_ty_pub(result_enum);
+                        self.lower_expr_expected(e, Some(&ok_inner))?
+                    };
+                    let val_ty = self.infer_ctx.resolve(&he.ty);
+                    let he = match self.result_enum_of(&val_ty) {
+                        Some(val_enum) if val_enum == result_enum => he,
+                        Some(_) => match self.implicit_propagate(he.clone())? {
+                            Some(v) => self.auto_wrap_ok(v, result_enum),
+                            None => he,
+                        },
+                        None => self.auto_wrap_ok(he, result_enum),
+                    };
                     let stmt = hir::Stmt::Expr(he);
                     self.record_take_moves_in_stmt(&stmt);
                     stmts.push(stmt);
                     continue;
                 }
+                let he = self.lower_expr_expected(e, Some(expected))?;
+                let stmt = hir::Stmt::Expr(he);
+                self.record_take_moves_in_stmt(&stmt);
+                stmts.push(stmt);
+                continue;
+            }
             if idx == block_len - 1
                 && let (Some(expected), crate::ast::Stmt::StoreInsert(store, values, span)) =
                     (tail_expected, s)
@@ -98,21 +99,23 @@ impl Typer {
                 }
             }
             if idx == block_len - 1
-                && let (Some(expected), crate::ast::Stmt::If(i)) = (tail_expected, s) {
-                    let hi = self.lower_if_with_tail(i, ret_ty, Some(expected))?;
-                    let stmt = hir::Stmt::If(hi);
-                    self.record_take_moves_in_stmt(&stmt);
-                    stmts.push(stmt);
-                    continue;
-                }
+                && let (Some(expected), crate::ast::Stmt::If(i)) = (tail_expected, s)
+            {
+                let hi = self.lower_if_with_tail(i, ret_ty, Some(expected))?;
+                let stmt = hir::Stmt::If(hi);
+                self.record_take_moves_in_stmt(&stmt);
+                stmts.push(stmt);
+                continue;
+            }
             if idx == block_len - 1
-                && let (Some(expected), crate::ast::Stmt::Match(m)) = (tail_expected, s) {
-                    let hm = self.lower_match_with_tail(m, ret_ty, Some(expected))?;
-                    let stmt = hir::Stmt::Match(hm);
-                    self.record_take_moves_in_stmt(&stmt);
-                    stmts.push(stmt);
-                    continue;
-                }
+                && let (Some(expected), crate::ast::Stmt::Match(m)) = (tail_expected, s)
+            {
+                let hm = self.lower_match_with_tail(m, ret_ty, Some(expected))?;
+                let stmt = hir::Stmt::Match(hm);
+                self.record_take_moves_in_stmt(&stmt);
+                stmts.push(stmt);
+                continue;
+            }
             let stmt = self.lower_stmt(s, ret_ty)?;
             self.record_take_moves_in_stmt(&stmt);
             stmts.push(stmt);
@@ -400,7 +403,8 @@ impl Typer {
                     _ => None,
                 };
 
-                let enum_name = expected_enum.or_else(|| self.variant_tags.get(name).map(|(en, _)| *en));
+                let enum_name =
+                    expected_enum.or_else(|| self.variant_tags.get(name).map(|(en, _)| *en));
 
                 if let Some(ref en) = enum_name {
                     let enum_ty = Type::Enum(*en);

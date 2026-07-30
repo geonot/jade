@@ -29,8 +29,12 @@ impl Typer {
                     return self.lower_call(&callee, &args, *span);
                 }
                 if self.variant_tags.contains_key(name)
-                    && let Some(r) =
-                        self.try_lower_variant_with_expected(&name.as_str(), inits, *span, expected)?
+                    && let Some(r) = self.try_lower_variant_with_expected(
+                        &name.as_str(),
+                        inits,
+                        *span,
+                        expected,
+                    )?
                 {
                     return Ok(r);
                 }
@@ -274,121 +278,123 @@ impl Typer {
         let struct_fields = self.structs.get(name).cloned();
 
         if struct_fields.is_none()
-            && let Some(gtd) = self.generic_types.get(name).cloned() {
-                let mut hinits_g: Vec<hir::FieldInit> = inits
-                    .iter()
-                    .map(|fi| {
-                        Ok(hir::FieldInit {
-                            name: fi.name,
-                            value: self.lower_expr(&fi.value)?,
-                        })
+            && let Some(gtd) = self.generic_types.get(name).cloned()
+        {
+            let mut hinits_g: Vec<hir::FieldInit> = inits
+                .iter()
+                .map(|fi| {
+                    Ok(hir::FieldInit {
+                        name: fi.name,
+                        value: self.lower_expr(&fi.value)?,
                     })
-                    .collect::<Result<_, String>>()?;
+                })
+                .collect::<Result<_, String>>()?;
 
-                let mut type_map = std::collections::HashMap::new();
-                for (i, fi) in hinits_g.iter().enumerate() {
-                    let field_def = if let Some(fname) = &fi.name {
-                        gtd.fields.iter().find(|f| &f.name == fname)
-                    } else {
-                        gtd.fields.get(i)
-                    };
-                    if let Some(field_def) = field_def
-                        && let Some(ref declared_ty) = field_def.ty {
-                            Self::collect_type_mapping(declared_ty, &fi.value.ty, &mut type_map);
-                        }
+            let mut type_map = std::collections::HashMap::new();
+            for (i, fi) in hinits_g.iter().enumerate() {
+                let field_def = if let Some(fname) = &fi.name {
+                    gtd.fields.iter().find(|f| &f.name == fname)
+                } else {
+                    gtd.fields.get(i)
+                };
+                if let Some(field_def) = field_def
+                    && let Some(ref declared_ty) = field_def.ty
+                {
+                    Self::collect_type_mapping(declared_ty, &fi.value.ty, &mut type_map);
                 }
+            }
 
-                for tp in &gtd.type_params {
-                    type_map.entry(*tp).or_insert(Type::I64);
-                }
+            for tp in &gtd.type_params {
+                type_map.entry(*tp).or_insert(Type::I64);
+            }
 
-                let concrete_fields: Vec<(Symbol, Type)> = gtd
-                    .fields
+            let concrete_fields: Vec<(Symbol, Type)> = gtd
+                .fields
+                .iter()
+                .map(|f| {
+                    let ty =
+                        f.ty.as_ref()
+                            .map(|t| Self::substitute_type_params(t, &type_map))
+                            .unwrap_or(Type::I64);
+                    (f.name, ty)
+                })
+                .collect();
+
+            let ty_suffix = gtd
+                .type_params
+                .iter()
+                .map(|tp| format!("{}", type_map.get(tp).unwrap_or(&Type::I64)))
+                .collect::<Vec<_>>()
+                .join("_");
+            let mangled = Symbol::intern(&format!("{name}_{ty_suffix}"));
+
+            if !self.structs.contains_key(&mangled) {
+                self.structs.insert(mangled, concrete_fields.clone());
+
+                let hir_fields: Vec<hir::Field> = concrete_fields
                     .iter()
-                    .map(|f| {
-                        let ty =
-                            f.ty.as_ref()
-                                .map(|t| Self::substitute_type_params(t, &type_map))
-                                .unwrap_or(Type::I64);
-                        (f.name, ty)
+                    .map(|(fname, fty)| hir::Field {
+                        name: *fname,
+                        ty: fty.clone(),
+                        default: None,
+                        access_mod: None,
+                        span,
                     })
                     .collect();
-
-                let ty_suffix = gtd
-                    .type_params
-                    .iter()
-                    .map(|tp| format!("{}", type_map.get(tp).unwrap_or(&Type::I64)))
-                    .collect::<Vec<_>>()
-                    .join("_");
-                let mangled = Symbol::intern(&format!("{name}_{ty_suffix}"));
-
-                if !self.structs.contains_key(&mangled) {
-                    self.structs.insert(mangled, concrete_fields.clone());
-
-                    let hir_fields: Vec<hir::Field> = concrete_fields
-                        .iter()
-                        .map(|(fname, fty)| hir::Field {
-                            name: *fname,
-                            ty: fty.clone(),
-                            default: None,
-                            access_mod: None,
-                            span,
-                        })
-                        .collect();
-                    let htd = hir::TypeDef {
-                        def_id: self.fresh_id(),
-                        name: mangled,
-                        fields: hir_fields,
-                        methods: Vec::new(),
-                        layout: gtd.layout.clone(),
-                        span,
-                    };
-                    self.mono_types.push(htd);
-
-                    for m in &gtd.methods {
-                        let mut mono_method = m.clone();
-
-                        for p in &mut mono_method.params {
-                            if let Some(ref ty) = p.ty {
-                                p.ty = Some(Self::substitute_type_params(ty, &type_map));
-                            }
-                        }
-                        if let Some(ref ret) = mono_method.ret {
-                            mono_method.ret = Some(Self::substitute_type_params(ret, &type_map));
-                        }
-                        self.methods
-                            .entry(mangled)
-                            .or_default()
-                            .push(mono_method.clone());
-                        self.declare_method_sig_by_ptr(&mangled.as_str(), &mono_method);
-                    }
-                }
-
-                for (i, fi) in hinits_g.iter_mut().enumerate() {
-                    let declared_ty = if let Some(fname) = &fi.name {
-                        concrete_fields
-                            .iter()
-                            .find(|(n, _)| n == fname)
-                            .map(|(_, ty)| ty)
-                    } else {
-                        concrete_fields.get(i).map(|(_, ty)| ty)
-                    };
-                    if let Some(declared_ty) = declared_ty {
-                        let _ = self.infer_ctx.unify_at(
-                            declared_ty,
-                            &fi.value.ty,
-                            span,
-                            "generic struct field",
-                        );
-                    }
-                }
-
-                return Ok(hir::Expr {
-                    kind: hir::ExprKind::Struct(mangled, hinits_g),
-                    ty: Type::Struct(mangled, vec![]),
+                let htd = hir::TypeDef {
+                    def_id: self.fresh_id(),
+                    name: mangled,
+                    fields: hir_fields,
+                    methods: Vec::new(),
+                    layout: gtd.layout.clone(),
                     span,
-                });
+                };
+                self.mono_types.push(htd);
+
+                for m in &gtd.methods {
+                    let mut mono_method = m.clone();
+
+                    for p in &mut mono_method.params {
+                        if let Some(ref ty) = p.ty {
+                            p.ty = Some(Self::substitute_type_params(ty, &type_map));
+                        }
+                    }
+                    if let Some(ref ret) = mono_method.ret {
+                        mono_method.ret = Some(Self::substitute_type_params(ret, &type_map));
+                    }
+                    self.methods
+                        .entry(mangled)
+                        .or_default()
+                        .push(mono_method.clone());
+                    self.declare_method_sig_by_ptr(&mangled.as_str(), &mono_method);
+                }
             }
+
+            for (i, fi) in hinits_g.iter_mut().enumerate() {
+                let declared_ty = if let Some(fname) = &fi.name {
+                    concrete_fields
+                        .iter()
+                        .find(|(n, _)| n == fname)
+                        .map(|(_, ty)| ty)
+                } else {
+                    concrete_fields.get(i).map(|(_, ty)| ty)
+                };
+                if let Some(declared_ty) = declared_ty {
+                    let _ = self.infer_ctx.unify_at(
+                        declared_ty,
+                        &fi.value.ty,
+                        span,
+                        "generic struct field",
+                    );
+                }
+            }
+
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::Struct(mangled, hinits_g),
+                ty: Type::Struct(mangled, vec![]),
+                span,
+            });
+        }
 
         let mut hinits: Vec<hir::FieldInit> = inits
             .iter()

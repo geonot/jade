@@ -228,7 +228,10 @@ impl Lowerer {
         }
 
         let result_ty = self.func.ret_ty.clone();
-        let err_enum = errs.first().copied().unwrap_or_else(|| Symbol::intern("Void"));
+        let err_enum = errs
+            .first()
+            .copied()
+            .unwrap_or_else(|| Symbol::intern("Void"));
         let got = self.emit(
             InstKind::Call(Symbol::intern("__scope_join_take_error"), vec![scope]),
             Type::I64,
@@ -300,7 +303,14 @@ impl Lowerer {
         captures: &[(Symbol, Type)],
         span: crate::ast::Span,
     ) {
-        self.lower_coroutine_inner(name, crate::hir::DefId::BUILTIN, body, captures, span, false);
+        self.lower_coroutine_inner(
+            name,
+            crate::hir::DefId::BUILTIN,
+            body,
+            captures,
+            span,
+            false,
+        );
     }
 
     pub(super) fn lower_scope_task(

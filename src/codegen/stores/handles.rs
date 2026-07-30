@@ -211,7 +211,8 @@ impl<'ctx> Compiler<'ctx> {
         let is_null = b!(self.bld.build_is_null(fp.into_pointer_value(), "is_null"));
 
         let is_transient = sd
-            .decorators.contains(&crate::ast::StoreDecorator::Transient);
+            .decorators
+            .contains(&crate::ast::StoreDecorator::Transient);
         if is_transient {
             b!(self.bld.build_conditional_branch(is_null, init_bb, done_bb));
         } else {
@@ -250,8 +251,9 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(global.as_pointer_value(), fp_val));
         let fingerprint = super::store_schema_fingerprint(sd);
         let schema_version = self.store_schema_version(sd);
-        let name_str =
-            b!(self.bld.build_global_string_ptr(&format!("{name}\0"), "store.name"));
+        let name_str = b!(self
+            .bld
+            .build_global_string_ptr(&format!("{name}\0"), "store.name"));
         let check_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_check_schema");
         b!(self.bld.build_call(
             check_fn,
@@ -486,14 +488,17 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<(), String> {
         let wal = self.load_store_wal(store_name)?;
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let f = self.module.get_function("jinn_txn_track").unwrap_or_else(|| {
-            let ft = self
-                .ctx
-                .void_type()
-                .fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
-            self.module
-                .add_function("jinn_txn_track", ft, Some(Linkage::External))
-        });
+        let f = self
+            .module
+            .get_function("jinn_txn_track")
+            .unwrap_or_else(|| {
+                let ft = self
+                    .ctx
+                    .void_type()
+                    .fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
+                self.module
+                    .add_function("jinn_txn_track", ft, Some(Linkage::External))
+            });
         b!(self.bld.build_call(f, &[fp.into(), wal.into()], ""));
         Ok(())
     }
@@ -774,23 +779,20 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(cond_bb));
         self.bld.position_at_end(cond_bb);
         let i_cur = b!(self.bld.build_load(i64t, i_ptr, "rb.icur")).into_int_value();
-        let more = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::SLT,
-            i_cur,
-            total,
-            "rb.more"
-        ));
+        let more =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::SLT, i_cur, total, "rb.more"));
         b!(self.bld.build_conditional_branch(more, body_bb, end_bb));
 
         self.bld.position_at_end(body_bb);
         let rec_off = b!(self
             .bld
             .build_int_mul(i_cur, i64t.const_int(rec_size, false), "rb.mul"));
-        let rec_off = b!(self.bld.build_int_add(
-            rec_off,
-            i64t.const_int(header_size, false),
-            "rb.off"
-        ));
+        let rec_off =
+            b!(self
+                .bld
+                .build_int_add(rec_off, i64t.const_int(header_size, false), "rb.off"));
         b!(self.bld.build_call(
             fseek_fn,
             &[fp.into(), rec_off.into(), i32t.const_int(0, false).into()],
@@ -809,10 +811,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let live_bb = self.ctx.append_basic_block(fv, "rb.live");
         if let Some(del_idx) = deleted_idx {
-            let del_gep =
-                b!(self
-                    .bld
-                    .build_struct_gep(st, rec_ptr, del_idx as u32, "rb.del"));
+            let del_gep = b!(self
+                .bld
+                .build_struct_gep(st, rec_ptr, del_idx as u32, "rb.del"));
             let del_val = b!(self.bld.build_load(i64t, del_gep, "rb.delv")).into_int_value();
             let is_del = b!(self.bld.build_int_compare(
                 inkwell::IntPredicate::NE,

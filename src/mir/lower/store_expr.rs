@@ -213,10 +213,7 @@ impl Lowerer {
             ExprKind::KvGet(store_name, key_expr) => {
                 let key = self.lower_expr(key_expr);
                 self.emit(
-                    InstKind::Call(
-                        Symbol::intern(&format!("__kv_get_{store_name}")),
-                        vec![key],
-                    ),
+                    InstKind::Call(Symbol::intern(&format!("__kv_get_{store_name}")), vec![key]),
                     ty,
                     span,
                 )
@@ -224,10 +221,7 @@ impl Lowerer {
             ExprKind::KvHas(store_name, key_expr) => {
                 let key = self.lower_expr(key_expr);
                 self.emit(
-                    InstKind::Call(
-                        Symbol::intern(&format!("__kv_has_{store_name}")),
-                        vec![key],
-                    ),
+                    InstKind::Call(Symbol::intern(&format!("__kv_has_{store_name}")), vec![key]),
                     ty,
                     span,
                 )
@@ -252,10 +246,7 @@ impl Lowerer {
             ExprKind::KvDel(store_name, key_expr) => {
                 let key = self.lower_expr(key_expr);
                 self.emit(
-                    InstKind::Call(
-                        Symbol::intern(&format!("__kv_del_{store_name}")),
-                        vec![key],
-                    ),
+                    InstKind::Call(Symbol::intern(&format!("__kv_del_{store_name}")), vec![key]),
                     ty,
                     span,
                 )
@@ -345,10 +336,7 @@ impl Lowerer {
             ExprKind::GraphTo(store_name, node_expr) => {
                 let n = self.lower_expr(node_expr);
                 self.emit(
-                    InstKind::Call(
-                        Symbol::intern(&format!("__graph_to_{store_name}")),
-                        vec![n],
-                    ),
+                    InstKind::Call(Symbol::intern(&format!("__graph_to_{store_name}")), vec![n]),
                     ty,
                     span,
                 )

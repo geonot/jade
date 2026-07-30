@@ -34,18 +34,18 @@ impl Workspace {
         let home = tempfile::tempdir().unwrap();
         let cache = home.path().join(".cache").join("jinn").join("cache");
         let root = tempfile::tempdir().unwrap();
-        Workspace { _home: home, root, cache }
+        Workspace {
+            _home: home,
+            root,
+            cache,
+        }
     }
 
     /// Place a dependency package in the git cache at the path the resolver
     /// derives from `https://example.com/<name>` and `version`, then commit it
     /// so `git rev-parse HEAD` (cache.rs::read_commit) succeeds.
     fn dep(&self, name: &str, version: &str, manifest: &str) {
-        let dir = self
-            .cache
-            .join("example.com")
-            .join(name)
-            .join(version);
+        let dir = self.cache.join("example.com").join(name).join(version);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("project.jn"), manifest).unwrap();
         std::fs::write(dir.join("lib.jn"), format!("fn {name}_helper\n  1\n")).unwrap();
@@ -105,7 +105,11 @@ fn git(dir: &Path, args: &[&str]) {
         .current_dir(dir)
         .output()
         .expect("git failed to start");
-    assert!(status.status.success(), "git {args:?} failed in {}", dir.display());
+    assert!(
+        status.status.success(),
+        "git {args:?} failed in {}",
+        dir.display()
+    );
 }
 
 // §2.1/§2.2: a single-version dep resolves under the consumer's scope and the
@@ -129,7 +133,11 @@ fn single_version_dep_builds_and_runs() {
 #[test]
 fn public_transitive_reach_in_builds() {
     let w = Workspace::new();
-    w.dep("bar", "1.0.0", "name is 'bar'\nversion is '1.0.0'\nvisibility is 'public'\n");
+    w.dep(
+        "bar",
+        "1.0.0",
+        "name is 'bar'\nversion is '1.0.0'\nvisibility is 'public'\n",
+    );
     w.dep(
         "baz",
         "1.0.0",
@@ -153,7 +161,11 @@ fn public_transitive_reach_in_builds() {
 #[test]
 fn internal_transitive_reach_in_is_hard_error() {
     let w = Workspace::new();
-    w.dep("bar", "1.0.0", "name is 'bar'\nversion is '1.0.0'\nvisibility is 'internal'\n");
+    w.dep(
+        "bar",
+        "1.0.0",
+        "name is 'bar'\nversion is '1.0.0'\nvisibility is 'internal'\n",
+    );
     w.dep(
         "baz",
         "1.0.0",

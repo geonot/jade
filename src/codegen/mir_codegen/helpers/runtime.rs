@@ -50,10 +50,7 @@ impl<'ctx> Compiler<'ctx> {
 
                 let declared_param_tys = &inner_params[n_captures..];
                 let mut wrapper_params: Vec<BasicMetadataTypeEnum<'ctx>> = vec![ptr_ty.into()];
-                wrapper_params.extend(
-                    declared_param_tys
-                        .iter().copied(),
-                );
+                wrapper_params.extend(declared_param_tys.iter().copied());
                 let wrapper_ft = match inner_type.get_return_type() {
                     Some(ret) => ret.fn_type(&wrapper_params, false),
                     None => self.ctx.void_type().fn_type(&wrapper_params, false),
@@ -169,11 +166,10 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_call(fv, &[ch_val.into(), alloca.into()], "send.res"));
             let res = self.call_result(csv).into_int_value();
-            let delivered = b!(self.bld.build_int_truncate(
-                res,
-                self.ctx.bool_type(),
-                "send.delivered"
-            ));
+            let delivered =
+                b!(self
+                    .bld
+                    .build_int_truncate(res, self.ctx.bool_type(), "send.delivered"));
             Ok(delivered.into())
         } else {
             Ok(self.ctx.bool_type().const_int(1, false).into())

@@ -76,8 +76,14 @@ impl VecMethod {
     pub fn ret_ty(self, elem_ty: &Type) -> Type {
         match self {
             Self::Push | Self::Clear | Self::Set => Type::Void,
-            Self::Pop | Self::Get | Self::Remove | Self::Shift | Self::First | Self::Last
-            | Self::Sum | Self::Find => elem_ty.clone(),
+            Self::Pop
+            | Self::Get
+            | Self::Remove
+            | Self::Shift
+            | Self::First
+            | Self::Last
+            | Self::Sum
+            | Self::Find => elem_ty.clone(),
             Self::Len | Self::Count => Type::I64,
             Self::IsEmpty | Self::Contains | Self::Any | Self::All => Type::Bool,
             Self::Take

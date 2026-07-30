@@ -1,4 +1,3 @@
-
 use super::*;
 fn lex(s: &str) -> Vec<Token> {
     Lexer::new(s)

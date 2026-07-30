@@ -95,10 +95,11 @@ impl<'ctx> Compiler<'ctx> {
             )))
             .into_int_value();
 
-        let jinn_total =
-            b!(self
-                .bld
-                .build_int_mul(written, i64t.const_int(jinn_size, false), "hist.jinn_total"));
+        let jinn_total = b!(self.bld.build_int_mul(
+            written,
+            i64t.const_int(jinn_size, false),
+            "hist.jinn_total"
+        ));
         let jinn_alloc = b!(self.bld.build_select(
             b!(self.bld.build_int_compare(
                 inkwell::IntPredicate::EQ,
@@ -131,9 +132,10 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "hist.i")).into_int_value();
-        let cmp = b!(self
-            .bld
-            .build_int_compare(inkwell::IntPredicate::ULT, idx, written, "hist.cmp"));
+        let cmp =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::ULT, idx, written, "hist.cmp"));
         b!(self.bld.build_conditional_branch(cmp, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
@@ -146,9 +148,10 @@ impl<'ctx> Compiler<'ctx> {
                 .build_gep(self.ctx.i8_type(), raw_buf, &[raw_off], "hist.rptr"))
         };
         let jinn_val = self.load_store_record_as_jinn(rec_st, raw_ptr, &sd)?;
-        let jinn_off = b!(self
-            .bld
-            .build_int_mul(idx, i64t.const_int(jinn_size, false), "hist.joff"));
+        let jinn_off =
+            b!(self
+                .bld
+                .build_int_mul(idx, i64t.const_int(jinn_size, false), "hist.joff"));
         let jinn_ptr = unsafe {
             b!(self
                 .bld

@@ -69,16 +69,17 @@ pub(in crate::driver) fn resolve_modules(
         }
 
         if let Ok(exe) = std::env::current_exe()
-            && let Some(exe_dir) = exe.parent() {
-                candidates.push(exe_dir.join("std").join(format!("{name}.jn")));
+            && let Some(exe_dir) = exe.parent()
+        {
+            candidates.push(exe_dir.join("std").join(format!("{name}.jn")));
 
-                if let Some(parent) = exe_dir.parent() {
-                    candidates.push(parent.join("std").join(format!("{name}.jn")));
-                    if let Some(grandparent) = parent.parent() {
-                        candidates.push(grandparent.join("std").join(format!("{name}.jn")));
-                    }
+            if let Some(parent) = exe_dir.parent() {
+                candidates.push(parent.join("std").join(format!("{name}.jn")));
+                if let Some(grandparent) = parent.parent() {
+                    candidates.push(grandparent.join("std").join(format!("{name}.jn")));
                 }
             }
+        }
         if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
             candidates.push(
                 PathBuf::from(manifest)
@@ -119,18 +120,17 @@ pub(in crate::driver) fn resolve_modules(
                 (Some(sm), Some(im)) => im.modified().ok() >= sm.modified().ok(),
                 _ => false,
             };
-            if use_cache
-                && let Ok(iface) = crate::interface::InterfaceFile::read_from(&jni_path) {
-                    let importable: Vec<Decl> = iface
-                        .to_decls()
-                        .into_iter()
-                        .filter(|d| should_import_decl(d, &imports))
-                        .collect();
-                    for pd in flatten_module(importable, &name.as_str()) {
-                        prog.decls.push(pd);
-                    }
-                    continue;
+            if use_cache && let Ok(iface) = crate::interface::InterfaceFile::read_from(&jni_path) {
+                let importable: Vec<Decl> = iface
+                    .to_decls()
+                    .into_iter()
+                    .filter(|d| should_import_decl(d, &imports))
+                    .collect();
+                for pd in flatten_module(importable, &name.as_str()) {
+                    prog.decls.push(pd);
                 }
+                continue;
+            }
         }
 
         let src = fs::read_to_string(&candidate)
@@ -174,17 +174,19 @@ pub(in crate::driver) fn resolve_modules(
             }
 
             if let Decl::Fn(ref f) = d
-                && f.name == "main" && f.params.is_empty() {
-                    for stmt in &f.body {
-                        if let Stmt::Bind(b) = stmt {
-                            let cd = Decl::Const(b.name, b.value.clone(), b.span);
-                            if should_import_decl(&cd, &imports) {
-                                own_importable.push(cd);
-                            }
+                && f.name == "main"
+                && f.params.is_empty()
+            {
+                for stmt in &f.body {
+                    if let Stmt::Bind(b) = stmt {
+                        let cd = Decl::Const(b.name, b.value.clone(), b.span);
+                        if should_import_decl(&cd, &imports) {
+                            own_importable.push(cd);
                         }
                     }
-                    continue;
                 }
+                continue;
+            }
             if should_import_decl(&d, &imports) {
                 own_importable.push(d);
             }
@@ -297,14 +299,15 @@ pub(in crate::driver) fn merge_source_files(
             }
 
             if let Decl::Fn(ref f) = d
-                && f.name == "main" {
-                    for stmt in &f.body {
-                        if let Stmt::Bind(b) = stmt {
-                            importable.push(Decl::Const(b.name, b.value.clone(), b.span));
-                        }
+                && f.name == "main"
+            {
+                for stmt in &f.body {
+                    if let Stmt::Bind(b) = stmt {
+                        importable.push(Decl::Const(b.name, b.value.clone(), b.span));
                     }
-                    continue;
                 }
+                continue;
+            }
             importable.push(d);
         }
         for pd in flatten_module(importable, &mod_name) {

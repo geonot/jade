@@ -27,9 +27,10 @@ impl<'ctx> Compiler<'ctx> {
 
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::BeforeInsert(fname) = dec
-                && let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
-                    b!(self.bld.build_call(hook_fn, &[], ""));
-                }
+                && let Some(hook_fn) = self.module.get_function(&fname.as_str())
+            {
+                b!(self.bld.build_call(hook_fn, &[], ""));
+            }
         }
 
         let i64t = self.ctx.i64_type();
@@ -101,8 +102,7 @@ impl<'ctx> Compiler<'ctx> {
             "deleted",
             "__version",
         ];
-        let is_simple = sd
-            .decorators.contains(&crate::ast::StoreDecorator::Simple);
+        let is_simple = sd.decorators.contains(&crate::ast::StoreDecorator::Simple);
         let mut user_val_idx = 0usize;
         for (i, field_def) in sd.fields.iter().enumerate() {
             let gep =
@@ -388,8 +388,7 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        let is_column = sd
-            .decorators.contains(&crate::ast::StoreDecorator::Column);
+        let is_column = sd.decorators.contains(&crate::ast::StoreDecorator::Column);
         if is_column {
             let i64t = self.ctx.i64_type();
             let col_append_fn = crate::codegen::fn_or_die(&self.module, "jinn_col_append");
@@ -399,18 +398,17 @@ impl<'ctx> Compiler<'ctx> {
                     continue;
                 }
                 if col_user_idx < args.len()
-                    && (field_def.ty == Type::I64 || field_def.ty == Type::F64) {
-                        let col_handle =
-                            self.load_col_handle(store_name, &field_def.name.as_str(), 8)?;
-                        let val = self.val(args[col_user_idx]);
-                        let tmp = self.entry_alloca(i64t.into(), "col.tmp");
-                        b!(self.bld.build_store(tmp, val));
-                        b!(self.bld.build_call(
-                            col_append_fn,
-                            &[col_handle.into(), tmp.into()],
-                            ""
-                        ));
-                    }
+                    && (field_def.ty == Type::I64 || field_def.ty == Type::F64)
+                {
+                    let col_handle =
+                        self.load_col_handle(store_name, &field_def.name.as_str(), 8)?;
+                    let val = self.val(args[col_user_idx]);
+                    let tmp = self.entry_alloca(i64t.into(), "col.tmp");
+                    b!(self.bld.build_store(tmp, val));
+                    b!(self
+                        .bld
+                        .build_call(col_append_fn, &[col_handle.into(), tmp.into()], ""));
+                }
                 col_user_idx += 1;
             }
         }
@@ -422,7 +420,8 @@ impl<'ctx> Compiler<'ctx> {
                     continue;
                 }
                 let has_bloom = field_def
-                    .decorators.contains(&crate::ast::FieldDecorator::Bloom);
+                    .decorators
+                    .contains(&crate::ast::FieldDecorator::Bloom);
                 if has_bloom && bloom_user_idx < args.len() {
                     let bloom =
                         self.load_bloom_handle(store_name, &field_def.name.as_str(), 10000)?;
@@ -443,7 +442,8 @@ impl<'ctx> Compiler<'ctx> {
                     continue;
                 }
                 let has_search = field_def
-                    .decorators.contains(&crate::ast::FieldDecorator::Search);
+                    .decorators
+                    .contains(&crate::ast::FieldDecorator::Search);
                 if has_search && fts_user_idx < args.len() && field_def.ty == Type::String {
                     let fts = self.load_fts_handle(store_name, &field_def.name.as_str())?;
                     let val = self.val(args[fts_user_idx]);
@@ -465,9 +465,10 @@ impl<'ctx> Compiler<'ctx> {
 
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::AfterInsert(fname) = dec
-                && let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
-                    b!(self.bld.build_call(hook_fn, &[], ""));
-                }
+                && let Some(hook_fn) = self.module.get_function(&fname.as_str())
+            {
+                b!(self.bld.build_call(hook_fn, &[], ""));
+            }
         }
 
         self.store_unlock(fp)?;

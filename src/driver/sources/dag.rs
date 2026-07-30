@@ -4,14 +4,16 @@ use std::path::PathBuf;
 
 use crate::intern::Symbol;
 use crate::pkg::{Dependency, SemVer};
-use crate::pkgid::{PackageRecord, PkgId, ScopePath, ScopedUseMap, Visibility, compute_semantic_hash};
+use crate::pkgid::{
+    PackageRecord, PkgId, ScopePath, ScopedUseMap, Visibility, compute_semantic_hash,
+};
 
-/// For each package A with a `use B` in its manifest, record the scoped PkgId
-/// that `B` resolves to from A's perspective.
-///
-/// Key: `(consumer_pkg_id, dep_name_symbol)`
-/// Value: the dep's `PkgId` as seen by the consumer (path-scoped under the
-///        consumer's owner scope, per scope.md §2.1).
+// For each package A with a `use B` in its manifest, record the scoped PkgId
+// that `B` resolves to from A's perspective.
+//
+// Key: `(consumer_pkg_id, dep_name_symbol)`
+// Value: the dep's `PkgId` as seen by the consumer (path-scoped under the
+//        consumer's owner scope, per scope.md §2.1).
 
 /// Build the `ScopedUseMap` for the given `ResolutionDag`.
 ///
@@ -31,8 +33,6 @@ pub fn resolve_scoped_pkg_ids(dag: &ResolutionDag) -> ScopedUseMap {
     }
     map
 }
-
-
 
 #[derive(Debug, Clone)]
 pub struct ResolvedNode {
@@ -64,7 +64,11 @@ pub fn flatten_workspace(
     resolve_node(
         root_name,
         ScopePath::root(),
-        &SemVer { major: 0, minor: 0, patch: 0 },
+        &SemVer {
+            major: 0,
+            minor: 0,
+            patch: 0,
+        },
         root_path,
         root_deps,
         load_visibility(root_path),
@@ -91,28 +95,31 @@ fn reject_multi_version(dag: &ResolutionDag) -> Result<(), String> {
     let mut majors: HashMap<Symbol, HashSet<u32>> = HashMap::new();
     for node in &dag.nodes {
         let rec = node.pkg_id.record();
-        majors.entry(rec.name).or_default().insert(rec.version.major);
+        majors
+            .entry(rec.name)
+            .or_default()
+            .insert(rec.version.major);
     }
     for node in &dag.nodes {
         let rec = node.pkg_id.record();
-        if let Some(set) = majors.get(&rec.name) {
-            if set.len() > 1 {
-                let mut found: Vec<String> = dag
-                    .nodes
-                    .iter()
-                    .map(|n| n.pkg_id.record())
-                    .filter(|r| r.name == rec.name)
-                    .map(|r| r.version.to_string())
-                    .collect();
-                found.sort();
-                found.dedup();
-                return Err(format!(
-                    "multi-version coexistence of '{}' ({}) is not yet supported; it is \
+        if let Some(set) = majors.get(&rec.name)
+            && set.len() > 1
+        {
+            let mut found: Vec<String> = dag
+                .nodes
+                .iter()
+                .map(|n| n.pkg_id.record())
+                .filter(|r| r.name == rec.name)
+                .map(|r| r.version.to_string())
+                .collect();
+            found.sort();
+            found.dedup();
+            return Err(format!(
+                "multi-version coexistence of '{}' ({}) is not yet supported; it is \
                      gated on coherence/traits (lamp.md §5.7.6). Pick one major.",
-                    rec.name,
-                    found.join(" and ")
-                ));
-            }
+                rec.name,
+                found.join(" and ")
+            ));
         }
     }
     Ok(())
@@ -150,7 +157,9 @@ fn resolve_node(
 ) -> Result<PkgId, String> {
     let cycle_key = (name, version.to_string());
     if visiting.contains(&cycle_key) {
-        return Err(format!("dependency cycle detected at package '{name}@{version}'"));
+        return Err(format!(
+            "dependency cycle detected at package '{name}@{version}'"
+        ));
     }
     visiting.insert(cycle_key.clone());
 
@@ -266,7 +275,11 @@ mod tests {
     }
 
     fn ver(maj: u32) -> SemVer {
-        SemVer { major: maj, minor: 0, patch: 0 }
+        SemVer {
+            major: maj,
+            minor: 0,
+            patch: 0,
+        }
     }
 
     fn write_src(dir: &std::path::Path, name: &str, content: &str) {
@@ -277,13 +290,7 @@ mod tests {
     fn single_root_no_deps() {
         let tmp = TempDir::new().unwrap();
         write_src(tmp.path(), "main.jn", "*main\n  log 1\n");
-        let dag = flatten_workspace(
-            sym("root"),
-            tmp.path(),
-            &[],
-            &HashMap::new(),
-        )
-        .unwrap();
+        let dag = flatten_workspace(sym("root"), tmp.path(), &[], &HashMap::new()).unwrap();
         assert_eq!(dag.nodes.len(), 1);
         assert_eq!(dag.nodes[0].pkg_id.name(), sym("root"));
         assert_ne!(dag.nodes[0].pkg_id.record().semantic_hash, [0u8; 32]);
@@ -300,7 +307,10 @@ mod tests {
         let name = sym("pkg");
         let h1 = compute_semantic_hash(name, scope, &v, &source_bytes_for(tmp1.path()), &[]);
         let h2 = compute_semantic_hash(name, scope, &v, &source_bytes_for(tmp2.path()), &[]);
-        assert_ne!(h1, h2, "different source bytes must produce different hashes");
+        assert_ne!(
+            h1, h2,
+            "different source bytes must produce different hashes"
+        );
     }
 
     #[test]
@@ -313,7 +323,11 @@ mod tests {
         let mut pkg_paths = HashMap::new();
         pkg_paths.insert(sym("helper"), dep_dir.path().to_path_buf());
 
-        let dep = Dependency { name: "helper".into(), url: "https://example.com/helper".into(), version: ver(1) };
+        let dep = Dependency {
+            name: "helper".into(),
+            url: "https://example.com/helper".into(),
+            version: ver(1),
+        };
         let dag = flatten_workspace(sym("myapp"), root_dir.path(), &[dep], &pkg_paths).unwrap();
         assert_eq!(dag.nodes.len(), 2);
     }
@@ -342,8 +356,7 @@ mod tests {
             .find(|n| n.pkg_id.name() == sym("myapp"))
             .unwrap()
             .pkg_id;
-        let resolved =
-            crate::pkgid::resolve_use(&map, consumer, sym("helper")).unwrap();
+        let resolved = crate::pkgid::resolve_use(&map, consumer, sym("helper")).unwrap();
         assert_eq!(resolved.name(), sym("helper"));
         assert_eq!(resolved.fully_qualified(), "myapp:helper");
         // Local: a name the consumer never required does not resolve.
@@ -403,8 +416,7 @@ mod tests {
     fn e2e_public_reach_in_resolves() {
         let (dag, foo) = build_three_tier("public");
         let map = resolve_scoped_pkg_ids(&dag);
-        let got =
-            crate::pkgid::resolve_path_use(&map, foo, &[sym("baz"), sym("bar")]).unwrap();
+        let got = crate::pkgid::resolve_path_use(&map, foo, &[sym("baz"), sym("bar")]).unwrap();
         assert_eq!(got.fully_qualified(), "foo:baz:bar");
     }
 
@@ -412,8 +424,7 @@ mod tests {
     fn e2e_internal_reach_in_is_hard_error() {
         let (dag, foo) = build_three_tier("internal");
         let map = resolve_scoped_pkg_ids(&dag);
-        let err = crate::pkgid::resolve_path_use(&map, foo, &[sym("baz"), sym("bar")])
-            .unwrap_err();
+        let err = crate::pkgid::resolve_path_use(&map, foo, &[sym("baz"), sym("bar")]).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("visibility internal"), "{msg}");
         assert!(msg.contains("foo:baz:bar"), "{msg}");
@@ -461,11 +472,22 @@ mod tests {
         pkg_paths.insert(sym("foo"), foo.path().to_path_buf());
 
         let root_deps = vec![
-            Dependency { name: "foo".into(), url: "x".into(), version: SemVer { major: 1, minor: 2, patch: 0 } },
-            Dependency { name: "mid".into(), url: "x".into(), version: ver(1) },
+            Dependency {
+                name: "foo".into(),
+                url: "x".into(),
+                version: SemVer {
+                    major: 1,
+                    minor: 2,
+                    patch: 0,
+                },
+            },
+            Dependency {
+                name: "mid".into(),
+                url: "x".into(),
+                version: ver(1),
+            },
         ];
-        let err = flatten_workspace(sym("root"), root.path(), &root_deps, &pkg_paths)
-            .unwrap_err();
+        let err = flatten_workspace(sym("root"), root.path(), &root_deps, &pkg_paths).unwrap_err();
         assert!(err.contains("multi-version coexistence of 'foo'"), "{err}");
         assert!(err.contains("1.2.0"), "{err}");
         assert!(err.contains("2.0.0"), "{err}");
@@ -492,7 +514,11 @@ mod tests {
         let root_deps = vec![Dependency {
             name: "foo".into(),
             url: "x".into(),
-            version: SemVer { major: 1, minor: 2, patch: 0 },
+            version: SemVer {
+                major: 1,
+                minor: 2,
+                patch: 0,
+            },
         }];
         assert!(flatten_workspace(sym("root"), root.path(), &root_deps, &pkg_paths).is_ok());
     }
@@ -501,7 +527,11 @@ mod tests {
     fn missing_dep_is_error() {
         let tmp = TempDir::new().unwrap();
         write_src(tmp.path(), "main.jn", "*main\n  log 1\n");
-        let dep = Dependency { name: "missing".into(), url: "https://example.com/missing".into(), version: ver(1) };
+        let dep = Dependency {
+            name: "missing".into(),
+            url: "https://example.com/missing".into(),
+            version: ver(1),
+        };
         let result = flatten_workspace(sym("myapp"), tmp.path(), &[dep], &HashMap::new());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("missing"));

@@ -90,8 +90,7 @@ impl Lowerer {
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
-                    let counter =
-                        self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), f.span);
+                    let counter = self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), f.span);
                     let cmp = self.emit(
                         InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64),
                         Type::Bool,
@@ -122,22 +121,14 @@ impl Lowerer {
                         f.bind_ty.clone(),
                         f.span,
                     );
-                    self.emit_void_typed(
-                        InstKind::Store(f.bind, next),
-                        f.bind_ty.clone(),
-                        f.span,
-                    );
+                    self.emit_void_typed(InstKind::Store(f.bind, next), f.bind_ty.clone(), f.span);
 
                     if let Some(ref b2) = f.bind2 {
                         let one = self.emit(InstKind::IntConst(1), Type::I64, f.span);
                         let cur_idx = self.emit(InstKind::Load(*b2), Type::I64, f.span);
                         let next_idx =
                             self.emit(InstKind::BinOp(BinOp::Add, cur_idx, one), Type::I64, f.span);
-                        self.emit_void_typed(
-                            InstKind::Store(*b2, next_idx),
-                            Type::I64,
-                            f.span,
-                        );
+                        self.emit_void_typed(InstKind::Store(*b2, next_idx), Type::I64, f.span);
                     }
                     self.set_terminator(Terminator::Goto(cond_bb));
                 } else if matches!(f.iter.ty, Type::I64 | Type::I32 | Type::F64) {
@@ -145,17 +136,12 @@ impl Lowerer {
                     let one = self.emit(InstKind::IntConst(1), Type::I64, f.span);
                     let end_val = iter_val;
 
-                    self.emit_void_typed(
-                        InstKind::Store(f.bind, zero),
-                        f.bind_ty.clone(),
-                        f.span,
-                    );
+                    self.emit_void_typed(InstKind::Store(f.bind, zero), f.bind_ty.clone(), f.span);
                     self.write_var(f.bind, self.current_block, zero);
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
-                    let counter =
-                        self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), f.span);
+                    let counter = self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), f.span);
                     let cmp = self.emit(
                         InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64),
                         Type::Bool,
@@ -180,11 +166,7 @@ impl Lowerer {
                         f.bind_ty.clone(),
                         f.span,
                     );
-                    self.emit_void_typed(
-                        InstKind::Store(f.bind, next),
-                        f.bind_ty.clone(),
-                        f.span,
-                    );
+                    self.emit_void_typed(InstKind::Store(f.bind, next), f.bind_ty.clone(), f.span);
                     self.set_terminator(Terminator::Goto(cond_bb));
                 } else if matches!(f.iter.ty, Type::Coroutine(_) | Type::Generator(_)) {
                     self.set_terminator(Terminator::Goto(cond_bb));
@@ -327,8 +309,7 @@ impl Lowerer {
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
-                    let counter =
-                        self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), *span);
+                    let counter = self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), *span);
                     let cmp = self.emit(
                         InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64),
                         Type::Bool,
@@ -353,28 +334,19 @@ impl Lowerer {
                         f.bind_ty.clone(),
                         *span,
                     );
-                    self.emit_void_typed(
-                        InstKind::Store(f.bind, next),
-                        f.bind_ty.clone(),
-                        *span,
-                    );
+                    self.emit_void_typed(InstKind::Store(f.bind, next), f.bind_ty.clone(), *span);
                     self.set_terminator(Terminator::Goto(cond_bb));
                 } else if matches!(f.iter.ty, Type::I64 | Type::I32 | Type::F64) {
                     let zero = self.emit(InstKind::IntConst(0), Type::I64, *span);
                     let one = self.emit(InstKind::IntConst(1), Type::I64, *span);
                     let end_val = iter_val;
 
-                    self.emit_void_typed(
-                        InstKind::Store(f.bind, zero),
-                        f.bind_ty.clone(),
-                        *span,
-                    );
+                    self.emit_void_typed(InstKind::Store(f.bind, zero), f.bind_ty.clone(), *span);
                     self.write_var(f.bind, self.current_block, zero);
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
-                    let counter =
-                        self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), *span);
+                    let counter = self.emit(InstKind::Load(f.bind), f.bind_ty.clone(), *span);
                     let cmp = self.emit(
                         InstKind::Cmp(CmpOp::Lt, counter, end_val, Type::I64),
                         Type::Bool,
@@ -399,11 +371,7 @@ impl Lowerer {
                         f.bind_ty.clone(),
                         *span,
                     );
-                    self.emit_void_typed(
-                        InstKind::Store(f.bind, next),
-                        f.bind_ty.clone(),
-                        *span,
-                    );
+                    self.emit_void_typed(InstKind::Store(f.bind, next), f.bind_ty.clone(), *span);
                     self.set_terminator(Terminator::Goto(cond_bb));
                 } else {
                     let zero = self.emit(InstKind::IntConst(0), Type::I64, *span);

@@ -27,8 +27,8 @@ use cmd_pkg::{cmd_fetch, cmd_package, cmd_publish, cmd_update};
 use pipeline::compile_and_link;
 use project::ProjectConfig;
 use sources::{
-    EntityIndex, find_project_entry, load_packages, merge_source_files,
-    resolve_implicit_imports, resolve_modules,
+    EntityIndex, find_project_entry, load_packages, merge_source_files, resolve_implicit_imports,
+    resolve_modules,
 };
 
 /// Initialize the `tracing` subscriber based on CLI verbosity flags.
@@ -58,9 +58,10 @@ fn init_tracing(cli: &Cli) {
         filter = filter.add_directive("jinnc::perceus=trace".parse().unwrap());
     }
     if let Ok(env) = std::env::var("JINN_LOG")
-        && let Ok(extra) = EnvFilter::try_new(env) {
-            filter = extra;
-        }
+        && let Ok(extra) = EnvFilter::try_new(env)
+    {
+        filter = extra;
+    }
 
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -527,13 +528,13 @@ pub fn run() {
                 for inst in &bb.insts {
                     if let InstKind::FnRef(ref name) = inst.kind
                         && let Some(dest) = inst.dest
-                            && func.name == "main"
-                                && matches!(bb.terminator, Terminator::Return(Some(v)) if v == dest)
-                                {
-                                    die(&format!(
-                                        "codegen: bare function reference `{name}` has unresolved return type in main"
-                                    ));
-                                }
+                        && func.name == "main"
+                        && matches!(bb.terminator, Terminator::Return(Some(v)) if v == dest)
+                    {
+                        die(&format!(
+                            "codegen: bare function reference `{name}` has unresolved return type in main"
+                        ));
+                    }
                 }
             }
         }

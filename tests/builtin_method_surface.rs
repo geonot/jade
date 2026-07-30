@@ -39,12 +39,19 @@ fn compile_and_run(src: &str) -> String {
 }
 
 fn expect(src: &str, expected: &str) {
-    assert_eq!(compile_and_run(src).trim(), expected.trim(), "source:\n{src}");
+    assert_eq!(
+        compile_and_run(src).trim(),
+        expected.trim(),
+        "source:\n{src}"
+    );
 }
 
 #[test]
 fn vec_chain_concatenates() {
-    expect("*main\n    c is [1, 2].chain([3, 4])\n    log(c.len())\n    log(c[3])\n", "4\n4");
+    expect(
+        "*main\n    c is [1, 2].chain([3, 4])\n    log(c.len())\n    log(c[3])\n",
+        "4\n4",
+    );
 }
 
 #[test]
@@ -84,28 +91,80 @@ fn registry_names_round_trip() {
     use jinnc::builtin_methods::{MapMethod, StrMethod, VecMethod};
 
     for name in [
-        "push", "pop", "shift", "first", "last", "get", "set", "remove", "clear", "len", "count",
-        "is_empty", "contains", "sum", "join", "take", "skip", "slice", "collect", "reverse",
-        "sort", "flatten", "enumerate", "chain", "zip", "map", "filter", "fold", "find", "any",
+        "push",
+        "pop",
+        "shift",
+        "first",
+        "last",
+        "get",
+        "set",
+        "remove",
+        "clear",
+        "len",
+        "count",
+        "is_empty",
+        "contains",
+        "sum",
+        "join",
+        "take",
+        "skip",
+        "slice",
+        "collect",
+        "reverse",
+        "sort",
+        "flatten",
+        "enumerate",
+        "chain",
+        "zip",
+        "map",
+        "filter",
+        "fold",
+        "find",
+        "any",
         "all",
     ] {
-        assert!(VecMethod::from_name(name).is_some(), "vec method `{name}` missing");
+        assert!(
+            VecMethod::from_name(name).is_some(),
+            "vec method `{name}` missing"
+        );
     }
     assert!(VecMethod::from_name("nope").is_none());
 
     for name in [
         "set", "get", "has", "contains", "remove", "clear", "len", "count", "keys", "values",
     ] {
-        assert!(MapMethod::from_name(name).is_some(), "map method `{name}` missing");
+        assert!(
+            MapMethod::from_name(name).is_some(),
+            "map method `{name}` missing"
+        );
     }
     assert!(MapMethod::from_name("nope").is_none());
 
     for name in [
-        "len", "length", "byte_count", "contains", "starts_with", "ends_with", "char_at", "find",
-        "slice", "trim", "trim_left", "trim_right", "replace", "to_upper", "to_lower", "repeat",
-        "split", "lines", "is_empty",
+        "len",
+        "length",
+        "byte_count",
+        "contains",
+        "starts_with",
+        "ends_with",
+        "char_at",
+        "find",
+        "slice",
+        "trim",
+        "trim_left",
+        "trim_right",
+        "replace",
+        "to_upper",
+        "to_lower",
+        "repeat",
+        "split",
+        "lines",
+        "is_empty",
     ] {
-        assert!(StrMethod::from_name(name).is_some(), "string method `{name}` missing");
+        assert!(
+            StrMethod::from_name(name).is_some(),
+            "string method `{name}` missing"
+        );
     }
     assert!(StrMethod::from_name("nope").is_none());
 }

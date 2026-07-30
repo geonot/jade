@@ -205,7 +205,11 @@ impl Parser {
             } else {
                 None
             };
-            annots.push(CapAnnot { class, scope, span: sp });
+            annots.push(CapAnnot {
+                class,
+                scope,
+                span: sp,
+            });
             if self.check(Token::Comma) {
                 self.advance();
             } else {

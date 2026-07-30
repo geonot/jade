@@ -14,7 +14,8 @@ impl<'ctx> Compiler<'ctx> {
         encoded_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let (store_name, field_name, op, primary_pred, extra_specs) = Self::parse_encoded_filter(encoded_name)?;
+        let (store_name, field_name, op, primary_pred, extra_specs) =
+            Self::parse_encoded_filter(encoded_name)?;
         if args.is_empty() {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
         }
@@ -116,8 +117,16 @@ impl<'ctx> Compiler<'ctx> {
                 (*lop, fi, ft, *eop, *epred, ev)
             })
             .collect();
-        let cond =
-            self.eval_store_filter_pred(rec_ptr, st, field_idx, &field_ty, op, primary_pred, filter_val, &extras)?;
+        let cond = self.eval_store_filter_pred(
+            rec_ptr,
+            st,
+            field_idx,
+            &field_ty,
+            op,
+            primary_pred,
+            filter_val,
+            &extras,
+        )?;
         b!(self.bld.build_conditional_branch(cond, update_bb, next_bb));
 
         self.bld.position_at_end(update_bb);

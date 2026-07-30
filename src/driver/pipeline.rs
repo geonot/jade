@@ -10,16 +10,16 @@ use crate::intern::Symbol;
 use crate::lexer::Lexer;
 use crate::ownership::OwnershipVerifier;
 use crate::parser::Parser;
-use crate::pkgid::{PackageRecord, PkgId, ScopePath, compute_semantic_hash};
 use crate::pkg::SemVer;
+use crate::pkgid::{PackageRecord, PkgId, ScopePath, compute_semantic_hash};
 use crate::typer::Typer;
 
 use super::cli::strip_codegen_prefix;
 use super::cli::*;
 use super::project::ProjectConfig;
 use super::sources::{
-    EntityIndex, load_packages_with_ids, merge_source_files, resolve_implicit_imports, resolve_modules,
-    flatten_workspace, resolve_scoped_pkg_ids,
+    EntityIndex, flatten_workspace, load_packages_with_ids, merge_source_files,
+    resolve_implicit_imports, resolve_modules, resolve_scoped_pkg_ids,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -87,14 +87,22 @@ pub(super) fn compile_and_link(
         let hash = compute_semantic_hash(
             pkg_name,
             ScopePath::root(),
-            &SemVer { major: 0, minor: 0, patch: 0 },
+            &SemVer {
+                major: 0,
+                minor: 0,
+                patch: 0,
+            },
             &all_sources,
             &[],
         );
         PkgId::intern(PackageRecord {
             name: pkg_name,
             owner_scope: ScopePath::root(),
-            version: SemVer { major: 0, minor: 0, patch: 0 },
+            version: SemVer {
+                major: 0,
+                minor: 0,
+                patch: 0,
+            },
             semantic_hash: hash,
             visibility: crate::pkgid::Visibility::Public,
         })

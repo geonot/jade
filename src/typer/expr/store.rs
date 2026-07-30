@@ -47,9 +47,7 @@ impl Typer {
                 let fi = values
                     .iter()
                     .find(|fi| fi.name.as_ref() == Some(fname))
-                    .ok_or_else(|| {
-                        format!("store '{store}' insert: missing field '{fname}'")
-                    })?;
+                    .ok_or_else(|| format!("store '{store}' insert: missing field '{fname}'"))?;
                 hvalues.push(self.lower_expr_expected(&fi.value, Some(fty))?);
             }
 
@@ -267,8 +265,11 @@ impl Typer {
         let field_names: Vec<Symbol> = hassigns.iter().map(|(n, _)| *n).collect();
         args.extend(hassigns.into_iter().map(|(_, e)| e));
 
-        let encoded = crate::hir::encode_store_set_call(*store, &hfilter, &field_names)
-            .replacen("__store_set_", "__store_set_status_", 1);
+        let encoded = crate::hir::encode_store_set_call(*store, &hfilter, &field_names).replacen(
+            "__store_set_",
+            "__store_set_status_",
+            1,
+        );
         self.store_result_subject(encoded, args, &[("Missing", -1)], span)
     }
 

@@ -133,16 +133,18 @@ impl OwnershipVerifier {
             return;
         }
         if let Some(state) = self.lookup(id).cloned()
-            && state.moved && state.ownership == Ownership::Owned {
-                self.diagnostics.push(OwnershipDiag {
-                    kind: DiagKind::UseAfterMove,
-                    span,
-                    message: format!(
-                        "use of moved value `{name}` (moved at line {})",
-                        state.move_span.map(|s| s.line).unwrap_or(0)
-                    ),
-                });
-            }
+            && state.moved
+            && state.ownership == Ownership::Owned
+        {
+            self.diagnostics.push(OwnershipDiag {
+                kind: DiagKind::UseAfterMove,
+                span,
+                message: format!(
+                    "use of moved value `{name}` (moved at line {})",
+                    state.move_span.map(|s| s.line).unwrap_or(0)
+                ),
+            });
+        }
     }
 
     fn record_borrow(&mut self, id: DefId, mutable: bool, span: crate::ast::Span) {
@@ -188,27 +190,29 @@ impl OwnershipVerifier {
         }
         if let Some(state) = self.lookup(id).cloned()
             && (state.ownership == Ownership::Owned || state.ownership == Ownership::BorrowMut)
-                && !state.ty.is_trivially_droppable()
-                && let Some(s) = self.lookup_mut(id) {
-                    s.moved = true;
-                    s.move_span = Some(span);
-                }
+            && !state.ty.is_trivially_droppable()
+            && let Some(s) = self.lookup_mut(id)
+        {
+            s.moved = true;
+            s.move_span = Some(span);
+        }
     }
 
     fn check_return_borrows(&mut self, expr: &Expr, span: crate::ast::Span) {
         if let ExprKind::Ref(inner) = &expr.kind
             && let Some((def_id, name)) = Self::extract_root_var(inner)
-                && let Some(state) = self.lookup(def_id)
-                    && state.ownership == Ownership::Owned {
-                        self.diagnostics.push(OwnershipDiag {
-                            kind: DiagKind::ReturnOfBorrowed,
-                            span,
-                            message: format!(
-                                "returning reference to local variable `{name}` — \
+            && let Some(state) = self.lookup(def_id)
+            && state.ownership == Ownership::Owned
+        {
+            self.diagnostics.push(OwnershipDiag {
+                kind: DiagKind::ReturnOfBorrowed,
+                span,
+                message: format!(
+                    "returning reference to local variable `{name}` — \
                                  value will be dropped when function returns"
-                            ),
-                        });
-                    }
+                ),
+            });
+        }
     }
 
     fn extract_root_var(expr: &Expr) -> Option<(DefId, String)> {

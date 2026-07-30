@@ -31,31 +31,33 @@ impl Typer {
                     return self.lower_expr_expected(&bare, expected);
                 }
                 if let ast::Expr::OfCall(inner, type_arg_expr, _) = callee.as_ref()
-                    && let ast::Expr::Ident(ctor_name, _) = inner.as_ref() {
-                        let is_struct_ctor = self.generic_types.contains_key(ctor_name)
-                            || self.structs.contains_key(ctor_name);
-                        let is_variant_ctor = self.variant_tags.contains_key(ctor_name);
-                        if (is_struct_ctor || is_variant_ctor)
-                            && let Some(tys) = self.expr_to_type_args(type_arg_expr) {
-                                let inits: Vec<ast::FieldInit> = args
-                                    .iter()
-                                    .map(|a| ast::FieldInit {
-                                        name: None,
-                                        value: a.clone(),
-                                    })
-                                    .collect();
-                                let result = self.lower_struct_or_variant_with_typeargs(
-                                    &ctor_name.as_str(),
-                                    &inits,
-                                    *span,
-                                    &tys,
-                                )?;
-                                if let Some(exp) = expected {
-                                    self.unify_call_result(exp, &result.ty, *span, "call result");
-                                }
-                                return Ok(result);
-                            }
+                    && let ast::Expr::Ident(ctor_name, _) = inner.as_ref()
+                {
+                    let is_struct_ctor = self.generic_types.contains_key(ctor_name)
+                        || self.structs.contains_key(ctor_name);
+                    let is_variant_ctor = self.variant_tags.contains_key(ctor_name);
+                    if (is_struct_ctor || is_variant_ctor)
+                        && let Some(tys) = self.expr_to_type_args(type_arg_expr)
+                    {
+                        let inits: Vec<ast::FieldInit> = args
+                            .iter()
+                            .map(|a| ast::FieldInit {
+                                name: None,
+                                value: a.clone(),
+                            })
+                            .collect();
+                        let result = self.lower_struct_or_variant_with_typeargs(
+                            &ctor_name.as_str(),
+                            &inits,
+                            *span,
+                            &tys,
+                        )?;
+                        if let Some(exp) = expected {
+                            self.unify_call_result(exp, &result.ty, *span, "call result");
+                        }
+                        return Ok(result);
                     }
+                }
 
                 if let ast::Expr::Ident(ctor_name, _) = callee.as_ref() {
                     let is_struct = self.generic_types.contains_key(ctor_name)
@@ -146,28 +148,25 @@ impl Typer {
                         if !self.fns.contains_key(&qualified_name)
                             && !self.inferable_fns.contains_key(&qualified_name)
                             && !self.generic_fns.contains_key(&qualified_name)
-                            && let Some((id, ptys, ret)) = self.externs.get(method).cloned() {
-                                let mut hargs = Vec::new();
-                                for (i, arg) in args.iter().enumerate() {
-                                    let expected_ty = ptys.get(i);
-                                    hargs.push(self.lower_expr_expected(arg, expected_ty)?);
-                                }
-                                for (i, harg) in hargs.iter().enumerate() {
-                                    if let Some(pty) = ptys.get(i) {
-                                        let _ = self.infer_ctx.unify_at(
-                                            pty,
-                                            &harg.ty,
-                                            *span,
-                                            "extern arg",
-                                        );
-                                    }
-                                }
-                                return Ok(hir::Expr {
-                                    kind: hir::ExprKind::Call(id, *method, hargs),
-                                    ty: ret,
-                                    span: *span,
-                                });
+                            && let Some((id, ptys, ret)) = self.externs.get(method).cloned()
+                        {
+                            let mut hargs = Vec::new();
+                            for (i, arg) in args.iter().enumerate() {
+                                let expected_ty = ptys.get(i);
+                                hargs.push(self.lower_expr_expected(arg, expected_ty)?);
                             }
+                            for (i, harg) in hargs.iter().enumerate() {
+                                if let Some(pty) = ptys.get(i) {
+                                    let _ =
+                                        self.infer_ctx.unify_at(pty, &harg.ty, *span, "extern arg");
+                                }
+                            }
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::Call(id, *method, hargs),
+                                ty: ret,
+                                span: *span,
+                            });
+                        }
                         let callee = ast::Expr::Ident(qualified_name, *span);
                         let result = self.lower_call(&callee, args, *span)?;
                         if let Some(exp) = expected {
@@ -237,7 +236,11 @@ impl Typer {
         })
     }
 
-    pub(in crate::typer) fn is_enum_variant_of(&self, enum_name: &Symbol, variant: &Symbol) -> bool {
+    pub(in crate::typer) fn is_enum_variant_of(
+        &self,
+        enum_name: &Symbol,
+        variant: &Symbol,
+    ) -> bool {
         if !self.enums.contains_key(enum_name) && !self.generic_enums.contains_key(enum_name) {
             return false;
         }
@@ -268,27 +271,30 @@ impl Typer {
                     return self.lower_expr_expected(&callee, expected);
                 }
                 if let ast::Expr::Ident(ref name, _) = **obj
-                    && self.modules.contains(name) && self.find_var(&name.as_str()).is_none() {
-                        let qualified_name = Symbol::intern(&format!("{}_{}", name, field));
-                        let callee = ast::Expr::Ident(qualified_name, *span);
-                        return self.lower_expr_expected(&callee, expected);
-                    }
+                    && self.modules.contains(name)
+                    && self.find_var(&name.as_str()).is_none()
+                {
+                    let qualified_name = Symbol::intern(&format!("{}_{}", name, field));
+                    let callee = ast::Expr::Ident(qualified_name, *span);
+                    return self.lower_expr_expected(&callee, expected);
+                }
                 let hobj = self.lower_expr(obj)?;
 
                 if let hir::ExprKind::Var(parent_id, parent_name) = &hobj.kind
                     && self.suppress_moved_field_check == 0
-                        && let Some(moved) = self.moved_fields.get(parent_id)
-                            && moved.contains(field) {
-                                return Err(format!(
-                                    "{}: field `{}` of `{}` was moved out by an earlier `take`; \
+                    && let Some(moved) = self.moved_fields.get(parent_id)
+                    && moved.contains(field)
+                {
+                    return Err(format!(
+                        "{}: field `{}` of `{}` was moved out by an earlier `take`; \
                                      reassign `{}.{}` before reading it",
-                                    span.loc(),
-                                    field,
-                                    parent_name,
-                                    parent_name,
-                                    field,
-                                ));
-                            }
+                        span.loc(),
+                        field,
+                        parent_name,
+                        parent_name,
+                        field,
+                    ));
+                }
                 let resolved_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
 
                 if let Type::Row(store) = &resolved_ty
@@ -344,11 +350,11 @@ impl Typer {
 
                 if let Type::ActorRef(actor_name) = &resolved_ty
                     && let Some((_, _, handlers)) = self.actors.get(actor_name)
-                        && handlers.iter().any(|(n, _, _)| n == field) {
-                            let call_expr =
-                                ast::Expr::Method(obj.clone(), *field, Vec::new(), *span);
-                            return self.lower_expr_expected(&call_expr, expected);
-                        }
+                    && handlers.iter().any(|(n, _, _)| n == field)
+                {
+                    let call_expr = ast::Expr::Method(obj.clone(), *field, Vec::new(), *span);
+                    return self.lower_expr_expected(&call_expr, expected);
+                }
 
                 let peeled_ty = resolved_ty.clone();
                 let struct_name = match &peeled_ty {

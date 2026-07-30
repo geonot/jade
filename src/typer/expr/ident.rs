@@ -42,13 +42,14 @@ impl Typer {
                     }
                 } else if let Ok(Some(mangled)) =
                     self.try_monomorphize_generic_variant(&name.as_str(), None)
-                    && let Some((_, tag)) = self.variant_tags.get(name).cloned() {
-                        return Ok(hir::Expr {
-                            kind: hir::ExprKind::VariantRef(mangled, *name, tag),
-                            ty: Type::Enum(mangled),
-                            span: *span,
-                        });
-                    }
+                    && let Some((_, tag)) = self.variant_tags.get(name).cloned()
+                {
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::VariantRef(mangled, *name, tag),
+                        ty: Type::Enum(mangled),
+                        span: *span,
+                    });
+                }
                 if let Some(v) = self.find_var(&name.as_str()) {
                     let def_id = v.def_id;
                     let mono_ty = v.ty.clone();
@@ -155,11 +156,7 @@ impl Typer {
                         .find(|(_, (vn, _))| vn == variant_name)
                     {
                         return Ok(hir::Expr {
-                            kind: hir::ExprKind::VariantRef(
-                                *type_name,
-                                *variant_name,
-                                tag as u32,
-                            ),
+                            kind: hir::ExprKind::VariantRef(*type_name, *variant_name, tag as u32),
                             ty: Type::Enum(*type_name),
                             span: *span,
                         });

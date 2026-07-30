@@ -364,16 +364,17 @@ impl<'s> Lexer<'s> {
                 self.src[self.pos + 1],
                 self.src[self.pos + 2],
                 self.src[self.pos + 3],
-            ) {
-                self.advance();
-                self.advance();
-                self.advance();
-                self.advance();
-                return Ok(Spanned {
-                    token: Token::UshrEq,
-                    span: Span::new(start, self.pos, self.line, sc),
-                });
-            }
+            )
+        {
+            self.advance();
+            self.advance();
+            self.advance();
+            self.advance();
+            return Ok(Spanned {
+                token: Token::UshrEq,
+                span: Span::new(start, self.pos, self.line, sc),
+            });
+        }
 
         if self.pos + 2 < self.src.len() {
             let three = match (ch, self.src[self.pos + 1], self.src[self.pos + 2]) {

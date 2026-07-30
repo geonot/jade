@@ -270,9 +270,7 @@ fn strict_cast_in_range_passes() {
 
 #[test]
 fn unwrap_on_nothing_aborts() {
-    expect_abort(
-        "*find() returns Option of i64\n    Nothing\n\n*main\n    log(find().unwrap())\n",
-    );
+    expect_abort("*find() returns Option of i64\n    Nothing\n\n*main\n    log(find().unwrap())\n");
 }
 
 #[test]
@@ -290,7 +288,10 @@ fn failed_assert_aborts() {
 
 #[test]
 fn passing_assert_continues() {
-    expect("*main\n    x is 1\n    assert(x equals 1)\n    log(x)\n", "1");
+    expect(
+        "*main\n    x is 1\n    assert(x equals 1)\n    log(x)\n",
+        "1",
+    );
 }
 
 // ── Invalid access rejected at compile time ───────────────────────────────
@@ -414,13 +415,13 @@ fn string_slice_oob_is_checked() {
 
 #[test]
 fn string_char_at_oob_is_checked() {
-    expect_trap("*main\n    s is 'hi'\n    log(s.char_at(99))\n", "out of bounds");
+    expect_trap(
+        "*main\n    s is 'hi'\n    log(s.char_at(99))\n",
+        "out of bounds",
+    );
 }
 
 #[test]
 fn oversized_shift_is_defined() {
-    expect_trap(
-        "*main\n    a is 1\n    b is 70\n    log(a << b)\n",
-        "shift",
-    );
+    expect_trap("*main\n    a is 1\n    b is 70\n    log(a << b)\n", "shift");
 }

@@ -46,7 +46,11 @@ pub fn verify_program(prog: &Program) -> Result<(), Vec<String>> {
             }
         }
     }
-    if errors.is_empty() { Ok(()) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
 /// Verify a single MIR function. Returns one diagnostic per violation.
@@ -66,10 +70,10 @@ pub fn verify_function(f: &Function) -> Result<(), Vec<String>> {
 
     let mut value_ty: HashMap<ValueId, Type> = HashMap::new();
     let redef = |v: ValueId,
-                     ty: &Type,
-                     site: &str,
-                     value_ty: &mut HashMap<ValueId, Type>,
-                     errors: &mut Vec<String>| {
+                 ty: &Type,
+                 site: &str,
+                 value_ty: &mut HashMap<ValueId, Type>,
+                 errors: &mut Vec<String>| {
         if value_ty.insert(v, ty.clone()).is_some() {
             errors.push(format!("{} multiply defined ({})", v, site));
         }
@@ -97,14 +101,12 @@ pub fn verify_function(f: &Function) -> Result<(), Vec<String>> {
         }
     };
 
-    let check_val = |v: ValueId,
-                     ctx: &str,
-                     value_ty: &HashMap<ValueId, Type>,
-                     errors: &mut Vec<String>| {
-        if !value_ty.contains_key(&v) {
-            errors.push(format!("{} uses undefined value {}", ctx, v));
-        }
-    };
+    let check_val =
+        |v: ValueId, ctx: &str, value_ty: &HashMap<ValueId, Type>, errors: &mut Vec<String>| {
+            if !value_ty.contains_key(&v) {
+                errors.push(format!("{} uses undefined value {}", ctx, v));
+            }
+        };
 
     for bb in &f.blocks {
         let bb_label = bb.id;
@@ -149,7 +151,12 @@ pub fn verify_function(f: &Function) -> Result<(), Vec<String>> {
                 check_block(*b, &format!("goto in {}", bb_label), &mut errors);
             }
             Terminator::Branch(cond, t, fl) => {
-                check_val(*cond, &format!("branch cond in {}", bb_label), &value_ty, &mut errors);
+                check_val(
+                    *cond,
+                    &format!("branch cond in {}", bb_label),
+                    &value_ty,
+                    &mut errors,
+                );
                 // Jinn has truthy semantics: codegen's compile_ternary / if applies
                 // `to_bool(...)` which coerces any int (and pointers/options) to i1.
                 // So MIR-level Branch cond is legitimately any int-like type, not just Bool.
@@ -166,15 +173,29 @@ pub fn verify_function(f: &Function) -> Result<(), Vec<String>> {
                 check_block(*fl, &format!("branch false in {}", bb_label), &mut errors);
             }
             Terminator::Switch(scr, cases, default) => {
-                check_val(*scr, &format!("switch scrutinee in {}", bb_label), &value_ty, &mut errors);
+                check_val(
+                    *scr,
+                    &format!("switch scrutinee in {}", bb_label),
+                    &value_ty,
+                    &mut errors,
+                );
                 for (_, b) in cases {
                     check_block(*b, &format!("switch case in {}", bb_label), &mut errors);
                 }
-                check_block(*default, &format!("switch default in {}", bb_label), &mut errors);
+                check_block(
+                    *default,
+                    &format!("switch default in {}", bb_label),
+                    &mut errors,
+                );
             }
             Terminator::Return(opt) => match opt {
                 Some(v) => {
-                    check_val(*v, &format!("return in {}", bb_label), &value_ty, &mut errors);
+                    check_val(
+                        *v,
+                        &format!("return in {}", bb_label),
+                        &value_ty,
+                        &mut errors,
+                    );
                     // A scheduler-task coroutine (structured-concurrency child)
                     // uses `Return(Some(err))` as the scope-error convention:
                     // codegen boxes the value and records it on the enclosing
@@ -204,7 +225,11 @@ pub fn verify_function(f: &Function) -> Result<(), Vec<String>> {
         }
     }
 
-    if errors.is_empty() { Ok(()) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
 /// Type equality with relaxations for not-yet-canonical Type variants
@@ -253,8 +278,18 @@ fn is_truthy_compatible(t: &Type) -> bool {
     let t = unwrap_transparent(t);
     matches!(
         t,
-        Bool | I8 | I16 | I32 | I64 | U8 | U16 | U32 | U64
-            | Ptr(_) | String | Enum(_) | Struct(_, _)
+        Bool | I8
+            | I16
+            | I32
+            | I64
+            | U8
+            | U16
+            | U32
+            | U64
+            | Ptr(_)
+            | String
+            | Enum(_)
+            | Struct(_, _)
     )
 }
 
@@ -263,15 +298,8 @@ fn is_truthy_compatible(t: &Type) -> bool {
 fn inst_used_values(k: &InstKind) -> Vec<ValueId> {
     use InstKind::*;
     match k {
-        IntConst(_)
-        | FloatConst(_)
-        | BoolConst(_)
-        | StringConst(_)
-        | Void
-        | Load(_)
-        | FnRef(_)
-        | MapInit
-        | GlobalLoad(_) => Vec::new(),
+        IntConst(_) | FloatConst(_) | BoolConst(_) | StringConst(_) | Void | Load(_) | FnRef(_)
+        | MapInit | GlobalLoad(_) => Vec::new(),
 
         BinOp(_, a, b) | Cmp(_, a, b, _) => vec![*a, *b],
         UnaryOp(_, a) => vec![*a],
@@ -480,10 +508,7 @@ mod tests {
 
     #[test]
     fn rejects_return_void_from_nonvoid_function() {
-        let f = func(
-            vec![block(0, vec![], Terminator::Return(None))],
-            Type::I64,
-        );
+        let f = func(vec![block(0, vec![], Terminator::Return(None))], Type::I64);
         let errs = verify_function(&f).unwrap_err();
         assert!(errs.iter().any(|e| e.contains("return-void")));
     }
@@ -513,10 +538,7 @@ mod tests {
 
     #[test]
     fn rejects_missing_entry_block() {
-        let mut f = func(
-            vec![block(0, vec![], Terminator::Return(None))],
-            Type::Void,
-        );
+        let mut f = func(vec![block(0, vec![], Terminator::Return(None))], Type::Void);
         f.entry = BlockId(3);
         let errs = verify_function(&f).unwrap_err();
         assert!(errs.iter().any(|e| e.contains("entry block")));
@@ -554,11 +576,7 @@ mod tests {
             incoming: vec![(BlockId(2), ValueId(1))],
         }];
         let f = func(
-            vec![
-                entry,
-                join,
-                block(2, vec![], Terminator::Return(None)),
-            ],
+            vec![entry, join, block(2, vec![], Terminator::Return(None))],
             Type::I64,
         );
         let errs = verify_function(&f).unwrap_err();
@@ -585,10 +603,7 @@ mod tests {
 
     #[test]
     fn program_errors_carry_function_name() {
-        let f = func(
-            vec![block(0, vec![], Terminator::Return(None))],
-            Type::I64,
-        );
+        let f = func(vec![block(0, vec![], Terminator::Return(None))], Type::I64);
         let prog = Program {
             functions: vec![f],
             types: vec![],

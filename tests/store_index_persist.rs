@@ -56,14 +56,22 @@ fn string_index_persists_and_reopens() {
     let writer = "store people\n    name as String @index\n    age as i64\n\n*main\n    insert people 'zoe', 30\n    insert people 'amy', 25\n    insert people 'bob', 40\n";
     let wbin = compile_in(dir.path(), "writer", writer);
     let w = run(dir.path(), &wbin);
-    assert!(w.status.success(), "writer: {}", String::from_utf8_lossy(&w.stderr));
+    assert!(
+        w.status.success(),
+        "writer: {}",
+        String::from_utf8_lossy(&w.stderr)
+    );
 
     assert!(dir.path().join("people.name.idx").exists());
 
     let reader = "store people\n    name as String @index\n    age as i64\n\n*main\n    r is people where name equals 'bob'\n    log r.age\n    r2 is people where name equals 'amy'\n    log r2.age\n";
     let rbin = compile_in(dir.path(), "reader", reader);
     let r = run(dir.path(), &rbin);
-    assert!(r.status.success(), "reader: {}", String::from_utf8_lossy(&r.stderr));
+    assert!(
+        r.status.success(),
+        "reader: {}",
+        String::from_utf8_lossy(&r.stderr)
+    );
     assert_eq!(out_lines(&r), vec!["40", "25"]);
 }
 
@@ -79,7 +87,11 @@ fn missing_index_rebuilds_from_store() {
     let reader = "store people\n    name as String @index\n    age as i64\n\n*main\n    r is people where name equals 'bob'\n    log r.age\n    r2 is people where name equals 'zoe'\n    log r2.age\n";
     let rbin = compile_in(dir.path(), "reader", reader);
     let r = run(dir.path(), &rbin);
-    assert!(r.status.success(), "reader: {}", String::from_utf8_lossy(&r.stderr));
+    assert!(
+        r.status.success(),
+        "reader: {}",
+        String::from_utf8_lossy(&r.stderr)
+    );
     assert_eq!(out_lines(&r), vec!["40", "30"]);
     assert!(dir.path().join("people.name.idx").exists());
 }
@@ -101,7 +113,11 @@ fn corrupt_index_rebuilds() {
     let reader = "store people\n    name as String @index\n    age as i64\n\n*main\n    r is people where name equals 'amy'\n    log r.age\n";
     let rbin = compile_in(dir.path(), "reader", reader);
     let r = run(dir.path(), &rbin);
-    assert!(r.status.success(), "reader: {}", String::from_utf8_lossy(&r.stderr));
+    assert!(
+        r.status.success(),
+        "reader: {}",
+        String::from_utf8_lossy(&r.stderr)
+    );
     assert_eq!(out_lines(&r), vec!["25"]);
 }
 
@@ -117,7 +133,11 @@ fn integer_index_rebuilds_from_store() {
     let reader = "store nums\n    key as i64 @index\n    val as i64\n\n*main\n    r is nums where key equals 200\n    log r.val\n";
     let rbin = compile_in(dir.path(), "reader", reader);
     let r = run(dir.path(), &rbin);
-    assert!(r.status.success(), "reader: {}", String::from_utf8_lossy(&r.stderr));
+    assert!(
+        r.status.success(),
+        "reader: {}",
+        String::from_utf8_lossy(&r.stderr)
+    );
     assert_eq!(out_lines(&r), vec!["2"]);
 }
 
@@ -133,6 +153,10 @@ fn rebuild_skips_soft_deleted_records() {
     let reader = "store people\n    name as String @index\n    age as i64\n\n*main\n    r is people where name equals 'zoe'\n    log r.age\n    c is count people\n    log c\n";
     let rbin = compile_in(dir.path(), "reader", reader);
     let r = run(dir.path(), &rbin);
-    assert!(r.status.success(), "reader: {}", String::from_utf8_lossy(&r.stderr));
+    assert!(
+        r.status.success(),
+        "reader: {}",
+        String::from_utf8_lossy(&r.stderr)
+    );
     assert_eq!(out_lines(&r), vec!["30", "1"]);
 }

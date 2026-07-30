@@ -126,19 +126,19 @@ impl Parser {
 
                 if let Token::Ident(first) = self.peek()
                     && first.as_str() == "const"
-                        && self.pos + 2 < self.tok.len()
-                        && matches!(self.tok[self.pos + 1].token, Token::Ident(_))
-                        && matches!(self.tok[self.pos + 2].token, Token::Is)
-                    {
+                    && self.pos + 2 < self.tok.len()
+                    && matches!(self.tok[self.pos + 1].token, Token::Ident(_))
+                    && matches!(self.tok[self.pos + 2].token, Token::Is)
+                {
+                    self.advance();
+                    let name = self.ident()?;
+                    self.expect(Token::Is)?;
+                    let val = self.parse_expr()?;
+                    if self.check(Token::Newline) {
                         self.advance();
-                        let name = self.ident()?;
-                        self.expect(Token::Is)?;
-                        let val = self.parse_expr()?;
-                        if self.check(Token::Newline) {
-                            self.advance();
-                        }
-                        return Ok(Decl::Const(name, val, sp));
                     }
+                    return Ok(Decl::Const(name, val, sp));
+                }
 
                 if self.pos + 1 < self.tok.len()
                     && matches!(self.tok[self.pos + 1].token, Token::Is)
@@ -153,11 +153,12 @@ impl Parser {
                 } else {
                     let stmt = self.parse_stmt()?;
                     if let Stmt::Expr(e) = &stmt
-                        && is_useless_top_expr(e) {
-                            return Err(self.error(
+                        && is_useless_top_expr(e)
+                    {
+                        return Err(self.error(
                                 "bare expression at top level has no effect; expected a declaration (`*function`, `type`, `actor`, `store`, ...) or a statement with side effects (`log`, `print`, function call, assignment)",
                             ));
-                        }
+                    }
                     if self.check(Token::Newline) {
                         self.advance();
                     }
@@ -169,11 +170,12 @@ impl Parser {
                 match self.parse_stmt() {
                     Ok(stmt) => {
                         if let Stmt::Expr(e) = &stmt
-                            && is_useless_top_expr(e) {
-                                return Err(self.error(
+                            && is_useless_top_expr(e)
+                        {
+                            return Err(self.error(
                                     "bare expression at top level has no effect; expected a declaration (`*function`, `type`, `actor`, `store`, ...) or a statement with side effects (`log`, `print`, function call, assignment)",
                                 ));
-                            }
+                        }
                         if self.check(Token::Newline) {
                             self.advance();
                         }

@@ -319,7 +319,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let join_slot_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 3, "join_slot_ptr"));
         let join_signal = crate::codegen::fn_or_die(&self.module, "jinn_join_signal");
-        b!(self.bld.build_call(join_signal, &[join_slot_ptr.into()], ""));
+        b!(self
+            .bld
+            .build_call(join_signal, &[join_slot_ptr.into()], ""));
 
         if let Some(destroy_fn) = self.module.get_function("jinn_actor_destroy") {
             b!(self.bld.build_call(destroy_fn, &[mb_ptr.into()], ""));

@@ -112,9 +112,10 @@ pub(super) fn fold_expr_with_fns(expr: &mut Expr, pure_fns: &HashMap<Symbol, hir
                 ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_)
             )
         })
-            && let Some(result) = try_eval_pure_call(&name.as_str(), args, pure_fns, 0) {
-                *expr = result;
-            }
+        && let Some(result) = try_eval_pure_call(&name.as_str(), args, pure_fns, 0)
+    {
+        *expr = result;
+    }
 }
 
 pub(super) fn fold_block(block: &mut Block) {

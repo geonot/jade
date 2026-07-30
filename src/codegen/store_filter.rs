@@ -444,12 +444,10 @@ impl<'ctx> Compiler<'ctx> {
         let needle_len = self.string_len(filter_val)?.into_int_value();
         let needle_data = self.string_data(filter_val)?.into_pointer_value();
 
-        let fits = b!(self.bld.build_int_compare(
-            IntPredicate::UGE,
-            stored_len,
-            needle_len,
-            "tp.fits"
-        ));
+        let fits =
+            b!(self
+                .bld
+                .build_int_compare(IntPredicate::UGE, stored_len, needle_len, "tp.fits"));
 
         let fv = self.current_fn();
         let memcmp_fn = self.ensure_memcmp();
@@ -480,10 +478,7 @@ impl<'ctx> Compiler<'ctx> {
 
                 self.bld.position_at_end(res_bb);
                 let phi = b!(self.bld.build_phi(boolt, "tp.sw"));
-                phi.add_incoming(&[
-                    (&boolt.const_int(0, false), fits_end),
-                    (&m, do_end),
-                ]);
+                phi.add_incoming(&[(&boolt.const_int(0, false), fits_end), (&m, do_end)]);
                 Ok(phi.as_basic_value().into_int_value())
             }
             crate::ast::FilterPred::EndsWith => {
@@ -494,11 +489,8 @@ impl<'ctx> Compiler<'ctx> {
 
                 self.bld.position_at_end(do_bb);
                 let off = b!(self.bld.build_int_sub(stored_len, needle_len, "tp.ew.off"));
-                let start = unsafe {
-                    b!(self
-                        .bld
-                        .build_gep(i8t, stored_data, &[off], "tp.ew.start"))
-                };
+                let start =
+                    unsafe { b!(self.bld.build_gep(i8t, stored_data, &[off], "tp.ew.start")) };
                 let mc = self
                     .call_result(b!(self.bld.build_call(
                         memcmp_fn,
@@ -517,10 +509,7 @@ impl<'ctx> Compiler<'ctx> {
 
                 self.bld.position_at_end(res_bb);
                 let phi = b!(self.bld.build_phi(boolt, "tp.ew"));
-                phi.add_incoming(&[
-                    (&boolt.const_int(0, false), fits_end),
-                    (&m, do_end),
-                ]);
+                phi.add_incoming(&[(&boolt.const_int(0, false), fits_end), (&m, do_end)]);
                 Ok(phi.as_basic_value().into_int_value())
             }
             crate::ast::FilterPred::Contains => {
@@ -535,19 +524,15 @@ impl<'ctx> Compiler<'ctx> {
                 self.bld.position_at_end(head_bb);
                 let iv = b!(self.bld.build_phi(i64t, "tp.ct.i"));
                 let cur = iv.as_basic_value().into_int_value();
-                let in_range = b!(self.bld.build_int_compare(
-                    IntPredicate::ULE,
-                    cur,
-                    last,
-                    "tp.ct.inr"
-                ));
+                let in_range =
+                    b!(self
+                        .bld
+                        .build_int_compare(IntPredicate::ULE, cur, last, "tp.ct.inr"));
                 b!(self.bld.build_conditional_branch(in_range, body_bb, res_bb));
                 let head_end = self.current_bb();
 
                 self.bld.position_at_end(body_bb);
-                let ptr = unsafe {
-                    b!(self.bld.build_gep(i8t, stored_data, &[cur], "tp.ct.p"))
-                };
+                let ptr = unsafe { b!(self.bld.build_gep(i8t, stored_data, &[cur], "tp.ct.p")) };
                 let mc = self
                     .call_result(b!(self.bld.build_call(
                         memcmp_fn,
@@ -565,14 +550,13 @@ impl<'ctx> Compiler<'ctx> {
                 let body_end = self.current_bb();
 
                 self.bld.position_at_end(next_bb);
-                let inc = b!(self.bld.build_int_add(cur, i64t.const_int(1, false), "tp.ct.inc"));
+                let inc = b!(self
+                    .bld
+                    .build_int_add(cur, i64t.const_int(1, false), "tp.ct.inc"));
                 b!(self.bld.build_unconditional_branch(head_bb));
                 let next_end = self.current_bb();
 
-                iv.add_incoming(&[
-                    (&i64t.const_int(0, false), fits_end),
-                    (&inc, next_end),
-                ]);
+                iv.add_incoming(&[(&i64t.const_int(0, false), fits_end), (&inc, next_end)]);
 
                 self.bld.position_at_end(res_bb);
                 let phi = b!(self.bld.build_phi(boolt, "tp.ct"));

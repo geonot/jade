@@ -12,14 +12,14 @@ impl<'ctx> Compiler<'ctx> {
             .get(store_name)
             .ok_or_else(|| format!("unknown store '{store_name}'"))?
             .clone();
-        let is_simple = sd
-            .decorators.contains(&crate::ast::StoreDecorator::Simple);
+        let is_simple = sd.decorators.contains(&crate::ast::StoreDecorator::Simple);
 
         if is_simple || sd.fields.iter().all(|f| f.name != "deleted") {
             return self.emit_store_hard_delete(encoded_name, args);
         }
 
-        let (store_name, field_name, op, primary_pred, extra_specs) = Self::parse_encoded_filter(encoded_name)?;
+        let (store_name, field_name, op, primary_pred, extra_specs) =
+            Self::parse_encoded_filter(encoded_name)?;
         if args.is_empty() {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
         }
@@ -29,9 +29,10 @@ impl<'ctx> Compiler<'ctx> {
 
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::BeforeDelete(fname) = dec
-                && let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
-                    b!(self.bld.build_call(hook_fn, &[], ""));
-                }
+                && let Some(hook_fn) = self.module.get_function(&fname.as_str())
+            {
+                b!(self.bld.build_call(hook_fn, &[], ""));
+            }
         }
 
         let i64t = self.ctx.i64_type();
@@ -114,8 +115,16 @@ impl<'ctx> Compiler<'ctx> {
                 (*lop, fi, ft, *eop, *epred, ev)
             })
             .collect();
-        let cond =
-            self.eval_store_filter_pred(rec_ptr, st, field_idx, &field_ty, op, primary_pred, filter_val, &extras)?;
+        let cond = self.eval_store_filter_pred(
+            rec_ptr,
+            st,
+            field_idx,
+            &field_ty,
+            op,
+            primary_pred,
+            filter_val,
+            &extras,
+        )?;
         b!(self.bld.build_conditional_branch(cond, mark_bb, next_bb));
 
         self.bld.position_at_end(mark_bb);
@@ -140,9 +149,10 @@ impl<'ctx> Compiler<'ctx> {
 
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::AfterDelete(fname) = dec
-                && let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
-                    b!(self.bld.build_call(hook_fn, &[], ""));
-                }
+                && let Some(hook_fn) = self.module.get_function(&fname.as_str())
+            {
+                b!(self.bld.build_call(hook_fn, &[], ""));
+            }
         }
 
         b!(self.bld.build_call(
@@ -215,9 +225,10 @@ impl<'ctx> Compiler<'ctx> {
 
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::BeforeDelete(fname) = dec
-                && let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
-                    b!(self.bld.build_call(hook_fn, &[], ""));
-                }
+                && let Some(hook_fn) = self.module.get_function(&fname.as_str())
+            {
+                b!(self.bld.build_call(hook_fn, &[], ""));
+            }
         }
 
         let i64t = self.ctx.i64_type();
@@ -397,7 +408,14 @@ impl<'ctx> Compiler<'ctx> {
                 })
                 .collect();
             self.eval_store_filter_pred(
-                rec_ptr, st, field_idx, &field_ty, primary_op, primary_pred, filter_val, &extras,
+                rec_ptr,
+                st,
+                field_idx,
+                &field_ty,
+                primary_op,
+                primary_pred,
+                filter_val,
+                &extras,
             )?
         };
         let del_hook_bb = self.ctx.append_basic_block(fv_fn, "del.hook");
@@ -410,9 +428,10 @@ impl<'ctx> Compiler<'ctx> {
         self.wal_write_delete(store_name, rec_ptr, rec_size)?;
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::AfterDelete(fname) = dec
-                && let Some(hook_fn) = self.module.get_function(&fname.as_str()) {
-                    b!(self.bld.build_call(hook_fn, &[], ""));
-                }
+                && let Some(hook_fn) = self.module.get_function(&fname.as_str())
+            {
+                b!(self.bld.build_call(hook_fn, &[], ""));
+            }
         }
         b!(self.bld.build_unconditional_branch(skip_bb));
 

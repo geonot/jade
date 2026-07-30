@@ -11,21 +11,23 @@ impl Typer {
         if let Some(args) = self
             .trait_impl_type_args
             .get(&(type_name.into(), "Iter".into()))
-            && let Some(t) = args.first() {
-                return t.clone();
-            }
+            && let Some(t) = args.first()
+        {
+            return t.clone();
+        }
         let fn_name = format!("{type_name}_next");
         if let Some((_, _, ret)) = self.fns.get(&fn_name)
             && let Type::Enum(ename) = ret
-                && let Some(stripped) = ename.strip_prefix("Option_") {
-                    return match &*stripped.as_str() {
-                        "i64" => Type::I64,
-                        "f64" => Type::F64,
-                        "bool" => Type::Bool,
-                        "str" | "String" | "string" => Type::String,
-                        other => Type::Struct(other.into(), vec![]),
-                    };
-                }
+            && let Some(stripped) = ename.strip_prefix("Option_")
+        {
+            return match &*stripped.as_str() {
+                "i64" => Type::I64,
+                "f64" => Type::F64,
+                "bool" => Type::Bool,
+                "str" | "String" | "string" => Type::String,
+                other => Type::Struct(other.into(), vec![]),
+            };
+        }
         Type::I64
     }
 
@@ -94,12 +96,7 @@ impl Typer {
         let some_pat = hir::Pat::Ctor(
             "Some".into(),
             some_tag,
-            vec![hir::Pat::Bind(
-                bind_id,
-                f.bind,
-                elem_ty.clone(),
-                span,
-            )],
+            vec![hir::Pat::Bind(bind_id, f.bind, elem_ty.clone(), span)],
             span,
         );
         let nothing_pat = hir::Pat::Ctor("Nothing".into(), nothing_tag, vec![], span);

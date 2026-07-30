@@ -362,51 +362,58 @@ impl Parser {
                     return Ok(Expr::Struct(name, fields, sp));
                 }
                 if name == "count"
-                    && let Token::Ident(_) = self.peek() {
-                        let store = self.ident()?;
-                        let filter = if matches!(self.peek(), Token::Ident(s) if s == "where") {
-                            Some(Box::new(self.parse_store_filter()?))
-                        } else {
-                            None
-                        };
-                        return Ok(Expr::StoreCount(store, filter, sp));
-                    }
+                    && let Token::Ident(_) = self.peek()
+                {
+                    let store = self.ident()?;
+                    let filter = if matches!(self.peek(), Token::Ident(s) if s == "where") {
+                        Some(Box::new(self.parse_store_filter()?))
+                    } else {
+                        None
+                    };
+                    return Ok(Expr::StoreCount(store, filter, sp));
+                }
                 if name == "all"
-                    && let Token::Ident(_) = self.peek() {
-                        let store = self.ident()?;
-                        return Ok(Expr::StoreAll(store, sp));
-                    }
+                    && let Token::Ident(_) = self.peek()
+                {
+                    let store = self.ident()?;
+                    return Ok(Expr::StoreAll(store, sp));
+                }
                 if name == "get"
-                    && let Token::Ident(_) = self.peek() {
-                        let store = self.ident()?;
-                        let key = self.parse_expr()?;
-                        return Ok(Expr::StoreGet(store, Box::new(key), sp));
-                    }
+                    && let Token::Ident(_) = self.peek()
+                {
+                    let store = self.ident()?;
+                    let key = self.parse_expr()?;
+                    return Ok(Expr::StoreGet(store, Box::new(key), sp));
+                }
                 if name == "first"
-                    && let Token::Ident(_) = self.peek() {
-                        let store = self.ident()?;
-                        let filter = self.parse_store_filter()?;
-                        return Ok(Expr::StoreFirst(store, Box::new(filter), sp));
-                    }
+                    && let Token::Ident(_) = self.peek()
+                {
+                    let store = self.ident()?;
+                    let filter = self.parse_store_filter()?;
+                    return Ok(Expr::StoreFirst(store, Box::new(filter), sp));
+                }
                 if name == "exists"
-                    && let Token::Ident(_) = self.peek() {
-                        let store = self.ident()?;
-                        let filter = self.parse_store_filter()?;
-                        return Ok(Expr::StoreExists(store, Box::new(filter), sp));
-                    }
+                    && let Token::Ident(_) = self.peek()
+                {
+                    let store = self.ident()?;
+                    let filter = self.parse_store_filter()?;
+                    return Ok(Expr::StoreExists(store, Box::new(filter), sp));
+                }
                 if name == "distinct"
-                    && let Token::Ident(_) = self.peek() {
-                        let store = self.ident()?;
-                        let field = self.ident()?;
-                        return Ok(Expr::StoreDistinct(store, field, sp));
-                    }
+                    && let Token::Ident(_) = self.peek()
+                {
+                    let store = self.ident()?;
+                    let field = self.ident()?;
+                    return Ok(Expr::StoreDistinct(store, field, sp));
+                }
 
                 if matches!(self.peek(), Token::Colon)
-                    && let Token::Ident(_) = self.peek_at(1) {
-                        self.advance();
-                        let variant = self.ident()?;
-                        return Ok(Expr::QualifiedIdent(name, variant, sp));
-                    }
+                    && let Token::Ident(_) = self.peek_at(1)
+                {
+                    self.advance();
+                    let variant = self.ident()?;
+                    return Ok(Expr::QualifiedIdent(name, variant, sp));
+                }
                 Ok(Expr::Ident(name, sp))
             }
             Token::Pipe => {

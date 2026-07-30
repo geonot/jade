@@ -173,16 +173,18 @@ impl Typer {
                 hir::Stmt::Assign(_target, value, _) => {
                     let resolved = self.infer_ctx.resolve(&value.ty);
                     if Self::expr_type_needs_drop(&resolved)
-                        && let hir::ExprKind::Var(id, _) = &value.kind {
-                            out.insert(*id);
-                        }
+                        && let hir::ExprKind::Var(id, _) = &value.kind
+                    {
+                        out.insert(*id);
+                    }
                 }
                 hir::Stmt::Bind(b) => {
                     let resolved = self.infer_ctx.resolve(&b.value.ty);
                     if Self::expr_type_needs_drop(&resolved)
-                        && let hir::ExprKind::Var(id, _) = &b.value.kind {
-                            out.insert(*id);
-                        }
+                        && let hir::ExprKind::Var(id, _) = &b.value.kind
+                    {
+                        out.insert(*id);
+                    }
                 }
                 _ => {}
             }
@@ -215,9 +217,10 @@ impl Typer {
                         let resolved = self.infer_ctx.resolve(&a.ty);
                         if Self::expr_type_needs_drop(&resolved)
                             && matches!(a.kind, hir::ExprKind::Var(_, _))
-                            && let hir::ExprKind::Var(id, _) = &a.kind {
-                                out.insert(*id);
-                            }
+                            && let hir::ExprKind::Var(id, _) = &a.kind
+                        {
+                            out.insert(*id);
+                        }
                     }
                 }
             }
@@ -693,9 +696,7 @@ impl Typer {
                 *name,
                 ts.iter().map(|t| Self::subst_type(t, subs)).collect(),
             ),
-            Type::Alias(name, inner) => {
-                Type::Alias(*name, Box::new(Self::subst_type(inner, subs)))
-            }
+            Type::Alias(name, inner) => Type::Alias(*name, Box::new(Self::subst_type(inner, subs))),
             Type::Newtype(name, inner) => {
                 Type::Newtype(*name, Box::new(Self::subst_type(inner, subs)))
             }

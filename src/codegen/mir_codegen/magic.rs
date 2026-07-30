@@ -22,61 +22,66 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         if (name == "__coro_next" || name == "__gen_next")
-            && let Some(&gen_val) = args.first() {
-                return self.emit_coro_next(gen_val).map(Some);
-            }
+            && let Some(&gen_val) = args.first()
+        {
+            return self.emit_coro_next(gen_val).map(Some);
+        }
 
         if name == "__gen_resume"
-            && let Some(&gen_val) = args.first() {
-                let gen_ptr = self.val(gen_val).into_pointer_value();
-                let gen_resume = self
-                    .module
-                    .get_function("jinn_gen_resume")
-                    .ok_or("jinn_gen_resume not declared")?;
-                b!(self.bld.build_call(gen_resume, &[gen_ptr.into()], ""));
-                return Ok(Some(self.ctx.i64_type().const_int(0, false).into()));
-            }
+            && let Some(&gen_val) = args.first()
+        {
+            let gen_ptr = self.val(gen_val).into_pointer_value();
+            let gen_resume = self
+                .module
+                .get_function("jinn_gen_resume")
+                .ok_or("jinn_gen_resume not declared")?;
+            b!(self.bld.build_call(gen_resume, &[gen_ptr.into()], ""));
+            return Ok(Some(self.ctx.i64_type().const_int(0, false).into()));
+        }
 
         if name == "__gen_done"
-            && let Some(&gen_val) = args.first() {
-                let gen_ptr = self.val(gen_val).into_pointer_value();
-                let i8t = self.ctx.i8_type();
-                let done_ptr =
-                    self.gen_field_ptr(gen_ptr, Compiler::GEN_DONE_OFF, "gen.done.ptr")?;
-                let done = b!(self.bld.build_load(i8t, done_ptr, "gen.done"));
-                let done_bool = b!(self.bld.build_int_compare(
-                    inkwell::IntPredicate::NE,
-                    done.into_int_value(),
-                    i8t.const_int(0, false),
-                    "gen.done.bool"
-                ));
-                return Ok(Some(done_bool.into()));
-            }
+            && let Some(&gen_val) = args.first()
+        {
+            let gen_ptr = self.val(gen_val).into_pointer_value();
+            let i8t = self.ctx.i8_type();
+            let done_ptr = self.gen_field_ptr(gen_ptr, Compiler::GEN_DONE_OFF, "gen.done.ptr")?;
+            let done = b!(self.bld.build_load(i8t, done_ptr, "gen.done"));
+            let done_bool = b!(self.bld.build_int_compare(
+                inkwell::IntPredicate::NE,
+                done.into_int_value(),
+                i8t.const_int(0, false),
+                "gen.done.bool"
+            ));
+            return Ok(Some(done_bool.into()));
+        }
 
         if name == "__gen_next_val"
-            && let Some(&gen_val) = args.first() {
-                let gen_ptr = self.val(gen_val).into_pointer_value();
-                let i8t = self.ctx.i8_type();
-                let i64t = self.ctx.i64_type();
-                let value_ptr =
-                    self.gen_field_ptr(gen_ptr, Compiler::GEN_VALUE_OFF, "gen.val.ptr")?;
-                let result = b!(self.bld.build_load(i64t, value_ptr, "gen.val"));
+            && let Some(&gen_val) = args.first()
+        {
+            let gen_ptr = self.val(gen_val).into_pointer_value();
+            let i8t = self.ctx.i8_type();
+            let i64t = self.ctx.i64_type();
+            let value_ptr = self.gen_field_ptr(gen_ptr, Compiler::GEN_VALUE_OFF, "gen.val.ptr")?;
+            let result = b!(self.bld.build_load(i64t, value_ptr, "gen.val"));
 
-                let has_val_ptr =
-                    self.gen_field_ptr(gen_ptr, Compiler::GEN_HAS_VALUE_OFF, "gen.hv.ptr")?;
-                b!(self.bld.build_store(has_val_ptr, i8t.const_int(0, false)));
-                return Ok(Some(result));
-            }
+            let has_val_ptr =
+                self.gen_field_ptr(gen_ptr, Compiler::GEN_HAS_VALUE_OFF, "gen.hv.ptr")?;
+            b!(self.bld.build_store(has_val_ptr, i8t.const_int(0, false)));
+            return Ok(Some(result));
+        }
 
         if name == "__yield"
-            && let Some(&val) = args.first() {
-                return self.emit_coro_yield(val).map(Some);
-            }
+            && let Some(&val) = args.first()
+        {
+            return self.emit_coro_yield(val).map(Some);
+        }
 
         if let Some(err_enum) = name.strip_prefix("__scope_build_err_")
             && let Some(&word) = args.first()
         {
-            return self.emit_scope_build_err(err_enum, word, _result_ty).map(Some);
+            return self
+                .emit_scope_build_err(err_enum, word, _result_ty)
+                .map(Some);
         }
 
         if name == "__scope_create" {
@@ -107,10 +112,12 @@ impl<'ctx> Compiler<'ctx> {
         {
             let scope_ptr = self.val(scope_val).into_pointer_value();
             let f = crate::codegen::fn_or_die(&self.module, "jinn_scope_join_take_error");
-            let word = b!(self.bld.build_call(f, &[scope_ptr.into()], "scope.err.word"))
-                .try_as_basic_value()
-                .basic()
-                .expect("ICE: jinn_scope_join_take_error returned void");
+            let word = b!(self
+                .bld
+                .build_call(f, &[scope_ptr.into()], "scope.err.word"))
+            .try_as_basic_value()
+            .basic()
+            .expect("ICE: jinn_scope_join_take_error returned void");
             return Ok(Some(word));
         }
 
@@ -126,33 +133,38 @@ impl<'ctx> Compiler<'ctx> {
         if let Some(coro_name) = name.strip_prefix("__scope_spawn_")
             && let Some(&scope_val) = args.first()
         {
-            return self.emit_scope_spawn(coro_name, scope_val, &args[1..]).map(Some);
+            return self
+                .emit_scope_spawn(coro_name, scope_val, &args[1..])
+                .map(Some);
         }
 
         if name == "__sched_yield" {
-            let f = self.module.get_function("jinn_sched_yield").unwrap_or_else(|| {
-                let ft = self.ctx.void_type().fn_type(&[], false);
-                self.module
-                    .add_function("jinn_sched_yield", ft, Some(Linkage::External))
-            });
+            let f = self
+                .module
+                .get_function("jinn_sched_yield")
+                .unwrap_or_else(|| {
+                    let ft = self.ctx.void_type().fn_type(&[], false);
+                    self.module
+                        .add_function("jinn_sched_yield", ft, Some(Linkage::External))
+                });
             b!(self.bld.build_call(f, &[], ""));
             return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
         }
 
-        if name == "__select_recv"
-            && args.len() >= 2 {
-                let select_vid = args[0];
-                let idx_val = self.val(args[1]).into_int_value();
-                let idx = idx_val.get_zero_extended_constant().unwrap_or(0) as usize;
-                if let Some(bufs) = self.select_data_bufs.get(&select_vid)
-                    && let Some(&buf_ptr) = bufs.get(idx) {
-                        let i64t = self.ctx.i64_type();
-                        let val = b!(self.bld.build_load(i64t, buf_ptr, "recv.val"));
-                        return Ok(Some(val));
-                    }
-
-                return Ok(Some(self.ctx.i64_type().const_int(0, false).into()));
+        if name == "__select_recv" && args.len() >= 2 {
+            let select_vid = args[0];
+            let idx_val = self.val(args[1]).into_int_value();
+            let idx = idx_val.get_zero_extended_constant().unwrap_or(0) as usize;
+            if let Some(bufs) = self.select_data_bufs.get(&select_vid)
+                && let Some(&buf_ptr) = bufs.get(idx)
+            {
+                let i64t = self.ctx.i64_type();
+                let val = b!(self.bld.build_load(i64t, buf_ptr, "recv.val"));
+                return Ok(Some(val));
             }
+
+            return Ok(Some(self.ctx.i64_type().const_int(0, false).into()));
+        }
 
         if let Some(rest) = name.strip_prefix("__send_") {
             return self.emit_actor_send(rest, args).map(Some);
@@ -296,119 +308,118 @@ impl<'ctx> Compiler<'ctx> {
             };
             let f = self.module.get_function(rt_name).unwrap_or_else(|| {
                 let ft = self.ctx.void_type().fn_type(&[], false);
-                self.module.add_function(rt_name, ft, Some(Linkage::External))
+                self.module
+                    .add_function(rt_name, ft, Some(Linkage::External))
             });
             b!(self.bld.build_call(f, &[], ""));
             return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
         }
 
         if name == "__chan_close"
-            && let Some(&ch_val) = args.first() {
-                let ch_ptr = self.val(ch_val).into_pointer_value();
-                let chan_close = self
-                    .module
-                    .get_function("jinn_chan_close")
-                    .ok_or("jinn_chan_close not declared")?;
-                b!(self.bld.build_call(chan_close, &[ch_ptr.into()], ""));
-                return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
-            }
+            && let Some(&ch_val) = args.first()
+        {
+            let ch_ptr = self.val(ch_val).into_pointer_value();
+            let chan_close = self
+                .module
+                .get_function("jinn_chan_close")
+                .ok_or("jinn_chan_close not declared")?;
+            b!(self.bld.build_call(chan_close, &[ch_ptr.into()], ""));
+            return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
+        }
 
         if name == "__stop"
-            && let Some(&actor_val) = args.first() {
-                let actor_ptr = self.val(actor_val).into_pointer_value();
-                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-                let ch_ptr =
-                    b!(self.bld.build_load(ptr_ty, actor_ptr, "stop.ch")).into_pointer_value();
-                let chan_close = self
-                    .module
-                    .get_function("jinn_chan_close")
-                    .ok_or("jinn_chan_close not declared")?;
-                b!(self.bld.build_call(chan_close, &[ch_ptr.into()], ""));
-                return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
-            }
+            && let Some(&actor_val) = args.first()
+        {
+            let actor_ptr = self.val(actor_val).into_pointer_value();
+            let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+            let ch_ptr = b!(self.bld.build_load(ptr_ty, actor_ptr, "stop.ch")).into_pointer_value();
+            let chan_close = self
+                .module
+                .get_function("jinn_chan_close")
+                .ok_or("jinn_chan_close not declared")?;
+            b!(self.bld.build_call(chan_close, &[ch_ptr.into()], ""));
+            return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
+        }
 
         if name == "__join"
-            && let Some(&actor_val) = args.first() {
-                let actor_ptr = self.val(actor_val).into_pointer_value();
-                let actor_name = match self.value_types.get(&actor_val) {
-                    Some(Type::ActorRef(n)) => n.clone(),
-                    _ => return Err("__join: argument is not an ActorRef".into()),
-                };
-                let mb_name = format!("{actor_name}_mailbox");
-                let mb_st = self
-                    .module
-                    .get_struct_type(&mb_name)
-                    .ok_or_else(|| format!("__join: mailbox struct '{mb_name}' not declared"))?;
-                let join_slot_ptr =
-                    b!(self.bld.build_struct_gep(mb_st, actor_ptr, 3, "join.slot"));
-                let actor_join = self
-                    .module
-                    .get_function("jinn_actor_join")
-                    .ok_or("jinn_actor_join not declared")?;
-                b!(self.bld.build_call(actor_join, &[join_slot_ptr.into()], ""));
-                return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
-            }
+            && let Some(&actor_val) = args.first()
+        {
+            let actor_ptr = self.val(actor_val).into_pointer_value();
+            let actor_name = match self.value_types.get(&actor_val) {
+                Some(Type::ActorRef(n)) => *n,
+                _ => return Err("__join: argument is not an ActorRef".into()),
+            };
+            let mb_name = format!("{actor_name}_mailbox");
+            let mb_st = self
+                .module
+                .get_struct_type(&mb_name)
+                .ok_or_else(|| format!("__join: mailbox struct '{mb_name}' not declared"))?;
+            let join_slot_ptr = b!(self.bld.build_struct_gep(mb_st, actor_ptr, 3, "join.slot"));
+            let actor_join = self
+                .module
+                .get_function("jinn_actor_join")
+                .ok_or("jinn_actor_join not declared")?;
+            b!(self.bld.build_call(actor_join, &[join_slot_ptr.into()], ""));
+            return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
+        }
 
         if name == "__atomic_load"
-            && let Some(&ptr_val) = args.first() {
-                let ptr = self.val(ptr_val).into_pointer_value();
-                let i64t = self.ctx.i64_type();
-                let load = b!(self.bld.build_load(i64t, ptr, "atomic.load"));
-                load.as_instruction_value()
-                    .expect("ICE: not an instruction")
-                    .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
-                    .map_err(|_| "failed to set atomic ordering")?;
-                return Ok(Some(load));
-            }
-        if name == "__atomic_store"
-            && args.len() >= 2 {
-                let ptr = self.val(args[0]).into_pointer_value();
-                let val = self.val(args[1]);
-                let store = b!(self.bld.build_store(ptr, val));
-                store
-                    .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
-                    .map_err(|_| "failed to set atomic ordering")?;
-                return Ok(Some(self.ctx.i64_type().const_zero().into()));
-            }
-        if name == "__atomic_add"
-            && args.len() >= 2 {
-                let ptr = self.val(args[0]).into_pointer_value();
-                let val = self.val(args[1]).into_int_value();
-                let old = b!(self.bld.build_atomicrmw(
-                    inkwell::AtomicRMWBinOp::Add,
-                    ptr,
-                    val,
-                    inkwell::AtomicOrdering::SequentiallyConsistent,
-                ));
-                return Ok(Some(old.into()));
-            }
-        if name == "__atomic_sub"
-            && args.len() >= 2 {
-                let ptr = self.val(args[0]).into_pointer_value();
-                let val = self.val(args[1]).into_int_value();
-                let old = b!(self.bld.build_atomicrmw(
-                    inkwell::AtomicRMWBinOp::Sub,
-                    ptr,
-                    val,
-                    inkwell::AtomicOrdering::SequentiallyConsistent,
-                ));
-                return Ok(Some(old.into()));
-            }
-        if name == "__atomic_cas"
-            && args.len() >= 3 {
-                let ptr = self.val(args[0]).into_pointer_value();
-                let expected = self.val(args[1]).into_int_value();
-                let new_val = self.val(args[2]).into_int_value();
-                let cas = b!(self.bld.build_cmpxchg(
-                    ptr,
-                    expected,
-                    new_val,
-                    inkwell::AtomicOrdering::SequentiallyConsistent,
-                    inkwell::AtomicOrdering::SequentiallyConsistent,
-                ));
-                let old = b!(self.bld.build_extract_value(cas, 0, "cas.old"));
-                return Ok(Some(old));
-            }
+            && let Some(&ptr_val) = args.first()
+        {
+            let ptr = self.val(ptr_val).into_pointer_value();
+            let i64t = self.ctx.i64_type();
+            let load = b!(self.bld.build_load(i64t, ptr, "atomic.load"));
+            load.as_instruction_value()
+                .expect("ICE: not an instruction")
+                .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
+                .map_err(|_| "failed to set atomic ordering")?;
+            return Ok(Some(load));
+        }
+        if name == "__atomic_store" && args.len() >= 2 {
+            let ptr = self.val(args[0]).into_pointer_value();
+            let val = self.val(args[1]);
+            let store = b!(self.bld.build_store(ptr, val));
+            store
+                .set_atomic_ordering(inkwell::AtomicOrdering::SequentiallyConsistent)
+                .map_err(|_| "failed to set atomic ordering")?;
+            return Ok(Some(self.ctx.i64_type().const_zero().into()));
+        }
+        if name == "__atomic_add" && args.len() >= 2 {
+            let ptr = self.val(args[0]).into_pointer_value();
+            let val = self.val(args[1]).into_int_value();
+            let old = b!(self.bld.build_atomicrmw(
+                inkwell::AtomicRMWBinOp::Add,
+                ptr,
+                val,
+                inkwell::AtomicOrdering::SequentiallyConsistent,
+            ));
+            return Ok(Some(old.into()));
+        }
+        if name == "__atomic_sub" && args.len() >= 2 {
+            let ptr = self.val(args[0]).into_pointer_value();
+            let val = self.val(args[1]).into_int_value();
+            let old = b!(self.bld.build_atomicrmw(
+                inkwell::AtomicRMWBinOp::Sub,
+                ptr,
+                val,
+                inkwell::AtomicOrdering::SequentiallyConsistent,
+            ));
+            return Ok(Some(old.into()));
+        }
+        if name == "__atomic_cas" && args.len() >= 3 {
+            let ptr = self.val(args[0]).into_pointer_value();
+            let expected = self.val(args[1]).into_int_value();
+            let new_val = self.val(args[2]).into_int_value();
+            let cas = b!(self.bld.build_cmpxchg(
+                ptr,
+                expected,
+                new_val,
+                inkwell::AtomicOrdering::SequentiallyConsistent,
+                inkwell::AtomicOrdering::SequentiallyConsistent,
+            ));
+            let old = b!(self.bld.build_extract_value(cas, 0, "cas.old"));
+            return Ok(Some(old));
+        }
 
         Ok(None)
     }
@@ -536,8 +547,7 @@ impl<'ctx> Compiler<'ctx> {
             .get_function(&coro_fn_name)
             .ok_or_else(|| format!("coroutine body fn `{coro_fn_name}` not declared"))?;
 
-        let arg_vals: Vec<BasicValueEnum<'ctx>> =
-            args.iter().map(|vid| self.val(*vid)).collect();
+        let arg_vals: Vec<BasicValueEnum<'ctx>> = args.iter().map(|vid| self.val(*vid)).collect();
 
         let total_size = Compiler::GEN_SIZE + (arg_vals.len() as u64) * 8;
         let malloc_fn = self.ensure_malloc();
@@ -681,9 +691,10 @@ impl<'ctx> Compiler<'ctx> {
             let mut found = None;
             for (aname, ad) in &self.actor_defs {
                 if let Some(hint) = actor_hint
-                    && aname.as_str() != hint {
-                        continue;
-                    }
+                    && aname.as_str() != hint
+                {
+                    continue;
+                }
                 for h in &ad.handlers {
                     if h.is_loop {
                         continue;
@@ -739,12 +750,9 @@ impl<'ctx> Compiler<'ctx> {
             let psize = self.type_store_size(pty);
             let offset_val = i64t.const_int(arg_offset, false);
             let dest = unsafe {
-                b!(self.bld.build_gep(
-                    self.ctx.i8_type(),
-                    payload_ptr,
-                    &[offset_val],
-                    "arg_ptr"
-                ))
+                b!(self
+                    .bld
+                    .build_gep(self.ctx.i8_type(), payload_ptr, &[offset_val], "arg_ptr"))
             };
             b!(self.bld.build_store(dest, val));
             arg_offset += psize;

@@ -17,27 +17,23 @@ impl Lowerer {
             }
             hir::Stmt::Stop(expr, span) => {
                 let v = self.lower_expr(expr);
-                self.emit(
-                    InstKind::Call("__stop".into(), vec![v]),
-                    Type::Void,
-                    *span,
-                )
+                self.emit(InstKind::Call("__stop".into(), vec![v]), Type::Void, *span)
             }
             hir::Stmt::ScopeCancel(name, span) => {
                 if let Some((_, scope)) = self.scope_named.iter().rev().find(|(n, _)| n == name) {
                     let scope = *scope;
-                    self.emit(InstKind::Call("__scope_cancel".into(), vec![scope]), Type::Void, *span)
+                    self.emit(
+                        InstKind::Call("__scope_cancel".into(), vec![scope]),
+                        Type::Void,
+                        *span,
+                    )
                 } else {
                     self.emit(InstKind::Void, Type::Void, *span)
                 }
             }
             hir::Stmt::Join(expr, span) => {
                 let v = self.lower_expr(expr);
-                self.emit(
-                    InstKind::Call("__join".into(), vec![v]),
-                    Type::Void,
-                    *span,
-                )
+                self.emit(InstKind::Call("__join".into(), vec![v]), Type::Void, *span)
             }
             hir::Stmt::Asm(asm) => {
                 let input_vals: Vec<_> =
@@ -58,11 +54,7 @@ impl Lowerer {
             hir::Stmt::UseLocal(_, _, _, _) => self.emit(InstKind::Void, Type::Void, Span::dummy()),
             hir::Stmt::GlobalStore(name, value, _span) => {
                 let val = self.lower_expr(value);
-                self.emit(
-                    InstKind::GlobalStore(*name, val),
-                    Type::Void,
-                    Span::dummy(),
-                )
+                self.emit(InstKind::GlobalStore(*name, val), Type::Void, Span::dummy())
             }
             _ => unreachable!("statement dispatched to wrong MIR lowering module"),
         }

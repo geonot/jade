@@ -24,17 +24,18 @@ impl Typer {
         let obj_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
 
         if let Type::Row(store) = &obj_ty
-            && method == "snapshot" {
-                if !args.is_empty() {
-                    return Err(format!("{}: `.snapshot()` takes no arguments", span.loc()));
-                }
-                let struct_ty = Type::Struct(Symbol::intern(&format!("__store_{store}")), vec![]);
-                return Ok(hir::Expr {
-                    kind: hobj.kind,
-                    ty: struct_ty,
-                    span,
-                });
+            && method == "snapshot"
+        {
+            if !args.is_empty() {
+                return Err(format!("{}: `.snapshot()` takes no arguments", span.loc()));
             }
+            let struct_ty = Type::Struct(Symbol::intern(&format!("__store_{store}")), vec![]);
+            return Ok(hir::Expr {
+                kind: hobj.kind,
+                ty: struct_ty,
+                span,
+            });
+        }
 
         if let Type::ActorRef(actor_name) = &obj_ty {
             let (_, _, handlers) = self
@@ -77,13 +78,7 @@ impl Typer {
             }
 
             return Ok(hir::Expr {
-                kind: hir::ExprKind::Send(
-                    Box::new(hobj),
-                    *actor_name,
-                    handler_name,
-                    tag,
-                    hargs,
-                ),
+                kind: hir::ExprKind::Send(Box::new(hobj), *actor_name, handler_name, tag, hargs),
                 ty: Type::Void,
                 span,
             });
@@ -676,7 +671,10 @@ impl Typer {
     ) -> hir::Expr {
         let tag = self.variant_tag_in(enum_name, variant);
         let inits = match payload {
-            Some(v) => vec![hir::FieldInit { name: None, value: v }],
+            Some(v) => vec![hir::FieldInit {
+                name: None,
+                value: v,
+            }],
             None => vec![],
         };
         hir::Expr {
@@ -699,7 +697,9 @@ impl Typer {
         let inner_ty = self.ok_inner_ty(enum_name);
 
         match method {
-            "unwrap" => Ok(Some(self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty, span))),
+            "unwrap" => Ok(Some(
+                self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty, span),
+            )),
             "is_some" if is_option => Ok(Some(self.enum_is(hobj, ok_tag, span))),
             "is_none" | "is_nothing" if is_option => {
                 let t = self.variant_tag_in(enum_name, "Nothing");
@@ -713,8 +713,7 @@ impl Typer {
             "unwrap_or" if args.len() == 1 => {
                 let default_arg = self.lower_expr_expected(&args[0], Some(&inner_ty))?;
                 let is_check = self.enum_is(hobj, ok_tag, span);
-                let unwrap_expr =
-                    self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty.clone(), span);
+                let unwrap_expr = self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty.clone(), span);
                 Ok(Some(hir::Expr {
                     kind: hir::ExprKind::Ternary(
                         Box::new(is_check),
@@ -729,7 +728,9 @@ impl Typer {
                 let fn_ret = self.infer_ctx.fresh_var_at(span, "map() callback result");
                 let fn_ty = Type::Fn(vec![inner_ty.clone()], Box::new(fn_ret.clone()));
                 let hf = self.lower_expr_expected(&args[0], Some(&fn_ty))?;
-                let _ = self.infer_ctx.unify_at(&fn_ty, &hf.ty, span, "map callback");
+                let _ = self
+                    .infer_ctx
+                    .unify_at(&fn_ty, &hf.ty, span, "map callback");
                 let u_ty = self.infer_ctx.shallow_resolve(&fn_ret);
                 let target = if is_option {
                     self.mono_option(&u_ty)?
@@ -737,8 +738,7 @@ impl Typer {
                     let e_ty = self.err_inner_ty(enum_name);
                     self.mono_result(&u_ty, &e_ty)?
                 };
-                let unwrap_expr =
-                    self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty.clone(), span);
+                let unwrap_expr = self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty.clone(), span);
                 let mapped = hir::Expr {
                     kind: hir::ExprKind::IndirectCall(Box::new(hf), vec![unwrap_expr]),
                     ty: u_ty.clone(),
@@ -766,7 +766,9 @@ impl Typer {
                 }))
             }
             "and_then" if args.len() == 1 => {
-                let fn_ret = self.infer_ctx.fresh_var_at(span, "and_then() callback result");
+                let fn_ret = self
+                    .infer_ctx
+                    .fresh_var_at(span, "and_then() callback result");
                 let fn_ty = Type::Fn(vec![inner_ty.clone()], Box::new(fn_ret.clone()));
                 let hf = self.lower_expr_expected(&args[0], Some(&fn_ty))?;
                 let _ = self
@@ -775,10 +777,14 @@ impl Typer {
                 let target = self.infer_ctx.shallow_resolve(&fn_ret);
                 let target_name = match &target {
                     Type::Enum(n) => *n,
-                    _ => return Err(format!("{}: and_then callback must return an Option/Result", span.loc())),
+                    _ => {
+                        return Err(format!(
+                            "{}: and_then callback must return an Option/Result",
+                            span.loc()
+                        ));
+                    }
                 };
-                let unwrap_expr =
-                    self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty.clone(), span);
+                let unwrap_expr = self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty.clone(), span);
                 let applied = hir::Expr {
                     kind: hir::ExprKind::IndirectCall(Box::new(hf), vec![unwrap_expr]),
                     ty: target.clone(),
@@ -807,8 +813,7 @@ impl Typer {
                 let herr = self.lower_expr(&args[0])?;
                 let err_ty = herr.ty.clone();
                 let target = self.mono_result(&inner_ty, &err_ty)?;
-                let unwrap_expr =
-                    self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty.clone(), span);
+                let unwrap_expr = self.enum_unwrap(hobj, enum_name, ok_tag, inner_ty.clone(), span);
                 let ok_branch = self.variant_ctor(target, "Ok", Some(unwrap_expr), span);
                 let err_branch = self.variant_ctor(target, "Err", Some(herr), span);
                 let is_check = self.enum_is(hobj, ok_tag, span);
@@ -824,7 +829,9 @@ impl Typer {
             }
             "map_err" if !is_option && args.len() == 1 => {
                 let err_ty = self.err_inner_ty(enum_name);
-                let fn_ret = self.infer_ctx.fresh_var_at(span, "map_err() callback result");
+                let fn_ret = self
+                    .infer_ctx
+                    .fresh_var_at(span, "map_err() callback result");
                 let fn_ty = Type::Fn(vec![err_ty.clone()], Box::new(fn_ret.clone()));
                 let hf = self.lower_expr_expected(&args[0], Some(&fn_ty))?;
                 let _ = self

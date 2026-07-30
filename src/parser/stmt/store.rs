@@ -151,7 +151,10 @@ impl Parser {
                 _ => break,
             }
             if matches!(self.peek(), Token::Newline)
-                && matches!(self.peek_at(1), Token::Question | Token::BangBang | Token::Bang)
+                && matches!(
+                    self.peek_at(1),
+                    Token::Question | Token::BangBang | Token::Bang
+                )
             {
                 self.advance();
             } else {
@@ -189,9 +192,8 @@ impl Parser {
         let seen_and = flat.iter().skip(1).any(|(l, _)| *l == LogicalOp::And);
         let seen_or = flat.iter().skip(1).any(|(l, _)| *l == LogicalOp::Or);
         if seen_and && seen_or {
-            return Err(self.error(
-                "mixed 'and'/'or' in a where clause is ambiguous; group with parentheses",
-            ));
+            return Err(self
+                .error("mixed 'and'/'or' in a where clause is ambiguous; group with parentheses"));
         }
         let (_, head) = flat.remove(0);
         Ok(StoreFilter {

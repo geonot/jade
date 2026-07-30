@@ -59,7 +59,14 @@ pub const STORE_DECORATORS: &[StoreDecoratorSpec] = &[
     StoreDecoratorSpec {
         name: "kv",
         arg: ArgKind::None,
-        excludes: &["simple", "versioned", "graph", "vector", "timeseries", "column"],
+        excludes: &[
+            "simple",
+            "versioned",
+            "graph",
+            "vector",
+            "timeseries",
+            "column",
+        ],
         summary: "Key/value store with schema-driven key/value types.",
     },
     StoreDecoratorSpec {
@@ -272,10 +279,7 @@ fn field_name(d: &FieldDecorator) -> &'static str {
     }
 }
 
-pub fn validate_store_decorators(
-    store: &str,
-    decorators: &[StoreDecorator],
-) -> Result<(), String> {
+pub fn validate_store_decorators(store: &str, decorators: &[StoreDecorator]) -> Result<(), String> {
     let names: Vec<&'static str> = decorators.iter().map(store_name).collect();
     for (i, &a) in names.iter().enumerate() {
         let spec = store_spec(a).expect("store decorator in table");
@@ -391,21 +395,17 @@ mod tests {
 
     #[test]
     fn rejects_kv_plus_vector() {
-        let err = validate_store_decorators(
-            "x",
-            &[StoreDecorator::Kv, StoreDecorator::Vector(8)],
-        )
-        .unwrap_err();
+        let err = validate_store_decorators("x", &[StoreDecorator::Kv, StoreDecorator::Vector(8)])
+            .unwrap_err();
         assert!(err.contains("@kv") && err.contains("@vector"));
     }
 
     #[test]
     fn rejects_mem_plus_versioned() {
-        assert!(validate_store_decorators(
-            "x",
-            &[StoreDecorator::Mem, StoreDecorator::Versioned]
-        )
-        .is_err());
+        assert!(
+            validate_store_decorators("x", &[StoreDecorator::Mem, StoreDecorator::Versioned])
+                .is_err()
+        );
     }
 
     #[test]
@@ -425,13 +425,10 @@ mod tests {
 
     #[test]
     fn rejects_increment_on_string() {
-        assert!(validate_field_decorators(
-            "x",
-            "id",
-            &Type::String,
-            &[FieldDecorator::Increment]
-        )
-        .is_err());
+        assert!(
+            validate_field_decorators("x", "id", &Type::String, &[FieldDecorator::Increment])
+                .is_err()
+        );
     }
 
     #[test]

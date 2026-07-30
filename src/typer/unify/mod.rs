@@ -327,19 +327,21 @@ impl InferCtx {
             let mut msg = format!("{}: {} ({})", span.loc(), e, reason);
 
             if let Some(origin) = &a_origin
-                && origin.span.line != span.line {
-                    msg.push_str(&format!(
-                        "\n  note: expected `{}` because of line {} ({})",
-                        ra, origin.span.line, origin.reason
-                    ));
-                }
+                && origin.span.line != span.line
+            {
+                msg.push_str(&format!(
+                    "\n  note: expected `{}` because of line {} ({})",
+                    ra, origin.span.line, origin.reason
+                ));
+            }
             if let Some(origin) = &b_origin
-                && origin.span.line != span.line {
-                    msg.push_str(&format!(
-                        "\n  note: found `{}` because of line {} ({})",
-                        rb, origin.span.line, origin.reason
-                    ));
-                }
+                && origin.span.line != span.line
+            {
+                msg.push_str(&format!(
+                    "\n  note: found `{}` because of line {} ({})",
+                    rb, origin.span.line, origin.reason
+                ));
+            }
 
             let suggestion = self.suggest_fix(reason, &ra, &rb);
             if let Some(s) = suggestion {

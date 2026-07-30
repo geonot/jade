@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use clap::{Parser as ClapParser, Subcommand};
 
-
 #[derive(ClapParser)]
 #[command(
     name = "jinn",

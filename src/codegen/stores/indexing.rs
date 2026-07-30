@@ -151,7 +151,8 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     pub(crate) fn store_is_versioned(sd: &hir::StoreDef) -> bool {
-        sd.decorators.contains(&crate::ast::StoreDecorator::Versioned)
+        sd.decorators
+            .contains(&crate::ast::StoreDecorator::Versioned)
     }
 
     pub(crate) fn load_store_ver(
@@ -400,7 +401,11 @@ impl<'ctx> Compiler<'ctx> {
 
             if let Some(sd) = self.store_defs.get(store_name) {
                 let fingerprint = super::store_schema_fingerprint(sd);
-                let version = self.store_schema_versions.get(store_name).copied().unwrap_or(0);
+                let version = self
+                    .store_schema_versions
+                    .get(store_name)
+                    .copied()
+                    .unwrap_or(0);
                 if let Some(fp_g) = self.module.get_global(&fp_global_name) {
                     let stamp_fn =
                         crate::codegen::fn_or_die(&self.module, "jinn_store_stamp_schema");

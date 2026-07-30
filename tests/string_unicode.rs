@@ -102,13 +102,7 @@ fn index_matches_char_at() {
 fn byte_iteration_uses_byte_count() {
     let src = "*main\n    s is \"héllo\"\n    sum is 0\n    \
         for i from 0 to s.byte_count\n        sum is sum + s.char_at(i)\n    log(sum)";
-    let expected = ('h' as i64
-        + 195
-        + 169
-        + 'l' as i64
-        + 'l' as i64
-        + 'o' as i64)
-        .to_string();
+    let expected = ('h' as i64 + 195 + 169 + 'l' as i64 + 'l' as i64 + 'o' as i64).to_string();
     expect(src, &expected);
 }
 

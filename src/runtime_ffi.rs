@@ -53,4 +53,3 @@ pub fn force_link_chan() -> [usize; 5] {
         jinn_chan_destroy as usize,
     ]
 }
-

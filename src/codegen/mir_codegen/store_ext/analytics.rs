@@ -310,7 +310,10 @@ impl<'ctx> Compiler<'ctx> {
                 .find(|(_, f)| f.name == val_name)
                 .map(|(i, f)| {
                     let norm = crate::codegen::store_filter::normalize_store_field_type(&f.ty);
-                    (i, matches!(norm, crate::types::Type::F64 | crate::types::Type::F32))
+                    (
+                        i,
+                        matches!(norm, crate::types::Type::F64 | crate::types::Type::F32),
+                    )
                 })
                 .ok_or_else(|| format!("no field '{val_name}' in store '{store_name}'"))?
         };
@@ -374,12 +377,10 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(loop_bb);
         let idx = b!(self.bld.build_load(i64t, idx_ptr, "grp.i")).into_int_value();
-        let cmp = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::ULT,
-            idx,
-            total_count,
-            "grp.cmp"
-        ));
+        let cmp =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::ULT, idx, total_count, "grp.cmp"));
         b!(self.bld.build_conditional_branch(cmp, body_bb, done_bb));
 
         self.bld.position_at_end(body_bb);
@@ -467,7 +468,9 @@ impl<'ctx> Compiler<'ctx> {
             let bits = b!(self.bld.build_bit_cast(zero, i64t, "grp.zbits"));
             b!(self.bld.build_store(acc_init_slot, bits));
         } else {
-            b!(self.bld.build_store(acc_init_slot, i64t.const_int(0, false)));
+            b!(self
+                .bld
+                .build_store(acc_init_slot, i64t.const_int(0, false)));
         }
         let ng = b!(self.bld.build_load(i64t, ngrp_ptr, "grp.ngl")).into_int_value();
         let ng1 = b!(self
@@ -564,8 +567,10 @@ impl<'ctx> Compiler<'ctx> {
                     _ => b!(self.bld.build_int_add(cur, v, "grp.iadd")),
                 };
                 let result = if matches!(agg, "min" | "max") {
-                    b!(self.bld.build_select(is_first, v, combined, "grp.ifirstsel"))
-                        .into_int_value()
+                    b!(self
+                        .bld
+                        .build_select(is_first, v, combined, "grp.ifirstsel"))
+                    .into_int_value()
                 } else {
                     combined
                 };
@@ -584,8 +589,11 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(done_bb);
 
         let key_lty = self.llvm_ty(&key_norm);
-        let val_lty: inkwell::types::BasicTypeEnum<'ctx> =
-            if result_float { f64t.into() } else { i64t.into() };
+        let val_lty: inkwell::types::BasicTypeEnum<'ctx> = if result_float {
+            f64t.into()
+        } else {
+            i64t.into()
+        };
         let tuple_ty = self.ctx.struct_type(&[key_lty, val_lty], false);
         let tuple_size = self.type_store_size(tuple_ty.into());
 
@@ -624,12 +632,10 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(oloop_bb);
         let sidx = b!(self.bld.build_load(i64t, sidx_ptr, "grp.osi")).into_int_value();
-        let ocmp = b!(self.bld.build_int_compare(
-            inkwell::IntPredicate::ULT,
-            sidx,
-            cap,
-            "grp.ocmp"
-        ));
+        let ocmp =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::ULT, sidx, cap, "grp.ocmp"));
         b!(self.bld.build_conditional_branch(ocmp, obody_bb, odone_bb));
 
         self.bld.position_at_end(obody_bb);
@@ -646,9 +652,10 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(oused_bb);
         let recof_ld = unsafe { b!(self.bld.build_gep(i64t, rec_of, &[sidx], "grp.orof")) };
         let rec_i = b!(self.bld.build_load(i64t, recof_ld, "grp.oreci")).into_int_value();
-        let roffset = b!(self
-            .bld
-            .build_int_mul(rec_i, i64t.const_int(rec_size, false), "grp.ooff"));
+        let roffset =
+            b!(self
+                .bld
+                .build_int_mul(rec_i, i64t.const_int(rec_size, false), "grp.ooff"));
         let orec_ptr = unsafe { b!(self.bld.build_gep(i8t, buf, &[roffset], "grp.orec")) };
         let okey_gep = b!(self
             .bld
@@ -670,7 +677,9 @@ impl<'ctx> Compiler<'ctx> {
             let abits = b!(self.bld.build_load(i64t, acc_ld, "grp.oab")).into_int_value();
             let af = b!(self.bld.build_bit_cast(abits, f64t, "grp.oaf")).into_float_value();
             if agg == "avg" {
-                let cntf = b!(self.bld.build_signed_int_to_float(cnt_val, f64t, "grp.cntf"));
+                let cntf = b!(self
+                    .bld
+                    .build_signed_int_to_float(cnt_val, f64t, "grp.cntf"));
                 b!(self.bld.build_float_div(af, cntf, "grp.avg")).into()
             } else {
                 af.into()
@@ -681,10 +690,10 @@ impl<'ctx> Compiler<'ctx> {
         };
 
         let undef = tuple_ty.get_undef();
-        let with0 = b!(self.bld.build_insert_value(undef, key_val, 0, "grp.ins0"))
-            .into_struct_value();
-        let tuple_val = b!(self.bld.build_insert_value(with0, out_val, 1, "grp.ins1"))
-            .into_struct_value();
+        let with0 =
+            b!(self.bld.build_insert_value(undef, key_val, 0, "grp.ins0")).into_struct_value();
+        let tuple_val =
+            b!(self.bld.build_insert_value(with0, out_val, 1, "grp.ins1")).into_struct_value();
         self.vec_push_raw(result_vec, tuple_val.into(), tuple_ty.into(), tuple_size)?;
         b!(self.bld.build_unconditional_branch(onext_bb));
 
@@ -724,8 +733,7 @@ impl<'ctx> Compiler<'ctx> {
             .ok_or_else(|| format!("unknown store '{store_name}'"))?
             .clone();
 
-        let is_column = sd
-            .decorators.contains(&crate::ast::StoreDecorator::Column);
+        let is_column = sd.decorators.contains(&crate::ast::StoreDecorator::Column);
         if is_column && (op == "sum" || op == "min" || op == "max") {
             let field_ty = sd
                 .fields
@@ -911,10 +919,7 @@ impl<'ctx> Compiler<'ctx> {
                     b!(self
                         .bld
                         .build_select::<inkwell::values::IntValue, inkwell::values::IntValue>(
-                            lt,
-                            field_val,
-                            cur_acc,
-                            "agg.min"
+                            lt, field_val, cur_acc, "agg.min"
                         ))
                     .into_int_value()
                 }
@@ -928,10 +933,7 @@ impl<'ctx> Compiler<'ctx> {
                     b!(self
                         .bld
                         .build_select::<inkwell::values::IntValue, inkwell::values::IntValue>(
-                            gt,
-                            field_val,
-                            cur_acc,
-                            "agg.max"
+                            gt, field_val, cur_acc, "agg.max"
                         ))
                     .into_int_value()
                 }

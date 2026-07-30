@@ -291,8 +291,7 @@ impl<'s> Lexer<'s> {
                                 self.advance();
                             }
                             _ => {
-                                return self
-                                    .err("invalid \\x escape: expected two hex digits");
+                                return self.err("invalid \\x escape: expected two hex digits");
                             }
                         }
                     }

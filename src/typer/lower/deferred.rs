@@ -268,15 +268,16 @@ impl Typer {
             let recv_ty = self.infer_ctx.shallow_resolve(&df.receiver_ty);
             if let Type::Struct(ref name, _) = recv_ty {
                 if let Some(fields) = self.structs.get(name)
-                    && let Some((_, fty)) = fields.iter().find(|(n, _)| n == &df.field_name) {
-                        let fty = fty.clone();
-                        let _ = self.infer_ctx.unify_at(
-                            &df.field_ty,
-                            &fty,
-                            df.span,
-                            "deferred field access",
-                        );
-                    }
+                    && let Some((_, fty)) = fields.iter().find(|(n, _)| n == &df.field_name)
+                {
+                    let fty = fty.clone();
+                    let _ = self.infer_ctx.unify_at(
+                        &df.field_ty,
+                        &fty,
+                        df.span,
+                        "deferred field access",
+                    );
+                }
             } else if matches!(recv_ty, Type::String)
                 && (df.field_name == "length" || df.field_name == "byte_count")
             {

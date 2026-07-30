@@ -55,9 +55,8 @@ impl<'ctx> Compiler<'ctx> {
                         Ok(self.call_result(csv))
                     } else {
                         const LIBM_UNARY_F64: &[&str] = &[
-                            "fabs", "sqrt", "floor", "ceil", "round", "trunc", "sin", "cos",
-                            "tan", "asin", "acos", "atan", "log", "log10", "log2", "exp",
-                            "exp2",
+                            "fabs", "sqrt", "floor", "ceil", "round", "trunc", "sin", "cos", "tan",
+                            "asin", "acos", "atan", "log", "log10", "log2", "exp", "exp2",
                         ];
                         const LIBM_BINARY_F64: &[&str] = &["pow", "atan2", "fmod", "copysign"];
                         let name_str = name.as_str();
@@ -65,8 +64,7 @@ impl<'ctx> Compiler<'ctx> {
                         if LIBM_UNARY_F64.contains(&&*name_str) && arg_vals.len() == 1 {
                             let sig = f64t.fn_type(&[f64t.into()], false);
                             let fv = self.module.add_function(&name_str, sig, None);
-                            let csv =
-                                b!(self.bld.build_call(fv, &[arg_vals[0].into()], "libm"));
+                            let csv = b!(self.bld.build_call(fv, &[arg_vals[0].into()], "libm"));
                             return Ok(Some(self.call_result(csv)));
                         }
                         if LIBM_BINARY_F64.contains(&&*name_str) && arg_vals.len() == 2 {
@@ -88,7 +86,8 @@ impl<'ctx> Compiler<'ctx> {
                     let recv_ty = self.value_types.get(recv).cloned();
 
                     if matches!(&recv_ty, Some(Type::String))
-                        && let Some(sm) = crate::builtin_methods::StrMethod::from_name(&method.as_str())
+                        && let Some(sm) =
+                            crate::builtin_methods::StrMethod::from_name(&method.as_str())
                     {
                         use crate::builtin_methods::StrMethod;
                         let recv_val = self.val(*recv);
@@ -199,11 +198,12 @@ impl<'ctx> Compiler<'ctx> {
                         };
 
                         if let Some(Type::Array(_, arr_len)) = recv_ty
-                            && &*method.as_str() == "len" {
-                                return Ok(Some(
-                                    self.ctx.i64_type().const_int(arr_len as u64, false).into(),
-                                ));
-                            }
+                            && &*method.as_str() == "len"
+                        {
+                            return Ok(Some(
+                                self.ctx.i64_type().const_int(arr_len as u64, false).into(),
+                            ));
+                        }
                         let header_ptr = if recv_val.is_pointer_value() {
                             recv_val.into_pointer_value()
                         } else {
@@ -215,7 +215,9 @@ impl<'ctx> Compiler<'ctx> {
                             ))
                         };
                         let lty = self.llvm_ty(&elem_ty);
-                        if let Some(vm) = crate::builtin_methods::VecMethod::from_name(&method.as_str()) {
+                        if let Some(vm) =
+                            crate::builtin_methods::VecMethod::from_name(&method.as_str())
+                        {
                             use crate::builtin_methods::VecMethod;
                             match vm {
                                 VecMethod::Len | VecMethod::Count => {
@@ -254,24 +256,30 @@ impl<'ctx> Compiler<'ctx> {
                                 }
                                 VecMethod::First => {
                                     let zero = self.ctx.i64_type().const_zero();
-                                    return Ok(Some((self.vec_get_idx_borrow(
-                                        header_ptr, &elem_ty, zero, borrow,
-                                    ))?));
+                                    return Ok(Some(
+                                        (self.vec_get_idx_borrow(
+                                            header_ptr, &elem_ty, zero, borrow,
+                                        ))?,
+                                    ));
                                 }
                                 VecMethod::Last => {
                                     let len = self.vec_len(header_ptr)?.into_int_value();
                                     let one = self.ctx.i64_type().const_int(1, false);
                                     let idx = b!(self.bld.build_int_nsw_sub(len, one, "vlast.idx"));
-                                    return Ok(Some((self.vec_get_idx_borrow(
-                                        header_ptr, &elem_ty, idx, borrow,
-                                    ))?));
+                                    return Ok(Some(
+                                        (self.vec_get_idx_borrow(
+                                            header_ptr, &elem_ty, idx, borrow,
+                                        ))?,
+                                    ));
                                 }
                                 VecMethod::Get => {
                                     if !args.is_empty() {
                                         let idx = self.val(args[0]).into_int_value();
-                                        return Ok(Some((self.vec_get_idx_borrow(
-                                            header_ptr, &elem_ty, idx, borrow,
-                                        ))?));
+                                        return Ok(Some(
+                                            (self.vec_get_idx_borrow(
+                                                header_ptr, &elem_ty, idx, borrow,
+                                            ))?,
+                                        ));
                                     }
                                     return Err("get() requires an index".into());
                                 }
@@ -333,13 +341,10 @@ impl<'ctx> Compiler<'ctx> {
                                     }
                                     let init_val = self.val(args[0]);
                                     let closure_val = self.val(args[1]);
-                                    let closure_ty = self
-                                        .value_types
-                                        .get(&args[1])
-                                        .cloned()
-                                        .ok_or_else(|| {
-                                            "missing closure type for fold callback".to_string()
-                                        })?;
+                                    let closure_ty =
+                                        self.value_types.get(&args[1]).cloned().ok_or_else(
+                                            || "missing closure type for fold callback".to_string(),
+                                        )?;
                                     return Ok(Some(self.vec_fold_dynamic(
                                         header_ptr,
                                         &elem_ty,
@@ -353,13 +358,10 @@ impl<'ctx> Compiler<'ctx> {
                                         return Err("find() requires a callback".into());
                                     }
                                     let closure_val = self.val(args[0]);
-                                    let closure_ty = self
-                                        .value_types
-                                        .get(&args[0])
-                                        .cloned()
-                                        .ok_or_else(|| {
-                                            "missing closure type for find callback".to_string()
-                                        })?;
+                                    let closure_ty =
+                                        self.value_types.get(&args[0]).cloned().ok_or_else(
+                                            || "missing closure type for find callback".to_string(),
+                                        )?;
                                     return Ok(Some(self.vec_find_dynamic(
                                         header_ptr,
                                         &elem_ty,
@@ -474,23 +476,19 @@ impl<'ctx> Compiler<'ctx> {
                                             "chain.optr"
                                         ))
                                     };
-                                    return Ok(Some(self.vec_chain_v(
-                                        header_ptr, &elem_ty, other_ptr,
-                                    )?));
+                                    return Ok(Some(
+                                        self.vec_chain_v(header_ptr, &elem_ty, other_ptr)?,
+                                    ));
                                 }
                                 VecMethod::Enumerate => {
-                                    return Ok(Some(
-                                        self.vec_enumerate_v(header_ptr, &elem_ty)?,
-                                    ));
+                                    return Ok(Some(self.vec_enumerate_v(header_ptr, &elem_ty)?));
                                 }
                                 VecMethod::Flatten => {
                                     let inner_ty = match &elem_ty {
                                         Type::Vec(et) => (**et).clone(),
                                         Type::Array(et, _) => (**et).clone(),
                                         _ => {
-                                            return Err(
-                                                "flatten() requires a Vec of Vec".into()
-                                            );
+                                            return Err("flatten() requires a Vec of Vec".into());
                                         }
                                     };
                                     return Ok(Some(
@@ -518,7 +516,9 @@ impl<'ctx> Compiler<'ctx> {
                             Some(Type::Map(k, v)) => ((**k).clone(), (**v).clone()),
                             _ => (Type::String, Type::I64),
                         };
-                        if let Some(mm) = crate::builtin_methods::MapMethod::from_name(&method.as_str()) {
+                        if let Some(mm) =
+                            crate::builtin_methods::MapMethod::from_name(&method.as_str())
+                        {
                             use crate::builtin_methods::MapMethod;
                             match mm {
                                 MapMethod::Len | MapMethod::Count => {
@@ -689,10 +689,11 @@ impl<'ctx> Compiler<'ctx> {
                         }
 
                         if matches!(ty, Type::Struct(_, _) | Type::Tuple(_))
-                            && let Some(dest) = inst.dest {
-                                self.self_allocs.insert(dest, ptr);
-                                self.self_alloc_types.insert(dest, lt);
-                            }
+                            && let Some(dest) = inst.dest
+                        {
+                            self.self_allocs.insert(dest, ptr);
+                            self.self_alloc_types.insert(dest, lt);
+                        }
                         Ok(val)
                     } else if let Some((ptr, ty)) = self.find_var(&name.as_str()).cloned() {
                         let lt = self.llvm_ty(&ty);
@@ -791,9 +792,10 @@ impl<'ctx> Compiler<'ctx> {
 
                 if v.is_struct_value() {
                     if let Some(arg_id) = args.get(i)
-                        && let Some(src_ptr) = self.self_allocs.get(arg_id).copied() {
-                            return src_ptr.into();
-                        }
+                        && let Some(src_ptr) = self.self_allocs.get(arg_id).copied()
+                    {
+                        return src_ptr.into();
+                    }
 
                     let alloca = self.entry_alloca(v.get_type(), "struct.arg");
                     let _ = self.bld.build_store(alloca, *v);
@@ -802,9 +804,10 @@ impl<'ctx> Compiler<'ctx> {
 
                 if v.is_pointer_value() {
                     if let Some(arg_id) = args.get(i)
-                        && let Some(src_ptr) = self.self_allocs.get(arg_id).copied() {
-                            return src_ptr.into();
-                        }
+                        && let Some(src_ptr) = self.self_allocs.get(arg_id).copied()
+                    {
+                        return src_ptr.into();
+                    }
                     return (*v).into();
                 }
                 (*v).into()

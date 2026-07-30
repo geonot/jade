@@ -71,12 +71,13 @@ impl HirValidator {
             return;
         }
         if let Some(prev) = self.fn_defs.insert(id.0, span)
-            && prev.line != span.line {
-                self.errors.push(format!(
-                    "duplicate DefId({}) for '{}' at line {} (previously at line {})",
-                    id.0, name, span.line, prev.line
-                ));
-            }
+            && prev.line != span.line
+        {
+            self.errors.push(format!(
+                "duplicate DefId({}) for '{}' at line {} (previously at line {})",
+                id.0, name, span.line, prev.line
+            ));
+        }
     }
 
     fn validate_fn(&mut self, f: &hir::Fn) {
@@ -265,20 +266,21 @@ impl HirValidator {
                     self.validate_expr(a);
                 }
                 if let Some((_, max_params, min_params)) = self.fn_sigs.get(&id.0)
-                    && (args.len() < *min_params || args.len() > *max_params) {
-                        self.errors.push(format!(
-                            "call to `{}` at line {}: expected {}{} args, got {}",
-                            name,
-                            expr.span.line,
-                            if min_params != max_params {
-                                format!("{}-", min_params)
-                            } else {
-                                String::new()
-                            },
-                            max_params,
-                            args.len()
-                        ));
-                    }
+                    && (args.len() < *min_params || args.len() > *max_params)
+                {
+                    self.errors.push(format!(
+                        "call to `{}` at line {}: expected {}{} args, got {}",
+                        name,
+                        expr.span.line,
+                        if min_params != max_params {
+                            format!("{}-", min_params)
+                        } else {
+                            String::new()
+                        },
+                        max_params,
+                        args.len()
+                    ));
+                }
             }
             hir::ExprKind::IndirectCall(callee, args) => {
                 self.validate_expr(callee);

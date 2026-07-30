@@ -119,8 +119,7 @@ impl<'ctx> Compiler<'ctx> {
                 self.struct_defaults.insert(td.name, defaults);
             }
 
-            self.struct_layouts
-                .insert(td.name, td.layout.clone());
+            self.struct_layouts.insert(td.name, td.layout.clone());
         }
 
         for ext in &prog.externs {
@@ -268,10 +267,7 @@ impl<'ctx> Compiler<'ctx> {
             }
             for mig in &hir_prog.migrations {
                 for op in &mig.up {
-                    let e = self
-                        .store_schema_versions
-                        .entry(op.store_name)
-                        .or_insert(0);
+                    let e = self.store_schema_versions.entry(op.store_name).or_insert(0);
                     if mig.version > *e {
                         *e = mig.version;
                     }
@@ -832,13 +828,15 @@ impl<'ctx> Compiler<'ctx> {
         });
 
         if let Some(alloca_ptr) = self.self_allocs.get(&id).copied()
-            && v.is_pointer_value() && v.into_pointer_value() == alloca_ptr
-                && let Some(orig_ty) = self.self_alloc_types.get(&id).copied() {
-                    return self
-                        .bld
-                        .build_load(orig_ty, alloca_ptr, "self.reload")
-                        .unwrap();
-                }
+            && v.is_pointer_value()
+            && v.into_pointer_value() == alloca_ptr
+            && let Some(orig_ty) = self.self_alloc_types.get(&id).copied()
+        {
+            return self
+                .bld
+                .build_load(orig_ty, alloca_ptr, "self.reload")
+                .unwrap();
+        }
         v
     }
 }
@@ -852,13 +850,8 @@ mod mangle_tests {
 
     fn pkg_id_ver(name: &str, ver: SemVer, src: &str) -> PkgId {
         let nm = Symbol::intern(name);
-        let hash = crate::pkgid::compute_semantic_hash(
-            nm,
-            ScopePath::root(),
-            &ver,
-            src.as_bytes(),
-            &[],
-        );
+        let hash =
+            crate::pkgid::compute_semantic_hash(nm, ScopePath::root(), &ver, src.as_bytes(), &[]);
         PkgId::intern(PackageRecord {
             name: nm,
             owner_scope: ScopePath::root(),
@@ -869,7 +862,15 @@ mod mangle_tests {
     }
 
     fn pkg_id(name: &str, src: &str) -> PkgId {
-        pkg_id_ver(name, SemVer { major: 0, minor: 0, patch: 0 }, src)
+        pkg_id_ver(
+            name,
+            SemVer {
+                major: 0,
+                minor: 0,
+                patch: 0,
+            },
+            src,
+        )
     }
 
     fn mir_fn(name: &str, pkg_id: Option<PkgId>) -> mir::Function {
@@ -898,7 +899,10 @@ mod mangle_tests {
         let mut c = Compiler::new(&ctx, "m");
         c.is_multi_package = false; // single-package fast path (scope.md §2.2)
         let root = pkg_id("app", "fn main");
-        assert_eq!(c.mangle_symbol(&mir_fn("greeter_hello", Some(root))), "greeter_hello");
+        assert_eq!(
+            c.mangle_symbol(&mir_fn("greeter_hello", Some(root))),
+            "greeter_hello"
+        );
     }
 
     #[test]
@@ -911,8 +915,15 @@ mod mangle_tests {
         // Format: <pkgid_hash>_<module>_<name>, hash is 8 hex chars (4 bytes).
         assert!(sym.ends_with("_greeter_hello"), "got {sym}");
         let prefix = sym.strip_suffix("_greeter_hello").unwrap();
-        assert_eq!(prefix.len(), 8, "pkgid_hash prefix must be 8 hex chars, got {prefix:?}");
-        assert!(prefix.chars().all(|c| c.is_ascii_hexdigit()), "got {prefix:?}");
+        assert_eq!(
+            prefix.len(),
+            8,
+            "pkgid_hash prefix must be 8 hex chars, got {prefix:?}"
+        );
+        assert!(
+            prefix.chars().all(|c| c.is_ascii_hexdigit()),
+            "got {prefix:?}"
+        );
         assert_eq!(prefix, dep.mangle_prefix());
     }
 
@@ -923,8 +934,24 @@ mod mangle_tests {
         c.is_multi_package = true;
         // Same module name, two coexisting versions => distinct PkgId =>
         // distinct symbols (scope.md §5.7.6 multi-version coexistence).
-        let v1 = pkg_id_ver("greeter", SemVer { major: 1, minor: 0, patch: 0 }, "fn hello returns 1");
-        let v2 = pkg_id_ver("greeter", SemVer { major: 2, minor: 0, patch: 0 }, "fn hello returns 2");
+        let v1 = pkg_id_ver(
+            "greeter",
+            SemVer {
+                major: 1,
+                minor: 0,
+                patch: 0,
+            },
+            "fn hello returns 1",
+        );
+        let v2 = pkg_id_ver(
+            "greeter",
+            SemVer {
+                major: 2,
+                minor: 0,
+                patch: 0,
+            },
+            "fn hello returns 2",
+        );
         assert_ne!(v1, v2, "distinct versions must intern to distinct PkgIds");
         let s1 = c.mangle_symbol(&mir_fn("greeter_hello", Some(v1)));
         let s2 = c.mangle_symbol(&mir_fn("greeter_hello", Some(v2)));
@@ -961,6 +988,9 @@ mod mangle_tests {
         c.is_multi_package = true;
         c.lib_mode = true; // FFI surface keeps stable names
         let dep = pkg_id("greeter", "fn hello returns 1");
-        assert_eq!(c.mangle_symbol(&mir_fn("greeter_hello", Some(dep))), "greeter_hello");
+        assert_eq!(
+            c.mangle_symbol(&mir_fn("greeter_hello", Some(dep))),
+            "greeter_hello"
+        );
     }
 }

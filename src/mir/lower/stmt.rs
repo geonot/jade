@@ -43,58 +43,49 @@ impl Lowerer {
 
                 if matches!(b.access_mod, Some(AccessMod::Take))
                     && let ExprKind::Field(obj, field, _) = &b.value.kind
-                        && let ExprKind::Var(parent_did, parent_name) = &obj.kind
-                            && !b.value.ty.is_trivially_droppable() {
-                                let parent_ty = obj.ty.clone();
-                                // If the parent struct is itself an actor field,
-                                // read it from / write it back to the state
-                                // struct; otherwise use the SSA local.
-                                if let Some((parent_field_sym, parent_field_ty)) =
-                                    self.field_lookup(*parent_did)
-                                {
-                                    let self_state = self.field_self();
-                                    let state_ty = self.field_state_ty();
-                                    let parent_val = self.emit(
-                                        InstKind::FieldGet(self_state, parent_field_sym),
-                                        parent_field_ty,
-                                        b.span,
-                                    );
-                                    let cleared = self.emit(
-                                        InstKind::FieldClear(parent_val, *field),
-                                        parent_ty,
-                                        b.span,
-                                    );
-                                    self.emit_void_typed(
-                                        InstKind::FieldSet(self_state, parent_field_sym, cleared),
-                                        state_ty,
-                                        b.span,
-                                    );
-                                } else {
-                                    // SSA-form field tombstone: read the parent's
-                                    // current SSA value, emit `FieldClear` to
-                                    // produce a new struct value with the field
-                                    // zeroed, and write the new value back as the
-                                    // parent's definition. No memory demotion
-                                    // needed — Perceus + drop see the cleared
-                                    // field on the new SSA value.
-                                    let parent_val = self.read_var(
-                                        *parent_name,
-                                        self.current_block,
-                                        parent_ty.clone(),
-                                        b.span,
-                                    );
-                                    let cleared = self.emit(
-                                        InstKind::FieldClear(parent_val, *field),
-                                        parent_ty,
-                                        b.span,
-                                    );
-                                    self.write_var(
-                                        *parent_name,
-                                        self.current_block,
-                                        cleared,
-                                    );
-                                }
-                            }
+                    && let ExprKind::Var(parent_did, parent_name) = &obj.kind
+                    && !b.value.ty.is_trivially_droppable()
+                {
+                    let parent_ty = obj.ty.clone();
+                    // If the parent struct is itself an actor field,
+                    // read it from / write it back to the state
+                    // struct; otherwise use the SSA local.
+                    if let Some((parent_field_sym, parent_field_ty)) =
+                        self.field_lookup(*parent_did)
+                    {
+                        let self_state = self.field_self();
+                        let state_ty = self.field_state_ty();
+                        let parent_val = self.emit(
+                            InstKind::FieldGet(self_state, parent_field_sym),
+                            parent_field_ty,
+                            b.span,
+                        );
+                        let cleared =
+                            self.emit(InstKind::FieldClear(parent_val, *field), parent_ty, b.span);
+                        self.emit_void_typed(
+                            InstKind::FieldSet(self_state, parent_field_sym, cleared),
+                            state_ty,
+                            b.span,
+                        );
+                    } else {
+                        // SSA-form field tombstone: read the parent's
+                        // current SSA value, emit `FieldClear` to
+                        // produce a new struct value with the field
+                        // zeroed, and write the new value back as the
+                        // parent's definition. No memory demotion
+                        // needed — Perceus + drop see the cleared
+                        // field on the new SSA value.
+                        let parent_val = self.read_var(
+                            *parent_name,
+                            self.current_block,
+                            parent_ty.clone(),
+                            b.span,
+                        );
+                        let cleared =
+                            self.emit(InstKind::FieldClear(parent_val, *field), parent_ty, b.span);
+                        self.write_var(*parent_name, self.current_block, cleared);
+                    }
+                }
 
                 if let Some(inst) = self
                     .func

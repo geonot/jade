@@ -128,9 +128,7 @@ pub(in crate::parser) fn replace_placeholder(expr: &Expr, name: &str) -> Expr {
             args.iter().map(|a| replace_placeholder(a, name)).collect(),
             *sp,
         ),
-        Expr::Field(e, f, sp) => {
-            Expr::Field(Box::new(replace_placeholder(e, name)), *f, *sp)
-        }
+        Expr::Field(e, f, sp) => Expr::Field(Box::new(replace_placeholder(e, name)), *f, *sp),
         Expr::Index(a, b, sp) => Expr::Index(
             Box::new(replace_placeholder(a, name)),
             Box::new(replace_placeholder(b, name)),
@@ -343,9 +341,7 @@ pub(in crate::parser) fn replace_index_placeholder(expr: &Expr, name: &str) -> E
                 .collect(),
             *sp,
         ),
-        Expr::Field(e, f, sp) => {
-            Expr::Field(Box::new(replace_index_placeholder(e, name)), *f, *sp)
-        }
+        Expr::Field(e, f, sp) => Expr::Field(Box::new(replace_index_placeholder(e, name)), *f, *sp),
         Expr::Index(a, b, sp) => Expr::Index(
             Box::new(replace_index_placeholder(a, name)),
             Box::new(replace_index_placeholder(b, name)),
@@ -407,9 +403,9 @@ pub(in crate::parser) fn contains_index_placeholder_in_stmt(stmt: &Stmt) -> bool
                     contains_index_placeholder(c)
                         || b.iter().any(contains_index_placeholder_in_stmt)
                 })
-                || i.els.as_ref().is_some_and(|b| {
-                    b.iter().any(contains_index_placeholder_in_stmt)
-                })
+                || i.els
+                    .as_ref()
+                    .is_some_and(|b| b.iter().any(contains_index_placeholder_in_stmt))
         }
         Stmt::While(w) => {
             contains_index_placeholder(&w.cond)

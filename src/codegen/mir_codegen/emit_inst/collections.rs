@@ -12,17 +12,17 @@ impl<'ctx> Compiler<'ctx> {
 
                     if let Type::Vec(elem) = ty
                         && v.is_pointer_value()
-                            && self
-                                .current_perceus_meta
-                                .reuse_save
-                                .get(val)
-                                .map(|s| self.current_perceus_meta.vec_slots.contains(s))
-                                .unwrap_or(false)
-                        {
-                            self.drop_vec_elements_only(v, elem)?;
-                            self.try_save_vec_slot(*val, v.into_pointer_value());
-                            return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
-                        }
+                        && self
+                            .current_perceus_meta
+                            .reuse_save
+                            .get(val)
+                            .map(|s| self.current_perceus_meta.vec_slots.contains(s))
+                            .unwrap_or(false)
+                    {
+                        self.drop_vec_elements_only(v, elem)?;
+                        self.try_save_vec_slot(*val, v.into_pointer_value());
+                        return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
+                    }
                     self.drop_value(v, ty)?;
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }

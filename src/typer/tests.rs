@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
@@ -1131,13 +1130,14 @@ fn test_lambda_standalone_unannotated_param_float() {
     let hir = typer.lower_program(&prog).unwrap();
     let main = &hir.fns[0];
     if let hir::Stmt::Bind(b) = &main.body[0]
-        && let Type::Fn(ptys, _) = &b.ty {
-            assert!(
-                ptys[0].is_float(),
-                "lambda param should be float: {:?}",
-                ptys[0]
-            );
-        }
+        && let Type::Fn(ptys, _) = &b.ty
+    {
+        assert!(
+            ptys[0].is_float(),
+            "lambda param should be float: {:?}",
+            ptys[0]
+        );
+    }
 }
 
 #[test]
@@ -1362,13 +1362,14 @@ fn test_vec_push_constrains_element_type() {
     let main = &hir.fns[0];
     for stmt in &main.body {
         if let hir::Stmt::Bind(b) = stmt
-            && b.name == "v" {
-                assert!(
-                    !b.ty.has_type_var(),
-                    "vec should have resolved element type: {:?}",
-                    b.ty
-                );
-            }
+            && b.name == "v"
+        {
+            assert!(
+                !b.ty.has_type_var(),
+                "vec should have resolved element type: {:?}",
+                b.ty
+            );
+        }
     }
 }
 
@@ -1413,25 +1414,32 @@ fn test_unannotated_fn_called_with_bool() {
     assert_eq!(negate.params[0].ty, Type::Bool);
 }
 
-
 // --- scope.md §1: PackageId threaded into HIR (task 2-32-3-9) ---
 
-use crate::pkgid::{PackageRecord, PkgId, ScopePath, Visibility};
 use crate::pkg::SemVer;
+use crate::pkgid::{PackageRecord, PkgId, ScopePath, Visibility};
 
 fn test_pkg_id(name: &str) -> PkgId {
     let nm = Symbol::intern(name);
     let hash = crate::pkgid::compute_semantic_hash(
         nm,
         ScopePath::root(),
-        &SemVer { major: 0, minor: 0, patch: 0 },
+        &SemVer {
+            major: 0,
+            minor: 0,
+            patch: 0,
+        },
         name.as_bytes(),
         &[],
     );
     PkgId::intern(PackageRecord {
         name: nm,
         owner_scope: ScopePath::root(),
-        version: SemVer { major: 0, minor: 0, patch: 0 },
+        version: SemVer {
+            major: 0,
+            minor: 0,
+            patch: 0,
+        },
         semantic_hash: hash,
         visibility: Visibility::Public,
     })
@@ -1473,7 +1481,10 @@ fn hir_owner_pkg_id_attributes_imported_items_to_dependency() {
     let hir = typer.lower_program(&prog).unwrap();
 
     assert_eq!(hir.pkg_id, Some(root));
-    assert_eq!(hir.item_pkgs.get(&Symbol::intern("helper_doit")), Some(&dep));
+    assert_eq!(
+        hir.item_pkgs.get(&Symbol::intern("helper_doit")),
+        Some(&dep)
+    );
     assert_eq!(hir.owner_pkg_id(Symbol::intern("helper_doit")), Some(dep));
     assert_eq!(hir.owner_pkg_id(Symbol::intern("main")), Some(root));
     // Distinct packages keep distinct identities through HIR.
@@ -1510,7 +1521,10 @@ fn mir_propagates_root_and_dependency_pkg_ids() {
 
     // Program-level identity carries through HIR -> MIR unchanged.
     assert_eq!(mir.pkg_id, Some(root));
-    assert_eq!(mir.item_pkgs.get(&Symbol::intern("helper_doit")), Some(&dep));
+    assert_eq!(
+        mir.item_pkgs.get(&Symbol::intern("helper_doit")),
+        Some(&dep)
+    );
 
     // Each lowered function is attributed to its owning package.
     let doit = mir
