@@ -1,0 +1,55 @@
+# 2026-07-30 implementation notes
+- Redesign: per-case `jinn_waitq_node_t` waiter nodes (stack-allocated in
+  jinn_select, embedded in the coroutine for plain send/recv), so a
+  selector sits on EVERY case's wait queue at once (Go's model). All
+  wakers claim the selector through one shared claim word (CAS 0→1);
+  losers skip the node. Channel wait queues now link through nodes, not
+  the coroutine's intrusive `next` (which stays for the scheduler inject
+  queue and actor join).
+- Park handoff generalized to multi-lock (worker `held_locks[]`): select
+  parks holding EVERY case lock; the scheduler releases them in reverse
+  acquisition order after the context save. Because re-acquisition
+  (lock_all) is forward in sorted order, a woken selector cannot pass its
+  first lock — and so cannot touch or reuse the stack-resident node
+  array — until the release loop has finished.
+- Node/stack lifetime invariant: select-node memory is valid for exactly
+  as long as its queue's channel lock is held, because the selector's
+  post-wake node-removal pass re-locks every case channel before its
+  frame can be reused or freed. Every waker therefore claims/pops under
+  the channel lock and never touches a node after unlock.
+- Close: observed in the ready scan (`case_ready`) and after wake.
+  Receive on closed+empty fires with the zero value (matches
+  jinn_chan_recv end-of-stream). Send on closed fires without sending —
+  statement-send's silent-false. The frontend only generates receive
+  cases today (`is_send` is always 0 in emit_select); when send cases
+  arrive, jinn_select_case_t needs a per-case result slot so a fired
+  send-to-closed can surface `false` to the arm, per the 8-11 DoD.
+- Retry exhaustion is gone, not repaired: -1 now means default (or
+  cancellation — the generated post-suspension check unwinds). A selector
+  with no default and nothing ready parks indefinitely.
+- No case cap: order/node/lock arrays are alloca'd from the
+  codegen-static case count (old fixed [16] silently ignored cases 17+).
+- The inherited combined stress (select + scope join + actor join +
+  channel churn, ASan, 10-way parallel) found and fixed two adjacent
+  lifetime bugs:
+  1. scope.c: jinn_scope_child_done decremented live_children BEFORE
+     taking the scope lock, so a running (not yet parked) parent could
+     observe zero, return from join, and free the scope while the child
+     was about to CAS its spinlock. The decrement now sits inside the
+     lock and join confirms zero by a lock acquire+release barrier.
+  2. actor.c: jinn_actor_destroy freed the mailbox channel at actor
+     exit while a concurrent `stop e` had already loaded the pointer —
+     close-after-free. The channel is now closed, detached, and retired
+     with the mailbox (freed in jinn_actor_retire_flush at shutdown), so
+     a stale stop/send only touches a closed, still-allocated channel.
+- Known ASan-environment artifact, NOT a runtime bug: rare SEGV in
+  libasan's __tls_get_addr interceptor during worker-thread bootstrap
+  (T-1, libc start_thread), under many concurrent instrumented processes.
+  Reproduced identically on the unmodified pre-8-11 runtime with a
+  select-free program; frequency correlates with process-lifetime
+  shortness, not with select. Excluded from the DoD sweep results.
+- Sweep: 60 runs × 7 programs (combined churn, two-channel wake, close
+  pre/during park, 32-case, 4-selector contention exactly-once, fairness)
+  at 10-way parallelism under ASan+UBSan: zero sanitizer reports besides
+  the environmental artifact above. TSan remains fiber-blind (see 8-10
+  notes); the deque keeps its pthread-only TSan harness.

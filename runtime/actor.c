@@ -169,22 +169,28 @@ void jinn_actor_join(void *join_slot_ptr) {
  * crashed whenever the actor drained before the join started
  * (jinn_join_get CAS-writes the join slot, which lives inside the
  * mailbox). Until actor handles are refcounted, an exited actor's
- * mailbox is retired, not freed: the channel is destroyed and nulled,
- * `alive` drops to 0, and sends/stop/join on the stale handle become
- * harmless no-ops (send/recv/close are NULL-tolerant). Memory is
+ * mailbox is retired, not freed: the channel is closed, detached, and
+ * retired along with the mailbox, `alive` drops to 0, and sends/stop/join
+ * on the stale handle become harmless no-ops (send/recv/close are
+ * NULL-tolerant, and a racer that loaded the channel pointer before the
+ * detach only ever touches a closed but still-allocated channel — freeing
+ * the channel at exit let `stop e` close freed memory when the actor's
+ * exit won the race between stop's pointer load and its close). Memory is
  * bounded by the number of actors spawned and reclaimed by
  * jinn_actor_retire_flush() from jinn_sched_shutdown(). */
 typedef struct jinn_retired_mb {
     void                   *mailbox;
+    void                   *chan; /* jinn_chan_t*, destroyed at flush */
     struct jinn_retired_mb *next;
 } jinn_retired_mb_t;
 
 static _Atomic(jinn_retired_mb_t *) g_retired_mailboxes = NULL;
 
-static void jinn_actor_retire_mailbox(void *mailbox_ptr) {
+static void jinn_actor_retire_mailbox(void *mailbox_ptr, void *chan) {
     jinn_retired_mb_t *node =
         (jinn_retired_mb_t *)jinn_xmalloc(sizeof(jinn_retired_mb_t));
     node->mailbox = mailbox_ptr;
+    node->chan = chan;
     node->next = atomic_load_explicit(&g_retired_mailboxes, memory_order_relaxed);
     while (!atomic_compare_exchange_weak_explicit(
         &g_retired_mailboxes, &node->next, node,
@@ -201,6 +207,7 @@ void jinn_actor_retire_flush(void) {
          * allocation; it is intentionally left to the allocator at
          * process exit — a parked joiner may still hold a pointer to it
          * and there is no refcount to know otherwise. */
+        if (n->chan) jinn_chan_destroy((jinn_chan_t *)n->chan);
         free(n->mailbox);
         free(n);
         n = next;
@@ -221,12 +228,14 @@ void jinn_actor_destroy(void *mailbox_ptr) {
     }
     jinn_chan_t *ch = *(jinn_chan_t **)mailbox_ptr;
     if (ch) {
-        /* Close if not already closed, then destroy */
+        /* Close and detach, but do NOT destroy: a concurrent `stop e`
+         * may already have loaded this pointer and be about to close it.
+         * The channel is retired below and freed at scheduler shutdown,
+         * so that racer only ever writes a closed, still-live channel. */
         jinn_chan_close(ch);
-        jinn_chan_destroy(ch);
         *(jinn_chan_t **)mailbox_ptr = NULL;
     }
     /* Mark dead for any late sender that checks, then retire. */
     *(int32_t *)((char *)mailbox_ptr + sizeof(void *)) = 0; /* alive @ byte 8 */
-    jinn_actor_retire_mailbox(mailbox_ptr);
+    jinn_actor_retire_mailbox(mailbox_ptr, ch);
 }

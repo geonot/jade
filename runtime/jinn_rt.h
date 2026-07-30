@@ -75,6 +75,25 @@ typedef struct {
 "runtime/channel.c before building on this architecture."
 #endif
 
+/* ── Channel wait-queue node (task 8-11) ─────────────────────────── */
+
+/* Membership in a channel wait queue. Plain send/recv waiters use the
+ * node embedded in their coroutine (one queue at a time, zero
+ * allocation); a `select` allocates one node per case on its own stack so
+ * the selector sits on EVERY case's queue simultaneously (Go's model —
+ * the old single-queue round-robin could park on channel A and never be
+ * woken by traffic on channel B).
+ *
+ * `select_claim` is NULL for plain waiters. For select nodes it points at
+ * the selector's claim word: a waker must CAS it 0→1 before waking; on
+ * failure another case already won and the node is simply discarded (the
+ * waker then services the next node in its queue). */
+typedef struct jinn_waitq_node {
+    struct jinn_waitq_node *next;
+    struct jinn_coro       *coro;
+    _Atomic(int32_t)       *select_claim;
+} jinn_waitq_node_t;
+
 /* ── Coroutine ───────────────────────────────────────────────────── */
 
 typedef enum {
@@ -91,15 +110,15 @@ struct jinn_coro {
     jinn_coro_state_t  state;
     void             (*entry)(void*);
     void              *arg;
-    jinn_coro_t       *next;          /* intrusive list for wait queues */
+    jinn_coro_t       *next;          /* intrusive list (scheduler inject queue, actor join) */
     void              *wait_chan;      /* channel blocked on, or NULL */
     uint32_t           id;
-    int                select_ready;  /* which select case fired (-1 = none) */
     uint8_t            daemon;        /* 1 = daemon coro (actor), doesn't block sched_run */
     void             (*on_exit_cb)(void *);  /* called when coro returns (before destroy) */
     void              *on_exit_arg;
     void              *scope;         /* owning jinn_scope_t, or NULL — structured concurrency */
     _Atomic(int32_t)   cancelled;     /* set when the owning scope is cancelled */
+    jinn_waitq_node_t  wq_node;       /* embedded node for plain channel waits */
 };
 
 #define JINN_STACK_SIZE  (64 * 1024)   /* 64KB per coroutine */
@@ -177,6 +196,12 @@ struct jinn_worker {
      * lock first, and cannot get it until the context is saved (task
      * 8-10, generalizing the channel-only `held_chan_lock`). */
     _Atomic(int32_t)  *held_lock;
+    /* Multi-lock variant for `select`, which parks holding EVERY case
+     * channel's lock (its waiter nodes are published on all of them). The
+     * array lives on the parker's stack, which stays valid while parked;
+     * the scheduler zeroes each word after the context save. */
+    _Atomic(int32_t) **held_locks;
+    int                held_locks_n;
     int                last_action;     /* SCHED_ACTION_* set before swap */
 };
 
@@ -242,10 +267,10 @@ struct jinn_chan {
     size_t             elem_size;
     void              *buffer;
     _Atomic(int32_t)   closed;
-    jinn_coro_t       *send_waitq;
-    jinn_coro_t       *send_waitq_tail;
-    jinn_coro_t       *recv_waitq;
-    jinn_coro_t       *recv_waitq_tail;
+    jinn_waitq_node_t *send_waitq;
+    jinn_waitq_node_t *send_waitq_tail;
+    jinn_waitq_node_t *recv_waitq;
+    jinn_waitq_node_t *recv_waitq_tail;
     _Atomic(int32_t)   lock;         /* spinlock (no thread-ownership tracking) */
 };
 

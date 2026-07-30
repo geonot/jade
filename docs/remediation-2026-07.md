@@ -386,7 +386,7 @@ sites; no park site releases its guard before the swap; a stress test drives
 select/join/scope-join/event parks concurrently under TSan for a sustained run with
 zero reports.
 
-### ◻ 8-11 Redesign `select` — **P0**, blocked_by: [8-10]
+### ✅ 8-11 Redesign `select` — **P0**, blocked_by: [8-10]
 *Review item 6.*
 
 Three independent defects, all in `runtime/select.c`:

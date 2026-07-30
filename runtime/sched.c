@@ -202,6 +202,8 @@ static void *jinn_worker_loop(void *arg) {
         c->state = JINN_CORO_RUNNING;
         w->current = c;
         w->held_lock = NULL;
+        w->held_locks = NULL;
+        w->held_locks_n = 0;
         /* Restore this coroutine's structured-concurrency scope so that any
          * dispatch/spawn it performs registers with the correct scope. */
         jinn_scope_set_current((jinn_scope_t *)c->scope);
@@ -219,6 +221,13 @@ static void *jinn_worker_loop(void *arg) {
         if (w->held_lock) {
             atomic_store_explicit(w->held_lock, 0, memory_order_release);
             w->held_lock = NULL;
+        }
+        if (w->held_locks) {
+            for (int li = w->held_locks_n - 1; li >= 0; li--) {
+                atomic_store_explicit(w->held_locks[li], 0, memory_order_release);
+            }
+            w->held_locks = NULL;
+            w->held_locks_n = 0;
         }
 
         if (w->last_action == SCHED_ACTION_DESTROY) {
@@ -279,6 +288,8 @@ void jinn_sched_init(int num_workers) {
         g_sched.workers[i].rng_state = (uint64_t)i + 1; /* nonzero seed */
         g_sched.workers[i].current = NULL;
         g_sched.workers[i].held_lock = NULL;
+        g_sched.workers[i].held_locks = NULL;
+        g_sched.workers[i].held_locks_n = 0;
         g_sched.workers[i].last_action = 0;
         jinn_deque_init(&g_sched.workers[i].run_queue);
     }

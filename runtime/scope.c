@@ -189,16 +189,26 @@ void jinn_actor_spawn_scoped(jinn_coro_t *coro, void *mailbox_ptr) {
 
 void jinn_scope_child_done(jinn_scope_t *s) {
     if (!s) return;
+    /* The decrement happens INSIDE the scope lock: the parent's join may
+     * observe zero and free the scope at any point after it, so the
+     * decrement and every later touch of `s` must sit in one critical
+     * section the join can serialize against (it confirms zero by taking
+     * this lock once before freeing). Decrementing first and locking
+     * after — the old order — let a running (not yet parked) parent see
+     * zero, return from join, and free the scope while this thread was
+     * still about to CAS its spinlock (heap-use-after-free under load). */
+    scope_lock(s);
     int64_t remaining = atomic_fetch_sub(&s->live_children, 1) - 1;
+    jinn_coro_t *p = NULL;
     if (remaining <= 0) {
-        scope_lock(s);
-        jinn_coro_t *p = s->parent;
+        p = s->parent;
         s->parent = NULL;
-        scope_unlock(s);
-        if (p) {
-            p->state = JINN_CORO_READY;
-            jinn_sched_enqueue(p);
-        }
+    }
+    scope_unlock(s);
+    /* `s` must not be touched past this point. */
+    if (p) {
+        p->state = JINN_CORO_READY;
+        jinn_sched_enqueue(p);
     }
 }
 
@@ -307,6 +317,14 @@ static void scope_wake_cancelled(jinn_scope_t *s) {
 static int jinn_scope_join_no_free(jinn_scope_t *s) {
     for (;;) {
         if (atomic_load_explicit(&s->live_children, memory_order_acquire) <= 0) {
+            /* The caller will free the scope. An unlocked zero here only
+             * proves the last child's decrement happened — that child may
+             * still be inside jinn_scope_child_done's critical section
+             * (the decrement is under the scope lock). Take the lock once:
+             * acquiring it means that critical section has released, and
+             * no child touches the scope after it. */
+            scope_lock(s);
+            scope_unlock(s);
             break;
         }
         scope_wake_cancelled(s);

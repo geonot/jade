@@ -98,7 +98,6 @@ jinn_coro_t *jinn_coro_create(void (*entry)(void*), void *arg) {
     c->id          = atomic_fetch_add(&g_coro_id_counter, 1);
     c->next        = NULL;
     c->wait_chan   = NULL;
-    c->select_ready = -1;
     c->daemon      = 0;
     c->on_exit_cb  = NULL;
     c->on_exit_arg = NULL;

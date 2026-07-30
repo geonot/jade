@@ -48,7 +48,8 @@ static uint64_t next_pow2(uint64_t v) {
     return v + 1;
 }
 
-static inline void waitq_push(jinn_coro_t **head, jinn_coro_t **tail, jinn_coro_t *node) {
+static inline void waitq_push(jinn_waitq_node_t **head, jinn_waitq_node_t **tail,
+                              jinn_waitq_node_t *node) {
     node->next = NULL;
     if (*tail) {
         (*tail)->next = node;
@@ -58,17 +59,39 @@ static inline void waitq_push(jinn_coro_t **head, jinn_coro_t **tail, jinn_coro_
     *tail = node;
 }
 
-static inline jinn_coro_t *waitq_pop(jinn_coro_t **head, jinn_coro_t **tail) {
-    jinn_coro_t *node = *head;
-    if (!node) {
-        return NULL;
+/* Claim a popped node's coroutine for waking. Plain waiters always
+ * succeed; a select node is won only by the first CAS on the selector's
+ * claim word — losers discard the node (its selector is already awake or
+ * being woken by another case). Must be called with the queue's channel
+ * lock held; the node memory (selector stack / coroutine embed) stays
+ * valid because the selector cannot leave jinn_select while its nodes are
+ * reachable from any locked queue. */
+static inline jinn_coro_t *waitq_node_claim(jinn_waitq_node_t *node) {
+    if (node->select_claim) {
+        int32_t expected = 0;
+        if (!atomic_compare_exchange_strong_explicit(
+                node->select_claim, &expected, 1,
+                memory_order_acq_rel, memory_order_acquire)) {
+            return NULL;
+        }
     }
-    *head = node->next;
-    if (!*head) {
-        *tail = NULL;
+    return node->coro;
+}
+
+/* Pop until a wakeable waiter is found (skipping select nodes whose
+ * selector was already claimed by another case). Returns the coroutine to
+ * wake, or NULL if the queue drained. */
+static inline jinn_coro_t *waitq_pop_wakeable(jinn_waitq_node_t **head,
+                                              jinn_waitq_node_t **tail) {
+    for (;;) {
+        jinn_waitq_node_t *node = *head;
+        if (!node) return NULL;
+        *head = node->next;
+        if (!*head) *tail = NULL;
+        node->next = NULL;
+        jinn_coro_t *c = waitq_node_claim(node);
+        if (c) return c;
     }
-    node->next = NULL;
-    return node;
 }
 
 jinn_chan_t *jinn_chan_create(size_t elem_size, size_t capacity) {
@@ -104,65 +127,72 @@ void jinn_chan_close(jinn_chan_t *ch) {
     if (!ch) return;
     atomic_store(&ch->closed, 1);
 
-    /* Wake all blocked receivers so they get the close signal */
+    /* Detach and claim every waiter under ONE lock hold, then never touch
+     * the channel again: the first coroutine we enqueue may run the
+     * program's last use of this channel and free it, so a re-lock after
+     * any enqueue is a use-after-free. One sweep suffices — `closed` was
+     * stored above, and both park paths test it under this same lock, so
+     * no waiter can arrive once the queues drain. Claimed coroutines are
+     * chained through their intrusive `next` (unused while parked on a
+     * channel: channel queues link through jinn_waitq_node_t, and a
+     * claimed coroutine cannot run until we enqueue it). Select-node
+     * memory (selector stacks) stays valid exactly as long as we hold the
+     * lock — a selector woken by another case blocks on this lock in its
+     * node-removal pass before it can return. */
+    jinn_coro_t *wake_head = NULL, *wake_tail = NULL;
     chan_lock(ch);
-    jinn_coro_t *c = ch->recv_waitq;
-    ch->recv_waitq = NULL;
-    ch->recv_waitq_tail = NULL;
-    /* Also wake senders */
-    jinn_coro_t *s = ch->send_waitq;
-    ch->send_waitq = NULL;
-    ch->send_waitq_tail = NULL;
+    for (;;) {
+        jinn_coro_t *c = waitq_pop_wakeable(&ch->recv_waitq, &ch->recv_waitq_tail);
+        if (!c) c = waitq_pop_wakeable(&ch->send_waitq, &ch->send_waitq_tail);
+        if (!c) break;
+        c->next = NULL;
+        if (wake_tail) wake_tail->next = c; else wake_head = c;
+        wake_tail = c;
+    }
     chan_unlock(ch);
 
-    while (c) {
-        jinn_coro_t *next = c->next;
+    while (wake_head) {
+        jinn_coro_t *c = wake_head;
+        wake_head = c->next;
         c->next = NULL;
         c->wait_chan = NULL;
         c->state = JINN_CORO_READY;
         jinn_sched_enqueue(c);
-        c = next;
     }
-    while (s) {
-        jinn_coro_t *next = s->next;
-        s->next = NULL;
-        s->wait_chan = NULL;
-        s->state = JINN_CORO_READY;
-        jinn_sched_enqueue(s);
-        s = next;
-    }
-    /* Wake non-coroutine thread waiters */
 }
 
-/* Remove `target` from either wait queue of `ch` and reschedule it. Used by
- * scope cancellation to unpark a child blocked on a channel so it reaches its
- * next cancellation check and unwinds. Safe to call with a coro that is not
- * actually queued (no-op in that case). */
-static int waitq_remove(jinn_coro_t **head, jinn_coro_t **tail, jinn_coro_t *target) {
-    jinn_coro_t *prev = NULL, *cur = *head;
+/* Remove the node whose coroutine is `target` from a wait queue. Returns
+ * the node, or NULL. Used by scope cancellation to unpark a child blocked
+ * on a channel so it reaches its next cancellation check and unwinds.
+ * Safe when the coroutine is not queued (no-op). */
+static jinn_waitq_node_t *waitq_remove_coro(jinn_waitq_node_t **head,
+                                            jinn_waitq_node_t **tail,
+                                            jinn_coro_t *target) {
+    jinn_waitq_node_t *prev = NULL, *cur = *head;
     while (cur) {
-        if (cur == target) {
+        if (cur->coro == target) {
             if (prev) prev->next = cur->next; else *head = cur->next;
             if (*tail == cur) *tail = prev;
             cur->next = NULL;
-            return 1;
+            return cur;
         }
         prev = cur;
         cur = cur->next;
     }
-    return 0;
+    return NULL;
 }
 
 void jinn_chan_wake_coro(jinn_chan_t *ch, jinn_coro_t *c) {
     if (!ch || !c) return;
     chan_lock(ch);
-    int found = waitq_remove(&ch->send_waitq, &ch->send_waitq_tail, c)
-             || waitq_remove(&ch->recv_waitq, &ch->recv_waitq_tail, c);
+    jinn_waitq_node_t *node = waitq_remove_coro(&ch->send_waitq, &ch->send_waitq_tail, c);
+    if (!node) node = waitq_remove_coro(&ch->recv_waitq, &ch->recv_waitq_tail, c);
+    jinn_coro_t *wake = node ? waitq_node_claim(node) : NULL;
     chan_unlock(ch);
-    if (found) {
-        c->wait_chan = NULL;
-        c->state = JINN_CORO_READY;
-        jinn_sched_enqueue(c);
+    if (wake) {
+        wake->wait_chan = NULL;
+        wake->state = JINN_CORO_READY;
+        jinn_sched_enqueue(wake);
     }
 }
 
@@ -194,7 +224,7 @@ int jinn_chan_send(jinn_chan_t *ch, const void *data) {
             atomic_store_explicit(&ch->tail, tail + 1, memory_order_release);
 
             /* Wake one blocked receiver if any */
-            jinn_coro_t *waiter = waitq_pop(&ch->recv_waitq, &ch->recv_waitq_tail);
+            jinn_coro_t *waiter = waitq_pop_wakeable(&ch->recv_waitq, &ch->recv_waitq_tail);
             if (waiter) {
                 waiter->wait_chan = NULL;
                 waiter->state = JINN_CORO_READY;
@@ -233,10 +263,11 @@ int jinn_chan_send(jinn_chan_t *ch, const void *data) {
         }
         self->state = JINN_CORO_SUSPENDED;
         self->wait_chan = ch;
-        self->next = NULL;
+        self->wq_node.coro = self;
+        self->wq_node.select_claim = NULL;
 
         /* Append to send wait queue in O(1) */
-        waitq_push(&ch->send_waitq, &ch->send_waitq_tail, self);
+        waitq_push(&ch->send_waitq, &ch->send_waitq_tail, &self->wq_node);
 
         /* Don't unlock — scheduler will release after context is saved */
 
@@ -270,7 +301,7 @@ int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
             atomic_store_explicit(&ch->head, head + 1, memory_order_release);
 
             /* Wake one blocked sender if any */
-            jinn_coro_t *waiter = waitq_pop(&ch->send_waitq, &ch->send_waitq_tail);
+            jinn_coro_t *waiter = waitq_pop_wakeable(&ch->send_waitq, &ch->send_waitq_tail);
             if (waiter) {
                 waiter->wait_chan = NULL;
                 waiter->state = JINN_CORO_READY;
@@ -313,10 +344,11 @@ int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
         }
         self->state = JINN_CORO_SUSPENDED;
         self->wait_chan = ch;
-        self->next = NULL;
+        self->wq_node.coro = self;
+        self->wq_node.select_claim = NULL;
 
         /* Append to recv wait queue in O(1) */
-        waitq_push(&ch->recv_waitq, &ch->recv_waitq_tail, self);
+        waitq_push(&ch->recv_waitq, &ch->recv_waitq_tail, &self->wq_node);
 
         /* Don't unlock — scheduler will release after context is saved */
 
@@ -340,7 +372,7 @@ int jinn_chan_try_recv(jinn_chan_t *ch, void *data_out) {
         memcpy(data_out, (char *)ch->buffer + idx * ch->elem_size, ch->elem_size);
         atomic_store_explicit(&ch->head, head + 1, memory_order_release);
 
-        jinn_coro_t *waiter = waitq_pop(&ch->send_waitq, &ch->send_waitq_tail);
+        jinn_coro_t *waiter = waitq_pop_wakeable(&ch->send_waitq, &ch->send_waitq_tail);
         if (waiter) {
             waiter->wait_chan = NULL;
             waiter->state = JINN_CORO_READY;

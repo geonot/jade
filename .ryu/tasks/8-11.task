@@ -1,10 +1,10 @@
 title: Redesign select: multi-channel wait, close, no truncation
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: ['8-10']
 created_at: '2026-07-29T00:00:00'
-updated_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-30T00:00:00'
 description: 'Review item 6. Three independent defects in runtime/select.c. (1) It can only wait on
   one channel: a single intrusive next pointer means the selector enqueues on one
   channel per attempt, round-robin (admitted at select.c:227-234), so a selector parked
