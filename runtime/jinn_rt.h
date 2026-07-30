@@ -127,11 +127,27 @@ void jinn_context_swap(jinn_context_t *from, jinn_context_t *to);
 
 #define JINN_DEQUE_INIT_CAP 1024
 
+/* One deque buffer: the capacity travels WITH the slots so a thief reads a
+ * consistent (buffer, capacity) pair from a single atomic pointer — the old
+ * separate `buffer`/`capacity` fields could be observed torn across a grow
+ * (task 8-14). Slots are atomics: they are formally racy between the
+ * owner's store and a thief's read. Retired buffers chain through `prev`
+ * and are freed only at deque destroy, never inline (canonical Chase-Lev:
+ * a thief may still be reading a slot of the old buffer after the owner
+ * swaps in the grown one; retired buffers are immutable, so that read
+ * stays valid). Total retired memory is bounded by the sum of the smaller
+ * powers of two, i.e. less than one final-size buffer. */
+typedef struct jinn_deque_buf jinn_deque_buf_t;
+struct jinn_deque_buf {
+    int64_t                 size; /* power of two */
+    jinn_deque_buf_t       *prev; /* retired predecessor (owner-written) */
+    _Atomic(jinn_coro_t *)  slots[];
+};
+
 struct jinn_deque {
-    jinn_coro_t       **buffer;
-    _Atomic(int64_t)    top;
-    _Atomic(int64_t)    bottom;
-    int64_t             capacity;
+    _Atomic(jinn_deque_buf_t *) buf;
+    _Atomic(int64_t)            top;
+    _Atomic(int64_t)            bottom;
 };
 
 void         jinn_deque_init(jinn_deque_t *dq);

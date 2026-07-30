@@ -446,7 +446,7 @@ entry; a test advances a generator several times, then spawns fresh coroutines o
 same worker and asserts correct execution; scan for other TLS values with the same
 clear-once pattern.
 
-### ◻ 8-14 Deque buffer reclamation — **P0**, blocked_by: []
+### ✅ 8-14 Deque buffer reclamation — **P0**, blocked_by: []
 *Review §7 critical (adjacent to item 5; not separately numbered in §11 — included
 because it is the same bug tier and one worker queueing >1024 coroutines triggers it).*
 

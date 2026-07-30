@@ -153,6 +153,80 @@ fn scope_handles_more_than_64_children() {
     assert_eq!(sorted_lines(&out.stdout), expected);
 }
 
+/// Task 8-14 — one worker queueing past the deque's 1024-slot initial
+/// buffer forces grows while other workers steal. Before the fix, grow
+/// freed the old buffer under live thieves and published buffer/capacity
+/// as a torn pair. 5001 tasks force at least two grows; every task must
+/// run exactly once.
+#[test]
+fn deque_grow_under_stealing_runs_every_task_once() {
+    let src = "\
+*work(id as i64)
+    log(id)
+
+*main
+    together
+        for i in 0 to 5000
+            dispatch
+                work(i)
+    log(9999)
+";
+    let c = compile(src);
+    let out = c.run_within(30);
+    assert!(out.status.success(), "{:?}", out.status);
+    let mut expected: Vec<i64> = (0..5000).collect();
+    expected.push(9999);
+    assert_eq!(sorted_lines(&out.stdout), expected);
+}
+
+/// Task 8-14 — the standalone C harness (tests/deque_stress.c) drives the
+/// deque from raw pthreads, which is the only way to get a meaningful
+/// TSan signal (the fiber-swapping scheduler has no TSan annotations).
+/// Old deque: TSan data-race and ASan heap-use-after-free, 5/5. Skips a
+/// sanitizer leg gracefully when the toolchain lacks it.
+#[test]
+fn deque_stress_harness_is_sanitizer_clean() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let dir = tempfile::tempdir().unwrap();
+    for san in ["thread", "address"] {
+        let bin = dir.path().join(format!("deque_{san}"));
+        let cc = Command::new("cc")
+            .args([
+                "-O1",
+                "-g",
+                "-fno-omit-frame-pointer",
+                &format!("-fsanitize={san}"),
+                "-Iruntime",
+                "tests/deque_stress.c",
+                "runtime/deque.c",
+                "-lpthread",
+                "-o",
+            ])
+            .arg(&bin)
+            .current_dir(&root)
+            .output()
+            .expect("invoke cc");
+        if !cc.status.success() {
+            eprintln!(
+                "skipping -fsanitize={san}: {}",
+                String::from_utf8_lossy(&cc.stderr)
+            );
+            continue;
+        }
+        for round in 0..3 {
+            let out = Command::new(&bin).output().expect("run harness");
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            assert!(
+                out.status.success()
+                    && !stderr.contains("ThreadSanitizer")
+                    && !stderr.contains("AddressSanitizer"),
+                "-fsanitize={san} round {round}: status={:?}\n{stderr}",
+                out.status
+            );
+        }
+    }
+}
+
 /// Task 8-13 — `tl_gen_coro` was set on every `jinn_gen_resume` but cleared
 /// only on the trampoline's first entry, so a worker that resumed a
 /// generator more than once kept a stale value forever, and the next fresh
@@ -176,7 +250,10 @@ fn generator_resume_does_not_poison_worker_tls() {
     );
     let c = compile(&src);
     for round in 0..3 {
-        let out = c.run_within(10);
+        // Generous timeout: the whole suite runs in parallel and each jinn
+        // program spawns a full worker pool, so wall-clock under load is
+        // many times the ~0.15s standalone time.
+        let out = c.run_within(60);
         assert!(
             out.status.success(),
             "round {round}: {:?} stderr={}",

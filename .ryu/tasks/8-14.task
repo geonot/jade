@@ -1,10 +1,10 @@
 title: Fix Chase-Lev deque buffer reclamation on grow
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []
 created_at: '2026-07-29T00:00:00'
-updated_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T21:00:00'
 description: 'Review section 7 critical, adjacent to item 5 and not separately numbered in section
   11; included because it is the same bug tier and one worker queueing more than 1024
   coroutines triggers it. jinn_deque_grow does free(dq->buffer) and swaps
