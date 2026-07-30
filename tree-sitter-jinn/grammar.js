@@ -8,7 +8,7 @@
 // comment-only lines, which is consumed as whitespace).
 //
 // This grammar is a faithful model of the reference parser in
-// `src/parser/` and the authoritative EBNF in `jinn.ebnf`. It is verified
+// `src/parser/` and the authoritative EBNF in `docs/jinn.ebnf`. It is verified
 // against the conformance corpus in `tests/ebnf_corpus/*.jn`: every snippet
 // must parse with zero ERROR nodes (`tree-sitter parse --quiet`).
 //

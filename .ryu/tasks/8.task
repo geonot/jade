@@ -1,0 +1,17 @@
+title: Remediation of JINN_REVIEW_2026_07 (items 1-14, 16, 17)
+status: pending
+atomic: false
+priority: high
+blocked_by: []
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Parent task for the remediation plan in docs/remediation-2026-07.md, derived from
+  JINN_REVIEW_2026_07.md section 11 items 1-14, 16, 17. Six tiers, 26 atomic subtasks.
+  Design decisions D1-D6 are recorded in the plan section 0 and are binding on the
+  subtasks: D1 aggregates are move-on-assign with inferred borrows; D2 fix
+  generic-argument propagation rather than requiring annotations; D3 possibly-empty
+  store queries are Option; D4 module resolution is explicit-use-only; D5 comments
+  become lexer trivia and fmt preserves them; D6 fix the store engine in place rather
+  than adopting SQLite. Alpha bar: no program that compiles may corrupt memory, and no
+  documented example may fail to compile. Items 15 (sigil reduction) and 18 (in-code
+  TODO markers) are out of scope by direction.'

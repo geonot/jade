@@ -1,6 +1,6 @@
 //! EBNF ↔ implementation drift detector (B.8 / P1-13).
 //!
-//! `jinn.ebnf` is the canonical surface grammar. It is paired with two
+//! `docs/jinn.ebnf` is the canonical surface grammar. It is paired with two
 //! implementations: the Rust parser in `src/parser/` and the tree-sitter
 //! grammar in `tree-sitter-jinn/grammar.js`. This test guards against
 //! three classes of drift:
@@ -32,7 +32,8 @@ fn repo_root() -> PathBuf {
 }
 
 fn read_ebnf() -> String {
-    std::fs::read_to_string(repo_root().join("jinn.ebnf")).expect("jinn.ebnf must exist")
+    std::fs::read_to_string(repo_root().join("docs").join("jinn.ebnf"))
+        .expect("docs/jinn.ebnf must exist")
 }
 
 /// Strip `(* ... *)` block comments and `? ... ?` special sequences

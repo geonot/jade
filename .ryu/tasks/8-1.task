@@ -1,0 +1,14 @@
+title: Restore the grammar-drift detector (jinn.ebnf path)
+status: complete
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T12:00:00'
+description: 'Review item 4. tests/ebnf_roundtrip.rs:35 reads repo_root().join(''jinn.ebnf'') but
+  commit f82402f moved the file to docs/jinn.ebnf, so
+  ebnf_has_no_dangling_rule_references and ebnf_keywords_are_reserved_in_lexer both fail
+  with NotFound and the parser/EBNF/tree-sitter drift detector is off. DoD: path
+  corrected; both tests pass; verify the detector still FAILS when a keyword is
+  deliberately removed from the lexer (confirm it detects, not merely runs); add a CI
+  check asserting zero failing tests so a red suite cannot be committed again.'

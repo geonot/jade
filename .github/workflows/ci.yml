@@ -40,8 +40,11 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      # --no-fail-fast: a red test must fail CI with the FULL failure list,
+      # not stop at the first failing binary — commit f82402f shipped two red
+      # tests (the grammar-drift detector) because the local run stopped early.
       - name: Tests
-        run: cargo test --all-targets
+        run: cargo test --all-targets --no-fail-fast
 
   ebnf-roundtrip:
     # EBNF ↔ implementation drift detector (P1-13). The Rust half
