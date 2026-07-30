@@ -300,6 +300,22 @@ impl Typer {
             tracing::debug!(target: "jinnc::type", "running bidirectional parameter inference");
         }
         self.infer_param_types(prog);
+
+        // Task 8-6 (memory-model.md M6): decide which parameters consume
+        // their argument before any body is lowered, so every call site's
+        // drop accounting and the callee's ownership agree.
+        {
+            let all_fns: Vec<&ast::Fn> = prog
+                .decls
+                .iter()
+                .filter_map(|d| match d {
+                    ast::Decl::Fn(f) => Some(f),
+                    _ => None,
+                })
+                .collect();
+            self.infer_consuming_params(&all_fns);
+        }
+
         if self.debug_types {
             tracing::debug!(target: "jinnc::type", "lowering declarations to HIR");
         }

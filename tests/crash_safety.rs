@@ -300,7 +300,7 @@ fn passing_assert_continues() {
 fn use_after_take_is_compile_error() {
     expect_compile_fail(
         "*eat(v as take Vec of i64)\n    log(v.len())\n\n*main\n    xs is [1,2]\n    eat(take xs)\n    log(xs.len())\n",
-        &["moved out", "take"],
+        &["moved value `xs`", "`eat`"],
     );
 }
 
@@ -308,7 +308,7 @@ fn use_after_take_is_compile_error() {
 fn resource_use_after_take_is_compile_error() {
     expect_compile_fail(
         "type Handle @resource\n    fd as i64\n\n*shut(h as take Handle)\n    log(h.fd)\n\n*main\n    h is Handle(fd is 3)\n    shut(h)\n    log(h.fd)\n",
-        &["moved out"],
+        &["moved value `h`", "`shut`"],
     );
 }
 

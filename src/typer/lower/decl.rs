@@ -311,8 +311,19 @@ impl Typer {
         for (i, p) in f.params.iter().enumerate() {
             let pid = self.fresh_id();
             let ty = ptys[i].clone();
+            // The effective access mod folds in inferred consuming
+            // parameters (task 8-6): `fn_param_access` was updated by
+            // `infer_consuming_params` before lowering began, so a
+            // parameter whose buffer escapes the function is owned here
+            // and moved at every call site.
+            let eff_mod = self
+                .fn_param_access
+                .get(&f.name)
+                .and_then(|a| a.get(i).copied())
+                .flatten()
+                .or(p.access_mod);
             let ownership = self
-                .param_ownership_with_mod(&ty, p.access_mod)
+                .param_ownership_with_mod(&ty, eff_mod)
                 .map_err(|e| format!("{}: {e}", p.span.loc()))?;
             self.define_var(
                 &p.name.as_str(),
@@ -334,7 +345,7 @@ impl Typer {
                 ty,
                 ownership,
                 default: hir_default,
-                access_mod: p.access_mod,
+                access_mod: eff_mod,
                 span: p.span,
             });
         }

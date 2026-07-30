@@ -262,7 +262,7 @@ existing "no reference cycles are constructible" property is stated as a consequ
 so it is not lost. Reviewed against `access-semantics.md` and `escape/mod.rs` tiers
 for contradictions.
 
-### ◻ 8-6 Fix aggregate move-out on return — **P0**, blocked_by: [8-5]
+### ✅ 8-6 Fix aggregate move-out on return — **P0**, blocked_by: [8-5]
 *Review item 1 (§3.1).*
 
 ```jinn

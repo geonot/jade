@@ -11,9 +11,12 @@
 > unchanged — and corrects it where the review showed its claims did not
 > hold (§9).
 >
-> Status: **contract, being enforced.** Until 8-6..8-8 land, the programs
-> §7 requires to be rejected are pinned asserting today's wrong behavior in
-> `tests/review_2026_07.rs`.
+> Status: **contract, being enforced.** Landed: 8-6 (M6 inferred consuming
+> parameters, M7 return transfer, single-drop accounting through nested
+> scopes — §3.1 runs clean and its use-after-move companion is rejected).
+> Open: 8-7 (M1/M3/M4 move-on-assign rejection) and 8-8 (M8 cross-task
+> capture); until they land, their §7 programs are pinned asserting today's
+> wrong behavior in `tests/review_2026_07.rs`.
 
 ## 1. Type categories
 
@@ -338,8 +341,9 @@ Recorded per the 8-5 DoD review-for-contradictions:
 ## 10. Conformance
 
 Every M-rule above gets a compile-or-run conformance test in
-`tests/memory_model.rs` (created by 8-6/8-7/8-8 as each rule becomes
-enforceable), following the `tests/access_semantics.rs` pattern: real
-programs through `jinnc`, asserting either exact runtime output under
-ASan or the diagnostic lead line. The §7 table is the checklist; the
-review pins in `tests/review_2026_07.rs` flip as their owners land.
+`tests/memory_model.rs` (extended by 8-7/8-8 as each rule becomes
+enforceable; M6/M7 and the nested-scope drop discipline are pinned there
+now), following the `tests/access_semantics.rs` pattern: real programs
+through `jinnc`, asserting either exact runtime output or the diagnostic
+lead line. The §7 table is the checklist; the review pins in
+`tests/review_2026_07.rs` flip as their owners land.

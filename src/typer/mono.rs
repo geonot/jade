@@ -471,6 +471,11 @@ impl Typer {
         self.pop_scope();
         let id = self.fresh_id();
         self.fns.insert(mangled, (id, ptys.clone(), ret.clone()));
+        // Call sites that refer to the mangled instantiation must see the
+        // same consuming-parameter answers as the base name (task 8-6).
+        if let Some(access) = self.fn_param_access.get(&Symbol::from(name)).cloned() {
+            self.fn_param_access.insert(mangled, access);
+        }
 
         let mono_fn = self.lower_generic_fn_body(&gf, &mangled.as_str(), id, &ptys, &ret, name)?;
         self.mono_fns.push(mono_fn);

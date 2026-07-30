@@ -161,33 +161,108 @@ impl Typer {
         self.emit_scope_drops_excluding(stmts, &std::collections::HashSet::new());
     }
 
+    /// Collect every def-id whose drop obligation has been transferred away
+    /// somewhere inside `stmts` — by a plain-variable bind/assign (the new
+    /// binding owns the buffer), by being pushed into a container, or by
+    /// being passed to a `take` (explicit or inferred-consuming, task 8-6)
+    /// parameter. Recurses into nested statement bodies: a bind inside an
+    /// `if`/`while`/`for`/`match` arm consumes the outer variable just as a
+    /// same-scope bind does (review §3.1 contributing cause; the old scan's
+    /// `_ => {}` left the outer drop in place and double-freed).
+    ///
+    /// Flow-insensitive by design: a consumption on *any* path suppresses
+    /// the scope-exit drop, which trades the double-free for a leak on the
+    /// paths that did not consume. Task 8-7's flow-sensitive analysis
+    /// rejects the conditional-move-then-use programs outright.
     fn collect_block_consumed_ids(
         &mut self,
         stmts: &[hir::Stmt],
         out: &mut std::collections::HashSet<crate::hir::DefId>,
     ) {
         for s in stmts {
-            match s {
-                hir::Stmt::Expr(e) => self.collect_consumed_in_expr(e, out),
+            self.collect_consumed_in_stmt(s, out);
+        }
+    }
 
-                hir::Stmt::Assign(_target, value, _) => {
-                    let resolved = self.infer_ctx.resolve(&value.ty);
-                    if Self::expr_type_needs_drop(&resolved)
-                        && let hir::ExprKind::Var(id, _) = &value.kind
-                    {
-                        out.insert(*id);
-                    }
+    fn collect_consumed_in_stmt(
+        &mut self,
+        s: &hir::Stmt,
+        out: &mut std::collections::HashSet<crate::hir::DefId>,
+    ) {
+        match s {
+            hir::Stmt::Expr(e) => self.collect_consumed_in_expr(e, out),
+
+            hir::Stmt::Assign(target, value, _) => {
+                let resolved = self.infer_ctx.resolve(&value.ty);
+                if Self::expr_type_needs_drop(&resolved)
+                    && let hir::ExprKind::Var(id, _) = &value.kind
+                {
+                    out.insert(*id);
                 }
-                hir::Stmt::Bind(b) => {
-                    let resolved = self.infer_ctx.resolve(&b.value.ty);
-                    if Self::expr_type_needs_drop(&resolved)
-                        && let hir::ExprKind::Var(id, _) = &b.value.kind
-                    {
-                        out.insert(*id);
-                    }
-                }
-                _ => {}
+                self.collect_consumed_in_expr(value, out);
+                self.collect_consumed_in_expr(target, out);
             }
+            hir::Stmt::Bind(b) => {
+                let resolved = self.infer_ctx.resolve(&b.value.ty);
+                if Self::expr_type_needs_drop(&resolved)
+                    && let hir::ExprKind::Var(id, _) = &b.value.kind
+                {
+                    out.insert(*id);
+                }
+                self.collect_consumed_in_expr(&b.value, out);
+            }
+            hir::Stmt::TupleBind(_, e, _)
+            | hir::Stmt::Ret(Some(e), _, _)
+            | hir::Stmt::ErrReturn(e, _, _)
+            | hir::Stmt::Break(Some(e), _) => {
+                self.collect_consumed_in_expr(e, out);
+            }
+            hir::Stmt::If(i) => {
+                self.collect_consumed_in_expr(&i.cond, out);
+                self.collect_block_consumed_ids(&i.then, out);
+                for (c, b) in &i.elifs {
+                    self.collect_consumed_in_expr(c, out);
+                    self.collect_block_consumed_ids(b, out);
+                }
+                if let Some(b) = &i.els {
+                    self.collect_block_consumed_ids(b, out);
+                }
+            }
+            hir::Stmt::While(w) => {
+                self.collect_consumed_in_expr(&w.cond, out);
+                self.collect_block_consumed_ids(&w.body, out);
+            }
+            hir::Stmt::For(f) => {
+                self.collect_consumed_in_expr(&f.iter, out);
+                if let Some(e) = &f.end {
+                    self.collect_consumed_in_expr(e, out);
+                }
+                if let Some(e) = &f.step {
+                    self.collect_consumed_in_expr(e, out);
+                }
+                self.collect_block_consumed_ids(&f.body, out);
+            }
+            hir::Stmt::Loop(l) => self.collect_block_consumed_ids(&l.body, out),
+            hir::Stmt::Match(m) => {
+                self.collect_consumed_in_expr(&m.subject, out);
+                for arm in &m.arms {
+                    if let Some(g) = &arm.guard {
+                        self.collect_consumed_in_expr(g, out);
+                    }
+                    self.collect_block_consumed_ids(&arm.body, out);
+                }
+            }
+            hir::Stmt::Defer(b, _)
+            | hir::Stmt::Transaction(b, _)
+            | hir::Stmt::SimBlock(b, _)
+            | hir::Stmt::Together(_, b, _, _, _) => {
+                self.collect_block_consumed_ids(b, out);
+            }
+            hir::Stmt::SimFor(f, _) => {
+                self.collect_consumed_in_expr(&f.iter, out);
+                self.collect_block_consumed_ids(&f.body, out);
+            }
+            _ => {}
         }
     }
 
@@ -250,6 +325,14 @@ impl Typer {
                     format!("{}_{}", ty_name.as_str(), m_name.as_str()).into();
                 let access = self.fn_param_access.get(&mangled).cloned();
                 if let Some(access) = access {
+                    if matches!(access.first(), Some(Some(crate::ast::AccessMod::Take)))
+                        && let hir::ExprKind::Var(id, _) = &recv.kind
+                    {
+                        let resolved = self.infer_ctx.resolve(&recv.ty);
+                        if Self::expr_type_needs_drop(&resolved) {
+                            out.insert(*id);
+                        }
+                    }
                     for (i, a) in args.iter().enumerate() {
                         if matches!(access.get(i + 1), Some(Some(crate::ast::AccessMod::Take)))
                             && let hir::ExprKind::Var(id, _) = &a.kind
@@ -264,6 +347,76 @@ impl Typer {
                 self.collect_consumed_in_expr(recv, out);
                 for a in args {
                     self.collect_consumed_in_expr(a, out);
+                }
+            }
+
+            // Structural recursion: a consuming call can sit anywhere in an
+            // expression tree (`total is tally(take_all(v)) + 1`), so walk
+            // every subexpression.
+            hir::ExprKind::BinOp(l, _, r) | hir::ExprKind::Index(l, r) => {
+                self.collect_consumed_in_expr(l, out);
+                self.collect_consumed_in_expr(r, out);
+            }
+            hir::ExprKind::UnaryOp(_, x)
+            | hir::ExprKind::Field(x, _, _)
+            | hir::ExprKind::Cast(x, _)
+            | hir::ExprKind::StrictCast(x, _)
+            | hir::ExprKind::Coerce(x, _)
+            | hir::ExprKind::Ref(x)
+            | hir::ExprKind::Deref(x) => {
+                self.collect_consumed_in_expr(x, out);
+            }
+            hir::ExprKind::Ternary(c, t, e) => {
+                self.collect_consumed_in_expr(c, out);
+                self.collect_consumed_in_expr(t, out);
+                self.collect_consumed_in_expr(e, out);
+            }
+            hir::ExprKind::Tuple(xs)
+            | hir::ExprKind::Array(xs)
+            | hir::ExprKind::VecNew(xs)
+            | hir::ExprKind::Builtin(_, xs) => {
+                for x in xs {
+                    self.collect_consumed_in_expr(x, out);
+                }
+            }
+            hir::ExprKind::Struct(_, inits) | hir::ExprKind::VariantCtor(_, _, _, inits) => {
+                for fi in inits {
+                    self.collect_consumed_in_expr(&fi.value, out);
+                }
+            }
+            hir::ExprKind::StringMethod(recv, _, args)
+            | hir::ExprKind::DeferredMethod(recv, _, args) => {
+                self.collect_consumed_in_expr(recv, out);
+                for a in args {
+                    self.collect_consumed_in_expr(a, out);
+                }
+            }
+            hir::ExprKind::IndirectCall(callee, args) => {
+                self.collect_consumed_in_expr(callee, out);
+                for a in args {
+                    self.collect_consumed_in_expr(a, out);
+                }
+            }
+            hir::ExprKind::Pipe(e, _, _, rest) => {
+                self.collect_consumed_in_expr(e, out);
+                for a in rest {
+                    self.collect_consumed_in_expr(a, out);
+                }
+            }
+            hir::ExprKind::Block(stmts) => {
+                for s in stmts {
+                    self.collect_consumed_in_stmt(s, out);
+                }
+            }
+            hir::ExprKind::IfExpr(i) => {
+                self.collect_consumed_in_expr(&i.cond, out);
+                self.collect_block_consumed_ids(&i.then, out);
+                for (c, b) in &i.elifs {
+                    self.collect_consumed_in_expr(c, out);
+                    self.collect_block_consumed_ids(b, out);
+                }
+                if let Some(b) = &i.els {
+                    self.collect_block_consumed_ids(b, out);
                 }
             }
             _ => {}
@@ -289,7 +442,7 @@ impl Typer {
                 {
                     let resolved = self.infer_ctx.resolve(&b.value.ty);
                     if Self::expr_type_needs_drop(&resolved) {
-                        self.mark_var_moved(*id);
+                        self.mark_var_moved(*id, crate::typer::MoveReason::TakeExplicit);
                     }
                 }
                 self.record_take_moves_in_expr(&b.value);
@@ -319,7 +472,10 @@ impl Typer {
                         {
                             let resolved = self.infer_ctx.resolve(&a.ty);
                             if Self::expr_type_needs_drop(&resolved) {
-                                self.mark_var_moved(*id);
+                                self.mark_var_moved(
+                                    *id,
+                                    crate::typer::MoveReason::ConsumingCall(*name),
+                                );
                             }
                         }
                     }
@@ -337,7 +493,10 @@ impl Typer {
                     {
                         let resolved = self.infer_ctx.resolve(&recv.ty);
                         if Self::expr_type_needs_drop(&resolved) {
-                            self.mark_var_moved(*id);
+                            self.mark_var_moved(
+                                *id,
+                                crate::typer::MoveReason::ConsumingCall(mangled),
+                            );
                         }
                     }
                     for (i, a) in args.iter().enumerate() {
@@ -346,7 +505,10 @@ impl Typer {
                         {
                             let resolved = self.infer_ctx.resolve(&a.ty);
                             if Self::expr_type_needs_drop(&resolved) {
-                                self.mark_var_moved(*id);
+                                self.mark_var_moved(
+                                    *id,
+                                    crate::typer::MoveReason::ConsumingCall(mangled),
+                                );
                             }
                         }
                     }

@@ -1,10 +1,10 @@
 title: Fix aggregate move-out on return (double-free)
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: ['8-5']
 created_at: '2026-07-29T00:00:00'
-updated_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T18:00:00'
 description: 'Review item 1, section 3.1. ''*ident(v) returns Vec of i64 / return v'' called as ''a
   is vec(1,2,3); s is ident(a); log(s.length)'' aborts with free(): invalid pointer at
   every opt level, annotated or not, return or tail expression; dropping the trailing

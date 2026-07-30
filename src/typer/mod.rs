@@ -34,6 +34,7 @@ pub(crate) struct DeferredField {
 }
 
 mod caps;
+mod consume_infer;
 mod errset;
 mod mono;
 mod resolve;
@@ -42,7 +43,20 @@ pub(crate) mod unify;
 #[derive(Clone, Default)]
 pub(crate) struct MoveState {
     pub(crate) fields: std::collections::HashMap<DefId, std::collections::HashSet<Symbol>>,
-    pub(crate) vars: std::collections::HashSet<DefId>,
+    pub(crate) vars: std::collections::HashMap<DefId, MoveReason>,
+}
+
+/// Why a variable is tombstoned, so the use-after-move diagnostic can say
+/// what actually happened instead of blaming a `take` the user never wrote
+/// (memory-model.md M1/M6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MoveReason {
+    /// An explicit `take` binding or `take` parameter the user wrote.
+    TakeExplicit,
+    /// Passed to a function whose parameter consumes its argument
+    /// (explicitly `take`, or inferred because the value escapes through
+    /// the callee — task 8-6).
+    ConsumingCall(Symbol),
 }
 
 #[allow(clippy::type_complexity)]
@@ -106,7 +120,7 @@ pub struct Typer {
 
     pub(crate) moved_fields: std::collections::HashMap<DefId, std::collections::HashSet<Symbol>>,
 
-    pub(crate) moved_vars: std::collections::HashSet<DefId>,
+    pub(crate) moved_vars: std::collections::HashMap<DefId, MoveReason>,
 
     pub(crate) const_vars: std::collections::HashSet<DefId>,
 
@@ -204,7 +218,7 @@ impl Typer {
             fn_defaults: IndexMap::new(),
             fn_param_access: IndexMap::new(),
             moved_fields: std::collections::HashMap::new(),
-            moved_vars: std::collections::HashSet::new(),
+            moved_vars: std::collections::HashMap::new(),
             declared_type_names: std::collections::HashSet::new(),
             const_vars: std::collections::HashSet::new(),
             suppress_moved_field_check: 0,
@@ -370,8 +384,8 @@ impl Typer {
         outer_ids: &std::collections::HashSet<DefId>,
         span: crate::ast::Span,
     ) -> Result<(), String> {
-        for id in &self.moved_vars {
-            if !pre.vars.contains(id) && outer_ids.contains(id) {
+        for id in self.moved_vars.keys() {
+            if !pre.vars.contains_key(id) && outer_ids.contains(id) {
                 return Err(format!(
                     "{}: value moved out by `take` inside a loop body would be moved \
                      again on the next iteration; move a fresh value each iteration or \
@@ -473,8 +487,8 @@ impl Typer {
         }
     }
 
-    pub(crate) fn mark_var_moved(&mut self, id: DefId) {
-        self.moved_vars.insert(id);
+    pub(crate) fn mark_var_moved(&mut self, id: DefId, reason: MoveReason) {
+        self.moved_vars.insert(id, reason);
     }
 
     pub(crate) fn clear_all_moved_for(&mut self, parent: DefId) {
@@ -504,7 +518,7 @@ impl Typer {
                     .or_default()
                     .extend(fields.iter().cloned());
             }
-            out_vars.extend(br.vars.iter().copied());
+            out_vars.extend(br.vars.iter().map(|(k, v)| (*k, *v)));
         }
         self.moved_fields = out_fields;
         self.moved_vars = out_vars;

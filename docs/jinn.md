@@ -1194,21 +1194,22 @@ moves ownership — `a` is unusable until reassigned — reads borrow without
 copying, and a program that would corrupt memory does not compile. No
 lifetime annotations, no `&`, no explicit `clone()`.
 
-> **Current status — not yet enforced.** Today the checker does **not** yet
-> deliver that guarantee for heap aggregates, and these programs misbehave
-> (each is pinned in `tests/review_2026_07.rs`, owned by tasks 8-6..8-8):
+> **Current status — partially enforced.** Landed (task 8-6): a parameter
+> whose value escapes through the callee (returned, stored, sent) is
+> **inferred consuming** — the call moves the argument, sorts/filters/
+> transform helpers run with exactly one drop, and using the argument
+> afterwards is a compile error that names the consuming call (clone first
+> with `a2 is copy a` to keep both). Still open, pinned in
+> `tests/review_2026_07.rs`:
 >
-> - returning an aggregate parameter double-frees
->   (`*ident(v) returns Vec of i64` / `return v`);
-> - two `dispatch` tasks mutating one `Vec` corrupt the allocator instead of
->   being rejected at compile time;
-> - `b is a; b.push(4)` on a `Vec` is silent shared mutable aliasing —
->   the mutation is visible through `a`.
+> - two `dispatch` tasks mutating one `Vec` corrupt the allocator instead
+>   of being rejected at compile time (task 8-8);
+> - `b is a; b.push(4)` on a `Vec` is still silent shared mutable
+>   aliasing — the mutation is visible through `a` (task 8-7 makes it
+>   "use of moved value `a`").
 >
-> Until tasks 8-5..8-8 land, treat aggregate assignment and
-> aggregate-returning helpers with care, and share data across tasks only
-> through channels or actors. Strings are unaffected — they already have
-> value semantics.
+> Until 8-7/8-8 land, share data across tasks only through channels or
+> actors. Strings are unaffected — they already have value semantics.
 
 One property that holds by construction: there are no shared reference
 counts, so reference cycles cannot be constructed and cycle leaks are

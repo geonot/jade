@@ -54,14 +54,32 @@ impl Typer {
                     let def_id = v.def_id;
                     let mono_ty = v.ty.clone();
                     let scheme_clone = v.scheme.clone();
-                    if self.suppress_moved_field_check == 0 && self.moved_vars.contains(&def_id) {
-                        return Err(format!(
-                            "{}: `{}` was moved out by an earlier `take`; \
-                             reassign `{}` before reading it",
-                            span.loc(),
-                            name,
-                            name,
-                        ));
+                    if self.suppress_moved_field_check == 0
+                        && let Some(reason) = self.moved_vars.get(&def_id)
+                    {
+                        return Err(match reason {
+                            crate::typer::MoveReason::TakeExplicit => format!(
+                                "{}: `{}` was moved out by an earlier `take`; \
+                                 reassign `{}` before reading it",
+                                span.loc(),
+                                name,
+                                name,
+                            ),
+                            crate::typer::MoveReason::ConsumingCall(callee) => format!(
+                                "{}: use of moved value `{}`: it was moved into the call \
+                                 to `{}`, whose parameter takes ownership (the value \
+                                 escapes through `{}`); pass a clone instead \
+                                 (`{}2 is copy {}` before the call), or reassign `{}` \
+                                 before reading it",
+                                span.loc(),
+                                name,
+                                callee,
+                                callee,
+                                name,
+                                name,
+                                name,
+                            ),
+                        });
                     }
                     let ty = match (&scheme_clone, expected) {
                         (Some(scheme), Some(exp)) if scheme.is_poly() => {

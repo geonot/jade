@@ -63,26 +63,61 @@ fn exit_desc(o: &Output) -> String {
 
 // ─── Memory (§3) ────────────────────────────────────────────────────────────
 
-/// §3.1 — returning an aggregate parameter double-frees.
-/// FIXME(8-6): must compile AND run clean, printing 3.
+/// §3.1 — returning an aggregate parameter used to double-free
+/// (`free(): invalid pointer`). Fixed by task 8-6: `ident`'s parameter is
+/// inferred consuming (memory-model.md M6), the call moves `a`, and
+/// exactly one drop fires.
 #[test]
-fn review_3_1_returning_vec_parameter_corrupts_heap() {
+fn review_3_1_returning_vec_parameter_runs_clean() {
     let c = compile(
         "*ident(v) returns Vec of i64\n    return v\n\n*main\n    a is vec(1, 2, 3)\n    s is ident(a)\n    log(s.length)\n",
     );
-    assert!(
-        c.ok(),
-        "compiles today (that is not the bug): {}",
-        c.stderr()
-    );
+    assert!(c.ok(), "must compile: {}", c.stderr());
     let run = c.run();
-    assert!(
-        !run.status.success(),
-        "OBSERVED-BAD: this program currently aborts (double-free). If it now \
-         runs clean, task 8-6 has landed — flip this test to assert success \
-         and stdout 3. {}",
-        exit_desc(&run)
+    assert!(run.status.success(), "must run clean: {}", exit_desc(&run));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "3\n");
+}
+
+/// Companion to §3.1: using the argument after the consuming call is a
+/// use-after-move compile error naming the callee and the copy-binding
+/// escape hatch, and cloning first keeps both values alive (8-6).
+#[test]
+fn review_3_1_use_after_consuming_call_is_rejected() {
+    let c = compile(
+        "*ident(v) returns Vec of i64\n    return v\n\n*main\n    a is vec(1, 2, 3)\n    s is ident(a)\n    log(a.length)\n",
     );
+    assert!(!c.ok(), "use-after-move must not compile");
+    let stderr = c.stderr();
+    assert!(
+        stderr.contains("moved value `a`") && stderr.contains("`ident`"),
+        "diagnostic must name the move and the consuming callee: {stderr}"
+    );
+
+    let ok = compile(
+        "*ident(v) returns Vec of i64\n    return v\n\n*main\n    a is vec(1, 2, 3)\n    a2 is copy a\n    s is ident(a2)\n    log(s.length)\n    log(a.length)\n",
+    );
+    assert!(
+        ok.ok(),
+        "copy-binding escape hatch must compile: {}",
+        ok.stderr()
+    );
+    let run = ok.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "3\n3\n");
+}
+
+/// Companion to §3.1: an aggregate bind inside a nested scope transfers
+/// the drop obligation; the outer scope must not drop again (8-6's
+/// consumed-set recursion fix).
+#[test]
+fn review_3_1_nested_scope_bind_single_drop() {
+    let c = compile(
+        "*main\n    a is vec(1, 2, 3)\n    if true\n        b is a\n        log(b.length)\n    log(7)\n",
+    );
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "must run clean: {}", exit_desc(&run));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "3\n7\n");
 }
 
 /// §3.2 — two dispatch tasks mutating one Vec corrupt the allocator.
