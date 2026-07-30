@@ -1,10 +1,10 @@
 title: Pin the review repros as tests
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []
 created_at: '2026-07-29T00:00:00'
-updated_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T14:00:00'
 description: 'Review item 1 part 1. Add nine programs from the review to a new
   tests/review_2026_07.rs, each asserting the currently-observed bad outcome with a
   FIXME(8-N) reference to its owning task, to be flipped to the correct assertion by
