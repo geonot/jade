@@ -120,29 +120,22 @@ fn review_3_1_nested_scope_bind_single_drop() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "3\n7\n");
 }
 
-/// §3.2 — two dispatch tasks mutating one Vec corrupt the allocator.
-/// FIXME(8-8): must be rejected at compile time with an actionable
-/// use-after-move diagnostic naming channels/actors as the alternative.
+/// §3.2 — two dispatch tasks mutating one Vec corrupted the allocator;
+/// under M8 (task 8-8) the second capture is a compile error whose
+/// diagnostic names the alternatives (per-task values over a channel, or
+/// an actor owning the value) rather than reading as a bare limitation.
 #[test]
-fn review_3_2_cross_task_shared_vec_races() {
+fn review_3_2_cross_task_shared_vec_is_rejected() {
     let c = compile(
         "*pusher(v, base)\n    for i in 0 to 20000\n        v.push(base + i)\n\n*main\n    shared is vec()\n    together\n        dispatch\n            pusher(shared, 0)\n        dispatch\n            pusher(shared, 1000000)\n    log(shared.length)\n",
     );
+    assert!(!c.ok(), "must be rejected under M8 (memory-model.md)");
+    let stderr = c.stderr();
     assert!(
-        c.ok(),
-        "OBSERVED-BAD: compiles today with no diagnostic. If this now fails \
-         to compile, task 8-8 has landed — flip this test to assert the \
-         rejection diagnostic. {}",
-        c.stderr()
-    );
-    // The race aborts essentially every run; allow retries so scheduler luck
-    // cannot green the suite.
-    let crashed = (0..5).any(|_| !c.run().status.success());
-    assert!(
-        crashed,
-        "expected the shared-Vec race to crash at least once in 5 runs; if it \
-         is now stable, re-examine whether the program became safe (8-8) or \
-         the race merely got harder to hit"
+        stderr.contains("`shared` used after being moved into a concurrent task")
+            && stderr.contains("channel")
+            && stderr.contains("actor"),
+        "diagnostic must name the message-passing alternatives: {stderr}"
     );
 }
 

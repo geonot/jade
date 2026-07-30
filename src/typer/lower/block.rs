@@ -509,6 +509,58 @@ impl Typer {
             .find(|v| v.def_id == id)
     }
 
+    /// M8 (memory-model.md, task 8-8): the pre-existing aggregate
+    /// variables a task body captures. `outer_ids` is the in-scope
+    /// def-id snapshot taken BEFORE the body was lowered — dispatch
+    /// bodies share the enclosing scope (`lower_block_no_scope`), so
+    /// body-local binds are distinguishable from captures only by that
+    /// snapshot. Sorted by def-id for deterministic diagnostics.
+    pub(in crate::typer) fn collect_aggregate_captures(
+        &mut self,
+        body: &[hir::Stmt],
+        outer_ids: &std::collections::HashSet<crate::hir::DefId>,
+    ) -> Vec<(crate::hir::DefId, crate::intern::Symbol)> {
+        let mut used: std::collections::HashSet<crate::hir::DefId> =
+            std::collections::HashSet::new();
+        for st in body {
+            Self::collect_hir_var_ids_stmt_inner(st, &mut used, true);
+        }
+        let mut candidates: Vec<(crate::hir::DefId, crate::intern::Symbol, Type)> = self
+            .scopes
+            .iter()
+            .flat_map(|s| s.iter())
+            .filter(|(_, info)| used.contains(&info.def_id) && outer_ids.contains(&info.def_id))
+            .map(|(n, info)| (info.def_id, *n, info.ty.clone()))
+            .collect();
+        candidates.sort_by_key(|(id, _, _)| id.0);
+        let mut captured = Vec::new();
+        for (id, name, ty) in candidates {
+            let was_strict = self.infer_ctx.is_strict();
+            self.infer_ctx.set_strict(false);
+            let resolved = self.infer_ctx.resolve(&ty);
+            self.infer_ctx.set_strict(was_strict);
+            if self.type_is_aggregate(&resolved) {
+                captured.push((id, name));
+            }
+        }
+        captured
+    }
+
+    /// Mark every aggregate the task body captures as moved into that
+    /// task (M8) — a second capture or a later parent use is then a
+    /// use-after-move with the task-capture diagnostic.
+    pub(in crate::typer) fn mark_task_captures(
+        &mut self,
+        body: &[hir::Stmt],
+        outer_ids: &std::collections::HashSet<crate::hir::DefId>,
+        at: crate::ast::Span,
+    ) -> Result<(), String> {
+        for (id, name) in self.collect_aggregate_captures(body, outer_ids) {
+            self.mark_var_moved_checked(id, name, crate::typer::MoveReason::TaskCapture(at), at)?;
+        }
+        Ok(())
+    }
+
     /// Record every move a lowered statement performs so that a later use
     /// of the source is diagnosed as a use-after-move (the flow-sensitive
     /// single analysis of task 8-7; memory-model.md M1/M6/M9/M10). This is
@@ -688,6 +740,45 @@ impl Typer {
                 }
                 self.record_take_moves_in_expr(ch)?;
                 self.record_take_moves_in_expr(v)?;
+            }
+            /* M8: actor message payloads and spawn initializers move
+             * into the actor's task. */
+            hir::ExprKind::Send(actor, _, _, _, args) => {
+                for a in args {
+                    let src = Self::peel_move_wrappers(a);
+                    if let hir::ExprKind::Var(id, vname) = &src.kind {
+                        let resolved = self.infer_ctx.resolve(&src.ty);
+                        if self.type_is_aggregate(&resolved) {
+                            self.mark_var_moved_checked(
+                                *id,
+                                *vname,
+                                crate::typer::MoveReason::TaskCapture(expr.span),
+                                expr.span,
+                            )?;
+                        }
+                    }
+                }
+                self.record_take_moves_in_expr(actor)?;
+                for a in args {
+                    self.record_take_moves_in_expr(a)?;
+                }
+            }
+            hir::ExprKind::Spawn(_, inits) => {
+                for (_, v) in inits {
+                    let src = Self::peel_move_wrappers(v);
+                    if let hir::ExprKind::Var(id, vname) = &src.kind {
+                        let resolved = self.infer_ctx.resolve(&src.ty);
+                        if self.type_is_aggregate(&resolved) {
+                            self.mark_var_moved_checked(
+                                *id,
+                                *vname,
+                                crate::typer::MoveReason::TaskCapture(expr.span),
+                                expr.span,
+                            )?;
+                        }
+                    }
+                    self.record_take_moves_in_expr(v)?;
+                }
             }
             hir::ExprKind::IndirectCall(callee, args) => {
                 self.record_take_moves_in_expr(callee)?;
@@ -899,13 +990,38 @@ impl Typer {
         stmt: &hir::Stmt,
         out: &mut std::collections::HashSet<crate::hir::DefId>,
     ) {
+        Self::collect_hir_var_ids_stmt_inner(stmt, out, false);
+    }
+
+    /// With `shield_copies`, a `c is copy x` bind does not count `x` as a
+    /// use — the task gets a clone, not the value (M8's sanctioned
+    /// snapshot pattern). Only statement-position binds are shielded;
+    /// copy-binds nested in expression-position blocks still count
+    /// (conservative: a false capture, never a missed one).
+    fn collect_hir_var_ids_stmt_inner(
+        stmt: &hir::Stmt,
+        out: &mut std::collections::HashSet<crate::hir::DefId>,
+        shield_copies: bool,
+    ) {
         match stmt {
-            hir::Stmt::Expr(e) | hir::Stmt::Bind(hir::Bind { value: e, .. }) => {
+            hir::Stmt::Bind(b) => {
+                if shield_copies
+                    && matches!(b.access_mod, Some(crate::ast::AccessMod::Copy))
+                    && matches!(Self::peel_move_wrappers(&b.value).kind, hir::ExprKind::Var(..))
+                {
+                    return;
+                }
+                Self::collect_hir_var_ids_expr(&b.value, out);
+            }
+            hir::Stmt::Expr(e) | hir::Stmt::TupleBind(_, e, _) => {
                 Self::collect_hir_var_ids_expr(e, out);
             }
             hir::Stmt::Ret(Some(e), _, _)
             | hir::Stmt::Break(Some(e), _)
-            | hir::Stmt::ErrReturn(e, _, _) => {
+            | hir::Stmt::ErrReturn(e, _, _)
+            | hir::Stmt::ChannelClose(e, _)
+            | hir::Stmt::Stop(e, _)
+            | hir::Stmt::Join(e, _) => {
                 Self::collect_hir_var_ids_expr(e, out);
             }
             hir::Stmt::Assign(t, v, _) => {
@@ -915,18 +1031,70 @@ impl Typer {
             hir::Stmt::If(i) => {
                 Self::collect_hir_var_ids_expr(&i.cond, out);
                 for s in &i.then {
-                    Self::collect_hir_var_ids_stmt(s, out);
+                    Self::collect_hir_var_ids_stmt_inner(s, out, shield_copies);
                 }
                 for (c, b) in &i.elifs {
                     Self::collect_hir_var_ids_expr(c, out);
                     for s in b {
-                        Self::collect_hir_var_ids_stmt(s, out);
+                        Self::collect_hir_var_ids_stmt_inner(s, out, shield_copies);
                     }
                 }
                 if let Some(b) = &i.els {
                     for s in b {
-                        Self::collect_hir_var_ids_stmt(s, out);
+                        Self::collect_hir_var_ids_stmt_inner(s, out, shield_copies);
                     }
+                }
+            }
+            hir::Stmt::While(w) => {
+                Self::collect_hir_var_ids_expr(&w.cond, out);
+                for s in &w.body {
+                    Self::collect_hir_var_ids_stmt_inner(s, out, shield_copies);
+                }
+            }
+            hir::Stmt::For(f) | hir::Stmt::SimFor(f, _) => {
+                Self::collect_hir_var_ids_expr(&f.iter, out);
+                if let Some(e) = &f.end {
+                    Self::collect_hir_var_ids_expr(e, out);
+                }
+                if let Some(e) = &f.step {
+                    Self::collect_hir_var_ids_expr(e, out);
+                }
+                for s in &f.body {
+                    Self::collect_hir_var_ids_stmt_inner(s, out, shield_copies);
+                }
+            }
+            hir::Stmt::Loop(l) => {
+                for s in &l.body {
+                    Self::collect_hir_var_ids_stmt_inner(s, out, shield_copies);
+                }
+            }
+            hir::Stmt::Match(m) => {
+                Self::collect_hir_var_ids_expr(&m.subject, out);
+                for arm in &m.arms {
+                    if let Some(g) = &arm.guard {
+                        Self::collect_hir_var_ids_expr(g, out);
+                    }
+                    for s in &arm.body {
+                        Self::collect_hir_var_ids_stmt_inner(s, out, shield_copies);
+                    }
+                }
+            }
+            hir::Stmt::Defer(b, _)
+            | hir::Stmt::Transaction(b, _)
+            | hir::Stmt::SimBlock(b, _)
+            | hir::Stmt::Together(_, b, _, _, _) => {
+                for s in b {
+                    Self::collect_hir_var_ids_stmt_inner(s, out, shield_copies);
+                }
+            }
+            hir::Stmt::StoreInsert(_, es, _) => {
+                for e in es {
+                    Self::collect_hir_var_ids_expr(e, out);
+                }
+            }
+            hir::Stmt::StoreSet(_, sets, _, _) => {
+                for (_, e) in sets {
+                    Self::collect_hir_var_ids_expr(e, out);
                 }
             }
             _ => {}

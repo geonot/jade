@@ -79,6 +79,18 @@ impl Typer {
                                 name,
                                 name,
                             ),
+                            crate::typer::MoveReason::TaskCapture(at) => format!(
+                                "{}: `{}` used after being moved into a concurrent task: \
+                                 it was captured by the task started at {} — two tasks \
+                                 may not share one aggregate; give each task its own \
+                                 value and merge results over a channel, let a single \
+                                 actor own it and send it messages, or capture a clone \
+                                 (`copy {}`)",
+                                span.loc(),
+                                name,
+                                at.loc(),
+                                name,
+                            ),
                             crate::typer::MoveReason::Sent(at) => format!(
                                 "{}: use of moved value `{}`: it was sent on a channel \
                                  at {} — sends transfer ownership to the receiver; to \

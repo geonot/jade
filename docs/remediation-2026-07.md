@@ -316,7 +316,7 @@ ownership entirely (`src/driver/mod.rs:249-280`). Also unify the two driver pipe
 so `jinn build` stops skipping `HirValidator` (`driver/pipeline.rs` omits it,
 `driver/mod.rs:437` runs it).
 
-### ◻ 8-8 Reject cross-task aggregate aliasing — **P0**, blocked_by: [8-7]
+### ✅ 8-8 Reject cross-task aggregate aliasing — **P0**, blocked_by: [8-7]
 *Review item 1 (§3.2).*
 
 ```jinn

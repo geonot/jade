@@ -1,0 +1,40 @@
+# 2026-07-30 implementation notes
+- MoveReason::TaskCapture(Span) rides the same flow-sensitive tombstone
+  machinery as 8-7; the ident-use diagnostic is the M8 contract message
+  (names channels, actors, and `copy` as the alternatives — not a bare
+  "use of moved value").
+- Dispatch blocks lower via lower_block_no_scope (they SHARE the
+  enclosing scope), so captures are detected by snapshotting
+  in_scope_def_ids() before lowering the body and intersecting with the
+  body's referenced ids after (collect_aggregate_captures). Marking
+  happens after the body is lowered, so the capturing task's own reads
+  of the value are legal; a sibling task's or the parent's later read
+  errors.
+- `sim for` is a hard error on any outer-aggregate capture (every
+  iteration is its own task; there is no single task to own the value).
+- Actor message payloads (ExprKind::Send args) and `spawn` initializers
+  (ExprKind::Spawn inits) mark TaskCapture in the record pass; channel
+  `.send()` was already covered by the M9 Sent arm (it lowers to
+  ChannelSend regardless of surface syntax).
+- `c is copy shared` inside a task body is the sanctioned snapshot
+  pattern: the capture collector walks with shield_copies=true, which
+  skips statement-position copy-binds of a bare Var. Copy-binds nested
+  in expression-position blocks are NOT shielded (conservative — a
+  false capture error, never a missed race).
+- collect_hir_var_ids_stmt was missing While/For/SimFor/Loop/Match/
+  Defer/Transaction/SimBlock/Together/TupleBind/StoreInsert/StoreSet/
+  ChannelClose/Stop/Join arms — a dispatch body mutating a captured
+  aggregate inside a `for` loop was invisible to it (and to 8-7's M10
+  defer registration). Now comprehensive; the shield flag threads
+  through statement recursion only.
+- Both §7 "equivalent correct programs" are conformance-tested: per-task
+  vectors merged over a channel, and an actor owning the aggregate.
+- Fallout: zero — 1971 tests green with no test edits beyond flipping
+  the §3.2 pin. Runtime concurrency tests capture channels/scalars,
+  which are not aggregates.
+- Follow-up inherited from 8-7's notes: lambda captures of aggregates
+  remain unenforced (the deleted verifier's capture-move had no test
+  coverage); generators (M11) own their captures at the runtime level
+  but the typer does not yet tombstone them either. Same shape as the
+  dispatch solution — collect free aggregate vars of the
+  generator/lambda body against a pre-lowering scope snapshot.

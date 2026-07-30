@@ -64,6 +64,11 @@ pub(crate) enum MoveReason {
     /// Sent on a channel (memory-model.md M9): `send ch, v` transfers
     /// ownership to the receiver; the sender's binding tombstones.
     Sent(crate::ast::Span),
+    /// Captured by a concurrent task — a `dispatch` block, an actor
+    /// message payload, or a `spawn` initializer (memory-model.md M8):
+    /// an aggregate moves into at most one task, so a second capture or
+    /// any later use in the parent is a use-after-move.
+    TaskCapture(crate::ast::Span),
 }
 
 #[allow(clippy::type_complexity)]

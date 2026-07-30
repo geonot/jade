@@ -17,9 +17,11 @@
 > 8-7 (M1 move-on-assign, M2 revive, M3 field partial move, M4 element-bind
 > rejection, M9 channel-send tombstone, M10 defer-read protection — the
 > typer's flow-sensitive analysis is the single authority, `src/ownership/`
-> is deleted, and `jinn check`/`build` agree). Open: 8-8 (M8 cross-task
-> capture); until it lands, its §7 program is pinned asserting today's
-> wrong behavior in `tests/review_2026_07.rs`.
+> is deleted, and `jinn check`/`build` agree); 8-8 (M8 — aggregates move
+> into at most one task: `dispatch` capture, `sim for` bodies, actor
+> message payloads, and `spawn` initializers all enforced, with the
+> `copy`-capture snapshot pattern recognized). Every §7 row is now
+> enforced; the review pins in `tests/review_2026_07.rs` are flipped.
 
 ## 1. Type categories
 

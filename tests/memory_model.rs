@@ -305,3 +305,113 @@ fn return_of_reference_to_local_rejected() {
         c.stderr()
     );
 }
+
+/// M8 — the §3.2 race: two dispatch tasks capturing one Vec is a
+/// use-after-move at the second capture, with the actionable diagnostic.
+#[test]
+fn m8_second_task_capture_rejected() {
+    let c = compile(
+        "*pusher(v, base)\n    for i in 0 to 100\n        v.push(base + i)\n\n*main\n    shared is vec()\n    together\n        dispatch\n            pusher(shared, 0)\n        dispatch\n            pusher(shared, 1000)\n",
+    );
+    assert!(!c.ok());
+    let stderr = c.stderr();
+    assert!(
+        stderr.contains("`shared` used after being moved into a concurrent task")
+            && stderr.contains("channel")
+            && stderr.contains("actor"),
+        "{stderr}"
+    );
+}
+
+/// M8 — any later use in the parent after a single task capture is also
+/// a use-after-move.
+#[test]
+fn m8_parent_use_after_capture_rejected() {
+    let c = compile(
+        "*pusher(v, base)\n    for i in 0 to 100\n        v.push(base + i)\n\n*main\n    shared is vec()\n    together\n        dispatch\n            pusher(shared, 0)\n    log(shared.length)\n",
+    );
+    assert!(!c.ok());
+    assert!(
+        c.stderr()
+            .contains("`shared` used after being moved into a concurrent task"),
+        "{}",
+        c.stderr()
+    );
+}
+
+/// M8 — the equivalent correct program: per-task vectors merged over a
+/// channel compiles and runs.
+#[test]
+fn m8_per_task_vectors_merged_over_channel_runs() {
+    let c = compile(
+        "*fill(v, base as i64, ch)\n    for i in 0 to 100\n        v.push(base + i)\n    send ch, v\n\n*main\n    ch is channel of Vec of i64(4)\n    together\n        dispatch\n            a is vec()\n            fill(a, 0, ch)\n        dispatch\n            b is vec()\n            fill(b, 1000, ch)\n    x is receive ch\n    y is receive ch\n    log(x.length + y.length)\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    assert_eq!(c.run_stdout(), "200\n");
+}
+
+/// M8 — the other correct shape: a single actor owns the aggregate and
+/// receives messages.
+#[test]
+fn m8_actor_owned_aggregate_runs() {
+    let c = compile(
+        "actor Collector\n    items as Vec of i64\n\n    @add n as i64\n        items.push(n)\n\n*main\n    c is spawn Collector(items is vec())\n    c.add(1)\n    c.add(2)\n    stop c\n    join c\n    log(9)\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    assert_eq!(c.run_stdout(), "9\n");
+}
+
+/// M8 — `sim for` iterations are each a task, so capturing an outer
+/// aggregate is a hard error naming the alternatives.
+#[test]
+fn m8_sim_for_capture_rejected() {
+    let c = compile("*main\n    shared is vec()\n    sim for i in 0 to 4\n        shared.push(i)\n");
+    assert!(!c.ok());
+    assert!(
+        c.stderr().contains("cannot be captured by `sim for`"),
+        "{}",
+        c.stderr()
+    );
+}
+
+/// M8 — an actor message payload moves into the actor's task.
+#[test]
+fn m8_actor_payload_moves() {
+    let c = compile(
+        "actor Sink\n    total as i64\n\n    @eat v as Vec of i64\n        total is total + v.length\n\n*main\n    s is spawn Sink(total is 0)\n    v is vec(1, 2)\n    s.eat(v)\n    log(v.length)\n",
+    );
+    assert!(!c.ok());
+    assert!(
+        c.stderr()
+            .contains("`v` used after being moved into a concurrent task"),
+        "{}",
+        c.stderr()
+    );
+}
+
+/// M8 — a `spawn` initializer from a variable moves the aggregate into
+/// the actor.
+#[test]
+fn m8_spawn_initializer_moves() {
+    let c = compile(
+        "actor Holder\n    items as Vec of i64\n\n    @noop n as i64\n        items.push(n)\n\n*main\n    v is vec(1)\n    h is spawn Holder(items is v)\n    log(v.length)\n",
+    );
+    assert!(!c.ok());
+    assert!(
+        c.stderr()
+            .contains("`v` used after being moved into a concurrent task"),
+        "{}",
+        c.stderr()
+    );
+}
+
+/// M8 — a `copy` capture shares a snapshot legally; the parent's value
+/// is untouched.
+#[test]
+fn m8_copy_capture_is_legal() {
+    let c = compile(
+        "*consume(v)\n    log(v.length)\n\n*main\n    shared is vec(1, 2)\n    together\n        dispatch\n            c is copy shared\n            consume(c)\n    log(shared.length)\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    assert_eq!(c.run_stdout(), "2\n2\n");
+}

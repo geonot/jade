@@ -1,10 +1,10 @@
 title: Reject cross-task aggregate aliasing
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: ['8-7']
 created_at: '2026-07-29T00:00:00'
-updated_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-30T00:00:00'
 description: 'Review item 1, section 3.2. A shared Vec passed into two dispatch bodies inside a
   together scope aborts the allocator with realloc(): invalid old size on 3/3 runs with
   no diagnostic; the only cross-thread check today rejects @resource types

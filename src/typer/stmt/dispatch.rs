@@ -1217,6 +1217,26 @@ impl Typer {
                 let pre_loop = self.snapshot_moved_fields();
                 let mut body = self.lower_block_no_scope(&f.body, ret_ty)?;
                 self.check_loop_body_moves(&pre_loop, &outer_ids, *span)?;
+                /* M8 (task 8-8): every `sim for` iteration is its own
+                 * concurrent task, and an aggregate moves into at most
+                 * one task — so capturing one here is a hard error, not
+                 * a mark (there is no single task to own it). */
+                if let Some((_, name)) = self
+                    .collect_aggregate_captures(&body, &outer_ids)
+                    .into_iter()
+                    .next()
+                {
+                    return Err(format!(
+                        "{}: `{}` cannot be captured by `sim for` — every iteration \
+                         is a concurrent task and an aggregate moves into at most \
+                         one task; give each iteration its own value and merge \
+                         results over a channel, let a single actor own it, or \
+                         capture a clone (`copy {}`)",
+                        span.loc(),
+                        name,
+                        name,
+                    ));
+                }
                 self.finalize_loop_body_drops(&mut body);
                 self.pop_scope();
                 self.restore_moved_fields(pre_loop);
