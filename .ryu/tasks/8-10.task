@@ -1,10 +1,10 @@
 title: Generalize the park lock-handoff to all park sites
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []
 created_at: '2026-07-29T00:00:00'
-updated_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T22:00:00'
 description: 'Review item 5. The channel path is correct and non-obvious: a parking coroutine holds
   the channel spinlock across the context swap and the scheduler releases it only after
   the context is fully saved (runtime/channel.c:239-244 + runtime/sched.c:213-222).

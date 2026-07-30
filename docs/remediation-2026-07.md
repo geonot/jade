@@ -359,7 +359,7 @@ rejected or runs to completion with no abort, SIGSEGV, or ICE, under ASan via
 
 ## Tier 2 — Runtime concurrency
 
-### ◻ 8-10 Generalize the park lock-handoff — **P0**, blocked_by: []
+### ✅ 8-10 Generalize the park lock-handoff — **P0**, blocked_by: []
 *Review item 5.*
 
 The channel path is correct and non-obvious: a parking coroutine holds the channel

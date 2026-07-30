@@ -144,7 +144,11 @@ void jinn_actor_join(void *join_slot_ptr) {
         self->state = JINN_CORO_SUSPENDED;
         self->next = j->waitq;
         j->waitq = self;
-        join_unlock(j);
+        /* Hand the join lock to the scheduler: it is released only after
+         * this context is saved, so jinn_join_signal cannot pop us from
+         * the waitq and swap into a half-saved context (task 8-10; the
+         * old code unlocked here, before the swap). */
+        wk->held_lock = &j->lock;
         wk->last_action = SCHED_ACTION_PARK;
         jinn_context_swap(&self->ctx, &wk->sched_ctx);
         /* Resumed — re-check done. */
@@ -158,10 +162,55 @@ void jinn_actor_join(void *join_slot_ptr) {
  * Called after the actor loop has exited (channel drained/closed).
  * Closes the channel (if not already closed), destroys it, and frees the mailbox.
  */
+/* Mailboxes retired by exited actors, reclaimed at scheduler shutdown.
+ * The user's actor handle (`e is spawn Echo`) is a raw pointer to the
+ * mailbox with no refcount, so freeing it at actor exit made every
+ * later operation on the handle a use-after-free — `stop e; join e`
+ * crashed whenever the actor drained before the join started
+ * (jinn_join_get CAS-writes the join slot, which lives inside the
+ * mailbox). Until actor handles are refcounted, an exited actor's
+ * mailbox is retired, not freed: the channel is destroyed and nulled,
+ * `alive` drops to 0, and sends/stop/join on the stale handle become
+ * harmless no-ops (send/recv/close are NULL-tolerant). Memory is
+ * bounded by the number of actors spawned and reclaimed by
+ * jinn_actor_retire_flush() from jinn_sched_shutdown(). */
+typedef struct jinn_retired_mb {
+    void                   *mailbox;
+    struct jinn_retired_mb *next;
+} jinn_retired_mb_t;
+
+static _Atomic(jinn_retired_mb_t *) g_retired_mailboxes = NULL;
+
+static void jinn_actor_retire_mailbox(void *mailbox_ptr) {
+    jinn_retired_mb_t *node =
+        (jinn_retired_mb_t *)jinn_xmalloc(sizeof(jinn_retired_mb_t));
+    node->mailbox = mailbox_ptr;
+    node->next = atomic_load_explicit(&g_retired_mailboxes, memory_order_relaxed);
+    while (!atomic_compare_exchange_weak_explicit(
+        &g_retired_mailboxes, &node->next, node,
+        memory_order_release, memory_order_relaxed)) {
+    }
+}
+
+void jinn_actor_retire_flush(void) {
+    jinn_retired_mb_t *n =
+        atomic_exchange_explicit(&g_retired_mailboxes, NULL, memory_order_acquire);
+    while (n) {
+        jinn_retired_mb_t *next = n->next;
+        /* The join latch (slot at the mailbox tail) is a separate
+         * allocation; it is intentionally left to the allocator at
+         * process exit — a parked joiner may still hold a pointer to it
+         * and there is no refcount to know otherwise. */
+        free(n->mailbox);
+        free(n);
+        n = next;
+    }
+}
+
 void jinn_actor_destroy(void *mailbox_ptr) {
     if (!mailbox_ptr) return;
     /* A scope-owned actor's mailbox is tracked in its scope's registry;
-     * leave it before freeing or a later cancel/stop would close freed
+     * leave it before retiring or a later cancel/stop would close stale
      * memory (task 8-12). Runs on the actor's own coroutine (the exit
      * block), so the owning scope is reachable via the current coroutine
      * and — because our live-children slot is still counted — guaranteed
@@ -177,5 +226,7 @@ void jinn_actor_destroy(void *mailbox_ptr) {
         jinn_chan_destroy(ch);
         *(jinn_chan_t **)mailbox_ptr = NULL;
     }
-    free(mailbox_ptr);
+    /* Mark dead for any late sender that checks, then retire. */
+    *(int32_t *)((char *)mailbox_ptr + sizeof(void *)) = 0; /* alive @ byte 8 */
+    jinn_actor_retire_mailbox(mailbox_ptr);
 }

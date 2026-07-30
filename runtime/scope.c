@@ -327,7 +327,11 @@ static int jinn_scope_join_no_free(jinn_scope_t *s) {
         }
         self->state = JINN_CORO_SUSPENDED;
         s->parent = self;
-        scope_unlock(s);
+        /* Hand the scope lock to the scheduler: released only after this
+         * context is saved, so jinn_scope_child_done cannot read `parent`
+         * and enqueue us while the old context is still live (task 8-10;
+         * the old code scope_unlock()ed here, before the swap). */
+        w->held_lock = &s->lock;
         w->last_action = SCHED_ACTION_PARK;
         jinn_context_swap(&self->ctx, &w->sched_ctx);
         /* Resumed — re-check live_children. */

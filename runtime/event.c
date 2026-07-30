@@ -25,9 +25,30 @@ typedef struct {
 
 typedef struct {
     int fd;
-    jinn_coro_t *coro;   /* parked coroutine to resume */
+    jinn_coro_t *coro;   /* parked coroutine to resume (guarded by `lock`) */
     int events;           /* EPOLLIN, EPOLLOUT, etc. */
+    /* Park/wake synchronization (task 8-10). `lock` serializes the poll
+     * thread's wake against the waiter's park; the parker hands it to the
+     * scheduler across the swap so a wake can never run against a
+     * half-saved context. `fired` latches an event that arrives before the
+     * waiter parks, closing the lost-wakeup window. */
+    _Atomic(int32_t) lock;
+    _Atomic(int32_t) fired;
 } jinn_io_waiter_t;
+
+static inline void waiter_lock(jinn_io_waiter_t *w) {
+    while (atomic_exchange_explicit(&w->lock, 1, memory_order_acquire) != 0) {
+#if defined(__x86_64__)
+        __builtin_ia32_pause();
+#elif defined(__aarch64__)
+        __asm__ volatile("yield");
+#endif
+    }
+}
+
+static inline void waiter_unlock(jinn_io_waiter_t *w) {
+    atomic_store_explicit(&w->lock, 0, memory_order_release);
+}
 
 /* Create a new event loop. Returns handle, or NULL on failure. */
 void *jinn_event_loop_create(int max_events) {
@@ -128,11 +149,20 @@ int jinn_event_loop_poll(void *handle, int timeout_ms,
         if (w) {
             ready_fds[i] = w->fd;
             ready_events[i] = (int)events[i].events;
-            /* Unpark the waiting coroutine if present */
+            /* Unpark the waiting coroutine under the waiter lock: the
+             * parker hands this lock to the scheduler across its swap, so
+             * acquiring it here guarantees the parked context is fully
+             * saved. If no coroutine parked yet, latch `fired` so the
+             * parker skips the park instead of missing the wakeup. */
+            waiter_lock(w);
             if (w->coro) {
-                jinn_sched_unpark(w->coro);
+                jinn_coro_t *c = w->coro;
                 w->coro = NULL;
+                jinn_sched_unpark(c);
+            } else {
+                atomic_store_explicit(&w->fired, 1, memory_order_release);
             }
+            waiter_unlock(w);
         } else {
             ready_fds[i] = -1;
             ready_events[i] = 0;
@@ -192,10 +222,45 @@ void jinn_io_waiter_destroy(void *waiter) {
     free(waiter);
 }
 
-/* Set the coroutine that should be unparked when this waiter fires. */
+/* Set the coroutine that should be unparked when this waiter fires.
+ * Prefer jinn_io_waiter_park() below, which closes the set-then-park race;
+ * this setter remains for ABI compatibility and takes the lock so a
+ * concurrent poll cannot observe a torn pointer. */
 void jinn_io_waiter_set_coro(void *waiter, void *coro) {
     jinn_io_waiter_t *w = (jinn_io_waiter_t *)waiter;
-    if (w) w->coro = (jinn_coro_t *)coro;
+    if (!w) return;
+    waiter_lock(w);
+    w->coro = (jinn_coro_t *)coro;
+    waiter_unlock(w);
+}
+
+/* Park the current coroutine on this waiter until the event loop fires it.
+ * Returns immediately when the event already fired (the `fired` latch),
+ * and hands the waiter lock to the scheduler across the swap so the poll
+ * thread's wake can only run once the context is saved (task 8-10). */
+void jinn_io_waiter_park(void *waiter) {
+    jinn_io_waiter_t *wt = (jinn_io_waiter_t *)waiter;
+    if (!wt) return;
+    jinn_worker_t *w = jinn_worker_self();
+    if (!w || !w->current) {
+        /* Non-coroutine thread: spin until the event fires. */
+        while (!atomic_exchange_explicit(&wt->fired, 0, memory_order_acq_rel)) {
+            jinn_sched_yield();
+        }
+        return;
+    }
+    waiter_lock(wt);
+    if (atomic_exchange_explicit(&wt->fired, 0, memory_order_acq_rel)) {
+        waiter_unlock(wt);
+        return; /* event arrived before we parked */
+    }
+    jinn_coro_t *self = w->current;
+    wt->coro = self;
+    self->state = JINN_CORO_SUSPENDED;
+    w->held_lock = &wt->lock;
+    w->last_action = SCHED_ACTION_PARK;
+    jinn_context_swap(&self->ctx, &w->sched_ctx);
+    /* Resumed by the poll thread's unpark. */
 }
 
 #else
@@ -216,4 +281,5 @@ int jinn_event_wait_writable(int fd, int tms) { (void)fd; (void)tms; return -1; 
 void *jinn_io_waiter_create(int fd) { (void)fd; return NULL; }
 void jinn_io_waiter_destroy(void *w) { (void)w; }
 void jinn_io_waiter_set_coro(void *w, void *c) { (void)w; (void)c; }
+void jinn_io_waiter_park(void *w) { (void)w; }
 #endif

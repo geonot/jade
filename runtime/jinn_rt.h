@@ -170,7 +170,13 @@ struct jinn_worker {
     jinn_coro_t       *current;
     jinn_context_t     sched_ctx;
     uint64_t           rng_state;
-    void              *held_chan_lock;  /* channel lock held across context swap */
+    /* Spinlock word held across a park's context swap; the scheduler
+     * releases it only after the parking coroutine's context is fully
+     * saved. This is the lock-handoff that makes publish-then-park safe:
+     * a waker that finds the coroutine on a wait queue must acquire this
+     * lock first, and cannot get it until the context is saved (task
+     * 8-10, generalizing the channel-only `held_chan_lock`). */
+    _Atomic(int32_t)  *held_lock;
     int                last_action;     /* SCHED_ACTION_* set before swap */
 };
 
@@ -277,6 +283,8 @@ uint64_t jinn_time_now_ns(void);
 void jinn_actor_park(void *mailbox_ptr);
 void jinn_actor_wake(void *mailbox_ptr);
 void jinn_actor_stop(void *mailbox_ptr);
+/* Reclaim mailboxes retired by exited actors (see jinn_actor_destroy). */
+void jinn_actor_retire_flush(void);
 void jinn_actor_destroy(void *mailbox_ptr);
 
 /* ── Join (actor completion latch) ───────────────────────────────── */
@@ -431,6 +439,9 @@ int jinn_event_wait_writable(int fd, int timeout_ms);
 void *jinn_io_waiter_create(int fd);
 void jinn_io_waiter_destroy(void *waiter);
 void jinn_io_waiter_set_coro(void *waiter, void *coro);
+/* Park the current coroutine until the waiter's event fires; safe against
+ * the fire-before-park race and the wake-during-park race (task 8-10). */
+void jinn_io_waiter_park(void *waiter);
 /* runtime/fs.c */
 int c_mkdir(const char *path, int mode);
 int c_rmdir(const char *path);

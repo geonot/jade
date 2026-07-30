@@ -201,7 +201,7 @@ static void *jinn_worker_loop(void *arg) {
         /* Run the coroutine */
         c->state = JINN_CORO_RUNNING;
         w->current = c;
-        w->held_chan_lock = NULL;
+        w->held_lock = NULL;
         /* Restore this coroutine's structured-concurrency scope so that any
          * dispatch/spawn it performs registers with the correct scope. */
         jinn_scope_set_current((jinn_scope_t *)c->scope);
@@ -211,14 +211,14 @@ static void *jinn_worker_loop(void *arg) {
         jinn_scope_set_current(NULL);
 
         /*
-         * Release any channel lock held across the context swap.
-         * This ensures the coroutine's context is fully saved before
-         * any waker can dequeue it from a wait queue.
+         * Release any spinlock held across the context swap (channel,
+         * actor-join, scope, io-waiter). This ensures the coroutine's
+         * context is fully saved before any waker can observe it on a
+         * wait queue and swap into it.
          */
-        if (w->held_chan_lock) {
-            jinn_chan_t *ch = (jinn_chan_t *)w->held_chan_lock;
-            atomic_store_explicit(&ch->lock, 0, memory_order_release);
-            w->held_chan_lock = NULL;
+        if (w->held_lock) {
+            atomic_store_explicit(w->held_lock, 0, memory_order_release);
+            w->held_lock = NULL;
         }
 
         if (w->last_action == SCHED_ACTION_DESTROY) {
@@ -278,7 +278,7 @@ void jinn_sched_init(int num_workers) {
         g_sched.workers[i].id = (uint32_t)i;
         g_sched.workers[i].rng_state = (uint64_t)i + 1; /* nonzero seed */
         g_sched.workers[i].current = NULL;
-        g_sched.workers[i].held_chan_lock = NULL;
+        g_sched.workers[i].held_lock = NULL;
         g_sched.workers[i].last_action = 0;
         jinn_deque_init(&g_sched.workers[i].run_queue);
     }
@@ -350,6 +350,9 @@ void jinn_sched_shutdown(void) {
         for (int i = 0; i < g_sched.num_workers; i++) {
             jinn_deque_destroy(&g_sched.workers[i].run_queue);
         }
+        /* All workers are joined, so no stale actor handle can be used
+         * anymore — reclaim retired mailboxes (task 8-10/8-12). */
+        jinn_actor_retire_flush();
     }
 
     pthread_mutex_destroy(&g_sched.idle_lock);
@@ -382,7 +385,7 @@ void jinn_sched_park(void) {
     }
     jinn_coro_t *c = w->current;
     c->state = JINN_CORO_SUSPENDED;
-    w->held_chan_lock = NULL;
+    w->held_lock = NULL;
     w->last_action = SCHED_ACTION_PARK;
     jinn_context_swap(&c->ctx, &w->sched_ctx);
     /* Resumed here when unparked */

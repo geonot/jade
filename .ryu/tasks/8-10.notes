@@ -1,0 +1,21 @@
+# 2026-07-29 implementation notes
+- held_chan_lock generalized to held_lock (_Atomic(int32_t)*); scheduler
+  releases whatever spinlock the parker handed off, after the context save.
+- Sites converted: channel send/recv (unchanged semantics), select park
+  (keeps the enqueued channel's lock, unlock_all_except), actor join (holds
+  j->lock), scope join (holds s->lock), io-waiter (new jinn_io_waiter_park
+  with a fired latch; poll wakes under the waiter lock).
+- Found by the DoD stress: exited actors freed their mailbox while user
+  code still held the handle — `stop e; join e` wrote the join slot of
+  freed memory. Mailboxes are now retired (channel destroyed + nulled,
+  alive=0, send/recv/close NULL-tolerant) and reclaimed at scheduler
+  shutdown. Refcounted actor handles remain the real fix (see
+  access-semantics.md §5's ActorRef story).
+- TSan on the fiber runtime is not meaningful without
+  __tsan_switch_to_fiber annotations (the CI TSan sweep is
+  continue-on-error for the same reason); the deque has a dedicated
+  pthread-only TSan harness (8-14), and the park handoff is exercised by
+  the ASan runs + sustained churn test instead.
+- The combined stress including `select` still hangs/crashes ~1/5 — that is
+  select's structural single-waitq defect, owned by 8-11; the full combined
+  stress becomes 8-11's conformance test.

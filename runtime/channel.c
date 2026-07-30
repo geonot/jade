@@ -101,6 +101,7 @@ void jinn_chan_destroy(jinn_chan_t *ch) {
 }
 
 void jinn_chan_close(jinn_chan_t *ch) {
+    if (!ch) return;
     atomic_store(&ch->closed, 1);
 
     /* Wake all blocked receivers so they get the close signal */
@@ -166,6 +167,7 @@ void jinn_chan_wake_coro(jinn_chan_t *ch, jinn_coro_t *c) {
 }
 
 int jinn_chan_send(jinn_chan_t *ch, const void *data) {
+    if (!ch) return 0;
     for (;;) {
         /* Re-derived every iteration, never cached across the park below: a
          * resumed coroutine may be running on a different worker now. */
@@ -239,7 +241,7 @@ int jinn_chan_send(jinn_chan_t *ch, const void *data) {
         /* Don't unlock — scheduler will release after context is saved */
 
         /* Yield to scheduler — will be resumed when a recv frees space */
-        w->held_chan_lock = ch;
+        w->held_lock = &ch->lock;
         w->last_action = SCHED_ACTION_PARK;
         jinn_context_swap(&self->ctx, &w->sched_ctx);
         /* Resumed here — retry send from the top */
@@ -247,6 +249,7 @@ int jinn_chan_send(jinn_chan_t *ch, const void *data) {
 }
 
 int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
+    if (!ch) return 0;
     for (;;) {
         /* Re-derived every iteration — see jinn_chan_send. */
         jinn_worker_t *wc = jinn_worker_self();
@@ -318,7 +321,7 @@ int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
         /* Don't unlock — scheduler will release after context is saved */
 
         /* Yield to scheduler */
-        w->held_chan_lock = ch;
+        w->held_lock = &ch->lock;
         w->last_action = SCHED_ACTION_PARK;
         jinn_context_swap(&self->ctx, &w->sched_ctx);
         /* Resumed — retry recv */
@@ -326,6 +329,7 @@ int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
 }
 
 int jinn_chan_try_recv(jinn_chan_t *ch, void *data_out) {
+    if (!ch) return -1;
     chan_lock(ch);
 
     uint64_t head = atomic_load_explicit(&ch->head, memory_order_relaxed);

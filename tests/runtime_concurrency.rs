@@ -227,6 +227,54 @@ fn deque_stress_harness_is_sanitizer_clean() {
     }
 }
 
+/// Task 8-10 — sustained scope-join + actor-join + channel park/wake churn.
+/// Every park site now hands its guard lock to the scheduler so no waker
+/// can swap into a half-saved context, and an exited actor's mailbox is
+/// retired rather than freed, so `stop e; join e` on a fast-draining actor
+/// no longer writes the join slot of freed memory (heap-use-after-free,
+/// found by this very stress under ASan; clean 3/3 after). 200 rounds of
+/// spawn/bump/stop/join inside nested scopes.
+#[test]
+fn park_handoff_actor_join_churn() {
+    let src = "\
+actor Echo
+    total as i64
+
+    @bump n as i64
+        total is total + n
+
+*main
+    for round in 0 to 200
+        ch1 is channel of i64(1)
+        together
+            dispatch
+                send ch1, 1
+            dispatch
+                v is receive ch1
+                log(v)
+            dispatch
+                e is spawn Echo
+                e.bump(1)
+                stop e
+                join e
+        close ch1
+    log(777)
+";
+    let c = compile(src);
+    for round in 0..3 {
+        let out = c.run_within(60);
+        assert!(
+            out.status.success(),
+            "round {round}: {:?} stderr={}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let mut expected: Vec<i64> = vec![1; 200];
+        expected.push(777);
+        assert_eq!(sorted_lines(&out.stdout), expected, "round {round}");
+    }
+}
+
 /// Task 8-13 — `tl_gen_coro` was set on every `jinn_gen_resume` but cleared
 /// only on the trampoline's first entry, so a worker that resumed a
 /// generator more than once kept a stale value forever, and the next fresh

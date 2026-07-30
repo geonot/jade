@@ -203,7 +203,7 @@ static void jinn_coro_exit(void) {
         cb(arg);
     }
     self->state = JINN_CORO_DONE;
-    w->held_chan_lock = NULL;
+    w->held_lock = NULL;
     w->last_action = SCHED_ACTION_DESTROY;
     /* Swap back to the scheduler; this coroutine is never resumed */
     jinn_context_swap(&self->ctx, &w->sched_ctx);
@@ -220,7 +220,7 @@ void jinn_coro_yield(void) {
     if (!w || !w->current) return;
     jinn_coro_t *c = w->current;
     c->state = JINN_CORO_READY;
-    w->held_chan_lock = NULL;
+    w->held_lock = NULL;
     w->last_action = SCHED_ACTION_REQUEUE;
     jinn_context_swap(&c->ctx, &w->sched_ctx);
     /* Resumed here when re-scheduled */

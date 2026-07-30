@@ -86,6 +86,24 @@ static void unlock_all(jinn_select_case_t *cases, int *lock_order, int n) {
     }
 }
 
+/* Unlock every case channel except `keep`, whose lock is handed off to the
+ * scheduler across the park (task 8-10): the selector was published on
+ * `keep`'s wait queue, so `keep`'s lock must stay held until the context
+ * is saved or a waker could swap into a half-saved context. */
+static void unlock_all_except(jinn_select_case_t *cases, int *lock_order, int n,
+                              jinn_chan_t *keep) {
+    uintptr_t last = 0;
+    for (int i = n - 1; i >= 0; i--) {
+        jinn_chan_t *ch = cases[lock_order[i]].chan;
+        if (!ch || ch == keep) continue;
+        uintptr_t addr = (uintptr_t)ch;
+        if (addr != last) {
+            chan_unlock(ch);
+            last = addr;
+        }
+    }
+}
+
 static int chan_can_send(jinn_chan_t *ch) {
     uint64_t head = atomic_load_explicit(&ch->head, memory_order_acquire);
     uint64_t tail = atomic_load_explicit(&ch->tail, memory_order_relaxed);
@@ -270,7 +288,11 @@ int jinn_select(jinn_select_case_t *cases, int n, int has_default) {
             return -1;
         }
 
-        unlock_all(cases, lock_order, limit);
+        /* Keep the enqueued channel's lock across the swap — the scheduler
+         * releases it after the context is saved (the same handoff
+         * jinn_chan_send/recv use). Everything else unlocks now. */
+        jinn_chan_t *enq_chan = (jinn_chan_t *)self->wait_chan;
+        unlock_all_except(cases, lock_order, limit, enq_chan);
 
         /* Park — scheduler will resume us when the channel we're on fires.
          * The worker is re-derived on every attempt and never carried across
@@ -278,7 +300,7 @@ int jinn_select(jinn_select_case_t *cases, int n, int has_default) {
          * worker, and parking must use *this* thread's scheduler context. */
         jinn_worker_t *pw = jinn_worker_self();
         if (!pw) pw = w; /* unreachable for a coroutine; keep prior behaviour */
-        pw->held_chan_lock = NULL;
+        pw->held_lock = &enq_chan->lock;
         pw->last_action = SCHED_ACTION_PARK;
         jinn_context_swap(&self->ctx, &pw->sched_ctx);
 
