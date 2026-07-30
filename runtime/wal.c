@@ -1,8 +1,15 @@
 /*
  * Jinn WAL (Write-Ahead Log) Runtime
  *
- * File format: [8B magic "JINNWAL\0"][entries...]
- * Entry:       [4B payload_len][1B op][8B timestamp][payload_len bytes][4B CRC32]
+ * File format v2: [8B magic "JINNWAL2"][entries...]
+ * Entry:          [4B payload_len][1B op][8B timestamp][payload_len bytes][4B CRC32]
+ *
+ * The CRC covers the WHOLE frame before it — payload_len, op, timestamp,
+ * and payload (task 8-22; v1 excluded payload_len, so corrupted framing
+ * could frame garbage that verified, and a CRC of 0 bypassed
+ * verification entirely). v1 logs ("JINNWAL\0") are upgraded by
+ * truncation on open: v1 was written data-file-first (write-behind), so
+ * a v1 log's content is redundant with the data file by construction.
  *
  * Ops: 1=Insert, 2=Update, 3=Delete(soft), 4=Destroy(hard)
  *
@@ -60,33 +67,33 @@ static int jinn_wal_get_policy(void) {
     return jinn_wal_sync_policy;
 }
 
-static void jinn_wal_force(FILE *wal, int policy) {
-    if (!wal) return;
+/* Returns 0 on success, -1 if the data could not be made durable. A
+ * discarded fsync error is the PostgreSQL fsync-gate class: the write is
+ * reported committed while the kernel has already dropped the pages. */
+static int jinn_wal_force(FILE *wal, int policy) {
+    if (!wal) return -1;
     /* Inside an open transaction every store runs in group-commit mode:
      * per-record syncs are deferred until jinn_txn_commit() issues the
      * group barrier (or rollback truncates the records away). */
     if (jinn_txn_active()) {
-        fflush(wal);
-        return;
+        return fflush(wal) == 0 ? 0 : -1;
     }
     /* Push libc buffers to the kernel first. */
-    fflush(wal);
+    if (fflush(wal) != 0) return -1;
     int fd = fileno(wal);
-    if (fd < 0) return;
+    if (fd < 0) return -1;
     switch (policy) {
         case JINN_WAL_SYNC_NONE:
         case JINN_WAL_SYNC_GROUP:
-            return;
+            return 0;
         case JINN_WAL_SYNC_FSYNC:
-            (void)fsync(fd);
-            return;
+            return fsync(fd) == 0 ? 0 : -1;
         case JINN_WAL_SYNC_FDATASYNC:
         default:
 #if defined(__linux__)
-            if (fdatasync(fd) == 0) return;
+            if (fdatasync(fd) == 0) return 0;
 #endif
-            (void)fsync(fd);
-            return;
+            return fsync(fd) == 0 ? 0 : -1;
     }
 }
 
@@ -96,16 +103,22 @@ static void jinn_wal_force(FILE *wal, int policy) {
  * appended records durable. */
 void jinn_wal_commit_group(FILE *wal) {
     if (!wal) return;
-    fflush(wal);
+    if (fflush(wal) != 0) {
+        fprintf(stderr, "jinn: wal: group-commit flush failed\n");
+        return;
+    }
     int fd = fileno(wal);
     if (fd < 0) return;
 #if defined(__linux__)
     if (fdatasync(fd) == 0) return;
 #endif
-    (void)fsync(fd);
+    if (fsync(fd) != 0) {
+        fprintf(stderr, "jinn: wal: group-commit fsync failed — batch may not be durable\n");
+    }
 }
 
-static const char WAL_MAGIC[8] = {'J','I','N','N','W','A','L','\0'};
+static const char WAL_MAGIC[8]    = {'J','I','N','N','W','A','L','2'};
+static const char WAL_MAGIC_V1[8] = {'J','I','N','N','W','A','L','\0'};
 
 /* Simple CRC32 (IEEE polynomial) */
 static uint32_t crc32_table[256];
@@ -123,37 +136,145 @@ static void crc32_init(void) {
     crc32_initialized = 1;
 }
 
-static uint32_t crc32(const void *data, size_t len) {
+/* Streaming CRC: begin with JINN_CRC_SEED, fold pieces in with
+ * crc32_update, finish with ^0xFFFFFFFF. No allocation, so there is no
+ * malloc-failure path that could write an unverifiable record. */
+#define JINN_CRC_SEED 0xFFFFFFFFu
+
+static uint32_t crc32_update(uint32_t crc, const void *data, size_t len) {
     crc32_init();
     const uint8_t *p = (const uint8_t *)data;
-    uint32_t crc = 0xFFFFFFFFu;
     for (size_t i = 0; i < len; i++) {
         crc = crc32_table[(crc ^ p[i]) & 0xFF] ^ (crc >> 8);
     }
-    return crc ^ 0xFFFFFFFFu;
+    return crc;
 }
 
-/* Open or create a WAL file. Returns FILE* or NULL. */
+/* Frame CRC over [payload_len | op | timestamp | payload]. */
+static uint32_t wal_frame_crc(uint32_t payload_len, uint8_t op, int64_t ts,
+                              const void *payload) {
+    uint32_t c = JINN_CRC_SEED;
+    c = crc32_update(c, &payload_len, 4);
+    c = crc32_update(c, &op, 1);
+    c = crc32_update(c, &ts, 8);
+    if (payload_len > 0 && payload) c = crc32_update(c, payload, payload_len);
+    return c ^ 0xFFFFFFFFu;
+}
+
+/* Scan entries from offset 8, verifying each frame CRC, and return the
+ * offset just past the last fully-valid entry. Reports (but does not
+ * decide about) a torn or corrupt tail via *damaged. */
+static long wal_scan_valid_end(FILE *f, int *damaged) {
+    fseek(f, 0, SEEK_END);
+    long file_end = ftell(f);
+    long valid_end = 8;
+    fseek(f, 8, SEEK_SET);
+    *damaged = 0;
+    while (ftell(f) < file_end) {
+        uint32_t payload_len;
+        uint8_t  op;
+        int64_t  ts;
+        if (fread(&payload_len, 4, 1, f) != 1 ||
+            fread(&op, 1, 1, f) != 1 ||
+            fread(&ts, 8, 1, f) != 1) { *damaged = 1; break; }
+        if (payload_len > 64u * 1024 * 1024) { *damaged = 1; break; }
+        long body = ftell(f);
+        if (file_end - body < (long)payload_len + 4) { *damaged = 1; break; }
+        uint32_t c = JINN_CRC_SEED;
+        c = crc32_update(c, &payload_len, 4);
+        c = crc32_update(c, &op, 1);
+        c = crc32_update(c, &ts, 8);
+        uint8_t buf[4096];
+        uint32_t left = payload_len;
+        while (left > 0) {
+            size_t chunk = left < sizeof buf ? left : sizeof buf;
+            if (fread(buf, 1, chunk, f) != chunk) { *damaged = 1; goto done; }
+            c = crc32_update(c, buf, chunk);
+            left -= (uint32_t)chunk;
+        }
+        uint32_t stored;
+        if (fread(&stored, 4, 1, f) != 1) { *damaged = 1; break; }
+        if ((c ^ 0xFFFFFFFFu) != stored) { *damaged = 1; break; }
+        valid_end = ftell(f);
+    }
+done:
+    return valid_end;
+}
+
+/* Open or create a WAL file. Returns FILE* or NULL (creation failure).
+ * A structurally invalid log is a hard error, never a silent recreate:
+ * silently truncating it was silent data loss. A v1-magic log is
+ * upgraded by truncation with a notice — v1 was write-behind (the data
+ * file was always written first), so its content is redundant with the
+ * data file by construction. A torn tail is truncated away HERE, before
+ * any append: the old code appended at SEEK_END past the torn record,
+ * making every later entry permanently unreachable to replay. */
 FILE *jinn_wal_open(const char *path) {
     FILE *f = fopen(path, "r+b");
     if (f) {
-        /* Verify magic */
         char magic[8];
-        if (fread(magic, 1, 8, f) == 8 && memcmp(magic, WAL_MAGIC, 8) == 0) {
-            fseek(f, 0, SEEK_END);
+        size_t got = fread(magic, 1, 8, f);
+        if (got == 8 && memcmp(magic, WAL_MAGIC, 8) == 0) {
+            int damaged = 0;
+            long valid_end = wal_scan_valid_end(f, &damaged);
+            if (damaged) {
+                fprintf(stderr,
+                        "jinn: wal: %s has a torn or corrupt tail; truncating to "
+                        "last valid entry (offset %ld) before appending\n",
+                        path, valid_end);
+                if (ftruncate(fileno(f), (off_t)valid_end) != 0) {
+                    fprintf(stderr, "jinn: wal: truncate of %s failed\n", path);
+                    fclose(f);
+                    return NULL;
+                }
+            }
+            fseek(f, valid_end, SEEK_SET);
             return f;
         }
-        /* Bad magic — recreate */
+        if (got == 8 && memcmp(magic, WAL_MAGIC_V1, 8) == 0) {
+            fprintf(stderr,
+                    "jinn: wal: %s uses the v1 format (pre-8-22); upgrading by "
+                    "truncation — v1 logs are redundant with the data file\n",
+                    path);
+            if (ftruncate(fileno(f), 0) != 0) {
+                fclose(f);
+                return NULL;
+            }
+            fseek(f, 0, SEEK_SET);
+            fwrite(WAL_MAGIC, 1, 8, f);
+            if (jinn_wal_force(f, JINN_WAL_SYNC_FDATASYNC) != 0) {
+                fclose(f);
+                return NULL;
+            }
+            return f;
+        }
+        if (got > 0) {
+            fprintf(stderr,
+                    "jinn: wal: %s is not a Jinn WAL (bad magic) — refusing to "
+                    "touch it; move it aside to proceed\n",
+                    path);
+            fclose(f);
+            abort();
+        }
+        /* Zero-length file: treat as fresh. */
         fclose(f);
     }
     f = fopen(path, "w+b");
     if (!f) return NULL;
     fwrite(WAL_MAGIC, 1, 8, f);
     /* The magic header itself must be durable so a torn create cannot
-     * later be mistaken for a valid empty WAL with garbage entries. */
-    jinn_wal_force(f, jinn_wal_get_policy() == JINN_WAL_SYNC_NONE
-                          ? JINN_WAL_SYNC_NONE
-                          : JINN_WAL_SYNC_FDATASYNC);
+     * later be mistaken for a valid empty WAL with garbage entries; the
+     * file's existence in its directory must survive power loss too. */
+    if (jinn_wal_force(f, jinn_wal_get_policy() == JINN_WAL_SYNC_NONE
+                              ? JINN_WAL_SYNC_NONE
+                              : JINN_WAL_SYNC_FDATASYNC) != 0) {
+        fprintf(stderr, "jinn: wal: cannot make new log %s durable\n", path);
+        fclose(f);
+        return NULL;
+    }
+    if (jinn_wal_get_policy() != JINN_WAL_SYNC_NONE) {
+        (void)jinn_dir_fsync(path);
+    }
     return f;
 }
 
@@ -162,69 +283,80 @@ FILE *jinn_wal_open(const char *path) {
  * payload: record bytes (for insert/update) or offset bytes (for delete/destroy)
  * payload_len: size of payload
  */
-void jinn_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload_len) {
-    if (!wal) return;
+int jinn_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload_len) {
+    if (!wal) return -1;
 
     int64_t ts = (int64_t)time(NULL);
 
-    /* Seek to end */
     if (fseek(wal, 0, SEEK_END) != 0) {
         fprintf(stderr, "jinn: wal: fseek failed\n");
-        return;
+        return -1;
+    }
+    long start = ftell(wal);
+
+    /* Write: [4B len][1B op][8B timestamp][payload][4B CRC32]. The CRC is
+     * computed by streaming (wal_frame_crc) — no allocation, so there is
+     * no path that appends an unverifiable record. On ANY failure the
+     * partial frame is truncated away immediately so the log stays
+     * append-clean. */
+    uint32_t checksum = wal_frame_crc(payload_len, op, ts, payload);
+    int ok = fwrite(&payload_len, 4, 1, wal) == 1 &&
+             fwrite(&op, 1, 1, wal) == 1 &&
+             fwrite(&ts, 8, 1, wal) == 1;
+    if (ok && payload_len > 0 && payload) {
+        ok = fwrite(payload, 1, payload_len, wal) == payload_len;
+    }
+    if (ok) ok = fwrite(&checksum, 4, 1, wal) == 1;
+
+    if (!ok) {
+        fprintf(stderr, "jinn: wal: append failed; truncating partial frame\n");
+        fflush(wal);
+        if (start >= 0) (void)ftruncate(fileno(wal), (off_t)start);
+        fseek(wal, 0, SEEK_END);
+        return -1;
     }
 
-    /* Write: [4B len][1B op][8B timestamp][payload][4B CRC32] */
-    if (fwrite(&payload_len, 4, 1, wal) != 1 ||
-        fwrite(&op, 1, 1, wal) != 1 ||
-        fwrite(&ts, 8, 1, wal) != 1) {
-        fprintf(stderr, "jinn: wal: write header failed\n");
-        return;
-    }
-    if (payload_len > 0 && payload) {
-        if (fwrite(payload, 1, payload_len, wal) != payload_len) {
-            fprintf(stderr, "jinn: wal: write payload failed\n");
-            return;
-        }
-    }
-
-    /* CRC over op + timestamp + payload */
-    size_t crc_len = 1 + 8 + payload_len;
-    uint8_t *crc_buf = (uint8_t *)malloc(crc_len);
-    if (crc_buf) {
-        crc_buf[0] = op;
-        memcpy(crc_buf + 1, &ts, 8);
-        if (payload_len > 0 && payload) {
-            memcpy(crc_buf + 9, payload, payload_len);
-        }
-        uint32_t checksum = crc32(crc_buf, crc_len);
-        fwrite(&checksum, 4, 1, wal);
-        free(crc_buf);
-    } else {
-        uint32_t zero = 0;
-        fwrite(&zero, 4, 1, wal);
-    }
     /* Per-record durability per JINN_WAL_SYNC. Group-commit policy defers
      * until jinn_wal_commit_group(). */
-    jinn_wal_force(wal, jinn_wal_get_policy());
+    if (jinn_wal_force(wal, jinn_wal_get_policy()) != 0) {
+        fprintf(stderr, "jinn: wal: sync failed — record may not be durable\n");
+        return -1;
+    }
+    return 0;
+}
+
+/* Abort-on-failure wrapper for generated store code: a WAL append that
+ * cannot be made durable must stop the program, not silently continue
+ * with a durability story that no longer holds (the fsync-gate lesson). */
+void jinn_wal_write_must(FILE *wal, uint8_t op, const void *payload,
+                         uint32_t payload_len) {
+    if (!wal) return; /* store running without a WAL (open failed loudly earlier) */
+    if (jinn_wal_write(wal, op, payload, payload_len) != 0) {
+        fprintf(stderr, "jinn: wal: cannot guarantee durability — aborting\n");
+        abort();
+    }
 }
 
 /* Checkpoint: truncate WAL back to just the magic header. */
 void jinn_wal_checkpoint(FILE *wal) {
     if (!wal) return;
-    /* Reopen as truncate — we can't just ftruncate portably, so rewrite magic */
+    fflush(wal);
     int fd = fileno(wal);
-    if (fd >= 0) {
-        if (ftruncate(fd, 8) == 0) {
-            fseek(wal, 8, SEEK_SET);
-        }
+    if (fd < 0) return;
+    if (ftruncate(fd, 8) != 0) {
+        fprintf(stderr, "jinn: wal: checkpoint truncate failed\n");
+        return;
     }
+    fseek(wal, 8, SEEK_SET);
     /* Checkpoint is a durability boundary: callers expect that on return,
      * the truncated state is on stable storage. Always force regardless of
      * the per-record sync policy (except explicit "none" for tests). */
     int policy = jinn_wal_get_policy();
-    jinn_wal_force(wal, policy == JINN_WAL_SYNC_NONE
-                            ? JINN_WAL_SYNC_NONE
-                            : JINN_WAL_SYNC_FDATASYNC);
+    if (jinn_wal_force(wal, policy == JINN_WAL_SYNC_NONE
+                                ? JINN_WAL_SYNC_NONE
+                                : JINN_WAL_SYNC_FDATASYNC) != 0) {
+        fprintf(stderr, "jinn: wal: checkpoint sync failed\n");
+    }
 }
 
 /* Close WAL file. */
@@ -467,23 +599,11 @@ int64_t jinn_wal_replay(FILE *wal, jinn_wal_replay_cb callback, void *user_data)
             break;
         }
 
-        /* Verify CRC: computed over op + timestamp + payload */
-        size_t crc_len = 1 + 8 + payload_len;
-        uint8_t *crc_buf = (uint8_t *)malloc(crc_len);
-        if (!crc_buf) {
-            free(payload);
-            break;
-        }
-        crc_buf[0] = op;
-        memcpy(crc_buf + 1, &ts, 8);
-        if (payload_len > 0 && payload) {
-            memcpy(crc_buf + 9, payload, payload_len);
-        }
-        uint32_t computed_crc = crc32(crc_buf, crc_len);
-        free(crc_buf);
-
-        if (stored_crc != 0 && computed_crc != stored_crc) {
-            /* CRC mismatch — entry is corrupt, stop replay */
+        /* Verify the full-frame CRC. No zero-CRC bypass: a record that
+         * cannot be verified is corrupt, full stop (the v1 bypass let a
+         * zeroed CRC field validate arbitrary garbage). */
+        uint32_t computed_crc = wal_frame_crc(payload_len, op, ts, payload);
+        if (computed_crc != stored_crc) {
             free(payload);
             break;
         }

@@ -47,6 +47,7 @@ fn main() {
         .file("runtime/process.c")
         .file("runtime/util.c")
         .file("runtime/durable.c")
+        .file("runtime/recover.c")
         .file("runtime/terminal.c")
         .file("runtime/event.c")
         .file("runtime/random.c")

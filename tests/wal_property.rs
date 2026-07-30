@@ -223,3 +223,93 @@ proptest! {
         prop_assert_eq!(&got[..], &ops[..j]);
     }
 }
+
+proptest! {
+    /// Task 8-22 — the length prefix is inside the CRC now. Corrupting it
+    /// must stop replay at that entry (v1 excluded the length from the
+    /// CRC, so corrupted framing could frame garbage that verified).
+    #[test]
+    fn length_prefix_corruption_detected(
+        ops in ops_strategy(),
+        which in any::<u64>(),
+        byte_sel in any::<u64>(),
+    ) {
+        ensure_linked();
+        let n = ops.len() as u64;
+        let j = (which % n) as usize;
+        let path = unique_path("lenflip");
+        write_wal(&path, &ops);
+
+        let ends = end_offsets(&ops);
+        let entry_start = if j == 0 { MAGIC_LEN } else { ends[j - 1] };
+        let flip_at = entry_start + (byte_sel % 4); // inside the 4B length
+
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[flip_at as usize] ^= 0xFF;
+        std::fs::write(&path, &bytes).unwrap();
+
+        let got = replay_wal(&path);
+        let _ = std::fs::remove_file(&path);
+        prop_assert_eq!(got.len(), j, "length corruption in entry {} must stop replay", j);
+        prop_assert_eq!(&got[..], &ops[..j]);
+    }
+
+    /// Task 8-22 — a zeroed CRC field is corruption, not a verification
+    /// bypass (v1 treated stored_crc == 0 as "skip the check", so a
+    /// zeroed field validated arbitrary garbage).
+    #[test]
+    fn zero_crc_is_rejected(
+        ops in ops_strategy(),
+        which in any::<u64>(),
+    ) {
+        ensure_linked();
+        let n = ops.len() as u64;
+        let j = (which % n) as usize;
+        let path = unique_path("zerocrc");
+        write_wal(&path, &ops);
+
+        let ends = end_offsets(&ops);
+        let crc_at = (ends[j] - 4) as usize;
+        let mut bytes = std::fs::read(&path).unwrap();
+        // If the true CRC is already 0 (1 in 2^32), zeroing changes nothing.
+        prop_assume!(bytes[crc_at..crc_at + 4] != [0, 0, 0, 0]);
+        bytes[crc_at..crc_at + 4].fill(0);
+        std::fs::write(&path, &bytes).unwrap();
+
+        let got = replay_wal(&path);
+        let _ = std::fs::remove_file(&path);
+        prop_assert_eq!(got.len(), j, "zero CRC in entry {} must be rejected", j);
+        prop_assert_eq!(&got[..], &ops[..j]);
+    }
+
+    /// Task 8-22 — a torn tail is truncated at open, BEFORE any append.
+    /// The old open appended at SEEK_END past the torn record, so every
+    /// post-crash append was permanently unreachable to replay.
+    #[test]
+    fn torn_tail_then_append_is_reachable(
+        ops in ops_strategy(),
+        appended in ops_strategy(),
+        cut_back in 1u64..=8,
+    ) {
+        ensure_linked();
+        let path = unique_path("tornappend");
+        write_wal(&path, &ops);
+
+        // Tear the last entry: cut 1..=8 bytes off the end (always inside
+        // the final entry, whose overhead alone is 17 bytes).
+        let ends = end_offsets(&ops);
+        let full = *ends.last().unwrap();
+        let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        f.set_len(full - cut_back).unwrap();
+        drop(f);
+
+        // Append through the normal open path (which must truncate first).
+        write_wal(&path, &appended);
+
+        let got = replay_wal(&path);
+        let _ = std::fs::remove_file(&path);
+        let mut want: Vec<(u8, Vec<u8>)> = ops[..ops.len() - 1].to_vec();
+        want.extend(appended.iter().cloned());
+        prop_assert_eq!(got, want, "appended entries must be reachable after a torn tail");
+    }
+}

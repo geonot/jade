@@ -180,20 +180,30 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
-    pub(in crate::codegen) fn store_deleted_offset(&self, sd: &hir::StoreDef) -> Option<u64> {
-        let deleted_idx = sd.fields.iter().position(|f| f.name == "deleted")?;
+    /// Byte offset of a named field within the on-disk record, following
+    /// the same alignment walk LLVM performs for the unpacked struct.
+    pub(in crate::codegen) fn store_field_offset(
+        &self,
+        sd: &hir::StoreDef,
+        fname: &str,
+    ) -> Option<u64> {
+        let idx = sd.fields.iter().position(|f| f.name.as_str() == fname)?;
         let mut offset = 0u64;
-        for f in &sd.fields[..deleted_idx] {
+        for f in &sd.fields[..idx] {
             let lty = self.store_field_llvm_ty(&f.ty);
             let fa = self.type_abi_align(lty);
             let fs = self.type_store_size(lty);
             offset = (offset + fa - 1) & !(fa - 1);
             offset += fs;
         }
-        let del_lty = self.store_field_llvm_ty(&sd.fields[deleted_idx].ty);
-        let del_align = self.type_abi_align(del_lty);
-        offset = (offset + del_align - 1) & !(del_align - 1);
+        let lty = self.store_field_llvm_ty(&sd.fields[idx].ty);
+        let align = self.type_abi_align(lty);
+        offset = (offset + align - 1) & !(align - 1);
         Some(offset)
+    }
+
+    pub(in crate::codegen) fn store_deleted_offset(&self, sd: &hir::StoreDef) -> Option<u64> {
+        self.store_field_offset(sd, "deleted")
     }
 
     pub(in crate::codegen) fn emit_store_compact(

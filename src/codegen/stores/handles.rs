@@ -265,6 +265,7 @@ impl<'ctx> Compiler<'ctx> {
             ],
             ""
         ));
+        self.emit_store_recover_call(sd, global.as_pointer_value())?;
         b!(self.bld.build_unconditional_branch(done_bb));
 
         self.bld.position_at_end(init_bb);
@@ -356,6 +357,14 @@ impl<'ctx> Compiler<'ctx> {
         let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
         b!(self.bld.build_call(fflush_fn, &[new_fp.into()], ""));
 
+        /* A fresh data file next to an existing WAL is exactly the
+         * "deleted the .store, kept the .wal" recovery case (task 8-23):
+         * replay restores every committed record. @transient stores
+         * never reach init_bb with a WAL on disk. */
+        if !is_transient {
+            self.emit_store_recover_call(sd, global.as_pointer_value())?;
+        }
+
         b!(self.bld.build_unconditional_branch(done_bb));
 
         self.bld.position_at_end(done_bb);
@@ -367,6 +376,48 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         Ok(fv)
+    }
+
+    /// Emit the recovery-at-open call (task 8-23): replay committed WAL
+    /// records into the data file by `sid`, then checkpoint. Emitted at
+    /// the current builder position; the store fp global is passed by
+    /// address so recovery's atomic rewrite can swap the handle.
+    fn emit_store_recover_call(
+        &mut self,
+        sd: &hir::StoreDef,
+        fp_global: PointerValue<'ctx>,
+    ) -> Result<(), String> {
+        let i64t = self.ctx.i64_type();
+        let name = &sd.name;
+        let rec_size = self.store_record_size(sd);
+        let sid_off = self
+            .store_field_offset(sd, "sid")
+            .map(|o| o as i64)
+            .unwrap_or(-1); // @simple: no sid → recovery skipped in C
+        let del_off = self
+            .store_field_offset(sd, "deleted")
+            .map(|o| o as i64)
+            .unwrap_or(-1);
+        let store_str = b!(self
+            .bld
+            .build_global_string_ptr(&format!("{name}.store\0"), "recover.store"));
+        let wal_str = b!(self
+            .bld
+            .build_global_string_ptr(&format!("{name}.wal\0"), "recover.wal"));
+        let recover_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_recover");
+        b!(self.bld.build_call(
+            recover_fn,
+            &[
+                fp_global.into(),
+                store_str.as_pointer_value().into(),
+                wal_str.as_pointer_value().into(),
+                i64t.const_int(rec_size, false).into(),
+                i64t.const_int(sid_off as u64, true).into(),
+                i64t.const_int(del_off as u64, true).into(),
+            ],
+            ""
+        ));
+        Ok(())
     }
 
     pub(crate) fn load_store_fp(&mut self, store_name: &str) -> Result<PointerValue<'ctx>, String> {
@@ -434,7 +485,7 @@ impl<'ctx> Compiler<'ctx> {
         rec_size: u64,
     ) -> Result<(), String> {
         let wal = self.load_store_wal(store_name)?;
-        let wal_write_fn = crate::codegen::fn_or_die(&self.module, "jinn_wal_write");
+        let wal_write_fn = crate::codegen::fn_or_die(&self.module, "jinn_wal_write_must");
         let op = self.ctx.i8_type().const_int(1, false);
         let size = self.ctx.i32_type().const_int(rec_size, false);
         b!(self.bld.build_call(
@@ -452,7 +503,7 @@ impl<'ctx> Compiler<'ctx> {
         rec_size: u64,
     ) -> Result<(), String> {
         let wal = self.load_store_wal(store_name)?;
-        let wal_write_fn = crate::codegen::fn_or_die(&self.module, "jinn_wal_write");
+        let wal_write_fn = crate::codegen::fn_or_die(&self.module, "jinn_wal_write_must");
         let op = self.ctx.i8_type().const_int(3, false);
         let size = self.ctx.i32_type().const_int(rec_size, false);
         b!(self.bld.build_call(
@@ -470,7 +521,7 @@ impl<'ctx> Compiler<'ctx> {
         rec_size: u64,
     ) -> Result<(), String> {
         let wal = self.load_store_wal(store_name)?;
-        let wal_write_fn = crate::codegen::fn_or_die(&self.module, "jinn_wal_write");
+        let wal_write_fn = crate::codegen::fn_or_die(&self.module, "jinn_wal_write_must");
         let op = self.ctx.i8_type().const_int(2, false);
         let size = self.ctx.i32_type().const_int(rec_size, false);
         b!(self.bld.build_call(

@@ -633,7 +633,7 @@ either the old or the new state, never a mixture; the single-writer contract (D6
 enforced with an advisory file lock and a clear diagnostic on contention — two
 concurrent writers currently both "succeed" by luck.
 
-### ◻ 8-22 WAL integrity — **P0**, blocked_by: []
+### ✅ 8-22 WAL integrity — **P0**, blocked_by: []
 *Review item 11.*
 
 The skeleton is right (per-entry CRC32, env-selectable sync policy, group commit,
@@ -663,7 +663,7 @@ invalid record before any append; `jinn_wal_write` returns a status callers hand
 Extend `tests/wal_crash.rs` / `wal_property.rs` with mid-record corruption,
 zero-CRC injection, and torn-tail-then-append.
 
-### ◻ 8-23 WAL replay on recovery — **P0**, blocked_by: [8-22]
+### ✅ 8-23 WAL replay on recovery — **P0**, blocked_by: [8-22]
 *Review item 11.*
 
 Measured: after `kill -9` mid-insert, recovery was consistent (6,233 rows) — but

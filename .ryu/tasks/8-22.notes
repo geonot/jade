@@ -1,0 +1,20 @@
+# 2026-07-30 implementation notes
+- WAL format bumped to v2 (magic "JINNWAL2"): the frame CRC now covers
+  payload_len|op|ts|payload via a streaming CRC (no malloc, so no
+  unverifiable-record path exists at all — the v1 zero-CRC bypass and
+  its deliberate malloc-failure poisoning are structurally gone).
+- v1-magic logs are upgraded by truncation with a notice: v1 was
+  write-BEHIND (data file written first), so a v1 log is redundant with
+  the data file by construction. Garbage magic aborts loudly (matching
+  jinn_store_check_schema's precedent) — never silent recreation.
+- Open scans entries and truncates a torn/corrupt tail BEFORE appending;
+  the old SEEK_END append made every post-crash entry permanently
+  unreachable to replay.
+- jinn_wal_force/commit_group/checkpoint/write all check fsync results
+  (fsync-gate class). jinn_wal_write returns int and self-truncates a
+  partial frame on failure; generated store code calls
+  jinn_wal_write_must, which aborts when durability cannot be
+  guaranteed. Directory fsync after creating a log.
+- wal_property.rs gains: length-prefix corruption detected (v1 excluded
+  the length from the CRC), zero-CRC rejected, torn-tail-then-append
+  reachable.

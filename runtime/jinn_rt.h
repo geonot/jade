@@ -591,7 +591,8 @@ void jinn_txn_track_aux(FILE *fp, void (*cb)(void *), void *arg);
 void jinn_txn_swap_fp(FILE *oldfp, FILE *newfp);
 void jinn_wal_commit_group(FILE *wal);
 FILE *jinn_wal_open(const char *path);
-void jinn_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload_len);
+int  jinn_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload_len);
+void jinn_wal_write_must(FILE *wal, uint8_t op, const void *payload, uint32_t payload_len);
 void jinn_wal_checkpoint(FILE *wal);
 void jinn_wal_close(FILE *wal);
 int64_t jinn_wal_size(FILE *wal);
@@ -604,6 +605,9 @@ int  jinn_dir_fsync(const char *filepath);
 int  jinn_atomic_rewrite(const char *path, jinn_fill_fn fill, void *arg);
 int  jinn_atomic_rewrite_reopen(const char *path, jinn_fill_fn fill, void *arg,
                                 FILE **fpp);
+int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
+                           const char *wal_path, int64_t rec_size,
+                           int64_t sid_offset, int64_t deleted_offset);
 int  jinn_writer_lock(const char *path);
 void jinn_writer_unlock(int lock_fd);
 

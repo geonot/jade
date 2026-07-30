@@ -248,6 +248,13 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
+        /* WAL first (task 8-23): the record is fully built and validated,
+         * so log it before any data-file byte moves. The old order (data
+         * file first, WAL last) made this a write-BEHIND log — a crash
+         * between the two writes lost the WAL entry, so replay could
+         * never restore anything the data file lacked. */
+        self.wal_write_insert(store_name, rec_ptr, rec_size)?;
+
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
         let header_size = crate::codegen::stores::HEADER_SIZE;
         let reserve_fn = self
@@ -460,8 +467,6 @@ impl<'ctx> Compiler<'ctx> {
                 fts_user_idx += 1;
             }
         }
-
-        self.wal_write_insert(store_name, rec_ptr, rec_size)?;
 
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::AfterInsert(fname) = dec

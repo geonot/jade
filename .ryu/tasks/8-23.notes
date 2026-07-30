@@ -1,0 +1,29 @@
+# 2026-07-30 implementation notes
+- New runtime/recover.c: jinn_store_recover, emitted by
+  gen_store_ensure_open in BOTH branches (existing file: heal forward;
+  missing file: full restore from the log). Every WAL payload is a full
+  record image, so replay reduces to upsert-by-sid, later entries win;
+  op-3 entries with an unstamped `deleted` field (the hard-delete path
+  logs the pre-removal image) are stamped from the entry timestamp so a
+  destroyed record can only ever come back as an invisible tombstone.
+- If recovery changes the file, the rewrite is 8-21-atomic, all
+  "{store}.*.idx" sidecars are unlinked (their byte offsets are stale;
+  the existing open_checked/rebuild path recreates them), and the WAL is
+  checkpointed — only then is the prefix discardable. Checkpoint also
+  runs on a clean replay, which bounds WAL growth at every open (it
+  previously grew forever unless the program said `save`/`compact`).
+- Insert is now WAL-FIRST (the record is fully built and validated
+  before any data-file byte moves). The old order — data file first, WAL
+  last — made it a write-behind log, which is why deleting the .store
+  and keeping the .wal yielded 0 rows.
+- @simple stores (no sid field) skip recovery: replay identity is
+  impossible without sid; sid_offset = -1 signals it.
+- Entries whose payload length mismatches the record size (schema drift
+  across a migration) are skipped with a count, then checkpointed away.
+- Known drift left in place, pre-existing: .col/.bloom/.fts sidecars are
+  positional/append-only and already desynchronize across compaction;
+  8-24 (transactions) still holds the process-global txn state.
+- tests/store_recovery.rs pins all the review probes: store restored
+  from WAL alone, wal-less store unaffected, stale data file healed
+  forward, corruption detected + valid prefix restored, kill -9
+  mid-insert recovers consistently and idempotently.

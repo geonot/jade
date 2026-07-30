@@ -1,5 +1,5 @@
 title: Make the WAL actually replayed on recovery
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: ['8-22']
