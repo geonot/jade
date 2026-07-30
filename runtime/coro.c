@@ -276,7 +276,20 @@ void jinn_gen_resume(void *gen_blk) {
     *(jinn_context_t **)((char *)gen_blk + GEN_CALLER_CTX_OFF) = &caller_ctx;
     tl_gen_coro = c;
     jinn_context_swap(&caller_ctx, &c->ctx);
-    /* Returned here: generator has yielded or finished */
+    /* Returned here: generator has yielded or finished.
+     *
+     * The flag exists only so the trampoline's FIRST entry can tell "started
+     * by gen_resume" from "started by the scheduler". The trampoline clears
+     * it on that first entry, but resumes 2..n swap into the middle of
+     * jinn_gen_suspend and never reach the trampoline — without clearing
+     * here, the thread's value stayed poisoned forever and the next NEW
+     * scheduler coroutine whose first run landed on this thread executed the
+     * generator's entry with the generator's argument instead of its own
+     * (task 8-13; reproduced as a SIGSEGV by
+     * tests/runtime_concurrency.rs::generator_resume_does_not_poison_worker_tls).
+     * A direct swap resumes on the same thread it left, so clearing after
+     * the swap covers every path back. */
+    tl_gen_coro = NULL;
 }
 
 /*

@@ -1,10 +1,10 @@
 title: Fix generator TLS staleness (tl_gen_coro)
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []
 created_at: '2026-07-29T00:00:00'
-updated_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T19:00:00'
 description: 'Review item 7b. jinn_gen_resume sets tl_gen_coro = c on every resume (coro.c:277) but
   it is cleared only on first trampoline entry (171-174). Resumes 2..n swap into the
   middle of jinn_gen_suspend and never reach the trampoline, so the thread''s value is

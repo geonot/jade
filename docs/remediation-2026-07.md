@@ -431,7 +431,7 @@ releases its reference — no dangling entry is reachable from cancel or wake; t
 non-registration; a test cancels a scope after some children have completed and runs
 clean under ASan.
 
-### ◻ 8-13 Generator TLS staleness — **P0**, blocked_by: []
+### ✅ 8-13 Generator TLS staleness — **P0**, blocked_by: []
 *Review item 7b.*
 
 `jinn_gen_resume` sets `tl_gen_coro = c` on every resume (`coro.c:277`) but it is
