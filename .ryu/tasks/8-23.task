@@ -1,0 +1,18 @@
+title: Make the WAL actually replayed on recovery
+status: pending
+atomic: true
+priority: high
+blocked_by: ['8-22']
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 11. Measured: after kill -9 mid-insert, recovery was consistent (6,233
+  rows) but corrupting 64 random bytes at WAL offset 2,000 produced identical results to
+  the uncorrupted control; deleting the .wal and keeping the .store gave the same 6,233
+  rows; deleting the .store and keeping the .wal gave 0. The WAL is write-only in
+  practice - it is not replayed to recover records the data file lacks. The durability
+  story today is ''the data file is the database and the WAL is a log nobody reads''.
+  DoD: open performs recovery by replaying committed WAL records not present in the data
+  file, then checkpoints; a store recovers correctly from a WAL plus a stale or missing
+  data file; WAL corruption is detected and reported rather than being invisible;
+  checkpointing is the only thing that makes a WAL prefix discardable; tests assert each
+  of the three probes above now behaves correctly.'

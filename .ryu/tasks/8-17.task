@@ -1,0 +1,23 @@
+title: Route all diagnostics through diagnostic.rs
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 13. src/diagnostic.rs already implements rustc-style diagnostics
+  (severities, codes E001-W202, labels, notes, suggestions, caret-rendering render() at
+  61-184) and nothing constructs one. Real errors are format! strings: type_errors:
+  Vec<String> (src/typer/mod.rs:101), eprintln!("ownership: {} (line {}): {}")
+  (driver/mod.rs:474), newline-joined parse blobs (parser/mod.rs:86-106). Formats differ
+  per subsystem (line N:C:, file:N:C:, (line N)) and some embed Rust Debug spans
+  (errset.rs:192). Two user-visible leaks must close with it: LLVM verifier output
+  reaching users (add(''one'', 2) prints ''Call parameter type does not match function
+  signature!'' with raw IR, a plain argument mismatch that reached codegen) and the
+  multi-clause arity panic at src/parser/mod.rs:512-522, which delivers a correct
+  diagnostic as a Rust panic AND exits 0. DoD: every user-facing error and warning is a
+  Diagnostic with a span; one rendering path; no eprintln!/panic! on any user-input
+  path; a test asserts a non-zero exit for every diagnostic-producing input; a
+  codegen-reached type error is impossible or reported as an ICE with an issue-report
+  prompt, never as IR; per D2, instantiation-site errors name both the call site and the
+  definition.'

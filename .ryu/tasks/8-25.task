@@ -1,0 +1,21 @@
+title: Store query results as Option and first-class rows
+status: pending
+atomic: true
+priority: medium
+blocked_by: []
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 12, decision D3. Two defects. A no-match query silently returns a
+  fabricated zero row: ''missing is users where age > 100'' then logging
+  missing.name/missing.age prints ''name=[] age=0'', indistinguishable from a real
+  empty-string age-0 record. And iterating all rows segfaults: ''for u in all users''
+  gives SIGSEGV at 0x51, with no test covering ''all <store>'' anywhere.
+  docs/store-improvement.md:48 already has the right diagnosis - a query result is not
+  composable (can''t iterate, can''t .name it, can''t pass it to generic code) - which
+  is the root cause of both and should be fixed ahead of new store features. DoD: a
+  possibly-empty query has type Option of <Record> and a field read on a miss is a
+  compile error; the quaternary handles it with no added ceremony (users where ... ?
+  use($) ! not_found()) and implicit propagation works in a fallible function; ''all
+  <store>'' yields an iterable row set that can be bound, iterated, .length-ed, and
+  passed to a function; the 8-4 store assertion flipped; conformance tests for hit,
+  miss, iterate-empty, iterate-many, and row-passed-to-a-function.'

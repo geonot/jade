@@ -1,0 +1,27 @@
+title: Propagate call-site generic arguments into implicit-generic bodies
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 10, decision D2. ''*bsort(v)'' and ''*peek(v)'' with ''t is v.get(0)''
+  fail with ''ambiguous type: cannot infer type for this expression (unresolved
+  method-call return type)'' while ''*firstof(v)'' (tail v.get(0)) and ''*sumall(v)'' (t
+  is t + v.get(i)) succeed: the element type of a container parameter is never
+  propagated from the call site and resolves only when a local constraint incidentally
+  pins it. Root cause is incomplete generic-argument plumbing, not a missing constraint
+  language. Fix: substitute the call site''s concrete type arguments into the
+  implicit-generic body''s type environment at instantiation; make resolve_core and
+  occurs_in recurse into Struct(_, args) (src/typer/unify/resolve.rs:26-82, where Struct
+  falls to _ => ty.clone() so ?v ~ Struct(n, [?v]) passes the occurs check); stop
+  Struct(n, _) <-> Enum(n) unifying with generic arguments skipped
+  (src/typer/unify/mod.rs:555-564). Also fix the fix-it text, which suggests '': i64'' -
+  Jinn annotates with ''as i64''. DoD: snippets s045, s090, s094, s123, s168 compile
+  with NO added annotations; std/random.jn is strict-clean; the fix-it text is valid
+  Jinn; the i64-defaulting sites (resolve.rs:130-133, unify/mod.rs:83-95, ~25
+  unwrap_or(Type::I64)) are audited and each justified in a comment or removed,
+  eliminating the pattern where a default returns i64 while pushing a strict error
+  (resolve.rs:254); for an exported function with no call site in the compilation unit,
+  require an annotation or a trait bound (task 1-4 bounded polymorphism) and say so in
+  the diagnostic.'

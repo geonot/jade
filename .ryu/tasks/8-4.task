@@ -1,0 +1,18 @@
+title: Pin the review repros as tests
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 1 part 1. Add nine programs from the review to a new
+  tests/review_2026_07.rs, each asserting the currently-observed bad outcome with a
+  FIXME(8-N) reference to its owning task, to be flipped to the correct assertion by
+  that task. Memory (8-5..8-8): aggregate-param return double-free (free(): invalid
+  pointer); cross-task shared-Vec mutation (realloc(): invalid old size, 3/3 runs);
+  alias-visible mutation (b is a; b.push(4)). Typer (8-16, 8-17): cross-type equals
+  SIGSEGV; declared-String-returns-i64 accepted; ''abc'' + 1 accepted; heterogeneous
+  vec() reading a leaked pointer as an integer; multi-clause arity mismatch panicking at
+  src/parser/mod.rs:514 and exiting 0. Store (8-25): ''for u in all users'' SIGSEGV.
+  DoD: all nine present; each names its owning task; the harness fails if a FIXME(8-N)
+  marker outlives its task''s completion.'

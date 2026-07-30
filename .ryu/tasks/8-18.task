@@ -1,0 +1,14 @@
+title: Comment-preserving formatter
+status: pending
+atomic: true
+priority: medium
+blocked_by: ['8-2']
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 3 part 2, decision D5. Add a Comment token / trivia channel to the lexer
+  (src/lexer/mod.rs:196-197 currently discards them and token.rs has no variant), attach
+  trivia to AST nodes, and preserve it through format_source. DoD: round-trip property
+  test - for a corpus including every snippets/ file, jinn fmt --write twice is
+  idempotent and preserves every comment, its position (leading, trailing, standalone),
+  and blank-line grouping; the 8-2 refusal is removed; docs/fmt.md documents the trivia
+  rules.'

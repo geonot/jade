@@ -1,0 +1,10 @@
+# 2026-07-29 (JINN_REVIEW_2026_07 remediation, task 8)
+SUPERSEDED IN PART by task 8-2 + 8-18 (docs/remediation-2026-07.md). This task's
+description records fmt as 'ALREADY SHIPPED' with gaps limited to conformance tests,
+idempotence, and reparse-equivalence. JINN_REVIEW_2026_07 found fmt deletes every
+comment and overwrites the file in place (lexer discards # comments,
+src/lexer/mod.rs:196-197; format_source reprints from AST, src/fmt.rs:5-11; driver
+writes over the original, src/driver/mod.rs:304-319). Verified: a 5-line file lost 3
+comments. Do not extend this task's test suite over a formatter that destroys source.
+8-2 makes fmt non-destructive; 8-18 adds comment trivia and absorbs this task's
+idempotence + reparse-equivalence DoD.

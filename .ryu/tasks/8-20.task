@@ -1,0 +1,24 @@
+title: Remove dead aspirational subsystems
+status: pending
+atomic: true
+priority: low
+blocked_by: ['8-7']
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 17. (1) src/codegen/rc.rs: 250 lines of retain/release/atomic-RC with zero
+  call sites outside the file. Under D1 there is no shared-ownership model coming, so no
+  refcounts are needed - delete it along with needs_atomic_rc (src/types.rs:129-143)
+  which exists only to serve it. Note ''Perceus'' here means drop placement (elision,
+  sinking, fusion, malloc-reuse) in src/perceus/mir_perceus.rs, which is real and stays;
+  the naming should stop implying reference counting. (2) src/incr.rs artifact cache:
+  call sites only log the dirty count (driver/mod.rs:532-545) and ArtifactCache::store
+  is never called outside its own unit test so lookup can never hit; the design would
+  also be near-useless if wired up because function_cache_key mixes in every function''s
+  signature rather than actual dependencies and hash_stmt hashes format!("{:?}", stmt)
+  including spans, so a blank line dirties everything below it. Compile times are 64 ms
+  for a small file and ~1 s for an app, so delete the cache; interface.rs interface
+  hashing is real and consumed (driver/sources/modules.rs:123) and stays. (3) Unused
+  parallel-codegen scaffolding (partition_work, codegen_threads, incr.rs:238-260). DoD:
+  deleted, not #[allow(dead_code)]-ed; zero warnings; no behavior change; if incremental
+  compilation is still wanted, docs/ records the requirements it would have to meet so
+  the next attempt does not rebuild the same broken design.'

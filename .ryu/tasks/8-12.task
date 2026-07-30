@@ -1,0 +1,18 @@
+title: Fix scope child lifecycle (dangling children[])
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 7a. s->children[] is appended at registration (scope.c:92-94) and never
+  pruned, but sched.c:225-238 calls jinn_coro_destroy(c) when a child exits.
+  jinn_scope_cancel then reads snapshot[i]->cancelled and ->wait_chan (scope.c:159-167),
+  and scope_wake_cancelled reads c->state and can enqueue a freed coroutine into the run
+  queue (240-246). Any together block where one child errors after siblings have
+  completed hits this. Separately, children beyond 64 are counted but not registered, so
+  cancellation silently misses them. DoD: children are removed on exit or destruction is
+  deferred until the scope releases its reference, so no dangling entry is reachable
+  from cancel or wake; the 64-child limit is removed or made a hard diagnostic rather
+  than silent non-registration; a test cancels a scope after some children have
+  completed and runs clean under ASan.'

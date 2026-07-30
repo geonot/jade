@@ -1,0 +1,18 @@
+title: Reject cross-task aggregate aliasing
+status: pending
+atomic: true
+priority: high
+blocked_by: ['8-7']
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 1, section 3.2. A shared Vec passed into two dispatch bodies inside a
+  together scope aborts the allocator with realloc(): invalid old size on 3/3 runs with
+  no diagnostic; the only cross-thread check today rejects @resource types
+  (enforce_cross_thread_safe, src/typer/mod.rs:603-618). Under D1 the second dispatch is
+  a use-after-move and must not compile. The diagnostic must point at the sharing and
+  name the alternative (send it on a channel, or give each task its own), because ''use
+  of moved value'' alone will read as a limitation rather than a caught race. DoD:
+  section 3.2 rejected at compile time with an actionable message; the equivalent
+  correct programs (per-task vectors merged over a channel; an actor owning the vector)
+  compile and run; together/dispatch/sim for/actor-payload capture paths all covered;
+  tests/concurrency_shutdown.rs still green.'

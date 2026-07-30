@@ -1,0 +1,14 @@
+title: Extend the ownership fuzzer to the new classes
+status: pending
+atomic: true
+priority: medium
+blocked_by: ['8-6', '8-8']
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 1 part 3. tests/ownership_fuzz.rs passes today while a 7-line program
+  corrupts the heap, so it does not generate returns of aggregate parameters or
+  cross-task captures. Add both classes plus nested-scope aggregate binds and aggregate
+  struct fields. DoD: the generator reproduces section 3.1 and 3.2 from a fresh seed
+  BEFORE 8-6/8-8 are applied (verified by reverting them); every generated program is
+  either cleanly rejected or runs to completion with no abort, SIGSEGV, or ICE, under
+  ASan via ci/sanitize.sh.'

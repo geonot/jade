@@ -1,0 +1,20 @@
+title: Repair and wire tests/programs into the harness
+status: pending
+atomic: true
+priority: medium
+blocked_by: ['8-16', '8-17']
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 14. 16 of 89 programs fail in isolation (binary_search, clause_fns_ext,
+  compiler_pipeline, data_structures, dispatch_fib, dispatch_multi, ecs, embed,
+  error_handling, interpreter, json_parser, linked_list, sim_for_test, state_machine,
+  store_index, syntax) and NONE of the 16 is referenced by any test;
+  tests/integration.rs has 21 expect_file sites for 89 programs, so the suite is green
+  partly because broken programs fell out of the harness. Two are codegen ICEs to fix
+  rather than delete: ''FieldGet on pointer to unknown struct type for field __tag''
+  (linked_list) and ''GEP index out of range'' (json_parser). error_handling still uses
+  the removed prefix-! raise and needs migrating to ''err <Variant>''. Several others
+  should resolve via 8-16. DoD: every .jn in tests/programs/ is either referenced by a
+  test with expected output or deleted with a reason; a harness test enumerates the
+  directory and fails on any unreferenced file so rot cannot recur; the two ICEs are
+  fixed with conformance tests.'

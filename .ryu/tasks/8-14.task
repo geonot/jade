@@ -1,0 +1,21 @@
+title: Fix Chase-Lev deque buffer reclamation on grow
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review section 7 critical, adjacent to item 5 and not separately numbered in section
+  11; included because it is the same bug tier and one worker queueing more than 1024
+  coroutines triggers it. jinn_deque_grow does free(dq->buffer) and swaps
+  buffer/capacity as two separate non-atomic stores (deque.c:24-37) while a thief reads
+  dq->buffer[t & (dq->capacity - 1)] (80) - both a read of freed memory and a torn
+  buffer/capacity pair. Canonical Chase-Lev leaks retired buffers or reclaims by epoch;
+  it never frees inline. Slots are also plain pointers rather than atomics, a formal
+  data race between 45 and 80. The memory orderings in this file are textbook-correct
+  (release fence in push, seq_cst in pop/steal, correct CAS orders), so this is a
+  contained fix. DoD: retired buffers retained or epoch-reclaimed, never freed inline;
+  slots are relaxed atomics; capacity and buffer published as one atomic unit; a test
+  forces at least two grows with concurrent stealers under TSan and ASan; the
+  calloc-failure path no longer yields capacity = 0 (deque.c:14, 45) and grow-OOM no
+  longer silently overwrites a queued coroutine (27-28).'

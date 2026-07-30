@@ -1,0 +1,21 @@
+title: Generalize the park lock-handoff to all park sites
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 5. The channel path is correct and non-obvious: a parking coroutine holds
+  the channel spinlock across the context swap and the scheduler releases it only after
+  the context is fully saved (runtime/channel.c:239-244 + runtime/sched.c:213-222).
+  Three structurally identical sites publish the coroutine before its context is saved:
+  select (unlock_all at select.c:273, swap at 283), actor join (join_unlock at
+  actor.c:147, swap at 149), scope join (publishes s->parent then scope_unlock at
+  scope.c:272, swap at 274), plus the event loop which unparks w->coro directly
+  (event.c:132-134) with no synchronization against a concurrent jinn_sched_park
+  (sched.c:370-384). In each window another worker can swap into a ctx holding stale
+  registers from a previous park while the original thread still executes on that stack;
+  commit 0219fe7 fixed exactly this class in channels. DoD: held_chan_lock generalized
+  to a release-after-save handoff used by all four sites; no park site releases its
+  guard before the swap; a stress test drives select/join/scope-join/event parks
+  concurrently under TSan for a sustained run with zero reports.'

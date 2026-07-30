@@ -1,0 +1,21 @@
+title: Atomic durable write discipline for all store rewrites
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 11, decision D6. Zero rename() calls and zero directory fsyncs exist in
+  the layer; fsync/fdatasync appear only in wal.c. Every other rewrite is
+  truncate-in-place via fopen(path, ''w+b''): migrations (migrate.c:238-240, 313-314,
+  380-382) where a crash between the truncating open and the final write destroys the
+  entire store, in the code path whose purpose is safe schema evolution; kv_save which
+  rewrites header plus all entries on every set/del/incr (kv.c:93-118) so a torn write
+  leaves count = N with garbage trailing entries that reload as live data (silent
+  resurrection of deleted keys); jinn_ver_compact (version.c:164-174); bloom persistence
+  (bloom.c:92-99). DoD: every rewrite is write-to-temp, fsync file, rename, fsync
+  directory; every fsync/fdatasync return value is checked and surfaced; a
+  crash-injection test kills the process at N points across each rewrite path and
+  asserts the store is always either the old or the new state, never a mixture; the
+  single-writer contract is enforced with an advisory file lock and a clear diagnostic
+  on contention (two concurrent writers currently both succeed by luck).'

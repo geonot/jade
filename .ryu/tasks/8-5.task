@@ -1,0 +1,21 @@
+title: Specify the aggregate memory model
+status: pending
+atomic: true
+priority: high
+blocked_by: ['8-3']
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 2, decision D1. Write docs/memory-model.md with the rigor of
+  docs/access-semantics.md, specifying move-on-assign with compiler-inferred borrows for
+  all heap aggregates (Vec, Map, aggregate-containing structs), matching what jinn.md
+  already promises. Cover: what ''is'' does for aggregates versus scalars and strings;
+  when a read borrows and what ends a borrow; what parameters and return values do to
+  ownership; how take and copy fit; interaction with defer, generators, channels, and
+  actor message payloads. Rejected: deep value semantics (silent O(n) copy violates the
+  performance goal) and today''s shared mutable aliasing (cannot be made safe without GC
+  or refcounts). Accept deliberately that ''b is a; b.push(4); log(a.length)'' becomes a
+  compile error. This document is the contract 8-6/8-7/8-8 implement against, so write
+  it first. DoD: every rule carries a named example; every rejection carries exact
+  diagnostic text; the three review section 3 programs appear with required outcomes;
+  the ''no reference cycles are constructible'' property is stated as a consequence;
+  reviewed against access-semantics.md and escape/mod.rs tiers for contradictions.'

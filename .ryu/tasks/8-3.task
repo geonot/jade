@@ -1,0 +1,20 @@
+title: Documentation honesty pass
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 9 part 1. Correct claims contradicted by observed behavior now, before the
+  code is fixed: remove ''Status: fully implemented and conformance-tested'' from
+  docs/error-effects.md:3; replace jinn.md''s ''prevents use-after-free, double-free,
+  and data races'' with the D1 target state marked in progress and linked to 8-5;
+  correct or remove the sim for parallelism claim (it lowers to a sequential counted
+  loop, src/mir/lower/loops.rs:307-460, measured identical to for); fix the
+  verified-broken jinn.md examples (actor ''*value returns i64'', ''channel of i64'' as
+  a param type, ''for v in ch'', extern varargs, sleep(), then-position ternary
+  nesting); state the store single-writer contract and the current zero-row miss
+  behavior. DoD: every code block in jinn.md is extracted and compiled by a test so a
+  documented example that does not compile fails CI; adopt docs/concurrency.md''s ''as
+  it actually exists today, not aspiration'' header contract on jinn.md and
+  error-effects.md.'

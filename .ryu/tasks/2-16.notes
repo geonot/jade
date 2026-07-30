@@ -1,0 +1,7 @@
+# 2026-07-29 (JINN_REVIEW_2026_07 remediation, task 8)
+SEQUENCE AFTER task 8-25 (docs/remediation-2026-07.md). Aggregations, projections, and
+group-by all sit on a query result that is not a first-class composable value --
+store-improvement.md:48's own diagnosis. Measured: a no-match query returns a
+fabricated zero row (name=[] age=0) and 'for u in all users' SIGSEGVs at 0x51 with no
+test covering it. 8-25 makes possibly-empty queries Option and makes row sets
+iterable/bindable/passable; build 2-16 on top of that, not beside it.

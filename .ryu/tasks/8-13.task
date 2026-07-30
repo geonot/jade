@@ -1,0 +1,16 @@
+title: Fix generator TLS staleness (tl_gen_coro)
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 7b. jinn_gen_resume sets tl_gen_coro = c on every resume (coro.c:277) but
+  it is cleared only on first trampoline entry (171-174). Resumes 2..n swap into the
+  middle of jinn_gen_suspend and never reach the trampoline, so the thread''s value is
+  permanently stale. The next NEW coroutine whose first run lands on that thread sees
+  gen != NULL, runs the generator''s entry with the generator''s argument on the wrong
+  coroutine, then spins in for(;;){} (179). DoD: the flag is cleared at every
+  suspend/resume boundary, not only on first entry; a test advances a generator several
+  times then spawns fresh coroutines on the same worker and asserts correct execution;
+  scan for other TLS values with the same clear-once pattern.'

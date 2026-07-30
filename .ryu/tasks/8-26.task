@@ -1,0 +1,23 @@
+title: Regenerate benchmarks and extend methodology honesty
+status: pending
+atomic: true
+priority: low
+blocked_by: ['8-1', '8-6', '8-11', '8-16', '8-21', '8-25']
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 9 part 2. benchmarks/results.csv reports fibonacci at 340.82 ms (Jinn) /
+  339.61 ms (C) ratio 1.0, but the current benchmarks/fibonacci.jn computes fib(42),
+  measured at 1,703 ms (Jinn) / 658 ms (gcc -O3) - whatever produced that row is not the
+  source in the tree. benchmarks/README.md is already commendably honest about
+  methodology (flagging store_ops as disk-vs-memory, marking C-side gaps language-only,
+  noting a real M:N C baseline may flip several ratios) and that candor should extend to
+  the numbers themselves. Also record the two genuine codegen gaps found: fib(42) at
+  2.59x despite LLVM applying an accumulator transformation and marking the function
+  nounwind memory(none), and tight_loop at 1.48x on a 16x-unrolled 2-billion-iteration
+  loop; both merit a perf profile. Everything else measured 0.34x-1.13x against gcc -O3
+  with byte-identical outputs (median ~0.97x), which is the claim worth defending. DoD:
+  results.csv regenerated from current sources on stated hardware with run counts and
+  variance; every ratio involving the Jinn scheduler against a single-pthread C baseline
+  is re-baselined or marked non-comparable in the CSV itself, not only the README; a CI
+  job re-runs the suite and fails on a >10% regression; the two outliers have profiles
+  attached and follow-up tasks if a fix is identified.'

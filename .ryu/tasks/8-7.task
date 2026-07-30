@@ -1,0 +1,23 @@
+title: Unify ownership checking into one flow-sensitive analysis
+status: pending
+atomic: true
+priority: high
+blocked_by: ['8-5']
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 16. Replace the two overlapping half-checkers with one analysis.
+  src/ownership/ sees everything but is the weaker: flow-insensitive across branches (a
+  move in ''then'' mutates outer VarState in place via lookup_mut,
+  src/ownership/mod.rs:123-130, no snapshot/merge at verify.rs:58-68), single-pass on
+  loops with no fixpoint (verify.rs:69-95), borrow counts that increment and never
+  release (mod.rs:148-183), call arguments never treated as moves (verify.rs:233-241).
+  The typer has correct snapshot/restore and branch-union merge
+  (src/typer/mod.rs:488-514) plus a loop re-move check but only for explicit take. Build
+  on the typer''s machinery: branch snapshot and union merge, loop fixpoint, scoped
+  borrow release, calls as moves-or-borrows per D1. DoD: the analysis is the single
+  authority and the redundant path is deleted not disabled; section 3.3 rejected with
+  the D1 diagnostic; the tests/audit_alpha/negative_* corpus still passes; jinn check
+  runs it so check and build agree (check currently skips ownership entirely,
+  src/driver/mod.rs:249-280, and passes a heap-corrupting program); unify the two driver
+  pipelines so jinn build stops skipping HirValidator (driver/pipeline.rs omits it,
+  driver/mod.rs:437 runs it).'

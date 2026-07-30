@@ -1,0 +1,9 @@
+# 2026-07-29 (JINN_REVIEW_2026_07 remediation, task 8)
+PREMISE CONTRADICTED by JINN_REVIEW_2026_07; see task 8-21/8-22/8-23. This task calls
+tests/wal_crash.rs + wal_property.rs a 'GOOD baseline' needing only torn-write
+simulation. Measured behavior: the WAL is never replayed on recovery (deleting the
+.wal left the row count unchanged at 6233; deleting the .store gave 0), and mid-WAL
+corruption is undetectable (64 random bytes at offset 2000 produced results identical
+to the uncorrupted control). The existing suite passes on a write-only WAL, so it is
+not a baseline to extend. Sequence: 8-23 (real replay) then 8-22 (CRC/fsync/torn tail)
+then this task's torn-tail, multi-store interleaving, and double-recovery idempotence.

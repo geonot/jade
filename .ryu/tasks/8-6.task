@@ -1,0 +1,20 @@
+title: Fix aggregate move-out on return (double-free)
+status: pending
+atomic: true
+priority: high
+blocked_by: ['8-5']
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 1, section 3.1. ''*ident(v) returns Vec of i64 / return v'' called as ''a
+  is vec(1,2,3); s is ident(a); log(s.length)'' aborts with free(): invalid pointer at
+  every opt level, annotated or not, return or tail expression; dropping the trailing
+  log gives a SIGSEGV instead, confirming a genuine double-free. jinn check reports
+  ''check passed''. Both the callee parameter drop and the caller binding drop fire on
+  one buffer. Contributing: a bind whose value is a plain variable emits no clone
+  (needs_auto_clone, src/mir/lower/mod.rs:616-621) and the consumed-set scan does not
+  recurse into nested statement bodies (collect_block_consumed_ids,
+  src/typer/lower/block.rs:164-190, _ => {} at 187). Highest-priority correctness fix in
+  the plan: this is how every sort, filter, and transform helper is written, and it is
+  why snippets/101-200/s107.jn dies. DoD: section 3.1 runs clean under ASan at --opt 0
+  and --opt 3; s107.jn sorts correctly; nested-scope aggregate binds accounted for; the
+  consumed-set scan recurses into if/while/match/for; 8-4''s first assertion flipped.'

@@ -1,0 +1,7 @@
+# 2026-07-29 (JINN_REVIEW_2026_07 remediation, task 8)
+COMPLEMENTS task 8-16 + 8-17 (docs/remediation-2026-07.md), and 8-16 makes this
+load-bearing: decision D2 propagates call-site generic arguments into
+implicit-generic bodies, so type errors surface at instantiation rather than
+definition. The instantiation-chain diagnostic specified here ('required by X
+instantiated at Y') is what makes that tradeoff acceptable. This task's Type
+pretty-printing audit (I64 vs i64) belongs in 8-17's single rendering path.

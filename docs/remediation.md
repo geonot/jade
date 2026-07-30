@@ -5,9 +5,14 @@ Consolidated, authoritative inventory of all remediation work derived from:
 - `JINN_LANGUAGE_REVIEW_2026_06.md` — the standing-panel language review (§8 actionable items).
 - `JINN_AUDIT_2026_06_02.md` — the build/test/run audit (findings + P0 soundness bugs).
 - `store-improvement.md` — the 12-item persistent-store review.
+- `JINN_REVIEW_2026_07.md` — the 2026-07 external review. Its remediation plan
+  (task 8, 26 subtasks, decisions D1–D6) lives in
+  [`remediation-2026-07.md`](remediation-2026-07.md) and is **not** duplicated
+  below; that document is authoritative for task 8.
 
-This file is the single source of truth for *what remains*. It mirrors the task
-tree under `.ryu/tasks/`. Each item carries its task ID, source, priority, and
+This file is the single source of truth for *what remains*, together with
+`remediation-2026-07.md` for task 8. It mirrors the task tree under
+`.ryu/tasks/`. Each item carries its task ID, source, priority, and
 current status. Completed items are recorded for provenance; remaining items are
 grouped by theme and ordered for execution.
 
@@ -30,6 +35,7 @@ Legend: ✅ done · ◻ remaining · ⊘ blocked.
 | Store query language (tasks 2-16, 2-17) | 0 | 2 | 0 |
 | Store improvements (task 2-31, 12 items) | 2 | 9 | 1 |
 | Result ctor monomorphization (task 4) | 1 | 0 | 0 |
+| **2026-07 review (task 8, see `remediation-2026-07.md`)** | **0** | **26** | **0** |
 
 ---
 

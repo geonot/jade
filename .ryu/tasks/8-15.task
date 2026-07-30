@@ -1,0 +1,24 @@
+title: Explicit module resolution (remove directory absorption)
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 8, decision D4. merge_source_files (src/driver/pipeline.rs:53 ->
+  sources/modules.rs:229-239) recursively merges every .jn file under the entry file''s
+  directory into the program, and resolve_implicit_imports (sources/implicit.rs)
+  additionally parses and flattens any file whose stem matches an undefined identifier
+  used in x.y position. Consequences: parse and type errors from unrelated files surface
+  as warnings; snippets/guide_tour.jn fails in place with "operator ''-'' not defined
+  for ''i64'' and ''Vec of ?509'' (line 18)" where line 18 contains no ''-'', while the
+  byte-identical file in an empty directory compiles and runs; the misattribution class
+  was reproduced directly ("type ''Vec3'' has no field ''x''" for a Vec3 that declares x
+  as f64). What a program means depends on what else is in the directory. DoD: a
+  single-file compile reads that file plus the transitive closure of its explicit use
+  declarations and nothing else; ''use math'' still resolves math.jn beside the entry
+  file and under the manifest source root; no diagnostic from a file outside that
+  closure can appear; snippets/guide_tour.jn compiles in place; project builds resolve
+  from the manifest entry only. Tests: a sibling with a syntax error, a sibling
+  declaring a colliding type, and a sibling declaring a store all leave the target
+  compile unaffected.'

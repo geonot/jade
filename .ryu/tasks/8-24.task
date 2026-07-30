@@ -1,0 +1,20 @@
+title: Scope and bound store transactions
+status: pending
+atomic: true
+priority: medium
+blocked_by: ['8-22']
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 11. static int jinn_txn_depth and static JinnTxnFile *jinn_txn_files
+  (wal.c:267-268) are process-global, not thread-local, with no lock, in an M:N runtime
+  where store code runs on any worker, so two coroutines in transaction concurrently
+  corrupt the list. Worse, jinn_wal_force checks jinn_txn_active() (68-71), so one
+  coroutine''s open transaction silently disables per-record fsync for every other
+  coroutine''s writes. The snapshot copies the entire data file into heap memory on
+  first touch (312-331) and rollback rewrites in place (376-399), so a crash
+  mid-rollback leaves the store corrupt with no recovery path. DoD: transaction state is
+  per-coroutine (or lock-protected) and one task''s transaction cannot alter another''s
+  durability; rollback is crash-safe via the 8-21 temp+rename path; snapshot memory is
+  bounded (undo log rather than whole-file copy) with a documented limit and a clear
+  error when exceeded; jinn.md''s atomicity claims are verified by a
+  concurrent-transaction test.'

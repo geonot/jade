@@ -1,0 +1,26 @@
+title: Close WAL integrity holes
+status: pending
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T00:00:00'
+description: 'Review item 11. The skeleton is right (per-entry CRC32, env-selectable sync policy,
+  group commit, replay stops at first bad entry). The holes: a CRC of 0 bypasses
+  verification entirely (if (stored_crc != 0 && computed != stored), wal.c:485) and the
+  malloc-failure path deliberately writes CRC 0 (202-204); payload_len is outside the
+  CRC (190-199) so corrupted framing can frame garbage that verifies; fsync results are
+  discarded ((void)fsync(fd) at 81, 88-89, 105), the PostgreSQL fsync-gate class where
+  an EIO is consumed and committed data is gone; no directory fsync after creating the
+  log (149-157); bad magic silently truncates and recreates the log (145-149) instead of
+  triggering recovery; a torn tail is never truncated - replay stops at the first bad
+  entry (485-489) but open appends at SEEK_END (143), so every post-crash append lands
+  after the torn record and is unreachable to all future replays permanently;
+  jinn_wal_write returns void and a short write is an fprintf (172-186). DoD: CRC covers
+  the full record including length; no zero-CRC bypass (a malloc-failure path that
+  cannot checksum must fail the write, not poison the log); fsync returns checked and
+  propagated; directory fsync on create; bad magic is a recovery error, never silent
+  truncation; the torn tail is truncated at the first invalid record before any append;
+  jinn_wal_write returns a status callers handle. Extend tests/wal_crash.rs and
+  wal_property.rs with mid-record corruption, zero-CRC injection, and
+  torn-tail-then-append.'
