@@ -77,6 +77,7 @@ impl Typer {
                     .collect();
                 self.infer_ctx.set_strict(was_strict);
 
+                self.instantiated_generics.insert(*name);
                 let inf_fn = self
                     .inferable_fns
                     .get(name)

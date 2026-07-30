@@ -495,7 +495,7 @@ builds resolve from the manifest `entry` only. Tests: a sibling with a syntax er
 sibling declaring a colliding type, and a sibling declaring a store all leave the
 target compile unaffected.
 
-### ◻ 8-16 Propagate call-site generic arguments — **P0**, blocked_by: []
+### ✅ 8-16 Propagate call-site generic arguments — **P0**, blocked_by: []
 *Review item 10. Decision D2.*
 
 `*bsort(v)` and `*peek(v)` (`t is v.get(0)`) fail with `ambiguous type: cannot infer

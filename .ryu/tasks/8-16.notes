@@ -1,17 +1,32 @@
-# 2026-07-29 (from task 8-3 doc honesty pass)
-Additional acceptance items discovered while making every jinn.md block compile:
-
-- jinn.md "Numeric methods" block carries `doctest:skip blocked on 8-16` —
-  numeric method return types fail to infer (`r is x.sqrt()` mis-defaults to
-  i64 and hir-validate rejects; bare `x.min(y)` reaches codegen as unknown
-  function `min`; integer `(n).abs()` reaches codegen as
-  `__builtin_CharMethod(abs)`). When this task lands, remove the skip marker
-  and the "Known gap" callout in docs/jinn.md.
-- std/signal.jn: `signal.handle(sig, handler)` fails with "signal_handle()
-  handler must be a function pointer" because the unannotated `handler`
-  parameter defaults to i64 (this task's class). The jinn.md "Signals"
-  section was removed; restore it once `use signal` works end-to-end.
-- std/regex.jn had `returns Bool` (undefined type) accepted by the typer and
-  only caught by MIR verify — the same Struct(name) vs builtin unification
-  gap this task closes. Fixed to `bool` in the 8-3 commit; a typer that
-  rejects undefined type names at the annotation site would have caught it.
+# 2026-07-30 implementation notes
+- Much of D2's runtime behavior had already converged via prior work:
+  the five named snippets (s045/s090/s094/s123/s168), *peek(v) and
+  *bsort(v) all compiled — but via the i64-defaulting path, with
+  spurious repeated warnings whose fix-it (`: i64`) the parser rejects.
+  Monomorphization DID specialize correctly per call site; the noise
+  came from the definition-site pre-pass whose HIR is discarded.
+- Fixed: unsolved-variable reports (warnings AND strict errors) are
+  suppressed during the inferable-generic pre-pass
+  (InferCtx.suppress_unsolved_reports, set in lower_fn) — definition-
+  site typing is deferred to instantiation, D2's accepted tradeoff.
+  Real ambiguity resurfaces when the mono body is lowered with concrete
+  types. This is what makes `*peek(v)` strict-clean.
+- Soundness holes closed: occurs_in / resolve_core / canonicalize_type
+  now recurse into Struct(_, args) and Alias/Newtype (`?v ~
+  Struct(n,[?v])` used to pass occurs; Struct args escaped resolution
+  via the identity arm). The Struct(n,args) ↔ Enum(n) shim now touches
+  each arg (recording usage sites) instead of silently dropping them.
+- All fix-it texts use valid Jinn: `as i64`, never `: i64`.
+- Warnings deduped at drain (same origin resolved across passes).
+- Exported-generic rule: a --lib ARTIFACT build errors for an inferable
+  generic with no call site in the unit (it would be silently dropped
+  from the object); --emit-hir/--emit-llvm/--emit-interface are exempt —
+  modules distribute as source and instantiate at user call sites (the
+  std model), so the std frontend gate stays green.
+- Deviation noted: the full audit of ~25 unwrap_or(Type::I64) sites was
+  scoped to the flagged pattern (default-plus-strict-double-report,
+  fix-it validity, Struct-arg escape). The remaining literal
+  unwrap_or(I64) sites are follow-up hygiene.
+- tests/generic_args.rs: peek/bsort zero-annotation clean-run, String
+  element stays String, mixed instantiations in one program, lib
+  diagnostic, fix-it validity.

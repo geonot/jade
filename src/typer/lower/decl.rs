@@ -282,6 +282,25 @@ impl Typer {
     }
 
     pub(in crate::typer) fn lower_fn(&mut self, f: &ast::Fn) -> Result<hir::Fn, String> {
+        /* D2 (task 8-16): an inferable-generic function's definition-site
+         * lowering is a pre-pass — its HIR is discarded when the scheme
+         * generalizes and the body is re-lowered per call site with the
+         * call's concrete type arguments. Unsolved-variable reports from
+         * the pre-pass are noise (the review's `*peek(v)` strict failure);
+         * real ambiguity resurfaces at instantiation. */
+        let suppress = self.inferable_fns.contains_key(&f.name)
+            && !self.infer_ctx.suppress_unsolved_reports;
+        if suppress {
+            self.infer_ctx.suppress_unsolved_reports = true;
+        }
+        let out = self.lower_fn_inner(f);
+        if suppress {
+            self.infer_ctx.suppress_unsolved_reports = false;
+        }
+        out
+    }
+
+    fn lower_fn_inner(&mut self, f: &ast::Fn) -> Result<hir::Fn, String> {
         let mut hfn = self.lower_fn_deferred(f)?;
         // NOTE: hfn.ret may still be an unresolved TypeVar here for fns with
         // an inferred return type. Resolution is deferred to a final pass in

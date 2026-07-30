@@ -441,6 +441,26 @@ pub fn run() {
         Err(e) => die(&format!("hir: {e}")),
     };
 
+    /* D2 (task 8-16): a library exports its functions to call sites the
+     * compiler cannot see, so an unannotated generic has nothing to
+     * instantiate against — require the annotation now, loudly, instead
+     * of silently dropping the function from the artifact. */
+    /* Only when producing an actual artifact: with --emit-hir/--emit-llvm/
+     * --emit-interface nothing is dropped (modules distribute as source and
+     * instantiate at user call sites — the std model), so the frontend
+     * check passes; a real .o build would silently omit the function. */
+    if cli.lib && !cli.emit_hir && !cli.emit_llvm && !cli.emit_ir && !cli.emit_mir && !cli.emit_interface {
+        let unresolved = typer.unresolved_exported_generics();
+        if !unresolved.is_empty() {
+            for f in &unresolved {
+                eprintln!(
+                    "error: exported function `{f}` has unannotated parameters whose types cannot be inferred without a call site; annotate them (e.g. `v as Vec of i64`) or declare a trait bound"
+                );
+            }
+            die("library compile failed: unresolvable exported generics");
+        }
+    }
+
     if cli.emit_interface {
         let mod_name = input
             .file_stem()

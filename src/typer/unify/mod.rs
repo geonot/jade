@@ -31,6 +31,12 @@ pub(crate) struct InferCtx {
     usage_sites: Vec<Vec<(Span, &'static str)>>,
     pub(crate) debug: bool,
     collect_default_warnings: bool,
+    /// D2 (task 8-16): while lowering an inferable-generic function's
+    /// body (the definition-site pre-pass whose HIR is discarded and
+    /// re-lowered per call site), unsolved-variable reports are
+    /// suppressed — definition-site typing is deferred to instantiation,
+    /// where the call-site's concrete arguments are known.
+    pub(crate) suppress_unsolved_reports: bool,
     default_warnings: Vec<String>,
     strict_types: bool,
     strict_errors: Vec<String>,
@@ -51,6 +57,7 @@ impl InferCtx {
             usage_sites: Vec::new(),
             debug: false,
             collect_default_warnings: false,
+            suppress_unsolved_reports: false,
             default_warnings: Vec::new(),
             strict_types: true,
             strict_errors: Vec::new(),
@@ -556,12 +563,20 @@ impl InferCtx {
             }
             // P0-12 compatibility shim: until every site that produces
             // `Type::Enum(n)` is migrated to produce `Type::Struct(n, args)`,
-            // accept `Struct(n, _) ↔ Enum(n)` when names match. Generic args
-            // on the struct side are not unified (the enum side carries no
-            // arg info), which preserves existing behaviour.
-            (Type::Struct(na, _), Type::Enum(nb)) | (Type::Enum(nb), Type::Struct(na, _))
+            // accept `Struct(n, _) ↔ Enum(n)` when names match. The enum
+            // side carries no arg info, so nothing can be unified against
+            // the struct's args — but silently DROPPING unsolved arg
+            // variables let `?v` escape resolution (task 8-16). Resolve
+            // what we can; only fully-opaque args are let through.
+            (Type::Struct(na, args), Type::Enum(nb)) | (Type::Enum(nb), Type::Struct(na, args))
                 if na == nb =>
             {
+                for a in args {
+                    // Touching each arg records a usage site, so a var
+                    // that stays unsolved is reported at its origin
+                    // instead of silently defaulting through the shim.
+                    let _ = self.shallow_resolve(a);
+                }
                 Ok(())
             }
             (Type::Newtype(na, ia), Type::Newtype(nb, ib)) if na == nb => self.unify(ia, ib),

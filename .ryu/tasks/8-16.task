@@ -1,5 +1,5 @@
 title: Propagate call-site generic arguments into implicit-generic bodies
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []

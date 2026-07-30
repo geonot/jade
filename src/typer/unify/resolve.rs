@@ -46,6 +46,10 @@ impl InferCtx {
             Type::Fn(params, ret) => {
                 params.iter().any(|t| self.occurs_in(v, t)) || self.occurs_in(v, ret)
             }
+            // D2 (task 8-16): parameterized nominal types carry vars too —
+            // `?v ~ Struct(n, [?v])` used to pass the occurs check.
+            Type::Struct(_, args) => args.iter().any(|t| self.occurs_in(v, t)),
+            Type::Alias(_, inner) | Type::Newtype(_, inner) => self.occurs_in(v, inner),
             _ => false,
         }
     }
@@ -77,6 +81,10 @@ impl InferCtx {
             Type::Coroutine(inner) => Type::Coroutine(Box::new(self.canonicalize_type(inner))),
             Type::Generator(inner) => Type::Generator(Box::new(self.canonicalize_type(inner))),
             Type::Channel(inner) => Type::Channel(Box::new(self.canonicalize_type(inner))),
+            Type::Struct(n, args) => Type::Struct(
+                *n,
+                args.iter().map(|t| self.canonicalize_type(t)).collect(),
+            ),
             _ => ty.clone(),
         }
     }
@@ -131,18 +139,21 @@ impl InferCtx {
                     TypeConstraint::Float => Type::F64,
                     _ => Type::I64,
                 };
-                if warn_only && !self.pedantic {
+                if self.suppress_unsolved_reports {
+                    // Inferable-generic pre-pass: reporting is deferred to
+                    // per-call-site instantiation (D2).
+                } else if warn_only && !self.pedantic {
                     if let Some(origin) = &self.origins[root as usize] {
                         match constraint {
                             TypeConstraint::None => {
                                 self.default_warnings.push(format!(
-                                    "{}: unsolved type variable defaulted to i64 ({}). Consider adding `: i64` or the appropriate type annotation.",
+                                    "{}: unsolved type variable defaulted to i64 ({}). Consider annotating with `as i64` or the appropriate type.",
                                     origin.span.loc(), origin.reason
                                 ));
                             }
                             TypeConstraint::Numeric => {
                                 self.default_warnings.push(format!(
-                                    "{}: numeric type defaults to i64 ({}). Add `: i64` for integer or `: f64` for float.",
+                                    "{}: numeric type defaults to i64 ({}). Annotate `as i64` for integer or `as f64` for float.",
                                     origin.span.loc(), origin.reason
                                 ));
                             }
@@ -176,7 +187,7 @@ impl InferCtx {
                         TypeConstraint::None => {
                             let msg = if let Some(origin) = &self.origins[root as usize] {
                                 format!(
-                                    "{}: ambiguous type: cannot infer type for this expression ({})\n  help: consider adding a type annotation, e.g. `: i64` or `: String`{}",
+                                    "{}: ambiguous type: cannot infer type for this expression ({})\n  help: consider adding a type annotation, e.g. `as i64` or `as String`{}",
                                     origin.span.loc(),
                                     origin.reason,
                                     usage_notes
@@ -191,13 +202,13 @@ impl InferCtx {
                         TypeConstraint::Numeric => {
                             let msg = if let Some(origin) = &self.origins[root as usize] {
                                 format!(
-                                    "{}: numeric type defaults to i64 ({})\n  help: add `: i64` for integer or `: f64` for float",
+                                    "{}: numeric type defaults to i64 ({})\n  help: annotate `as i64` for integer or `as f64` for float",
                                     origin.span.loc(),
                                     origin.reason
                                 )
                             } else {
                                 format!(
-                                    "numeric type defaults to i64 for ?{root}\n  help: add `: i64` for integer or `: f64` for float"
+                                    "numeric type defaults to i64 for ?{root}\n  help: annotate `as i64` for integer or `as f64` for float"
                                 )
                             };
                             self.default_warnings.push(msg);
@@ -223,13 +234,13 @@ impl InferCtx {
                         TypeConstraint::Integer if self.pedantic => {
                             let msg = if let Some(origin) = &self.origins[root as usize] {
                                 format!(
-                                    "{}: pedantic: integer type defaults to i64 ({})\n  help: add an explicit annotation, e.g. `: i64` or `: i32`",
+                                    "{}: pedantic: integer type defaults to i64 ({})\n  help: add an explicit annotation, e.g. `as i64` or `as i32`",
                                     origin.span.loc(),
                                     origin.reason
                                 )
                             } else {
                                 format!(
-                                    "pedantic: unsolved integer type variable ?{root} defaults to i64\n  help: add an explicit annotation, e.g. `: i64` or `: i32`"
+                                    "pedantic: unsolved integer type variable ?{root} defaults to i64\n  help: add an explicit annotation, e.g. `as i64` or `as i32`"
                                 )
                             };
                             self.strict_errors.push(msg);
@@ -237,13 +248,13 @@ impl InferCtx {
                         TypeConstraint::Float if self.pedantic => {
                             let msg = if let Some(origin) = &self.origins[root as usize] {
                                 format!(
-                                    "{}: pedantic: float type defaults to f64 ({})\n  help: add an explicit annotation, e.g. `: f64` or `: f32`",
+                                    "{}: pedantic: float type defaults to f64 ({})\n  help: add an explicit annotation, e.g. `as f64` or `as f32`",
                                     origin.span.loc(),
                                     origin.reason
                                 )
                             } else {
                                 format!(
-                                    "pedantic: unsolved float type variable ?{root} defaults to f64\n  help: add an explicit annotation, e.g. `: f64` or `: f32`"
+                                    "pedantic: unsolved float type variable ?{root} defaults to f64\n  help: add an explicit annotation, e.g. `as f64` or `as f32`"
                                 )
                             };
                             self.strict_errors.push(msg);
@@ -281,6 +292,15 @@ impl InferCtx {
                 Type::Generator(Box::new(self.resolve_core(inner, warn_only)))
             }
             Type::Channel(inner) => Type::Channel(Box::new(self.resolve_core(inner, warn_only))),
+            // D2 (task 8-16): resolve THROUGH parameterized nominal types;
+            // `Struct(n, [?v])` used to fall to the identity arm, so `?v`
+            // escaped resolution entirely.
+            Type::Struct(n, args) => Type::Struct(
+                *n,
+                args.iter()
+                    .map(|t| self.resolve_core(t, warn_only))
+                    .collect(),
+            ),
             _ => ty.clone(),
         }
     }

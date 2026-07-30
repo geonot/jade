@@ -611,7 +611,14 @@ impl Typer {
         }
         self.auto_derive_display(&mut program);
         let default_warnings = self.infer_ctx.drain_default_warnings();
-        self.warnings.extend(default_warnings);
+        // The same origin can be resolved several times across passes;
+        // report each distinct warning once.
+        let mut seen_warn = std::collections::HashSet::new();
+        self.warnings.extend(
+            default_warnings
+                .into_iter()
+                .filter(|w| seen_warn.insert(w.clone())),
+        );
         let strict_errors = self.infer_ctx.drain_strict_errors();
         if !strict_errors.is_empty() {
             let mut seen = std::collections::HashSet::new();
