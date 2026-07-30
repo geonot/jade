@@ -245,6 +245,11 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_load(vec_ty, vec_ptr, "va.result")))
     }
 
+    /// `all <store>` — a first-class row set: a real Vec of the store's
+    /// in-memory record struct (task 8-25, decision D3). Bindable,
+    /// iterable, `.length`-able, passable. The old emission returned a
+    /// bare malloc'd array as `Ptr(Struct)` with no length traveling
+    /// with it, so `for u in all users` walked garbage and crashed.
     pub(in crate::codegen) fn emit_store_all(
         &mut self,
         store_name: &str,
@@ -265,6 +270,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let fp = self.load_store_fp(store_name)?;
         let i64t = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
 
         let rec_name = format!("__store_{store_name}_rec");
         let rec_st = self
@@ -283,168 +289,92 @@ impl<'ctx> Compiler<'ctx> {
         let count = self.store_read_count(fp)?;
         let raw_buf = self.store_load_records(fp, count, rec_size)?;
 
-        let jinn_total =
-            b!(self
-                .bld
-                .build_int_mul(count, i64t.const_int(jinn_size, false), "all.jinn_total"));
-        let one = i64t.const_int(1, false);
-        let jinn_alloc = b!(self.bld.build_select(
-            b!(self.bld.build_int_compare(
-                inkwell::IntPredicate::EQ,
-                jinn_total,
-                i64t.const_int(0, false),
-                "all.jinn_isz"
-            )),
-            one,
-            jinn_total,
-            "all.jinn_alloc"
-        ))
-        .into_int_value();
+        /* Fresh empty vec header {data: null, len: 0, cap: 0}; pushes
+         * grow it exactly like any user vec. */
+        let header_ty = self.vec_header_type();
         let malloc_fn = self.ensure_malloc();
-        let jinn_buf = self
+        let vec_hdr = self
             .call_result(b!(self.bld.build_call(
                 malloc_fn,
-                &[jinn_alloc.into()],
-                "all.jn"
+                &[i64t.const_int(24, false).into()],
+                "all.vec"
             )))
             .into_pointer_value();
+        let d0 = b!(self.bld.build_struct_gep(header_ty, vec_hdr, 0, "all.v.d"));
+        b!(self.bld.build_store(d0, ptr_ty.const_null()));
+        let d1 = b!(self.bld.build_struct_gep(header_ty, vec_hdr, 1, "all.v.l"));
+        b!(self.bld.build_store(d1, i64t.const_int(0, false)));
+        let d2 = b!(self.bld.build_struct_gep(header_ty, vec_hdr, 2, "all.v.c"));
+        b!(self.bld.build_store(d2, i64t.const_int(0, false)));
 
-        let has_strings = sd.fields.iter().any(|f| matches!(f.ty, Type::String));
         let deleted_idx = sd.fields.iter().position(|f| f.name == "deleted");
 
-        if has_strings || deleted_idx.is_some() {
-            let fv = self.cur_fn.expect("ICE: cur_fn not set");
-            let idx_ptr = self.entry_alloca(i64t.into(), "all.idx");
-            b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
+        let fv = self.cur_fn.expect("ICE: cur_fn not set");
+        let idx_ptr = self.entry_alloca(i64t.into(), "all.idx");
+        b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
 
-            let out_ptr = self.entry_alloca(i64t.into(), "all.out");
-            b!(self.bld.build_store(out_ptr, i64t.const_int(0, false)));
+        let loop_bb = self.ctx.append_basic_block(fv, "all.loop");
+        let body_bb = self.ctx.append_basic_block(fv, "all.body");
+        let push_bb = self.ctx.append_basic_block(fv, "all.push");
+        let next_bb = self.ctx.append_basic_block(fv, "all.next");
+        let done_bb = self.ctx.append_basic_block(fv, "all.done");
 
-            let loop_bb = self.ctx.append_basic_block(fv, "all.loop");
-            let body_bb = self.ctx.append_basic_block(fv, "all.body");
-            let copy_bb = self.ctx.append_basic_block(fv, "all.copy");
-            let next_bb = self.ctx.append_basic_block(fv, "all.next");
-            let done_bb = self.ctx.append_basic_block(fv, "all.done");
+        b!(self.bld.build_unconditional_branch(loop_bb));
+        self.bld.position_at_end(loop_bb);
+        let idx = b!(self.bld.build_load(i64t, idx_ptr, "all.i")).into_int_value();
+        let cmp = b!(self
+            .bld
+            .build_int_compare(inkwell::IntPredicate::ULT, idx, count, "all.cmp"));
+        b!(self.bld.build_conditional_branch(cmp, body_bb, done_bb));
 
-            b!(self.bld.build_unconditional_branch(loop_bb));
-            self.bld.position_at_end(loop_bb);
-            let idx = b!(self.bld.build_load(i64t, idx_ptr, "all.i")).into_int_value();
-            let cmp =
-                b!(self
-                    .bld
-                    .build_int_compare(inkwell::IntPredicate::ULT, idx, count, "all.cmp"));
-            b!(self.bld.build_conditional_branch(cmp, body_bb, done_bb));
-
-            self.bld.position_at_end(body_bb);
-            let raw_off =
-                b!(self
-                    .bld
-                    .build_int_mul(idx, i64t.const_int(rec_size, false), "all.roff"));
-            let raw_ptr = unsafe {
-                b!(self
-                    .bld
-                    .build_gep(self.ctx.i8_type(), raw_buf, &[raw_off], "all.rptr"))
-            };
-
-            if let Some(del_idx) = deleted_idx {
-                let del_gep =
-                    b!(self
-                        .bld
-                        .build_struct_gep(rec_st, raw_ptr, del_idx as u32, "all.del"));
-                let del_val =
-                    b!(self.bld.build_load(i64t, del_gep, "all.del.val")).into_int_value();
-                let is_deleted = b!(self.bld.build_int_compare(
-                    inkwell::IntPredicate::NE,
-                    del_val,
-                    i64t.const_int(0, false),
-                    "all.is_del"
-                ));
-                b!(self
-                    .bld
-                    .build_conditional_branch(is_deleted, next_bb, copy_bb));
-            } else {
-                b!(self.bld.build_unconditional_branch(copy_bb));
-            }
-
-            self.bld.position_at_end(copy_bb);
-            let out_idx = b!(self.bld.build_load(i64t, out_ptr, "all.oi")).into_int_value();
-
-            if has_strings {
-                let jinn_val = self.load_store_record_as_jinn(rec_st, raw_ptr, &sd)?;
-                let jinn_off = b!(self.bld.build_int_mul(
-                    out_idx,
-                    i64t.const_int(jinn_size, false),
-                    "all.joff"
-                ));
-                let jinn_ptr = unsafe {
-                    b!(self
-                        .bld
-                        .build_gep(self.ctx.i8_type(), jinn_buf, &[jinn_off], "all.jptr"))
-                };
-                b!(self.bld.build_store(jinn_ptr, jinn_val));
-            } else {
-                let src_off =
-                    b!(self
-                        .bld
-                        .build_int_mul(idx, i64t.const_int(rec_size, false), "all.soff"));
-                let src_ptr = unsafe {
-                    b!(self
-                        .bld
-                        .build_gep(self.ctx.i8_type(), raw_buf, &[src_off], "all.src"))
-                };
-                let dst_off = b!(self.bld.build_int_mul(
-                    out_idx,
-                    i64t.const_int(rec_size, false),
-                    "all.doff"
-                ));
-                let dst_ptr = unsafe {
-                    b!(self
-                        .bld
-                        .build_gep(self.ctx.i8_type(), jinn_buf, &[dst_off], "all.dst"))
-                };
-                let memcpy_fn = self.ensure_memcpy();
-                b!(self.bld.build_call(
-                    memcpy_fn,
-                    &[
-                        dst_ptr.into(),
-                        src_ptr.into(),
-                        i64t.const_int(rec_size, false).into()
-                    ],
-                    ""
-                ));
-            }
-
-            let next_out =
-                b!(self
-                    .bld
-                    .build_int_add(out_idx, i64t.const_int(1, false), "all.onext"));
-            b!(self.bld.build_store(out_ptr, next_out));
-            b!(self.bld.build_unconditional_branch(next_bb));
-
-            self.bld.position_at_end(next_bb);
-            let next_idx = b!(self
+        self.bld.position_at_end(body_bb);
+        let raw_off = b!(self
+            .bld
+            .build_int_mul(idx, i64t.const_int(rec_size, false), "all.roff"));
+        let raw_ptr = unsafe {
+            b!(self
                 .bld
-                .build_int_add(idx, i64t.const_int(1, false), "all.next"));
-            b!(self.bld.build_store(idx_ptr, next_idx));
-            b!(self.bld.build_unconditional_branch(loop_bb));
+                .build_gep(self.ctx.i8_type(), raw_buf, &[raw_off], "all.rptr"))
+        };
 
-            self.bld.position_at_end(done_bb);
-        } else {
-            let total =
-                b!(self
-                    .bld
-                    .build_int_mul(count, i64t.const_int(rec_size, false), "all.total"));
-            let memcpy_fn = self.ensure_memcpy();
-            b!(self.bld.build_call(
-                memcpy_fn,
-                &[jinn_buf.into(), raw_buf.into(), total.into()],
-                ""
+        if let Some(del_idx) = deleted_idx {
+            let del_gep = b!(self
+                .bld
+                .build_struct_gep(rec_st, raw_ptr, del_idx as u32, "all.del"));
+            let del_val = b!(self.bld.build_load(i64t, del_gep, "all.del.val")).into_int_value();
+            let is_deleted = b!(self.bld.build_int_compare(
+                inkwell::IntPredicate::NE,
+                del_val,
+                i64t.const_int(0, false),
+                "all.is_del"
             ));
+            b!(self.bld.build_conditional_branch(is_deleted, next_bb, push_bb));
+        } else {
+            b!(self.bld.build_unconditional_branch(push_bb));
         }
 
+        self.bld.position_at_end(push_bb);
+        let jinn_val = self.load_store_record_as_jinn(rec_st, raw_ptr, &sd)?;
+        self.vec_push_raw_with_floor(
+            vec_hdr,
+            jinn_val,
+            jinn_st.into(),
+            jinn_size,
+            self.empty_vec_growth_floor,
+        )?;
+        b!(self.bld.build_unconditional_branch(next_bb));
+
+        self.bld.position_at_end(next_bb);
+        let next_idx = b!(self
+            .bld
+            .build_int_add(idx, i64t.const_int(1, false), "all.next"));
+        b!(self.bld.build_store(idx_ptr, next_idx));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(done_bb);
         let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[raw_buf.into()], ""));
 
-        Ok(jinn_buf.into())
+        Ok(vec_hdr.into())
     }
 }

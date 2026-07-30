@@ -263,21 +263,18 @@ fn top_level_reassignment_overflows_compiler_stack() {
 // ─── Store (§5.4) ───────────────────────────────────────────────────────────
 
 /// §5.4 — `for u in all users` segfaults at runtime.
-/// FIXME(8-25): `all <store>` must yield an iterable row set.
+/// `all <store>` yields a first-class row set (task 8-25, first half):
+/// a real Vec of the store's records — bindable, iterable, `.length`-able.
+/// It used to be a bare pointer with no length, so iteration crashed.
 #[test]
-fn review_5_4_all_store_iteration_segfaults() {
+fn review_5_4_all_store_iteration_works() {
     let c = compile(
-        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    for u in all users\n        log(u.name)\n",
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    for u in all users\n        log(u.name)\n    rows is all users\n    log(rows.length)\n",
     );
-    assert!(c.ok(), "compiles today: {}", c.stderr());
+    assert!(c.ok(), "{}", c.stderr());
     let run = c.run();
-    assert!(
-        !run.status.success(),
-        "OBSERVED-BAD: `for u in all users` currently crashes. If it now \
-         works, task 8-25 has landed — flip this test to assert the two rows \
-         are printed. {}",
-        exit_desc(&run)
-    );
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "Alice\nBob\n2\n");
 }
 
 // ─── Marker lifecycle ───────────────────────────────────────────────────────

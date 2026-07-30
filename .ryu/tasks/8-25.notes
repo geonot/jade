@@ -1,0 +1,24 @@
+# 2026-07-30 progress notes (task still OPEN — second half pending)
+- LANDED (first half): `all <store>` is a first-class row set — a real
+  Vec of the store's in-memory record structs, built by emit_store_all
+  pushing each live (non-tombstoned) record through the normal vec
+  machinery. Bindable, iterable, `.length`-able, passable to an
+  unannotated (inferable-generic) function. The old emission returned a
+  bare malloc'd array typed Ptr(Struct) with no length traveling with
+  it, so `for u in all users` walked garbage and crashed. Pin flipped;
+  conformance test covers empty/many/tombstone-excluded/pass-to-fn.
+- OPEN (second half): queries as `Result of <row>, StoreError`. A full
+  desugar (`exists ? Ok(row) ! Err(Missing)`) was implemented and
+  REVERTED: the Err/miss path worked, but the Ok payload read garbage —
+  `row.age` after `match r / Ok(row)` returned the first bytes of the
+  name field ("Alic" as an i64). Root cause: Type::Row has a dual
+  representation (fixed-256-byte record strings on disk vs 24-byte SSO
+  in the jinn view), and enum-payload store/unwrap goes through a
+  layout that disagrees with Row field-access offsets. Fixing requires
+  teaching enum payload codegen a canonical Row representation (or
+  lowering Row to the __store_N struct type before it enters a
+  VariantCtor). Also: annotating a parameter `as Vec of items` (store
+  name as element type) resolves to the wrong struct — user-facing row
+  type naming needs a decision.
+- The zero-row fabrication on a miss therefore still stands; docs
+  continue to carry the "guard with count" warning until this lands.

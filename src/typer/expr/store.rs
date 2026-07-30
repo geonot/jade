@@ -343,9 +343,12 @@ impl Typer {
                     return Err(format!("unknown store '{store}'"));
                 }
                 let struct_name = Symbol::intern(&format!("__store_{store}"));
+                /* D3 (task 8-25): `all <store>` is a first-class row set —
+                 * a Vec of the store's record struct. The old Ptr type had
+                 * no length, so iteration walked garbage. */
                 Ok(hir::Expr {
                     kind: hir::ExprKind::StoreAll(*store),
-                    ty: Type::Ptr(Box::new(Type::Struct(struct_name, vec![]))),
+                    ty: Type::Vec(Box::new(Type::Struct(struct_name, vec![]))),
                     span: *span,
                 })
             }

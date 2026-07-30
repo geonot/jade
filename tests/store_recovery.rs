@@ -200,3 +200,20 @@ fn kill_nine_mid_insert_recovers_consistently() {
     let n2: i64 = stdout_lines(&r2)[0].parse().unwrap();
     assert_eq!(n, n2, "recovered state must be stable across opens");
 }
+
+/// Task 8-25 (first half) — `all <store>` is a first-class row set:
+/// iterate empty, iterate many, bind, `.length`, pass to a function,
+/// and tombstoned rows are excluded.
+#[test]
+fn all_store_first_class_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = "store items\n    name as String\n    qty as i64\n\n*total(rows)\n    t is 0\n    for r in rows\n        t is t + r.qty\n    log(t)\n\n*main\n    e is all items\n    log(e.length)\n    insert items 'a', 1\n    insert items 'b', 2\n    insert items 'c', 4\n    delete items where name equals 'b'\n    rows is all items\n    log(rows.length)\n    total(rows)\n";
+    let bin = compile_in(dir.path(), "p", src);
+    let out = run(dir.path(), &bin);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(stdout_lines(&out), vec!["0", "2", "5"]);
+}
