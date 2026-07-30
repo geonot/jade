@@ -102,6 +102,7 @@ jinn_coro_t *jinn_coro_create(void (*entry)(void*), void *arg) {
     c->on_exit_cb  = NULL;
     c->on_exit_arg = NULL;
     c->scope       = NULL;
+    c->txn_state   = NULL;
     atomic_store(&c->cancelled, 0);
 
     /*

@@ -14,10 +14,28 @@ impl Typer {
             ast::Expr::BinOp(lhs, op, rhs, span) => {
                 let hl = self.lower_expr(lhs)?;
                 let hr = self.lower_expr_expected(rhs, Some(&hl.ty))?;
+                /* Operands always unify (that drives inference), but the
+                 * FAILURE is surfaced only for equality (task 8-16):
+                 * `'abc' equals 5` used to type-check and segfault in the
+                 * String comparison the backend emitted. Arithmetic keeps
+                 * its historical laxity for now — pointer arithmetic
+                 * (`buf + n`) and string concatenation with coercible
+                 * operands are legitimate and handled downstream. */
+                let rl0 = self.infer_ctx.shallow_resolve(&hl.ty);
+                let rr0 = self.infer_ctx.shallow_resolve(&hr.ty);
                 let r = self
                     .infer_ctx
                     .unify_at(&hl.ty, &hr.ty, *span, "binary operands");
-                self.collect_unify_error(r);
+                if matches!(op, BinOp::Eq | BinOp::Ne)
+                    && !matches!(rl0, Type::Ptr(_))
+                    && !matches!(rr0, Type::Ptr(_))
+                {
+                    if let Err(e) = r {
+                        return Err(format!("type mismatch in `equals`: {e}"));
+                    }
+                } else {
+                    let _ = r;
+                }
 
                 match op {
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Exp => {

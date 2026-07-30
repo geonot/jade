@@ -87,6 +87,15 @@ impl InferCtx {
         self.strict_types = false;
     }
 
+    pub(crate) fn push_strict_error(&mut self, msg: String) {
+        self.strict_errors.push(msg);
+    }
+
+    pub(crate) fn is_quantified(&mut self, var: u32) -> bool {
+        let root = self.find(var);
+        self.quantified_vars.contains(&root)
+    }
+
     pub(crate) fn default_quantified_vars(&mut self, quantified: &[u32]) {
         for &v in quantified {
             let root = self.find(v);

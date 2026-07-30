@@ -1,0 +1,37 @@
+# 2026-07-30 implementation notes
+- Transaction state is per-coroutine: JinnTxnState hangs off
+  jinn_coro.txn_state (coroutines migrate threads, so thread-locals
+  alone are wrong; plain threads use a TLS fallback slot). Every access
+  re-derives the slot — nothing cached across a context swap. One
+  coroutine's open transaction no longer disables per-record fsync for
+  other coroutines (jinn_txn_active answers for the CURRENT context).
+- Store tracking is by GLOBAL ADDRESS (FILE **) + path
+  (jinn_txn_track_store), so rollback can restore through the 8-21
+  atomic temp+rename path and swap the reopened handle back into the
+  __store_N_fp global. Aux entries (index/column) keep the by-value
+  fp + rollback-callback shape.
+- Rollback order: WAL truncated to the pre-txn offset FIRST (so 8-23's
+  recovery replay can never resurrect aborted records), then the data
+  file restored atomically. A crash between the two leaves the data file
+  un-rolled-back but structurally intact — strictly better than the old
+  in-place restore, which could tear the store with no recovery path.
+  Remaining window documented here.
+- Snapshot memory is bounded: 256MB per file by default,
+  JINN_TXN_SNAPSHOT_MAX overrides; exceeding it aborts with a clear
+  message (proceeding would make rollback silently impossible). A true
+  undo log (the DoD's parenthetical) needs pre-images plumbed from every
+  mutation site — recorded as follow-up.
+- Same-store concurrent transactions remain an application-level hazard
+  (both snapshot independently); D6 single-writer is per-process.
+- Also in this change, 8-16 follow-through the FIXME lifecycle test
+  demanded: cross-type `equals` and heterogeneous vec `push` are hard
+  type errors (their unify failures were collected into a list that was
+  only ever surfaced alongside strict errors — i.e. swallowed).
+  Deferred-resolution ambiguity errors ("multiple types have this
+  method/field") are now gated on the receiver NOT being a quantified
+  row-poly var, since those legitimately match several types and
+  resolve per instantiation. `'abc' + 1` is now caught by the typer
+  rather than hir-validate.
+- tests: concurrent transactions commit independently; one task's
+  rollback leaves another task's committed store intact; the two §4.6
+  pins flipped.

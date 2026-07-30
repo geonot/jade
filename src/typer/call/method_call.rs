@@ -297,9 +297,14 @@ impl Typer {
 
             for (i, ha) in hargs.iter().enumerate() {
                 if let Some(Some(expected)) = expected_arg_tys.get(i) {
-                    let _ = self
+                    let r = self
                         .infer_ctx
                         .unify_at(expected, &ha.ty, span, "vec method argument");
+                    // A hard error, not dropped: `v.push('two')` on a Vec of
+                    // i64 used to type-check and leak a pointer (review §4.6).
+                    if let Err(e) = r {
+                        return Err(format!("type mismatch in vec `{method}`: {e}"));
+                    }
                 }
             }
             let ret_ty = Self::vec_method_ret_ty(method, elem_ty)

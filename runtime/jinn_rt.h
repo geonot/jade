@@ -119,6 +119,7 @@ struct jinn_coro {
     void              *scope;         /* owning jinn_scope_t, or NULL — structured concurrency */
     _Atomic(int32_t)   cancelled;     /* set when the owning scope is cancelled */
     jinn_waitq_node_t  wq_node;       /* embedded node for plain channel waits */
+    void              *txn_state;     /* per-coroutine transaction state (task 8-24) */
 };
 
 #define JINN_STACK_SIZE  (64 * 1024)   /* 64KB per coroutine */
@@ -586,7 +587,7 @@ void jinn_txn_begin(void);
 void jinn_txn_commit(void);
 void jinn_txn_rollback(void);
 int  jinn_txn_active(void);
-void jinn_txn_track(FILE *fp, FILE *wal);
+void jinn_txn_track_store(FILE **fpp, FILE *wal, const char *path);
 void jinn_txn_track_aux(FILE *fp, void (*cb)(void *), void *arg);
 void jinn_txn_swap_fp(FILE *oldfp, FILE *newfp);
 void jinn_wal_commit_group(FILE *wal);

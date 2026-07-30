@@ -537,20 +537,36 @@ impl<'ctx> Compiler<'ctx> {
         store_name: &str,
         fp: PointerValue<'ctx>,
     ) -> Result<(), String> {
+        let _ = fp; // tracking is by global address now (survives atomic reopen)
         let wal = self.load_store_wal(store_name)?;
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let f = self
             .module
-            .get_function("jinn_txn_track")
+            .get_function("jinn_txn_track_store")
             .unwrap_or_else(|| {
                 let ft = self
                     .ctx
                     .void_type()
-                    .fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
+                    .fn_type(&[ptr_ty.into(), ptr_ty.into(), ptr_ty.into()], false);
                 self.module
-                    .add_function("jinn_txn_track", ft, Some(Linkage::External))
+                    .add_function("jinn_txn_track_store", ft, Some(Linkage::External))
             });
-        b!(self.bld.build_call(f, &[fp.into(), wal.into()], ""));
+        let global = self
+            .module
+            .get_global(&format!("__store_{store_name}_fp"))
+            .expect("store fp global");
+        let path_str = b!(self
+            .bld
+            .build_global_string_ptr(&format!("{store_name}.store\0"), "txn.path"));
+        b!(self.bld.build_call(
+            f,
+            &[
+                global.as_pointer_value().into(),
+                wal.into(),
+                path_str.as_pointer_value().into()
+            ],
+            ""
+        ));
         Ok(())
     }
 

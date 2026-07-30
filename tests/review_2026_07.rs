@@ -166,22 +166,17 @@ fn review_3_3_vec_assignment_is_rejected_as_use_after_move() {
 
 // ─── Typer (§4) ─────────────────────────────────────────────────────────────
 
-/// §4.6 — cross-type `equals` (String vs i64) is accepted and segfaults.
-/// FIXME(8-16): must be a type error at compile time.
+/// §4.6 — cross-type `equals` (String vs i64) was accepted and
+/// segfaulted; under 8-16 equality operands unify, so it is a compile
+/// error.
 #[test]
-fn review_4_6_cross_type_equals_segfaults() {
+fn review_4_6_cross_type_equals_is_rejected() {
     let c = compile("*main\n    if 'abc' equals 5\n        log('huh')\n");
+    assert!(!c.ok(), "cross-type equals must be a type error");
     assert!(
-        c.ok(),
-        "OBSERVED-BAD: the typer accepts String-vs-i64 `equals` today. If it \
-         is now rejected, task 8-16 has landed — flip this test. {}",
+        c.stderr().contains("type mismatch"),
+        "{}",
         c.stderr()
-    );
-    let run = c.run();
-    assert!(
-        !run.status.success(),
-        "expected the accepted-but-ill-typed comparison to crash at runtime: {}",
-        exit_desc(&run)
     );
 }
 
@@ -211,30 +206,25 @@ fn review_4_6_string_plus_int() {
     let c = compile("*main\n    x is 'abc' + 1\n    log(x)\n");
     assert!(!c.ok(), "must not compile");
     let stderr = c.stderr();
+    // Caught by the TYPER since 8-16 surfaced operand-unification
+    // failures (previously it fell through to hir-validate).
     assert!(
-        stderr.contains("hir-validate"),
-        "OBSERVED-BAD: currently caught by hir-validate, not the typer. If \
-         the message changed, check whether 8-17 landed and flip. {stderr}"
+        stderr.contains("type mismatch") || stderr.contains("operator"),
+        "{stderr}"
     );
 }
 
-/// §4.6 — heterogeneous `vec()` type-checks and reading element 1 as an
-/// integer yields a leaked pointer value.
-/// FIXME(8-16): the second `push` must be a type error.
+/// §4.6 — heterogeneous `vec()` type-checked and read back a leaked
+/// pointer as an integer; under 8-16 push arguments unify with the
+/// element type and the mismatch is surfaced, not swallowed.
 #[test]
-fn review_4_6_heterogeneous_vec() {
+fn review_4_6_heterogeneous_vec_is_rejected() {
     let c = compile("*main\n    v is vec()\n    v.push(1)\n    v.push('two')\n    log(v.get(1))\n");
+    assert!(!c.ok(), "heterogeneous vec must be a type error");
     assert!(
-        c.ok(),
-        "OBSERVED-BAD: heterogeneous vec type-checks today. If it is now \
-         rejected, task 8-16 has landed — flip this test. {}",
+        c.stderr().contains("type mismatch"),
+        "{}",
         c.stderr()
-    );
-    let run = c.run();
-    assert!(
-        run.status.success(),
-        "currently runs to completion printing a leaked pointer as an integer: {}",
-        exit_desc(&run)
     );
 }
 

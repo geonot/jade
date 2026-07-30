@@ -680,7 +680,7 @@ data file; WAL corruption is *detected* and reported rather than being invisible
 checkpointing is the only thing that makes a WAL prefix discardable. Tests assert each
 of the three probes above now behaves correctly.
 
-### ◻ 8-24 Scope and bound transactions — **P1**, blocked_by: [8-22]
+### ✅ 8-24 Scope and bound transactions — **P1**, blocked_by: [8-22]
 *Review item 11.*
 
 `static int jinn_txn_depth; static JinnTxnFile *jinn_txn_files;` (`wal.c:267-268`) —

@@ -14,9 +14,13 @@ impl Typer {
                     let elem = elem_ty.as_ref().clone();
                     if dm.method == "push" {
                         if let Some(arg_ty) = dm.arg_tys.first() {
-                            let _ = self
+                            let r = self
                                 .infer_ctx
                                 .unify_at(&elem, arg_ty, dm.span, "vec.push arg");
+                            if let Err(e) = r {
+                                self.infer_ctx
+                                    .push_strict_error(format!("type mismatch in vec `push`: {e}"));
+                            }
                         }
                     } else if dm.method == "set" {
                         if let Some(idx_ty) = dm.arg_tys.first() {
@@ -207,7 +211,17 @@ impl Typer {
 
                         candidates.sort_by(|(a, _, _), (b, _, _)| a.cmp(b));
 
-                        if candidates.len() > 1 {
+                        let recv_quantified = match self
+                            .infer_ctx
+                            .shallow_resolve(&dm.receiver_ty)
+                        {
+                            Type::TypeVar(v) => self.infer_ctx.is_quantified(v),
+                            _ => false,
+                        };
+                        if candidates.len() > 1 && !recv_quantified {
+                            /* A quantified (row-polymorphic generic) receiver
+                             * may legitimately match several types — each call
+                             * site instantiates its own copy (task 8-16). */
                             let names: Vec<String> =
                                 candidates.iter().map(|(n, _, _)| n.as_str()).collect();
                             self.type_errors.push(format!(
@@ -317,7 +331,11 @@ impl Typer {
                 .collect();
             candidates.sort();
 
-            if candidates.len() > 1 {
+            if candidates.len() > 1 && !self.infer_ctx.is_quantified(_root) {
+                /* Quantified receiver: a row-polymorphic generic is ALLOWED
+                 * to match several structs — each call site instantiates
+                 * its own copy (task 8-16). Ambiguity is only an error for
+                 * a concrete receiver. */
                 let field_names: Vec<String> =
                     fields.iter().map(|f| f.field_name.as_str()).collect();
                 self.type_errors.push(format!(
