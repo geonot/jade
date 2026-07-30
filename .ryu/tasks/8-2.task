@@ -1,0 +1,15 @@
+title: Make jinn fmt non-destructive (interim)
+status: complete
+atomic: true
+priority: high
+blocked_by: []
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T12:00:00'
+description: 'Review item 3 part 1, decision D5. jinn fmt deletes every comment and overwrites in
+  place: the lexer discards # comments (src/lexer/mod.rs:196-197, no Comment token in
+  token.rs), format_source reprints from the AST (src/fmt.rs:5-11), and the driver
+  writes over the original (src/driver/mod.rs:304-319). Verified: a 5-line file lost 3
+  comments. DoD: fmt exits non-zero with a clear diagnostic when the input contains a
+  comment; in-place modification requires an explicit --write and default prints to
+  stdout; a test asserts a commented file is byte-identical after jinn fmt --write. Full
+  fix is 8-18.'

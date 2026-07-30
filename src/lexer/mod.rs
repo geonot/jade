@@ -35,6 +35,10 @@ pub struct Lexer<'s> {
     /// suppressed (implicit line-joining), so call arguments and list literals
     /// may span multiple lines.
     bracket_depth: u32,
+    /// Spans of `#` comments (and a leading shebang) skipped during
+    /// tokenization. Comments are not tokens yet (see task 8-18); recording
+    /// where they were lets `jinn fmt` refuse to destroy them (task 8-2).
+    comments: Vec<Span>,
 }
 
 static KEYWORDS: LazyLock<HashMap<&'static str, Token>> = LazyLock::new(|| {
@@ -151,7 +155,14 @@ impl<'s> Lexer<'s> {
             file: None,
             after_dot: false,
             bracket_depth: 0,
+            comments: Vec::new(),
         }
+    }
+
+    /// Spans of the comments the last `tokenize()` call skipped, in source
+    /// order. Empty until `tokenize()` runs.
+    pub fn comments(&self) -> &[Span] {
+        &self.comments
     }
 
     pub fn with_file(mut self, file: crate::intern::Symbol) -> Self {
@@ -163,9 +174,11 @@ impl<'s> Lexer<'s> {
         let mut out = Vec::new();
 
         if self.pos == 0 && self.src.len() >= 2 && self.src[0] == b'#' && self.src[1] == b'!' {
+            let (start, line, col) = (self.pos, self.line, self.col);
             while self.pos < self.src.len() && self.src[self.pos] != b'\n' {
                 self.advance();
             }
+            self.comments.push(Span::new(start, self.pos, line, col));
             if self.pos < self.src.len() {
                 self.line += 1;
                 self.col = 0;
@@ -194,7 +207,9 @@ impl<'s> Lexer<'s> {
                     continue;
                 }
                 b'#' => {
+                    let (start, line, col) = (self.pos, self.line, self.col);
                     self.skip_line();
+                    self.comments.push(Span::new(start, self.pos, line, col));
                     continue;
                 }
                 b'\r' => {

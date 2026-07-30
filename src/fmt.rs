@@ -3,7 +3,19 @@ use crate::lexer::Lexer;
 use crate::parser::Parser;
 
 pub fn format_source(src: &str) -> Result<String, String> {
-    let tokens = Lexer::new(src).tokenize().map_err(|e| e.to_string())?;
+    let mut lexer = Lexer::new(src);
+    let tokens = lexer.tokenize().map_err(|e| e.to_string())?;
+    // The formatter reprints from the AST, and comments are not part of the
+    // AST yet (task 8-18 makes them lexer trivia). Until they are, formatting
+    // a commented file would silently delete every comment — refuse instead
+    // (decision D5: fmt must never destroy source).
+    if let Some(span) = lexer.comments().first() {
+        return Err(format!(
+            "file contains a comment (line {}); refusing to format because \
+             `jinn fmt` cannot preserve comments yet and would delete it",
+            span.line
+        ));
+    }
     let prog = Parser::new(tokens)
         .parse_program()
         .map_err(|e| e.to_string())?;

@@ -278,7 +278,7 @@ pub fn run() {
                     Err(e) => die(&format!("type error: {e}")),
                 }
             }
-            Cmd::Fmt { files } => {
+            Cmd::Fmt { files, write } => {
                 let targets: Vec<PathBuf> = if files.is_empty() {
                     fn collect_jinn_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
                         if let Ok(entries) = fs::read_dir(dir) {
@@ -301,21 +301,36 @@ pub fn run() {
                 } else {
                     files
                 };
+                let mut failed = false;
                 for path in &targets {
                     match fs::read_to_string(path) {
                         Ok(src) => match crate::fmt::format_source(&src) {
                             Ok(formatted) => {
-                                if formatted != src {
-                                    fs::write(path, &formatted).unwrap_or_else(|e| {
-                                        eprintln!("cannot write {}: {e}", path.display())
-                                    });
-                                    println!("formatted {}", path.display());
+                                if write {
+                                    if formatted != src {
+                                        fs::write(path, &formatted).unwrap_or_else(|e| {
+                                            eprintln!("cannot write {}: {e}", path.display());
+                                            failed = true;
+                                        });
+                                        println!("formatted {}", path.display());
+                                    }
+                                } else {
+                                    print!("{formatted}");
                                 }
                             }
-                            Err(e) => eprintln!("cannot format {}: {e}", path.display()),
+                            Err(e) => {
+                                eprintln!("cannot format {}: {e}", path.display());
+                                failed = true;
+                            }
                         },
-                        Err(e) => eprintln!("cannot read {}: {e}", path.display()),
+                        Err(e) => {
+                            eprintln!("cannot read {}: {e}", path.display());
+                            failed = true;
+                        }
                     }
+                }
+                if failed {
+                    std::process::exit(1);
                 }
             }
             Cmd::Bind { header } => match crate::bind::bind_header(&header) {

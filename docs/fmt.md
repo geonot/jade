@@ -21,16 +21,26 @@ A naive formatter already exists:
 
 - CLI: `jinnc fmt [paths…]` dispatches in [`src/driver/mod.rs`](../src/driver/mod.rs)
   (`Cmd::Fmt`) to `crate::fmt::format_source`.
-- Impl: [`src/fmt.rs`](../src/fmt.rs) (648 LOC) lexes → parses to `ast::Program`
-  → **pretty-prints the AST** back to source, writing the file in place.
+- Impl: [`src/fmt.rs`](../src/fmt.rs) lexes → parses to `ast::Program`
+  → **pretty-prints the AST** back to source.
 
-This is an *AST reprinter*, and it has two disqualifying flaws for a real
-formatter:
+**Current shipped behavior (task 8-2, interim until the trivia channel in
+task 8-18 lands):**
 
-1. **It destroys comments.** The lexer discards `#` comments at the source
-   (`skip_line()` in [`src/lexer/mod.rs`](../src/lexer/mod.rs)); they never reach
-   the AST, so the reprint silently deletes every comment in the file. This
-   alone makes the current tool unsafe to run on real code.
+- `jinn fmt FILE` prints the formatted source to **stdout**; it never writes.
+- In-place rewriting requires an explicit `jinn fmt --write FILE`.
+- Because comments are not yet represented in the AST, `fmt` **refuses any
+  file containing a `#` comment or shebang** (non-zero exit, diagnostic
+  naming the first comment line) instead of silently deleting them. This is
+  pinned by `tests/fmt_nondestructive.rs`.
+
+The reprinter still has two disqualifying flaws for a real formatter:
+
+1. **It cannot preserve comments.** The lexer skips `#` comments
+   (`skip_line()` in [`src/lexer/mod.rs`](../src/lexer/mod.rs), which now
+   records their spans so `fmt` can refuse); they never reach the AST, so a
+   reprint would silently delete every comment in the file. The refusal above
+   stops the data loss; task 8-18 makes comments first-class trivia.
 2. **It cannot rewrite idioms** and offers **no lint, no idempotency proof, no
    diff/check mode, no config.**
 
