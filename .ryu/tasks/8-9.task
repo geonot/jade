@@ -1,5 +1,5 @@
 title: Extend the ownership fuzzer to the new classes
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: ['8-6', '8-8']

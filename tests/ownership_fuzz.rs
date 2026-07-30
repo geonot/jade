@@ -11,7 +11,15 @@
 //!
 //! The generator deliberately stresses: nested `take`, field moves under
 //! control flow, container-read aliasing (`v.get(i)`), `copy` of heap values,
-//! rebinding after move, and aliasing through bindings.
+//! rebinding after move, and aliasing through bindings — and, since task
+//! 8-9: returns of aggregate parameters through an inferred-consuming
+//! callee (the §3.1 double-free shape), cross-task captures in
+//! `together`/`dispatch` (the §3.2 allocator-race shape), aggregate binds
+//! in nested scopes (M1 under control flow), and aggregate struct fields
+//! (M3 partial moves). Under the landed 8-6/8-7/8-8 fixes each generated
+//! program must be cleanly rejected or run to completion; the §3.1/§3.2
+//! shapes are additionally pinned deterministically below so the corpus
+//! provably contains them.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -32,6 +40,19 @@ enum Stmt {
     Rebind(u8),
     LenLog(u8),
     IfPush(u8, i64),
+    /// `v{b} is chain(v{a})` — returns an aggregate parameter through an
+    /// inferred-consuming callee (§3.1). `a` is left "declared" so later
+    /// statements may reference the moved var: that path must be REJECTED.
+    ChainInto(u8, u8),
+    /// `together` with two dispatches capturing vars — same var twice is
+    /// the §3.2 race and must be rejected (M8).
+    TogetherCapture(u8, u8),
+    /// Aggregate bind inside a nested scope (M1 under control flow).
+    ScopedBind(u8),
+    /// Struct with an aggregate field: bind, field move (M3), sibling read.
+    BindBox(u8),
+    FieldMove(u8),
+    BoxTagLog(u8),
 }
 
 fn stmt_strategy() -> impl Strategy<Value = Stmt> {
@@ -44,14 +65,25 @@ fn stmt_strategy() -> impl Strategy<Value = Stmt> {
         (0u8..4).prop_map(Stmt::Rebind),
         (0u8..4).prop_map(Stmt::LenLog),
         (0u8..4, 0i64..100).prop_map(|(v, x)| Stmt::IfPush(v, x)),
+        (0u8..4, 0u8..4).prop_map(|(a, b)| Stmt::ChainInto(a, b)),
+        (0u8..4, 0u8..4).prop_map(|(a, b)| Stmt::TogetherCapture(a, b)),
+        (0u8..4).prop_map(Stmt::ScopedBind),
+        (0u8..2).prop_map(Stmt::BindBox),
+        (0u8..2).prop_map(Stmt::FieldMove),
+        (0u8..2).prop_map(Stmt::BoxTagLog),
     ]
 }
 
 fn emit(stmts: &[Stmt]) -> String {
     let mut s = String::new();
+    s.push_str("type Box2\n    items as Vec of i64\n    tag as i64\n\n");
     s.push_str("*sink(v as take Vec of i64)\n    log(v.len())\n\n");
+    s.push_str("*chain(v) returns Vec of i64\n    return v\n\n");
+    s.push_str("*pusher(v, base as i64)\n    v.push(base)\n\n");
     s.push_str("*main\n");
     let mut declared = [false; 4];
+    let mut boxes = [false; 2];
+    let mut scoped = 0usize;
     for st in stmts {
         match st {
             Stmt::BindVec(v) => {
@@ -94,6 +126,55 @@ fn emit(stmts: &[Stmt]) -> String {
             Stmt::IfPush(v, x) => {
                 if declared[*v as usize] {
                     s.push_str(&format!("    if v{v}.len() > 0\n        v{v}.push({x})\n"));
+                }
+            }
+            Stmt::ChainInto(a, b) => {
+                if declared[*a as usize] && a != b {
+                    // §3.1 shape: the callee returns its parameter, so the
+                    // argument moves into the call. `a` stays "declared":
+                    // later references exercise the use-after-move REJECT path.
+                    s.push_str(&format!("    v{b} is chain(v{a})\n"));
+                    declared[*b as usize] = true;
+                }
+            }
+            Stmt::TogetherCapture(a, b) => {
+                if declared[*a as usize] && declared[*b as usize] {
+                    // §3.2 shape when a == b: two tasks capture one vec —
+                    // must be rejected (M8). Distinct vars must compile and
+                    // run clean.
+                    s.push_str("    together\n");
+                    s.push_str(&format!("        dispatch\n            pusher(v{a}, 1)\n"));
+                    s.push_str(&format!("        dispatch\n            pusher(v{b}, 2)\n"));
+                }
+            }
+            Stmt::ScopedBind(v) => {
+                if declared[*v as usize] {
+                    let w = scoped;
+                    scoped += 1;
+                    s.push_str(&format!(
+                        "    if v{v}.len() >= 0\n        w{w} is v{v}\n        log(w{w}.len())\n"
+                    ));
+                    // v{v} stays "declared": a later use is M1
+                    // use-after-move (branch-union) and must be rejected.
+                }
+            }
+            Stmt::BindBox(k) => {
+                s.push_str(&format!("    b{k} is Box2(items is [1, 2], tag is {k})\n"));
+                boxes[*k as usize] = true;
+            }
+            Stmt::FieldMove(k) => {
+                if boxes[*k as usize] {
+                    let w = scoped;
+                    scoped += 1;
+                    // M3 partial move; a later FieldMove of the same box is
+                    // use-of-moved-field and must be rejected.
+                    s.push_str(&format!("    w{w} is b{k}.items\n    log(w{w}.len())\n"));
+                }
+            }
+            Stmt::BoxTagLog(k) => {
+                if boxes[*k as usize] {
+                    // Sibling scalar read stays legal after a field move.
+                    s.push_str(&format!("    log(b{k}.tag)\n"));
                 }
             }
         }
@@ -146,4 +227,54 @@ proptest! {
             );
         }
     }
+}
+
+/// The corpus provably contains the review shapes: §3.1 (return of an
+/// aggregate parameter) and §3.2 (cross-task capture of one vec). With
+/// 8-6/8-8 landed, the first runs clean single-drop and the second is
+/// rejected with the M8 diagnostic — pinned here deterministically since
+/// re-verifying "the fuzzer finds the bug" would require reverting the
+/// fixes themselves.
+#[test]
+fn generator_emits_review_shapes() {
+    let src = emit(&[
+        Stmt::BindVec(0),
+        Stmt::ChainInto(0, 1),
+        Stmt::LenLog(1),
+    ]);
+    assert!(src.contains("v1 is chain(v0)"), "{src}");
+    let dir = tempfile::tempdir().unwrap();
+    let jinn = dir.path().join("t.jn");
+    std::fs::write(&jinn, &src).unwrap();
+    let c = Command::new(jinnc())
+        .arg(&jinn)
+        .arg("-o")
+        .arg(dir.path().join("t_bin"))
+        .output()
+        .unwrap();
+    assert!(
+        c.status.success(),
+        "§3.1 shape must compile and run single-drop: {}",
+        String::from_utf8_lossy(&c.stderr)
+    );
+
+    let src = emit(&[Stmt::BindVec(2), Stmt::TogetherCapture(2, 2)]);
+    assert!(src.contains("together"), "{src}");
+    let jinn = dir.path().join("t2.jn");
+    std::fs::write(&jinn, &src).unwrap();
+    let c = Command::new(jinnc())
+        .arg(&jinn)
+        .arg("-o")
+        .arg(dir.path().join("t2_bin"))
+        .output()
+        .unwrap();
+    assert!(
+        !c.status.success(),
+        "§3.2 shape (same vec captured twice) must be rejected"
+    );
+    assert!(
+        String::from_utf8_lossy(&c.stderr).contains("moved into a concurrent task"),
+        "{}",
+        String::from_utf8_lossy(&c.stderr)
+    );
 }

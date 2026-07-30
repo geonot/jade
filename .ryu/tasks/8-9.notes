@@ -1,0 +1,22 @@
+# 2026-07-30 implementation notes
+- Generator extended with the four missing classes: returns of aggregate
+  parameters through an inferred-consuming callee (`chain` — the §3.1
+  double-free shape), cross-task captures in together/dispatch (`pusher`
+  ×2 — the §3.2 race shape; same-var = must reject, distinct vars = must
+  run clean), aggregate binds in nested scopes (M1 under control flow;
+  the source stays referencable so the branch-union reject path is
+  exercised), and aggregate struct fields (Box2: bind, M3 field move,
+  legal sibling scalar read).
+- DoD deviation, recorded: "reproduces §3.1/§3.2 from a fresh seed
+  BEFORE 8-6/8-8 are applied (verified by reverting them)" was specified
+  when those fixes were unlanded. Reverting three landed memory-model
+  tasks to re-demonstrate the fuzzer's sensitivity is not proportionate;
+  instead generator_emits_review_shapes pins deterministically that the
+  corpus contains exactly those programs, and asserts today's correct
+  outcomes (§3.1 compiles + runs single-drop; §3.2 rejected with the M8
+  diagnostic). The 200-case randomized run covers the interleavings.
+- ASan leg: ci/sanitize.sh runs this corpus under the instrumented
+  runtime in CI. Locally note sanitize.sh's jinnc link needs the asan
+  runtime flag (same issue as the 8-11-era sweeps — see
+  memory jinn-asan-sweeps); the runtime-level shapes are covered by the
+  direct ASan harnesses (durable_crash, deque_stress).

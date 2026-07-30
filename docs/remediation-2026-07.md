@@ -342,7 +342,7 @@ correct programs (per-task vectors merged over a channel; an actor owning the ve
 compile and run; `together`/`dispatch`/`sim for`/actor-payload capture paths all
 covered; `tests/concurrency_shutdown.rs` still green.
 
-### ◻ 8-9 Extend the ownership fuzzer — **P1**, blocked_by: [8-6, 8-8]
+### ✅ 8-9 Extend the ownership fuzzer — **P1**, blocked_by: [8-6, 8-8]
 *Review item 1, part 3.*
 
 `tests/ownership_fuzz.rs` passes today while a 7-line program corrupts the heap,
