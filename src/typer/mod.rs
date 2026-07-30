@@ -49,7 +49,7 @@ pub(crate) struct MoveState {
 /// Why a variable is tombstoned, so the use-after-move diagnostic can say
 /// what actually happened instead of blaming a `take` the user never wrote
 /// (memory-model.md M1/M6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum MoveReason {
     /// An explicit `take` binding or `take` parameter the user wrote.
     TakeExplicit,
@@ -57,6 +57,13 @@ pub(crate) enum MoveReason {
     /// (explicitly `take`, or inferred because the value escapes through
     /// the callee — task 8-6).
     ConsumingCall(Symbol),
+    /// A plain aggregate bind/assignment `b is a` (memory-model.md M1):
+    /// aggregates move on assignment, so `a` is a tombstone. Carries the
+    /// new owner's name and the move site for the diagnostic.
+    AssignMove(Symbol, crate::ast::Span),
+    /// Sent on a channel (memory-model.md M9): `send ch, v` transfers
+    /// ownership to the receiver; the sender's binding tombstones.
+    Sent(crate::ast::Span),
 }
 
 #[allow(clippy::type_complexity)]
@@ -123,6 +130,15 @@ pub struct Typer {
     pub(crate) moved_vars: std::collections::HashMap<DefId, MoveReason>,
 
     pub(crate) const_vars: std::collections::HashSet<DefId>,
+
+    /// Variables read by a registered `defer` block → the defer's span.
+    /// Moving one is a compile error (memory-model.md M10: defers run at
+    /// scope exit and may read any binding they could read at
+    /// registration). Never cleared — DefIds are globally unique, and
+    /// keeping entries past their scope only over-approximates (a move
+    /// after an inner-scope defer already ran is rejected too, which is
+    /// the safe direction).
+    pub(crate) defer_read_vars: std::collections::HashMap<DefId, crate::ast::Span>,
 
     pub(crate) suppress_moved_field_check: u32,
     pub(crate) current_method_type: Option<String>,
@@ -221,6 +237,7 @@ impl Typer {
             moved_vars: std::collections::HashMap::new(),
             declared_type_names: std::collections::HashSet::new(),
             const_vars: std::collections::HashSet::new(),
+            defer_read_vars: std::collections::HashMap::new(),
             suppress_moved_field_check: 0,
             current_method_type: None,
             modules: std::collections::HashSet::new(),
@@ -387,7 +404,8 @@ impl Typer {
         for id in self.moved_vars.keys() {
             if !pre.vars.contains_key(id) && outer_ids.contains(id) {
                 return Err(format!(
-                    "{}: value moved out by `take` inside a loop body would be moved \
+                    "{}: value moved inside a loop body (by `take`, an aggregate \
+                     assignment, a consuming call, or a channel send) would be moved \
                      again on the next iteration; move a fresh value each iteration or \
                      reassign it before the loop repeats",
                     span.loc(),
@@ -402,7 +420,7 @@ impl Typer {
             for f in fields {
                 if pre_fields.map(|pf| !pf.contains(f)).unwrap_or(true) {
                     return Err(format!(
-                        "{}: field moved out by `take` inside a loop body would be moved \
+                        "{}: field moved out inside a loop body would be moved \
                          again on the next iteration; reassign it before the loop repeats",
                         span.loc(),
                     ));
@@ -489,6 +507,29 @@ impl Typer {
 
     pub(crate) fn mark_var_moved(&mut self, id: DefId, reason: MoveReason) {
         self.moved_vars.insert(id, reason);
+    }
+
+    /// Mark a move, first rejecting it if a registered `defer` reads the
+    /// variable (memory-model.md M10: defers run at scope exit, after the
+    /// move would have hollowed the value out).
+    pub(crate) fn mark_var_moved_checked(
+        &mut self,
+        id: DefId,
+        name: Symbol,
+        reason: MoveReason,
+        at: crate::ast::Span,
+    ) -> Result<(), String> {
+        if let Some(defer_span) = self.defer_read_vars.get(&id) {
+            return Err(format!(
+                "{}: cannot move `{}`: it is read by the `defer` registered at {}; \
+                 move it before the defer is registered, or clone it into the defer",
+                at.loc(),
+                name,
+                defer_span.loc(),
+            ));
+        }
+        self.mark_var_moved(id, reason);
+        Ok(())
     }
 
     pub(crate) fn clear_all_moved_for(&mut self, parent: DefId) {

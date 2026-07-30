@@ -13,9 +13,12 @@
 >
 > Status: **contract, being enforced.** Landed: 8-6 (M6 inferred consuming
 > parameters, M7 return transfer, single-drop accounting through nested
-> scopes — §3.1 runs clean and its use-after-move companion is rejected).
-> Open: 8-7 (M1/M3/M4 move-on-assign rejection) and 8-8 (M8 cross-task
-> capture); until they land, their §7 programs are pinned asserting today's
+> scopes — §3.1 runs clean and its use-after-move companion is rejected);
+> 8-7 (M1 move-on-assign, M2 revive, M3 field partial move, M4 element-bind
+> rejection, M9 channel-send tombstone, M10 defer-read protection — the
+> typer's flow-sensitive analysis is the single authority, `src/ownership/`
+> is deleted, and `jinn check`/`build` agree). Open: 8-8 (M8 cross-task
+> capture); until it lands, its §7 program is pinned asserting today's
 > wrong behavior in `tests/review_2026_07.rs`.
 
 ## 1. Type categories

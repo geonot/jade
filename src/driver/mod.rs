@@ -17,7 +17,6 @@ use inkwell::context::Context;
 use crate::codegen::Compiler;
 use crate::intern::Symbol;
 use crate::lexer::Lexer;
-use crate::ownership::OwnershipVerifier;
 use crate::parser::Parser;
 use crate::typer::Typer;
 
@@ -274,8 +273,24 @@ pub fn run() {
                 );
                 let mut typer = Typer::new();
                 typer.set_source_dir(base_dir.to_path_buf());
+                /* The typer's lowering is also the ownership analysis
+                 * (task 8-7), so `check` and `build` agree: a program
+                 * `check` passes cannot corrupt memory when built. Run
+                 * HIR validation too — `check` should be at least as
+                 * strict as any compiling pipeline. */
                 match typer.lower_program(&prog) {
-                    Ok(_) => println!("check passed"),
+                    Ok(mut hir_prog) => {
+                        let hir_errors =
+                            crate::hir_validate::HirValidator::validate(&hir_prog);
+                        for e in &hir_errors {
+                            eprintln!("hir-validate: {e}");
+                        }
+                        if !hir_errors.is_empty() {
+                            die("check failed: HIR validation errors");
+                        }
+                        crate::comptime::fold_program(&mut hir_prog);
+                        println!("check passed");
+                    }
                     Err(e) => die(&format!("type error: {e}")),
                 }
             }
@@ -460,38 +475,9 @@ pub fn run() {
 
     crate::comptime::fold_program(&mut hir_prog);
 
-    let mut verifier = OwnershipVerifier::new();
-    let diags = verifier.verify(&hir_prog);
-    let mut has_hard_error = false;
-    for d in &diags {
-        let level = match d.kind {
-            crate::ownership::DiagKind::UseAfterMove => {
-                has_hard_error = true;
-                "error"
-            }
-            crate::ownership::DiagKind::DoubleMutableBorrow => {
-                has_hard_error = true;
-                "error"
-            }
-            crate::ownership::DiagKind::MoveOfBorrowed => {
-                has_hard_error = true;
-                "error"
-            }
-            crate::ownership::DiagKind::InvalidRcDeref => {
-                has_hard_error = true;
-                "error"
-            }
-            crate::ownership::DiagKind::ReturnOfBorrowed => {
-                has_hard_error = true;
-                "error"
-            }
-            crate::ownership::DiagKind::Warning => "warning",
-        };
-        eprintln!("ownership: {} (line {}): {}", level, d.span.line, d.message);
-    }
-    if has_hard_error {
-        die("compilation aborted due to ownership errors");
-    }
+    /* Ownership is enforced by the typer's single flow-sensitive analysis
+     * during lowering (task 8-7); the separate HIR OwnershipVerifier is
+     * deleted, not run here. */
 
     let mir_opt_level = match cli.opt {
         0 => crate::mir::opt::OptLevel::None,

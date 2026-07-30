@@ -205,7 +205,7 @@ fn alpha_audit_std_test_mode() {
 
 #[test]
 fn alpha_audit_negative_compile_cases() {
-    expect_compile_fail("negative_partial_move.jn", &["moved", "`a`"]);
+    expect_compile_fail("negative_partial_move.jn", &["use of moved field", "`p.a`"]);
     expect_compile_fail("negative_resource_copy.jn", &["resource"]);
     expect_compile_fail("negative_resource_channel.jn", &["resource", "thread"]);
     expect_compile_fail(

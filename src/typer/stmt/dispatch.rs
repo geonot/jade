@@ -305,16 +305,80 @@ impl Typer {
                     ));
                 }
 
+                // Non-strict: `ty` may still hold unsolved vars here (e.g. a
+                // polymorphic lambda bind before generalization); an
+                // unsolved type is simply not an aggregate.
+                let resolved_bind_ty = {
+                    let was_strict = self.infer_ctx.is_strict();
+                    self.infer_ctx.set_strict(false);
+                    let r = self.infer_ctx.resolve(&ty);
+                    self.infer_ctx.set_strict(was_strict);
+                    r
+                };
+
+                // M4 (memory-model.md): a container slot cannot be
+                // tombstoned, so binding an aggregate element would alias
+                // the container's memory. Scalar and String elements bind
+                // freely (they copy); expression-position reads stay
+                // borrows. Checked on the expression KIND plus the
+                // resolved type — `is_aliased_read_of_heap` tests the
+                // unresolved `expr.ty`, which is still a TypeVar for an
+                // inferred-element container.
+                let is_element_read = match &value.kind {
+                    hir::ExprKind::VecMethod(_, mname, _)
+                    | hir::ExprKind::MapMethod(_, mname, _) => matches!(
+                        mname.as_str().as_ref(),
+                        "get" | "peek" | "front" | "back" | "first" | "last"
+                    ),
+                    hir::ExprKind::Index(..) => true,
+                    _ => false,
+                };
+                if b.access_mod.is_none()
+                    && is_element_read
+                    && self.type_is_aggregate(&resolved_bind_ty)
+                {
+                    return Err(format!(
+                        "{}: cannot bind aggregate element to `{}` — binding would alias \
+                         the container's memory; clone it (`{} is copy ...`) or remove \
+                         it (`{} is take ...`)",
+                        b.span.loc(),
+                        b.name,
+                        b.name,
+                        b.name,
+                    ));
+                }
+
+                // M3 (memory-model.md): a plain bind of an aggregate
+                // struct field is a partial move, exactly as `take b.f`
+                // does today — canonicalize the access modifier so the
+                // MIR FieldClear tombstone and the moved-field
+                // diagnostics both apply.
+                let access_mod = {
+                    let field_of_var = matches!(
+                        &value.kind,
+                        hir::ExprKind::Field(parent, _, _)
+                            if matches!(parent.kind, hir::ExprKind::Var(..))
+                    );
+                    if b.access_mod.is_none()
+                        && field_of_var
+                        && self.type_is_aggregate(&resolved_bind_ty)
+                    {
+                        Some(ast::AccessMod::Take)
+                    } else {
+                        b.access_mod
+                    }
+                };
+
                 if Self::is_aliased_read_of_heap(&value) && !ty.is_value_clonable() {
                     ownership = Ownership::Borrowed;
                 }
 
-                if b.access_mod.is_some() {
-                    ownership = self.ownership_with_mod(&ty, b.access_mod)?;
+                if access_mod.is_some() {
+                    ownership = self.ownership_with_mod(&ty, access_mod)?;
                 }
 
                 let partial_move: Option<(DefId, Symbol)> =
-                    if matches!(b.access_mod, Some(ast::AccessMod::Take))
+                    if matches!(access_mod, Some(ast::AccessMod::Take))
                         && let hir::ExprKind::Field(parent, field, _) = &value.kind
                         && let hir::ExprKind::Var(parent_id, _) = &parent.kind
                     {
@@ -355,7 +419,7 @@ impl Typer {
                         ty: existing_ty,
                         ownership,
                         atomic: b.atomic,
-                        access_mod: b.access_mod,
+                        access_mod,
                         span: b.span,
                     }))
                 } else {
@@ -385,7 +449,7 @@ impl Typer {
                         },
                     );
 
-                    if matches!(b.access_mod, Some(ast::AccessMod::Const)) {
+                    if matches!(access_mod, Some(ast::AccessMod::Const)) {
                         self.const_vars.insert(id);
                     }
                     if let Some((pid, fname)) = partial_move {
@@ -398,7 +462,7 @@ impl Typer {
                         ty,
                         ownership,
                         atomic: b.atomic,
-                        access_mod: b.access_mod,
+                        access_mod,
                         span: b.span,
                     }))
                 }
@@ -625,8 +689,10 @@ impl Typer {
             ast::Stmt::While(w) => {
                 let cond = self.lower_expr_expected(&w.cond, Some(&Type::Bool))?;
 
+                let outer_ids = self.in_scope_def_ids();
                 let pre = self.snapshot_moved_fields();
                 let body = self.lower_block(&w.body, ret_ty)?;
+                self.check_loop_body_moves(&pre, &outer_ids, w.span)?;
                 self.restore_moved_fields(pre);
                 Ok(hir::Stmt::While(hir::While {
                     cond,

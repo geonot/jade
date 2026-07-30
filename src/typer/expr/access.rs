@@ -286,11 +286,15 @@ impl Typer {
                     && moved.contains(field)
                 {
                     return Err(format!(
-                        "{}: field `{}` of `{}` was moved out by an earlier `take`; \
-                                     reassign `{}.{}` before reading it",
+                        "{}: use of moved field `{}.{}`: the field was moved out earlier \
+                         (binding an aggregate field moves it, as `take` does); to keep \
+                         it, clone at the move site (`copy {}.{}`), or reassign \
+                         `{}.{}` before reading it",
                         span.loc(),
+                        parent_name,
                         field,
                         parent_name,
+                        field,
                         parent_name,
                         field,
                     ));

@@ -1,10 +1,10 @@
 title: Unify ownership checking into one flow-sensitive analysis
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: ['8-5']
 created_at: '2026-07-29T00:00:00'
-updated_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-30T00:00:00'
 description: 'Review item 16. Replace the two overlapping half-checkers with one analysis.
   src/ownership/ sees everything but is the weaker: flow-insensitive across branches (a
   move in ''then'' mutates outer VarState in place via lookup_mut,

@@ -1,0 +1,61 @@
+# 2026-07-30 implementation notes
+- The typer's existing take-tombstone machinery (moved_vars/moved_fields,
+  snapshot/restore, branch union merge, loop re-move check, rebind revive
+  via clear_all_moved_for) is now the single ownership analysis. New
+  MoveReason variants carry the diagnostic story: AssignMove(owner, span)
+  for M1 and Sent(span) for M9.
+- M1: record_take_moves_in_stmt (renamed duty, same hook) marks a plain
+  `b is a` bind/assign of an aggregate-typed Var as a move. Drop-side
+  accounting needed NO change — collect_consumed_ids already excluded
+  the source of every plain bind (8-6), so runtime semantics were
+  already move; only the use-side rejection was missing.
+- Aggregate category (type_is_aggregate, lower/block.rs): Vec, Map,
+  Coroutine, Generator, and structs/enums/tuples/arrays transitively
+  containing one. NOT String (value, deep-copies), NOT Channel/ActorRef
+  (runtime-refcounted handles), NOT @resource (own linear discipline).
+- M3: a plain bind of an aggregate struct field canonicalizes its
+  access_mod to Take in the Bind lowering, so the MIR FieldClear
+  tombstone and moved-field diagnostics apply identically to
+  `v is b.items` and `v is take b.items`. The moved-field diagnostic is
+  reworded to "use of moved field `b.items`" (no longer blames a `take`
+  the user never wrote).
+- M4: element binds are detected by HIR kind (VecMethod/MapMethod
+  get/peek/front/back/first/last, Index) + resolved aggregate type —
+  NOT via is_aliased_read_of_heap, whose unresolved-ty test misses
+  inferred-element containers (that's why the first cut didn't fire).
+- M10: Stmt::Defer registers its read var-ids (defer_read_vars, never
+  cleared — DefIds are unique; over-approximates by design). Every move
+  site routes through mark_var_moved_checked, which rejects moves of
+  defer-read vars. collect_hir_var_ids_expr gained Builtin/VecNew/
+  Coerce/StrictCast/Ternary/ChannelSend arms — log(x) lowers to Builtin
+  and was invisible to the collector.
+- Ported from the deleted src/ownership/ (the rest was dead or subsumed:
+  borrow counting never released, DoubleMutableBorrow unreachable,
+  fn_ret_types write-only):
+  - return-of-borrowed: `return %local` of an Owned var → error in the
+    Ret arm of the record pass, wording kept for the audit_alpha corpus.
+  - channel-send moves: ChannelSend of an aggregate Var → Sent tombstone.
+- while-loops now run check_loop_body_moves (they silently skipped it;
+  for/loop/sim-for had it).
+- Driver unification: OwnershipVerifier blocks deleted from both
+  pipelines; pipeline.rs (build/run/test) now runs HirValidator (it
+  never did); `jinn check` runs the full typer + HirValidator + fold and
+  rejects the §3.3 program it used to pass.
+- Fallout in-tree was tiny and all real: two typer unit tests needed a
+  non-strict resolve (lambda binds hit strict mode via the new early
+  resolve); std/bangle.jn and std/dataframe.jn had 16 genuine M4
+  element-alias binds, fixed with `copy`.
+- Follow-ups, deliberately out of scope:
+  - `copy` of Map (and Vec-of-Map etc.) does not clone — is_value_clonable
+    excludes Map, so the MIR Copy arm skips the Clone inst and aliases
+    silently. Every M1/M4 diagnostic names `copy` as the escape hatch, so
+    this gap now matters more; needs its own task.
+  - Lambda captures of aggregates are not yet moves (M11 is about
+    generators; the old verifier's capture-move was the only enforcement
+    and had no test coverage). 8-8 (cross-task capture) is the natural
+    place to settle capture semantics.
+  - Consuming-param inference still under-approximates lambda bodies /
+    block exprs / named-arg calls (consume_infer.rs docs); the
+    flow-sensitive analysis catches the use-after-move side, but a
+    conditional escape still leaks rather than double-frees (union
+    merge is deliberately conservative toward leak-not-corrupt).

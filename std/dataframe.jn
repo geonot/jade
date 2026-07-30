@@ -100,7 +100,7 @@ type DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
             return self
-        col_data is self.data.get(idx)
+        col_data is copy self.data.get(idx)
         mask is vec()
         loop col_data
             if $ equals target
@@ -112,7 +112,7 @@ type DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
             return self
-        col_data is self.data.get(idx)
+        col_data is copy self.data.get(idx)
         mask is vec()
         loop col_data
             if $ neq target
@@ -124,7 +124,7 @@ type DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
             return self
-        col_data is self.data.get(idx)
+        col_data is copy self.data.get(idx)
         mask is vec()
         loop col_data
             val is convert.parse_float($)
@@ -137,7 +137,7 @@ type DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
             return self
-        col_data is self.data.get(idx)
+        col_data is copy self.data.get(idx)
         mask is vec()
         loop col_data
             val is convert.parse_float($)
@@ -150,7 +150,7 @@ type DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
             return self
-        col_data is self.data.get(idx)
+        col_data is copy self.data.get(idx)
         mask is vec()
         loop col_data
             if $.find(substr) >= 0
@@ -185,7 +185,7 @@ type DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
             return self
-        col_data is self.data.get(idx)
+        col_data is copy self.data.get(idx)
         # Build index array and sort by values
         indices is vec()
         for i in 0 to self.nrows
@@ -198,7 +198,7 @@ type DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
             return self
-        col_data is self.data.get(idx)
+        col_data is copy self.data.get(idx)
         indices is vec()
         for i in 0 to self.nrows
             indices.push(i)
@@ -212,7 +212,7 @@ type DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
             return 0.0
-        col_data is self.data.get(idx)
+        col_data is copy self.data.get(idx)
         total is 0.0
         loop col_data
             total is total + convert.parse_float($)
@@ -229,7 +229,7 @@ type DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0 or self.nrows equals 0
             return 0.0
-        col_data is self.data.get(idx)
+        col_data is copy self.data.get(idx)
         m is convert.parse_float(col_data.get(0))
         loop col_data
             v is convert.parse_float($)
@@ -242,7 +242,7 @@ type DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0 or self.nrows equals 0
             return 0.0
-        col_data is self.data.get(idx)
+        col_data is copy self.data.get(idx)
         m is convert.parse_float(col_data.get(0))
         loop col_data
             v is convert.parse_float($)
@@ -255,7 +255,7 @@ type DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
             return 0
-        col_data is self.data.get(idx)
+        col_data is copy self.data.get(idx)
         n is 0
         loop col_data
             if $.length > 0
@@ -267,7 +267,7 @@ type DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
             return 0
-        col_data is self.data.get(idx)
+        col_data is copy self.data.get(idx)
         seen is map()
         loop col_data
             seen.set($, "1")
@@ -279,7 +279,7 @@ type DataFrame
         result is map()
         if idx < 0
             return result
-        col_data is self.data.get(idx)
+        col_data is copy self.data.get(idx)
         loop col_data
             val is $
             if result.has(val)
@@ -365,7 +365,7 @@ type DataFrame
 *from_csv(rows as Vec of Vec of String) returns DataFrame
     if rows.length < 1
         return new(vec())
-    headers is rows.get(0)
+    headers is copy rows.get(0)
     ncols is headers.length
     # Columnar conversion: transpose row-major to column-major
     col_data is vec()

@@ -8,7 +8,6 @@ use inkwell::context::Context;
 use crate::codegen::Compiler;
 use crate::intern::Symbol;
 use crate::lexer::Lexer;
-use crate::ownership::OwnershipVerifier;
 use crate::parser::Parser;
 use crate::pkg::SemVer;
 use crate::pkgid::{PackageRecord, PkgId, ScopePath, compute_semantic_hash};
@@ -141,40 +140,21 @@ pub(super) fn compile_and_link(
         Err(e) => die(&format!("hir: {e}")),
     };
 
+    /* HIR validation ran only on the `jinnc <file>` inline path before;
+     * `jinn build`/`run`/`test` skipped it (task 8-7 unification). */
+    let hir_errors = crate::hir_validate::HirValidator::validate(&hir_prog);
+    for e in &hir_errors {
+        eprintln!("hir-validate: {e}");
+    }
+    if !hir_errors.is_empty() {
+        die("compilation aborted due to HIR validation errors");
+    }
+
     crate::comptime::fold_program(&mut hir_prog);
 
-    let mut verifier = OwnershipVerifier::new();
-    let diags = verifier.verify(&hir_prog);
-    let mut has_hard_error = false;
-    for d in &diags {
-        let level = match d.kind {
-            crate::ownership::DiagKind::UseAfterMove => {
-                has_hard_error = true;
-                "error"
-            }
-            crate::ownership::DiagKind::DoubleMutableBorrow => {
-                has_hard_error = true;
-                "error"
-            }
-            crate::ownership::DiagKind::MoveOfBorrowed => {
-                has_hard_error = true;
-                "error"
-            }
-            crate::ownership::DiagKind::InvalidRcDeref => {
-                has_hard_error = true;
-                "error"
-            }
-            crate::ownership::DiagKind::ReturnOfBorrowed => {
-                has_hard_error = true;
-                "error"
-            }
-            crate::ownership::DiagKind::Warning => "warning",
-        };
-        eprintln!("ownership: {} (line {}): {}", level, d.span.line, d.message);
-    }
-    if has_hard_error {
-        die("compilation aborted due to ownership errors");
-    }
+    /* Ownership is enforced by the typer's single flow-sensitive analysis
+     * during lowering (task 8-7); the separate HIR OwnershipVerifier is
+     * deleted, not run here. */
 
     let mir_opt_level = match opt_level {
         0 => crate::mir::opt::OptLevel::None,

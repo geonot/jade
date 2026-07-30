@@ -79,6 +79,31 @@ impl Typer {
                                 name,
                                 name,
                             ),
+                            crate::typer::MoveReason::Sent(at) => format!(
+                                "{}: use of moved value `{}`: it was sent on a channel \
+                                 at {} — sends transfer ownership to the receiver; to \
+                                 keep a local copy, send a clone (`send ch, copy {}`), \
+                                 or reassign `{}` before reading it",
+                                span.loc(),
+                                name,
+                                at.loc(),
+                                name,
+                                name,
+                            ),
+                            crate::typer::MoveReason::AssignMove(to, at) => format!(
+                                "{}: use of moved value `{}`: it moved at {} (`{} is {}`) \
+                                 — aggregates move on assignment; to keep both values, \
+                                 clone explicitly (`{} is copy {}`), or reassign `{}` \
+                                 before reading it",
+                                span.loc(),
+                                name,
+                                at.loc(),
+                                to,
+                                name,
+                                to,
+                                name,
+                                name,
+                            ),
                         });
                     }
                     let ty = match (&scheme_clone, expected) {

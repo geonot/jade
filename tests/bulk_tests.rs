@@ -6635,7 +6635,7 @@ fn field_take_use_after_move_errors() {
         "type Pair\n    a as Vec of i64\n    b as Vec of i64\n\n*main\n    p is Pair(a is [1, 2, 3], b is [4, 5, 6])\n    taken is take p.a\n    log p.a.len()\n",
     );
     assert!(
-        err.contains("moved") && err.contains("`a`"),
+        err.contains("use of moved field") && err.contains(".a`"),
         "expected use-after-partial-move diagnostic, got: {err}"
     );
 }
@@ -6654,7 +6654,7 @@ fn field_take_both_branches_then_read_errors() {
         "type Pair\n    a as Vec of i64\n    b as Vec of i64\n\n*main\n    p is Pair(a is [1, 2, 3], b is [4, 5, 6])\n    if p.b.len() > 0\n        t1 is take p.a\n    else\n        t2 is take p.a\n    log p.a.len()\n",
     );
     assert!(
-        err.contains("moved") && err.contains("`a`"),
+        err.contains("use of moved field") && err.contains(".a`"),
         "expected merged-branch use-after-move diagnostic, got: {err}"
     );
 }
@@ -6665,7 +6665,7 @@ fn field_take_one_branch_only_errors() {
         "type Pair\n    a as Vec of i64\n    b as Vec of i64\n\n*main\n    p is Pair(a is [1, 2, 3], b is [4, 5, 6])\n    if p.b.len() > 0\n        t1 is take p.a\n    log p.a.len()\n",
     );
     assert!(
-        err.contains("moved") && err.contains("`a`"),
+        err.contains("use of moved field") && err.contains(".a`"),
         "expected conservative-branch use-after-move diagnostic, got: {err}"
     );
 }

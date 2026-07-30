@@ -146,24 +146,29 @@ fn review_3_2_cross_task_shared_vec_races() {
     );
 }
 
-/// §3.3 — `b is a` on a Vec is silent shared mutable aliasing.
-/// FIXME(8-7): must be a compile error: use of moved value `a` (decision D1).
+/// §3.3 — `b is a` on a Vec was silent shared mutable aliasing; under D1
+/// (task 8-7) aggregates move on assignment, so the later read of `a` is
+/// a compile error naming the move site and the `copy` escape hatch.
 #[test]
-fn review_3_3_vec_assignment_aliases() {
+fn review_3_3_vec_assignment_is_rejected_as_use_after_move() {
     let c = compile(
         "*main\n    a is vec(1,2,3)\n    b is a\n    b.push(4)\n    log(a.length)\n    log(b.length)\n",
     );
-    assert!(c.ok(), "compiles today: {}", c.stderr());
-    let run = c.run();
-    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
-    assert_eq!(
-        stdout,
-        "4\n4\n",
-        "OBSERVED-BAD: mutation through `b` is visible through `a`. If this \
-         no longer holds, task 8-7 has landed — flip this test to assert the \
-         D1 use-of-moved-value diagnostic. {}",
-        exit_desc(&run)
+    assert!(!c.ok(), "must be rejected under D1 (memory-model.md M1)");
+    let stderr = c.stderr();
+    assert!(
+        stderr.contains("use of moved value `a`")
+            && stderr.contains("`b is a`")
+            && stderr.contains("copy"),
+        "diagnostic must name the move site and the copy escape hatch: {stderr}"
     );
+    // The escape hatch keeps both values, independently.
+    let c = compile(
+        "*main\n    a is vec(1,2,3)\n    b is copy a\n    b.push(4)\n    log(a.length)\n    log(b.length)\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    let run = c.run();
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "3\n4\n");
 }
 
 // ─── Typer (§4) ─────────────────────────────────────────────────────────────

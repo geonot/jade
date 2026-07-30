@@ -430,58 +430,209 @@ impl Typer {
         )
     }
 
-    /// Record variables that are consumed by `take` so that a later use of the
-    /// same variable is diagnosed as a use-after-move. This is distinct from
-    /// `collect_block_consumed_ids` (which drives drop-exclusion): only `take`
-    /// of a drop-bearing value marks a variable as moved.
-    pub(in crate::typer) fn record_take_moves_in_stmt(&mut self, s: &hir::Stmt) {
+    /// D1's Aggregate category (memory-model.md §1): the types for which
+    /// `b is a` MOVES. Distinct from `needs_drop`: `String` drops but
+    /// deep-copies on assignment (Value category), `Channel`/`ActorRef`
+    /// are runtime-refcounted handles, and `@resource` structs have their
+    /// own linear discipline with explicit modifiers.
+    pub(in crate::typer) fn type_is_aggregate(&self, ty: &Type) -> bool {
+        let mut visiting: std::collections::HashSet<crate::intern::Symbol> =
+            std::collections::HashSet::new();
+        self.type_is_aggregate_inner(ty, &mut visiting)
+    }
+
+    fn type_is_aggregate_inner(
+        &self,
+        ty: &Type,
+        visiting: &mut std::collections::HashSet<crate::intern::Symbol>,
+    ) -> bool {
+        match ty {
+            Type::Vec(_) | Type::Map(_, _) | Type::Coroutine(_) | Type::Generator(_) => true,
+            Type::Struct(name, args) => {
+                if self
+                    .struct_attrs
+                    .get(name)
+                    .map(|a| a.resource)
+                    .unwrap_or(false)
+                {
+                    return false;
+                }
+                if !visiting.insert(*name) {
+                    return false;
+                }
+                let result = self
+                    .struct_field_types(name, args)
+                    .into_iter()
+                    .any(|fty| self.type_is_aggregate_inner(&fty, visiting));
+                visiting.remove(name);
+                result
+            }
+            Type::Enum(name) => {
+                if !visiting.insert(*name) {
+                    return false;
+                }
+                let result = if let Some(variants) = self.enums.get(name) {
+                    variants.iter().any(|(_vname, ftys)| {
+                        ftys.iter().any(|t| self.type_is_aggregate_inner(t, visiting))
+                    })
+                } else {
+                    false
+                };
+                visiting.remove(name);
+                result
+            }
+            Type::Tuple(elts) => elts.iter().any(|t| self.type_is_aggregate_inner(t, visiting)),
+            Type::Array(elem, _) => self.type_is_aggregate_inner(elem, visiting),
+            Type::Alias(_, inner) | Type::Newtype(_, inner) => {
+                self.type_is_aggregate_inner(inner, visiting)
+            }
+            _ => false,
+        }
+    }
+
+    /// Peel value-preserving wrappers so move detection sees the source
+    /// variable through coercions.
+    fn peel_move_wrappers(e: &hir::Expr) -> &hir::Expr {
+        match &e.kind {
+            hir::ExprKind::Coerce(inner, _) | hir::ExprKind::Cast(inner, _) => {
+                Self::peel_move_wrappers(inner)
+            }
+            _ => e,
+        }
+    }
+
+    fn find_var_by_id(&self, id: crate::hir::DefId) -> Option<&crate::typer::VarInfo> {
+        self.scopes
+            .iter()
+            .rev()
+            .flat_map(|s| s.values())
+            .find(|v| v.def_id == id)
+    }
+
+    /// Record every move a lowered statement performs so that a later use
+    /// of the source is diagnosed as a use-after-move (the flow-sensitive
+    /// single analysis of task 8-7; memory-model.md M1/M6/M9/M10). This is
+    /// distinct from `collect_block_consumed_ids`, which drives
+    /// drop-exclusion. Moves recorded here: explicit `take` binds,
+    /// consuming-call arguments (task 8-6), plain aggregate binds and
+    /// assignments (M1 — aggregates move on assignment), and channel
+    /// sends (M9). Each is rejected outright if a registered `defer`
+    /// reads the source (M10), and a `return` of a reference to an owned
+    /// local is rejected here too.
+    pub(in crate::typer) fn record_take_moves_in_stmt(&mut self, s: &hir::Stmt) -> Result<(), String> {
         match s {
             hir::Stmt::Bind(b) => {
-                if matches!(b.access_mod, Some(crate::ast::AccessMod::Take))
-                    && let hir::ExprKind::Var(id, _) = &b.value.kind
+                let src = Self::peel_move_wrappers(&b.value);
+                if let hir::ExprKind::Var(id, name) = &src.kind
+                    && *id != b.def_id
                 {
-                    let resolved = self.infer_ctx.resolve(&b.value.ty);
-                    if Self::expr_type_needs_drop(&resolved) {
-                        self.mark_var_moved(*id, crate::typer::MoveReason::TakeExplicit);
+                    let resolved = self.infer_ctx.resolve(&src.ty);
+                    match b.access_mod {
+                        Some(crate::ast::AccessMod::Take) => {
+                            if Self::expr_type_needs_drop(&resolved) {
+                                self.mark_var_moved_checked(
+                                    *id,
+                                    *name,
+                                    crate::typer::MoveReason::TakeExplicit,
+                                    b.span,
+                                )?;
+                            }
+                        }
+                        None => {
+                            if self.type_is_aggregate(&resolved) {
+                                self.mark_var_moved_checked(
+                                    *id,
+                                    *name,
+                                    crate::typer::MoveReason::AssignMove(b.name, b.span),
+                                    b.span,
+                                )?;
+                            }
+                        }
+                        _ => {}
                     }
                 }
-                self.record_take_moves_in_expr(&b.value);
+                self.record_take_moves_in_expr(&b.value)?;
+            }
+            hir::Stmt::Ret(Some(e), _, span) => {
+                let inner = Self::peel_move_wrappers(e);
+                if let hir::ExprKind::Ref(pointee) = &inner.kind
+                    && let hir::ExprKind::Var(id, name) = &Self::peel_move_wrappers(pointee).kind
+                    && let Some(info) = self.find_var_by_id(*id)
+                    && matches!(info.ownership, crate::hir::Ownership::Owned)
+                {
+                    return Err(format!(
+                        "{}: returning reference to local variable `{}` — the pointee \
+                         is dropped when the function returns; return the value itself \
+                         to transfer ownership",
+                        span.loc(),
+                        name,
+                    ));
+                }
+                self.record_take_moves_in_expr(e)?;
             }
             hir::Stmt::Expr(e)
-            | hir::Stmt::Ret(Some(e), _, _)
             | hir::Stmt::ErrReturn(e, _, _)
             | hir::Stmt::Break(Some(e), _) => {
-                self.record_take_moves_in_expr(e);
+                self.record_take_moves_in_expr(e)?;
             }
-            hir::Stmt::Assign(target, value, _) => {
-                self.record_take_moves_in_expr(value);
-                self.record_take_moves_in_expr(target);
+            hir::Stmt::Assign(target, value, span) => {
+                self.record_take_moves_in_expr(value)?;
+                self.record_take_moves_in_expr(target)?;
+                if let hir::ExprKind::Var(tid, tname) = &target.kind {
+                    let src = Self::peel_move_wrappers(value);
+                    if let hir::ExprKind::Var(id, name) = &src.kind
+                        && id != tid
+                    {
+                        let resolved = self.infer_ctx.resolve(&src.ty);
+                        if self.type_is_aggregate(&resolved) {
+                            self.mark_var_moved_checked(
+                                *id,
+                                *name,
+                                crate::typer::MoveReason::AssignMove(*tname, *span),
+                                *span,
+                            )?;
+                        }
+                    }
+                }
+            }
+            hir::Stmt::Defer(block, span) => {
+                let mut ids: std::collections::HashSet<crate::hir::DefId> =
+                    std::collections::HashSet::new();
+                for st in block {
+                    Self::collect_hir_var_ids_stmt(st, &mut ids);
+                }
+                for id in ids {
+                    self.defer_read_vars.entry(id).or_insert(*span);
+                }
             }
 
             _ => {}
         }
+        Ok(())
     }
 
-    fn record_take_moves_in_expr(&mut self, expr: &hir::Expr) {
+    fn record_take_moves_in_expr(&mut self, expr: &hir::Expr) -> Result<(), String> {
         match &expr.kind {
             hir::ExprKind::Call(_, name, args) => {
                 if let Some(access) = self.fn_param_access.get(name).cloned() {
                     for (i, a) in args.iter().enumerate() {
                         if matches!(access.get(i), Some(Some(crate::ast::AccessMod::Take)))
-                            && let hir::ExprKind::Var(id, _) = &a.kind
+                            && let hir::ExprKind::Var(id, vname) = &a.kind
                         {
                             let resolved = self.infer_ctx.resolve(&a.ty);
                             if Self::expr_type_needs_drop(&resolved) {
-                                self.mark_var_moved(
+                                self.mark_var_moved_checked(
                                     *id,
+                                    *vname,
                                     crate::typer::MoveReason::ConsumingCall(*name),
-                                );
+                                    a.span,
+                                )?;
                             }
                         }
                     }
                 }
                 for a in args {
-                    self.record_take_moves_in_expr(a);
+                    self.record_take_moves_in_expr(a)?;
                 }
             }
             hir::ExprKind::Method(recv, ty_name, m_name, args) => {
@@ -489,44 +640,64 @@ impl Typer {
                     format!("{}_{}", ty_name.as_str(), m_name.as_str()).into();
                 if let Some(access) = self.fn_param_access.get(&mangled).cloned() {
                     if matches!(access.first(), Some(Some(crate::ast::AccessMod::Take)))
-                        && let hir::ExprKind::Var(id, _) = &recv.kind
+                        && let hir::ExprKind::Var(id, vname) = &recv.kind
                     {
                         let resolved = self.infer_ctx.resolve(&recv.ty);
                         if Self::expr_type_needs_drop(&resolved) {
-                            self.mark_var_moved(
+                            self.mark_var_moved_checked(
                                 *id,
+                                *vname,
                                 crate::typer::MoveReason::ConsumingCall(mangled),
-                            );
+                                recv.span,
+                            )?;
                         }
                     }
                     for (i, a) in args.iter().enumerate() {
                         if matches!(access.get(i + 1), Some(Some(crate::ast::AccessMod::Take)))
-                            && let hir::ExprKind::Var(id, _) = &a.kind
+                            && let hir::ExprKind::Var(id, vname) = &a.kind
                         {
                             let resolved = self.infer_ctx.resolve(&a.ty);
                             if Self::expr_type_needs_drop(&resolved) {
-                                self.mark_var_moved(
+                                self.mark_var_moved_checked(
                                     *id,
+                                    *vname,
                                     crate::typer::MoveReason::ConsumingCall(mangled),
-                                );
+                                    a.span,
+                                )?;
                             }
                         }
                     }
                 }
-                self.record_take_moves_in_expr(recv);
+                self.record_take_moves_in_expr(recv)?;
                 for a in args {
-                    self.record_take_moves_in_expr(a);
+                    self.record_take_moves_in_expr(a)?;
                 }
             }
+            hir::ExprKind::ChannelSend(ch, v) => {
+                let src = Self::peel_move_wrappers(v);
+                if let hir::ExprKind::Var(id, vname) = &src.kind {
+                    let resolved = self.infer_ctx.resolve(&src.ty);
+                    if self.type_is_aggregate(&resolved) {
+                        self.mark_var_moved_checked(
+                            *id,
+                            *vname,
+                            crate::typer::MoveReason::Sent(expr.span),
+                            expr.span,
+                        )?;
+                    }
+                }
+                self.record_take_moves_in_expr(ch)?;
+                self.record_take_moves_in_expr(v)?;
+            }
             hir::ExprKind::IndirectCall(callee, args) => {
-                self.record_take_moves_in_expr(callee);
+                self.record_take_moves_in_expr(callee)?;
                 for a in args {
-                    self.record_take_moves_in_expr(a);
+                    self.record_take_moves_in_expr(a)?;
                 }
             }
             hir::ExprKind::BinOp(l, _, r) | hir::ExprKind::Index(l, r) => {
-                self.record_take_moves_in_expr(l);
-                self.record_take_moves_in_expr(r);
+                self.record_take_moves_in_expr(l)?;
+                self.record_take_moves_in_expr(r)?;
             }
             hir::ExprKind::UnaryOp(_, x)
             | hir::ExprKind::Field(x, _, _)
@@ -535,23 +706,24 @@ impl Typer {
             | hir::ExprKind::Coerce(x, _)
             | hir::ExprKind::Ref(x)
             | hir::ExprKind::Deref(x) => {
-                self.record_take_moves_in_expr(x);
+                self.record_take_moves_in_expr(x)?;
             }
             hir::ExprKind::Ternary(c, t, e) => {
-                self.record_take_moves_in_expr(c);
-                self.record_take_moves_in_expr(t);
-                self.record_take_moves_in_expr(e);
+                self.record_take_moves_in_expr(c)?;
+                self.record_take_moves_in_expr(t)?;
+                self.record_take_moves_in_expr(e)?;
             }
             hir::ExprKind::Tuple(xs)
             | hir::ExprKind::Array(xs)
             | hir::ExprKind::VecNew(xs)
             | hir::ExprKind::Builtin(_, xs) => {
                 for x in xs {
-                    self.record_take_moves_in_expr(x);
+                    self.record_take_moves_in_expr(x)?;
                 }
             }
             _ => {}
         }
+        Ok(())
     }
 
     pub(in crate::typer) fn emit_scope_drops_excluding(
@@ -702,6 +874,23 @@ impl Typer {
                 }
             }
             hir::ExprKind::Cast(e, _) => Self::collect_hir_var_ids_expr(e, out),
+            hir::ExprKind::Builtin(_, xs) | hir::ExprKind::VecNew(xs) => {
+                for e in xs {
+                    Self::collect_hir_var_ids_expr(e, out);
+                }
+            }
+            hir::ExprKind::Coerce(e, _) | hir::ExprKind::StrictCast(e, _) => {
+                Self::collect_hir_var_ids_expr(e, out);
+            }
+            hir::ExprKind::Ternary(c, t, e) => {
+                Self::collect_hir_var_ids_expr(c, out);
+                Self::collect_hir_var_ids_expr(t, out);
+                Self::collect_hir_var_ids_expr(e, out);
+            }
+            hir::ExprKind::ChannelSend(ch, v) => {
+                Self::collect_hir_var_ids_expr(ch, out);
+                Self::collect_hir_var_ids_expr(v, out);
+            }
             _ => {}
         }
     }

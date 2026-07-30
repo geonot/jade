@@ -292,7 +292,7 @@ snippet (`snippets/101-200/s107.jn`) dies.
 correctly; nested-scope aggregate binds accounted for; the consumed-set scan recurses
 into `if`/`while`/`match`/`for` bodies; 8-4's first assertion flipped.
 
-### ◻ 8-7 One flow-sensitive ownership analysis — **P0**, blocked_by: [8-5]
+### ✅ 8-7 One flow-sensitive ownership analysis — **P0**, blocked_by: [8-5]
 *Review item 16.*
 
 Replace the two overlapping half-checkers with one analysis. Today `src/ownership/`

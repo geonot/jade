@@ -19,7 +19,6 @@ pub mod lexer;
 pub mod lock;
 pub mod lsp;
 pub mod mir;
-pub mod ownership;
 pub mod parser;
 pub mod perceus;
 pub mod pkg;

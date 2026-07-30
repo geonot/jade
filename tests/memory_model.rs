@@ -158,3 +158,150 @@ fn m6_merge_sort_shape_runs_clean() {
     assert!(c.ok(), "{}", c.stderr());
     assert_eq!(c.run_stdout(), "1\n2\n3\n4\n5\n6\n7\n8\n9\n");
 }
+
+/// M1 — aggregates move on assignment: the §3.3 program is rejected with
+/// the D1 diagnostic naming the move site and the `copy` escape hatch.
+#[test]
+fn m1_move_on_assign_rejects_use_of_source() {
+    let c = compile("*main\n    a is vec(1, 2, 3)\n    b is a\n    log(a.length)\n");
+    assert!(!c.ok());
+    let stderr = c.stderr();
+    assert!(
+        stderr.contains("use of moved value `a`")
+            && stderr.contains("`b is a`")
+            && stderr.contains("copy"),
+        "{stderr}"
+    );
+}
+
+/// M1 — the moved-to binding owns the one buffer; the program runs clean.
+#[test]
+fn m1_move_on_assign_new_owner_runs_clean() {
+    let c = compile("*main\n    a is vec(1, 2, 3)\n    b is a\n    b.push(4)\n    log(b.length)\n");
+    assert!(c.ok(), "{}", c.stderr());
+    assert_eq!(c.run_stdout(), "4\n");
+}
+
+/// M2 — reassignment revives the tombstone (identical to the `take` rule).
+#[test]
+fn m2_reassignment_revives() {
+    let c = compile(
+        "*main\n    a is vec(1)\n    b is a\n    a is vec(2, 3)\n    log(a.length)\n    log(b.length)\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    assert_eq!(c.run_stdout(), "2\n1\n");
+}
+
+/// M1 + branches — a move on any branch tombstones after the join
+/// (union merge), so the later read is rejected even with no else.
+#[test]
+fn m1_move_in_branch_rejected_after_join() {
+    let c = compile(
+        "*main\n    a is vec(1)\n    x is 1\n    if x > 0\n        b is a\n        log(b.length)\n    log(a.length)\n",
+    );
+    assert!(!c.ok());
+    assert!(c.stderr().contains("use of moved value `a`"), "{}", c.stderr());
+}
+
+/// M1 + loops — an aggregate assignment inside a loop body would re-move
+/// the tombstone on the next iteration; rejected by the loop check
+/// (including `while`, which previously skipped it).
+#[test]
+fn m1_move_in_while_loop_rejected() {
+    let c = compile("*main\n    a is vec(1)\n    while true\n        b is a\n        log(b.length)\n");
+    assert!(!c.ok());
+    assert!(c.stderr().contains("moved inside a loop body"), "{}", c.stderr());
+}
+
+/// M3 — a plain bind of an aggregate struct field is a partial move, as
+/// `take` is: the field read is rejected, siblings stay readable.
+#[test]
+fn m3_field_bind_is_partial_move() {
+    let src_bad = "type Bag\n    items as Vec of i64\n    label as String\n\n*main\n    b is Bag(items is vec(1), label is 'x')\n    v is b.items\n    log(b.items.length)\n";
+    let c = compile(src_bad);
+    assert!(!c.ok());
+    assert!(c.stderr().contains("use of moved field"), "{}", c.stderr());
+
+    let src_ok = "type Bag\n    items as Vec of i64\n    label as String\n\n*main\n    b is Bag(items is vec(1), label is 'x')\n    v is b.items\n    log(b.label)\n    log(v.length)\n";
+    let c = compile(src_ok);
+    assert!(c.ok(), "{}", c.stderr());
+    assert_eq!(c.run_stdout(), "x\n1\n");
+}
+
+/// M4 — binding an aggregate container element is rejected (it would
+/// alias the container's memory); `copy` and `take` are the escapes.
+#[test]
+fn m4_aggregate_element_bind_rejected_with_escapes() {
+    let c = compile("*main\n    grid is vec()\n    grid.push(vec(1, 2))\n    row is grid.get(0)\n    log(row.length)\n");
+    assert!(!c.ok());
+    assert!(
+        c.stderr().contains("cannot bind aggregate element"),
+        "{}",
+        c.stderr()
+    );
+
+    for escape in ["copy", "take"] {
+        let c = compile(&format!(
+            "*main\n    grid is vec()\n    grid.push(vec(1, 2))\n    row is {escape} grid.get(0)\n    log(row.length)\n"
+        ));
+        assert!(c.ok(), "{escape}: {}", c.stderr());
+        assert_eq!(c.run_stdout(), "2\n", "{escape}");
+    }
+}
+
+/// M4 — scalar elements bind freely (they copy).
+#[test]
+fn m4_scalar_element_bind_is_legal() {
+    let c = compile("*main\n    nums is vec(7, 8)\n    x is nums.get(1)\n    log(x)\n");
+    assert!(c.ok(), "{}", c.stderr());
+    assert_eq!(c.run_stdout(), "8\n");
+}
+
+/// M9 — `send ch, v` moves an aggregate; the sender's later read is
+/// rejected with a diagnostic naming the send.
+#[test]
+fn m9_channel_send_tombstones_sender() {
+    let c = compile(
+        "*main\n    ch is channel of Vec of i64(4)\n    v is vec(1, 2)\n    send ch, v\n    log(v.length)\n",
+    );
+    assert!(!c.ok());
+    let stderr = c.stderr();
+    assert!(
+        stderr.contains("use of moved value `v`") && stderr.contains("sent on a channel"),
+        "{stderr}"
+    );
+}
+
+/// M10 — moving a value that a registered `defer` reads is rejected; the
+/// same defer with no later move runs after the scope body.
+#[test]
+fn m10_defer_read_blocks_move() {
+    let c = compile(
+        "*main\n    buf is vec(1, 2)\n    defer\n        log(buf.length)\n    b is buf\n    log(b.length)\n",
+    );
+    assert!(!c.ok());
+    let stderr = c.stderr();
+    assert!(
+        stderr.contains("cannot move `buf`") && stderr.contains("defer"),
+        "{stderr}"
+    );
+
+    let c = compile("*main\n    buf is vec(1, 2)\n    defer\n        log(buf.length)\n    log(7)\n");
+    assert!(c.ok(), "{}", c.stderr());
+    assert_eq!(c.run_stdout(), "7\n2\n");
+}
+
+/// The ported return-of-borrowed check (formerly src/ownership): a
+/// function returning `%local` is rejected — the pointee dies with the
+/// frame.
+#[test]
+fn return_of_reference_to_local_rejected() {
+    let c = compile("*f() returns %i64\n    x is 5\n    return %x\n\n*main\n    log(1)\n");
+    assert!(!c.ok());
+    assert!(
+        c.stderr()
+            .contains("returning reference to local variable"),
+        "{}",
+        c.stderr()
+    );
+}

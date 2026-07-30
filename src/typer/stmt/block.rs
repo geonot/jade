@@ -71,13 +71,13 @@ impl Typer {
                         None => self.auto_wrap_ok(he, result_enum),
                     };
                     let stmt = hir::Stmt::Expr(he);
-                    self.record_take_moves_in_stmt(&stmt);
+                    self.record_take_moves_in_stmt(&stmt)?;
                     stmts.push(stmt);
                     continue;
                 }
                 let he = self.lower_expr_expected(e, Some(expected))?;
                 let stmt = hir::Stmt::Expr(he);
-                self.record_take_moves_in_stmt(&stmt);
+                self.record_take_moves_in_stmt(&stmt)?;
                 stmts.push(stmt);
                 continue;
             }
@@ -93,7 +93,7 @@ impl Typer {
                         None => insert,
                     };
                     let stmt = hir::Stmt::Expr(he);
-                    self.record_take_moves_in_stmt(&stmt);
+                    self.record_take_moves_in_stmt(&stmt)?;
                     stmts.push(stmt);
                     continue;
                 }
@@ -103,7 +103,7 @@ impl Typer {
             {
                 let hi = self.lower_if_with_tail(i, ret_ty, Some(expected))?;
                 let stmt = hir::Stmt::If(hi);
-                self.record_take_moves_in_stmt(&stmt);
+                self.record_take_moves_in_stmt(&stmt)?;
                 stmts.push(stmt);
                 continue;
             }
@@ -112,12 +112,12 @@ impl Typer {
             {
                 let hm = self.lower_match_with_tail(m, ret_ty, Some(expected))?;
                 let stmt = hir::Stmt::Match(hm);
-                self.record_take_moves_in_stmt(&stmt);
+                self.record_take_moves_in_stmt(&stmt)?;
                 stmts.push(stmt);
                 continue;
             }
             let stmt = self.lower_stmt(s, ret_ty)?;
-            self.record_take_moves_in_stmt(&stmt);
+            self.record_take_moves_in_stmt(&stmt)?;
             stmts.push(stmt);
         }
         if self.deferred_quantified_vars.len() > deferred_snapshot {
