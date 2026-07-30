@@ -168,6 +168,8 @@ pub struct Typer {
     pub(crate) dep_pkg_ids: std::collections::HashMap<crate::intern::Symbol, crate::pkgid::PkgId>,
     pub(crate) scoped_use_map: crate::pkgid::ScopedUseMap,
     pub(crate) declared_type_names: std::collections::HashSet<Symbol>,
+    /// Guard against self-referential const expansion (task 8-17).
+    pub(crate) const_expansion_stack: Vec<Symbol>,
     /// Inferable generics that were instantiated by at least one call
     /// site in this unit (D2/task 8-16 — used to scope the exported-
     /// generic diagnostic to functions with NO call site).
@@ -245,6 +247,7 @@ impl Typer {
             moved_fields: std::collections::HashMap::new(),
             moved_vars: std::collections::HashMap::new(),
             declared_type_names: std::collections::HashSet::new(),
+            const_expansion_stack: Vec::new(),
             instantiated_generics: std::collections::HashSet::new(),
             const_vars: std::collections::HashSet::new(),
             defer_read_vars: std::collections::HashMap::new(),

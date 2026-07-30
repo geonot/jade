@@ -438,6 +438,33 @@ impl Typer {
             } else {
                 let _ = self.infer_ctx.unify(&ret, &Type::Void);
             }
+        } else if f.ret.is_some() && f.name != "main" {
+            /* A DECLARED return type must match the tail (task 8-17): this
+             * used to fall through to the MIR verifier, which reported a
+             * plain source error as "this is a compiler bug". */
+            if let Some(tail_ty) = self.hir_tail_type(&body) {
+                let rt = self.infer_ctx.shallow_resolve(&ret);
+                let tt = self.infer_ctx.shallow_resolve(&tail_ty);
+                let r = self
+                    .infer_ctx
+                    .unify_at(&ret, &tail_ty, f.span, "function tail expression");
+                let rt_lax =
+                    matches!(rt, Type::Ptr(_)) || self.infer_ctx.type_has_unresolved(&rt);
+                let tt_lax =
+                    matches!(tt, Type::Ptr(_)) || self.infer_ctx.type_has_unresolved(&tt);
+                if let Err(e) = r
+                    && !rt_lax
+                    && !tt_lax
+                    && !(rt.is_num() && tt.is_num())
+                {
+                    return Err(format!(
+                        "{}: function `{}` declares `returns {}` but its body                          produces a different type: {e}",
+                        f.span.loc(),
+                        f.name,
+                        ret,
+                    ));
+                }
+            }
         }
 
         let final_body = if f.is_generator && f.name != "main" {

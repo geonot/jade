@@ -110,15 +110,22 @@ type Complex
     e_re is extern.exp(z.re)
     Complex(re is e_re * extern.cos(z.im), im is e_re * extern.sin(z.im))
 
-# log(z) = log|z| + i·arg(z) (principal branch)
-*log(z as Complex) returns Complex
+# log(z) = log|z| + i·arg(z) (principal branch). The implementation is
+# named `ln` because an unqualified in-module `log(...)` call resolves to
+# the builtin print-log — `pow` was passing void into `mul` (caught when
+# task 8-17 made argument mismatches hard errors). Qualified external
+# calls (`complex.log(z)`) are unaffected.
+*ln(z as Complex) returns Complex
     Complex(re is extern.log(magnitude(z)), im is extern.atan2(z.im, z.re))
+
+*log(z as Complex) returns Complex
+    ln(z)
 
 # z^w = exp(w · log z)
 *pow(z as Complex, w as Complex) returns Complex
     if is_zero(z)
         return zero()
-    exp(mul(w, log(z)))
+    exp(mul(w, ln(z)))
 
 # Principal square root.
 *sqrt(z as Complex) returns Complex

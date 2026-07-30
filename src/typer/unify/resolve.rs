@@ -54,6 +54,32 @@ impl InferCtx {
         }
     }
 
+    /// True if the type still CONTAINS an unresolved variable anywhere
+    /// (task 8-17: mismatch checks stay lax for such types — the
+    /// constraint/coercion machinery owns them until they're concrete).
+    pub(crate) fn type_has_unresolved(&mut self, ty: &Type) -> bool {
+        fn scan(t: &Type) -> bool {
+            match t {
+                Type::TypeVar(_) => true,
+                Type::Array(i, _)
+                | Type::Vec(i)
+                | Type::Ptr(i)
+                | Type::Coroutine(i)
+                | Type::Generator(i)
+                | Type::Channel(i)
+                | Type::Alias(_, i)
+                | Type::Newtype(_, i) => scan(i),
+                Type::Map(k, v) => scan(k) || scan(v),
+                Type::Tuple(ts) => ts.iter().any(scan),
+                Type::Fn(ps, r) => ps.iter().any(scan) || scan(r),
+                Type::Struct(_, args) => args.iter().any(scan),
+                _ => false,
+            }
+        }
+        let c = self.canonicalize_type(ty);
+        scan(&c)
+    }
+
     pub(crate) fn canonicalize_type(&mut self, ty: &Type) -> Type {
         match ty {
             Type::TypeVar(v) => {

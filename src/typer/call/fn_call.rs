@@ -65,7 +65,29 @@ impl Typer {
                         let r = self
                             .infer_ctx
                             .unify_at(pt, &ha.ty, span, "function argument");
-                        self.collect_unify_error(r);
+                        /* Hard error (task 8-17): a swallowed mismatch here
+                         * reached codegen and printed raw LLVM verifier IR
+                         * at the user. */
+                        if let Err(e) = r {
+                            /* Numeric pairs coerce downstream (i64 -> f64,
+                             * widening); everything else is a hard error. */
+                            let pl = self.infer_ctx.shallow_resolve(pt);
+                            let al = self.infer_ctx.shallow_resolve(&ha.ty);
+                            /* Hard-error only on concrete/concrete non-numeric
+                             * mismatches; unresolved vars, pointers (auto
+                             * deref/reinterpret), and numeric pairs are the
+                             * coercion pass's business. */
+                            let lax = |this: &mut Self, t: &Type| {
+                                matches!(t, Type::Ptr(_)) || this.infer_ctx.type_has_unresolved(t)
+                            };
+                            if !lax(self, &pl) && !lax(self, &al) && !(pl.is_num() && al.is_num()) {
+                                return Err(format!(
+                                    "argument {} of `{}` has the wrong type: {e}",
+                                    i + 1,
+                                    name
+                                ));
+                            }
+                        }
                     }
                 }
 
@@ -155,9 +177,29 @@ impl Typer {
                 }
                 for (i, ha) in hargs.iter().enumerate() {
                     if let Some(pt) = param_tys.get(i) {
-                        let _ = self
+                        let r = self
                             .infer_ctx
                             .unify_at(pt, &ha.ty, span, "function argument");
+                        if let Err(e) = r {
+                            /* Numeric pairs coerce downstream (i64 -> f64,
+                             * widening); everything else is a hard error. */
+                            let pl = self.infer_ctx.shallow_resolve(pt);
+                            let al = self.infer_ctx.shallow_resolve(&ha.ty);
+                            /* Hard-error only on concrete/concrete non-numeric
+                             * mismatches; unresolved vars, pointers (auto
+                             * deref/reinterpret), and numeric pairs are the
+                             * coercion pass's business. */
+                            let lax = |this: &mut Self, t: &Type| {
+                                matches!(t, Type::Ptr(_)) || this.infer_ctx.type_has_unresolved(t)
+                            };
+                            if !lax(self, &pl) && !lax(self, &al) && !(pl.is_num() && al.is_num()) {
+                                return Err(format!(
+                                    "argument {} of `{}` has the wrong type: {e}",
+                                    i + 1,
+                                    name
+                                ));
+                            }
+                        }
                     }
                 }
                 for (i, ha) in hargs.iter_mut().enumerate() {

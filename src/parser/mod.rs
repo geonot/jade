@@ -5,6 +5,9 @@ use crate::lexer::{Spanned, Token};
 pub enum ParseError {
     #[error("line {line}:{col}: {msg}")]
     Error { line: u32, col: u32, msg: String },
+    /// A message that already carries its own span prefix.
+    #[error("{msg}")]
+    Plain { msg: String },
 }
 
 pub struct Parser {
@@ -87,6 +90,7 @@ impl Parser {
             let msgs: Vec<String> = self.errors.iter().map(|e| e.to_string()).collect();
             let (line, col) = match &self.errors[0] {
                 ParseError::Error { line, col, .. } => (*line, *col),
+                ParseError::Plain { .. } => (0, 0),
             };
             let body = if msgs.len() == 1 {
                 msgs.into_iter().next().unwrap()
@@ -152,7 +156,10 @@ impl Parser {
             }
             prog.decls = remaining_decls;
         }
-        desugar_multi_clause_fns(&mut prog);
+        if let Err(msg) = desugar_multi_clause_fns(&mut prog) {
+            // The message carries its own span prefix; don't double it.
+            return Err(ParseError::Plain { msg });
+        }
         Ok(prog)
     }
 
@@ -451,7 +458,7 @@ impl Parser {
     }
 }
 
-fn desugar_multi_clause_fns(prog: &mut Program) {
+fn desugar_multi_clause_fns(prog: &mut Program) -> Result<(), String> {
     let mut name_indices: Vec<(Symbol, Vec<usize>)> = Vec::new();
     let mut seen: std::collections::HashMap<Symbol, usize> = std::collections::HashMap::new();
 
@@ -472,7 +479,7 @@ fn desugar_multi_clause_fns(prog: &mut Program) {
         .collect();
 
     if multi_groups.is_empty() {
-        return;
+        return Ok(());
     }
 
     let mut to_remove: std::collections::HashSet<usize> = std::collections::HashSet::new();
@@ -489,7 +496,7 @@ fn desugar_multi_clause_fns(prog: &mut Program) {
             })
             .collect();
 
-        let merged = merge_fn_clauses(&clauses);
+        let merged = merge_fn_clauses(&clauses)?;
 
         prog.decls[indices[0]] = Decl::Fn(merged);
         for &i in &indices[1..] {
@@ -502,23 +509,26 @@ fn desugar_multi_clause_fns(prog: &mut Program) {
     for i in remove_sorted {
         prog.decls.remove(i);
     }
+    Ok(())
 }
 
-fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
+fn merge_fn_clauses(clauses: &[Fn]) -> Result<Fn, String> {
     let first = &clauses[0];
     let param_count = first.params.len();
     let sp = first.span;
 
     for (i, c) in clauses.iter().enumerate().skip(1) {
         if c.params.len() != param_count {
-            panic!(
-                "{}: multi-clause function `{}` clause {} has {} parameters, but first clause has {}",
+            /* A user-input error must be a diagnostic, never a Rust panic
+             * (task 8-17 — the panic also exited 0 through the driver). */
+            return Err(format!(
+                "{}: multi-clause function `{}`: clause {} has {} parameters, but the first clause has {}; every clause of a multi-clause function must take the same number of parameters",
                 c.span.loc(),
                 first.name,
                 i + 1,
                 c.params.len(),
                 param_count
-            );
+            ));
         }
     }
 
@@ -619,7 +629,7 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
         })))]
     };
 
-    Fn {
+    Ok(Fn {
         name: first.name,
         type_params: first.type_params.clone(),
         type_bounds: first.type_bounds.clone(),
@@ -631,7 +641,7 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Fn {
         is_generator: false,
         span: sp,
         attrs: FnAttrs::default(),
-    }
+    })
 }
 
 #[cfg(test)]

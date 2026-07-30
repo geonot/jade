@@ -180,27 +180,26 @@ fn review_4_6_cross_type_equals_is_rejected() {
     );
 }
 
-/// §4.6 — declared `returns String`, body returns i64. Rejected since the
-/// review, but by the MIR verifier as "this is a compiler bug" instead of a
-/// source-level type diagnostic.
-/// FIXME(8-17): must be a proper `Diagnostic` with the function's span; no
-/// internal-error wording on a plain source type error.
+/// §4.6 — declared `returns String`, body returns i64: a source-level
+/// diagnostic naming the function and its span (task 8-17). It used to
+/// fall through to the MIR verifier and be reported as "a compiler bug".
 #[test]
 fn review_4_6_declared_string_returns_i64() {
     let c = compile("*f(x as i64) returns String\n    x + 1\n\n*main\n    log(f(1))\n");
     assert!(!c.ok(), "must not compile");
     let stderr = c.stderr();
     assert!(
-        stderr.contains("compiler bug") || stderr.contains("MIR verify"),
-        "OBSERVED-BAD: currently reported as an internal MIR-verify failure. \
-         If this is now a source diagnostic, task 8-17 has landed — flip this \
-         test to assert the diagnostic and the absence of ICE wording. {stderr}"
+        stderr.contains("`f`") && stderr.contains("returns") && stderr.contains("type mismatch"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("compiler bug") && !stderr.contains("MIR verify"),
+        "a plain source error must not carry ICE wording: {stderr}"
     );
 }
 
-/// §4.6 — `'abc' + 1` is rejected since the review, but by the HIR validator
-/// (`hir-validate:` prefix) rather than the typer's diagnostic path.
-/// FIXME(8-17): must be a source-level diagnostic from the typer.
+/// §4.6 — `'abc' + 1` is rejected by the typer as a source-level
+/// diagnostic (8-16 surfaced operand unification; 8-17 owns rendering).
 #[test]
 fn review_4_6_string_plus_int() {
     let c = compile("*main\n    x is 'abc' + 1\n    log(x)\n");
@@ -228,35 +227,39 @@ fn review_4_6_heterogeneous_vec_is_rejected() {
     );
 }
 
-/// §4.7 — multi-clause arity mismatch delivers a correct message as a Rust
-/// panic (RUST_BACKTRACE hint, panic exit code).
-/// FIXME(8-17): must be a normal diagnostic — non-zero (non-panic) exit, no
-/// backtrace hint, span-carrying rendering.
+/// §4.7 — multi-clause arity mismatch is a normal span-carrying
+/// diagnostic with a non-zero exit (task 8-17). It used to be delivered
+/// as a Rust panic — and the panic escaped the driver with EXIT CODE 0.
 #[test]
-fn review_4_7_multi_clause_arity_panics() {
+fn review_4_7_multi_clause_arity_is_a_diagnostic() {
     let c = compile("*f(0) is 0\n*f a, b is a + b\n\n*main\n    log(f(1, 2))\n");
-    assert!(!c.ok(), "must not compile");
+    assert!(!c.ok(), "must not compile (and must exit non-zero)");
     let stderr = c.stderr();
     assert!(
-        stderr.contains("RUST_BACKTRACE"),
-        "OBSERVED-BAD: the arity mismatch is currently reported via a Rust \
-         panic. If the backtrace hint is gone, task 8-17 has landed — flip \
-         this test to assert a clean diagnostic. {stderr}"
+        stderr.contains("multi-clause function `f`") && stderr.contains("parameters"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("RUST_BACKTRACE") && !stderr.contains("panicked"),
+        "must not be a Rust panic: {stderr}"
     );
 }
 
-/// Found while pinning: top-level statements with a reassignment crash the
-/// compiler with a stack overflow (3-line program, no `*main`).
-/// FIXME(8-17): must be either accepted or cleanly diagnosed; never an ICE.
+/// Found while pinning: top-level reassignment used to expand the
+/// self-referential const until the compiler's stack overflowed. Now a
+/// clean acyclicity diagnostic (task 8-17: no ICE on user input).
 #[test]
-fn top_level_reassignment_overflows_compiler_stack() {
+fn top_level_reassignment_is_cleanly_diagnosed() {
     let c = compile("x is 41\nx is x + 1\nlog(x)\n");
+    assert!(!c.ok(), "self-referential top-level const must be rejected");
+    let stderr = c.stderr();
     assert!(
-        !c.ok(),
-        "OBSERVED-BAD: currently dies (stack overflow / abort). If this now \
-         compiles or errors cleanly, task 8-17 (no ICE on user input) has \
-         landed — flip this test. {}",
-        c.stderr()
+        stderr.contains("defined in terms of itself"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("stack overflow") && !stderr.contains("RUST_BACKTRACE"),
+        "must be a diagnostic, not a crash: {stderr}"
     );
 }
 
@@ -311,4 +314,31 @@ fn fixme_markers_do_not_outlive_their_tasks() {
         }
     }
     assert!(stale.is_empty(), "{}", stale.join("\n"));
+}
+
+/// Task 8-17 — every diagnostic-producing input exits non-zero (the
+/// multi-clause arity panic used to exit 0), and none is delivered as a
+/// Rust panic or raw LLVM IR.
+#[test]
+fn every_diagnostic_input_exits_nonzero() {
+    let bad = [
+        "*f(0) is 0\n*f a, b is a + b\n\n*main\n    log(f(1, 2))\n",
+        "x is 41\nx is x + 1\nlog(x)\n",
+        "*f(x as i64) returns String\n    x + 1\n\n*main\n    log(f(1))\n",
+        "*add(a as i64, b as i64) returns i64\n    a + b\n\n*main\n    log(add('one', 2))\n",
+        "*main\n    if 'abc' equals 5\n        log('huh')\n",
+        "*main\n    v is vec()\n    v.push(1)\n    v.push('two')\n",
+        "*main\n    log(oops(((\n",
+    ];
+    for src in bad {
+        let c = compile(src);
+        assert!(!c.ok(), "must exit non-zero for:\n{src}");
+        let stderr = c.stderr();
+        assert!(
+            !stderr.contains("RUST_BACKTRACE")
+                && !stderr.contains("panicked at")
+                && !stderr.contains("Call parameter type"),
+            "diagnostic must not be a panic or raw IR for:\n{src}\n{stderr}"
+        );
+    }
 }

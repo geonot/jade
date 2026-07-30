@@ -330,7 +330,18 @@ impl<'ctx> Compiler<'ctx> {
         if std::env::var("JINN_DUMP_IR").is_ok() {
             self.module.print_to_stderr();
         }
-        self.module.verify().map_err(|e| e.to_string())
+        self.module.verify().map_err(|e| {
+            /* Reaching LLVM verification with bad IR means the frontend
+             * let an ill-typed program through — a compiler bug, and it
+             * must be reported as one, never as raw IR at the user
+             * (task 8-17). */
+            format!(
+                "internal compiler error: generated LLVM IR failed verification — \
+                 this is a compiler bug; please report it together with the source \
+                 program\n{}",
+                e
+            )
+        })
     }
 
     /// Compute the emitted LLVM symbol name for a MIR function (scope.md §1.3).

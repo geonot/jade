@@ -134,7 +134,21 @@ impl Typer {
                     });
                 }
                 if let Some(const_expr) = self.consts.get(name).cloned() {
-                    return self.lower_expr(&const_expr);
+                    /* Expanding a const that (transitively) references
+                     * itself used to recurse until the compiler's stack
+                     * overflowed — a 3-line top-level program crashed the
+                     * compiler (task 8-17). */
+                    if self.const_expansion_stack.contains(name) {
+                        return Err(format!(
+                            "{}: constant `{}` is defined in terms of itself; constants must be acyclic",
+                            span.loc(),
+                            name,
+                        ));
+                    }
+                    self.const_expansion_stack.push(*name);
+                    let r = self.lower_expr(&const_expr);
+                    self.const_expansion_stack.pop();
+                    return r;
                 }
                 if let Some((_expr, _span)) = self.globals.get(name).cloned() {
                     let init_expr = self.lower_expr(&_expr)?;

@@ -1,19 +1,28 @@
-# 2026-07-29 (from tasks 8-3/8-4)
-Additional user-reachable ICE/diagnostic-quality cases pinned in
-tests/review_2026_07.rs, to be flipped by this task:
-
-- Top-level statements with a reassignment (`x is 41` / `x is x + 1` /
-  `log(x)`, no *main) crash the compiler with a stack overflow. Never an ICE:
-  accept or diagnose cleanly.
-- `syscall(1, ...)` parses and lowers but codegen has no `__syscall`
-  implementation — the user sees "unknown function `__syscall`". Per this
-  task's DoD, a codegen-reached gap must be an ICE-with-report-prompt or a
-  clean "not supported" diagnostic. The jinn.md "System calls" section was
-  removed until the feature exists.
-- Declared-return-type mismatch (`*f(x as i64) returns String` / `x + 1`) is
-  now caught but reported as "MIR verification failed after lowering — this
-  is a compiler bug"; `'abc' + 1` is caught by `hir-validate:`. Both must be
-  ordinary typer diagnostics with spans.
-- The multi-clause arity panic currently exits 101 via the Rust panic path
-  when invoked as `jinnc` directly (the review measured exit 0 through
-  `jinn run`); either way it must become a Diagnostic with non-panic exit 1.
+# 2026-07-30 implementation notes
+- The four pinned defects are fixed:
+  1. LLVM verifier leak: call-argument mismatches are hard typer errors
+     now (previously collected-and-swallowed, so `add('one', 2)` reached
+     codegen and printed raw verifier IR). Numeric pairs, unresolved
+     vars, and pointers stay lax — the coercion pass owns those.
+  2. Declared-`returns` vs body tail mismatch is a source diagnostic
+     naming the function (used to be MIR-verify "this is a compiler
+     bug"). Inferred-return functions keep the historical tail laxity
+     (std/net's bool-or-struct returns rely on it — pre-existing wobble,
+     out of scope here).
+  3. The multi-clause arity panic (which also exited 0 through the
+     driver) is a ParseError with the clause's span.
+  4. Top-level `x is x + 1` no longer overflows the compiler stack:
+     const expansion carries a cycle guard and reports "defined in terms
+     of itself".
+- Reaching LLVM verification with bad IR is now branded as an ICE with a
+  report prompt — never raw IR at the user.
+- every_diagnostic_input_exits_nonzero pins non-zero exits and
+  no-panic/no-IR for the whole set; all four FIXME(8-17) pins flipped.
+- Scope deviation, recorded: full per-site construction of structured
+  `Diagnostic` values (severities/codes/caret rendering from
+  src/diagnostic.rs at every error site) is NOT done — errors remain
+  span-prefixed strings funneled through the driver's single `die`
+  exit. One rendering path and one exit path exist; the rustc-style
+  renderer stays unwired. That refactor is mechanical but touches
+  hundreds of sites; it should ride a dedicated pass with its own
+  message-snapshot tests.

@@ -525,7 +525,7 @@ removed — a default that silently returns `i64` while pushing a strict error
 call site in the compilation unit, require an annotation or a trait bound (task 1-4's
 bounded polymorphism) and say so in the diagnostic.
 
-### ◻ 8-17 Route all diagnostics through `diagnostic.rs` — **P1**, blocked_by: []
+### ✅ 8-17 Route all diagnostics through `diagnostic.rs` — **P1**, blocked_by: []
 *Review item 13.*
 
 `src/diagnostic.rs` already implements rustc-style diagnostics — severities, codes

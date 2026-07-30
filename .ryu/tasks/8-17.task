@@ -1,5 +1,5 @@
 title: Route all diagnostics through diagnostic.rs
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
