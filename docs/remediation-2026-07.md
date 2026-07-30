@@ -243,7 +243,7 @@ harness fails if a `FIXME(8-N)` marker outlives its task's completion.
 
 ## Tier 1 — Memory model
 
-### ◻ 8-5 Specify the aggregate memory model — **P0**, blocked_by: [8-3]
+### ✅ 8-5 Specify the aggregate memory model — **P0**, blocked_by: [8-3]
 *Review item 2. Decision D1.*
 
 Write `docs/memory-model.md` with the rigor of `docs/access-semantics.md`: what `is`

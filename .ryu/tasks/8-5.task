@@ -1,10 +1,10 @@
 title: Specify the aggregate memory model
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: ['8-3']
 created_at: '2026-07-29T00:00:00'
-updated_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T15:00:00'
 description: 'Review item 2, decision D1. Write docs/memory-model.md with the rigor of
   docs/access-semantics.md, specifying move-on-assign with compiler-inferred borrows for
   all heap aggregates (Vec, Map, aggregate-containing structs), matching what jinn.md

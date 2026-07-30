@@ -1,8 +1,13 @@
 # Jinn Access Semantics
 
-> Authoritative reference for how Jinn binds, passes, shares, mutates, and
-> destroys values. Supersedes the prior `access-semantics*.md`,
-> `architecture.md`, and `memory-model.md` documents (all deleted).
+> Authoritative reference for the access-modifier surface
+> (`copy`/`take`/`const`), `@resource` linearity, the HIR ownership tiers,
+> and cross-thread enforcement. The **aggregate ownership contract** —
+> what `is` does for `Vec`/`Map`/aggregate structs, inferred consuming
+> parameters, and the rejection rules for aliasing — is specified in
+> [`memory-model.md`](memory-model.md) (decision D1), which also records
+> (§9) the places where this document's original claims did not match the
+> implementation. Where the two disagree, `memory-model.md` wins.
 
 ## 1. Design pillars
 
