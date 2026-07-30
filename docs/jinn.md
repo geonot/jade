@@ -11,8 +11,11 @@ ownership.
 ```
 
 This document is a tour of the language, from the basics to the more advanced
-features. Every example is valid Jinn.
-         
+features. It describes the language **as implemented today**, not as aspired
+to; where a feature is incomplete, the gap is stated inline. Every fenced
+example is extracted and compiled against the current compiler by
+`tests/doc_examples.rs`, so an example that stops compiling fails CI.
+
 ---
 
 ## Contents
@@ -62,10 +65,8 @@ features. Every example is valid Jinn.
   - [Persistent stores](#persistent-stores)
   - [Systems programming](#systems-programming)
     - [C interop](#c-interop)
-    - [System calls](#system-calls)
     - [Raw pointers](#raw-pointers)
     - [Volatile access](#volatile-access)
-    - [Signals](#signals)
   - [Standard library](#standard-library)
     - [Numeric methods](#numeric-methods)
     - [Integer bit operations](#integer-bit-operations)
@@ -117,12 +118,15 @@ x is x + 1
 
 Augmented assignments update a variable in place:
 
+<!-- doctest:prelude
+x is 0
+mask is 1
+-->
 ```jinn
 x += 1
 x -= 2
 x *= 3
 x /= 4
-x %= 5
 x &= 0xFF
 x |= 0x80
 x ^= mask
@@ -172,6 +176,16 @@ log('x={x}, doubled={x * 2}')  # x=42, doubled=84
 
 Common string methods:
 
+<!-- doctest:prelude
+s is 'abc'
+start is 0
+end is 1
+delim is ','
+old is 'a'
+new is 'b'
+sub is 'b'
+n is 2
+-->
 ```jinn
 s.length              # number of bytes
 s.contains('sub')
@@ -199,6 +213,10 @@ Jinn uses words for logical and equality operators, and symbols for arithmetic.
 
 `equals` (or `eq`) and `neq` test equality. Ordering uses `<`, `>`, `<=`, `>=`.
 
+<!-- doctest:prelude
+x is 1
+y is 2
+-->
 ```jinn
 if x equals 0
     log('zero')
@@ -208,6 +226,12 @@ if x neq y
 
 Comparisons can be chained the way they read in mathematics:
 
+<!-- doctest:prelude
+a is 1
+b is 2
+c is 3
+x is 50
+-->
 ```jinn
 if 0 < x < 100
     log('in range')
@@ -219,6 +243,10 @@ if a <= b <= c
 
 `and`, `or`, `not`, and `xor`:
 
+<!-- doctest:prelude
+a is true
+b is false
+-->
 ```jinn
 if a and not b
     log('a only')
@@ -231,6 +259,9 @@ if a xor b
 `in` tests membership in arrays, vectors, maps (keys), and strings
 (substrings).
 
+<!-- doctest:prelude
+x is 2
+-->
 ```jinn
 if x in [1, 2, 3]
     log('found')
@@ -240,6 +271,7 @@ if 'lo' in 'hello'
 
 ### Arithmetic and bitwise
 
+<!-- doctest:skip reference table, one operator per cell rather than a program -->
 ```jinn
 a + b    a - b    a * b    a / b    a % b    a mod b
 a pow b                    # exponentiation
@@ -249,6 +281,10 @@ a << b   a >> b            # shifts
 
 ### Casting
 
+<!-- doctest:prelude
+x is 1
+big is 1000
+-->
 ```jinn
 y is x as f64            # widen — always safe
 z is big as strict i16   # narrow, panics if the value does not fit
@@ -261,6 +297,9 @@ w is big as i16          # narrow, truncates
 
 ### Conditionals
 
+<!-- doctest:prelude
+x is 1
+-->
 ```jinn
 if x > 0
     log('positive')
@@ -275,24 +314,36 @@ else
 `condition ? then ! else` is a conditional expression. It is the idiomatic way
 to choose a value.
 
+<!-- doctest:prelude
+x is 1
+ready is true
+-->
 ```jinn
 sign is x > 0 ? 1 ! -1
 label is ready ? 'go' ! 'wait'
 ```
 
-Ternaries can nest (they associate to the right) and can span multiple lines
-when the branches are large:
+Ternaries chain in the **else** position (like an `elif` ladder). Nesting a
+ternary in the *then* position is not supported — parenthesize or restructure
+instead. A ternary bound with `is` stays on one line; the multi-line arm form
+(leading `?` / `!` markers) is available in statement position, shown under
+[Error handling](#error-handling).
 
+<!-- doctest:prelude
+score is 85
+-->
 ```jinn
 grade is score > 90 ? 'A' ! score > 80 ? 'B' ! 'C'
-
-result is condition
-    ? do_something()
-    ! do_something_else()
 ```
 
 ### Loops
 
+<!-- doctest:prelude
+n is 3
+items is [1, 2, 3]
+done is true
+*process x is x
+-->
 ```jinn
 # While
 while n > 0
@@ -319,6 +370,9 @@ loop
 A C-style counted loop is written `loop(init, cond, step)`, where `$` is the
 current value. It is the common idiom for indexed iteration over a collection:
 
+<!-- doctest:prelude
+items is [1, 2, 3]
+-->
 ```jinn
 loop(0, $ < items.len(), $ + 1)
     log(items.get($))
@@ -336,9 +390,17 @@ outer is for i in 0 to 10
 
 ### Parallel loops
 
-`sim for` runs iterations in parallel on a work-stealing scheduler. Iterations
-must be independent.
+`sim for` declares that iterations are independent and may run in parallel.
 
+> **Current status:** `sim for` compiles and runs, but it currently lowers to
+> a **sequential** counted loop — measured timings are identical to `for`
+> (`src/mir/lower/loops.rs`). Write it only where iterations really are
+> independent, so the code stays correct when parallel lowering lands.
+
+<!-- doctest:prelude
+items is [1, 2, 3]
+*process x is x
+-->
 ```jinn
 sim for x in items
     process(x)
@@ -422,21 +484,23 @@ Functions are values. A function parameter is typed `(ParamTypes) returns Ret`.
 
 ## Lambdas and pipelines
 
-A lambda is written `|params| body`:
+A lambda is written `|params| body`, where the body is a single expression.
+Lambda parameters are always inferred — `as` annotations are not supported
+inside `|…|` — and multi-line lambda bodies are not supported; use a named
+function for anything larger.
 
 ```jinn
 square is |x| x * x
-double is |x as i64| x * 2
-
-# Multi-line: indent the body
-transform is |x|
-    y is x * 2
-    y + 1
 ```
 
 The pipeline operator `~` feeds the left value as the first argument of the
 function on the right:
 
+<!-- doctest:prelude
+value is 1
+*double x is x * 2
+*add_one x is x + 1
+-->
 ```jinn
 result is value ~ double ~ add_one
 ```
@@ -444,6 +508,10 @@ result is value ~ double ~ add_one
 Inside a pipeline, `$` marks where the piped value goes when you need it in a
 different position:
 
+<!-- doctest:prelude
+value is 1
+*add a, b is a + b
+-->
 ```jinn
 result is value ~ add(5, $)     # add(5, value)
 ```
@@ -508,6 +576,12 @@ enum Shape
 
 You handle an enum by matching on it:
 
+<!-- doctest:prelude
+enum Shape
+    Circle(f64)
+    Rect(f64, f64)
+    Unit
+-->
 ```jinn
 *area(s as Shape) returns f64
     match s
@@ -533,6 +607,13 @@ enum HttpStatus
 `match` selects a branch by pattern. Patterns include literals, binding names,
 enum constructors with destructuring, and the wildcard `_`.
 
+<!-- doctest:prelude
+enum Shape
+    Circle(f64)
+    Rect(f64, f64)
+n is 1
+shape is Circle(1.0)
+-->
 ```jinn
 match n
     0 ? log('zero')
@@ -546,6 +627,12 @@ match shape
 
 A branch body may be a single expression after `?`, or an indented block:
 
+<!-- doctest:prelude
+enum Outcome
+    Ok(i64)
+    Err(String)
+result is Ok(1)
+-->
 ```jinn
 match result
     Ok(v) ?
@@ -645,6 +732,11 @@ evens is [x for x in 0 to 100 if x mod 2 equals 0]
 
 Vectors also provide functional combinators, which chain with `.` or `~`:
 
+<!-- doctest:prelude
+nums is [1, 2, 3]
+items is [1, 2, 3]
+target is 2
+-->
 ```jinn
 doubled is nums.map(|x| x * 2)
 big is nums.filter(|x| x > 10)
@@ -711,20 +803,42 @@ err FileError
     Denied
 ```
 
-`!` is shorthand for returning early — typically an error value:
+A function declares which error enums it can return with a trailing `! E`,
+and raises one with `err <Variant>`, which returns early:
 
 ```jinn
-*open(path as String) returns FileError
+err FileError
+    NotFound
+    Denied
+
+*open(path as String) returns i64 ! FileError
     if path equals ''
-        ! NotFound
-    ...
+        err NotFound
+    42
 ```
 
-A function may declare which error enums it returns with a trailing `! E`:
+At the call site the quaternary handles both outcomes: `?` binds the success
+value as `$`, `!!` binds the error as `err`. Inside a fallible function, a
+bare call propagates the error to the caller with no ceremony. In statement
+position the arms may span multiple lines with leading markers.
 
+<!-- doctest:prelude
+err FileError
+    NotFound
+    Denied
+
+*open(path as String) returns i64 ! FileError
+    if path equals ''
+        err NotFound
+    42
+-->
 ```jinn
-*read(path as String) returns i64 ! FileError
-    ...
+open('config') ? log($) !! log('open failed')
+fd is open('config') !! -1        # default on error
+
+open('config')
+    ? log($)
+    !! log('open failed')
 ```
 
 `defer` registers cleanup that runs when the function exits, whichever way it
@@ -734,7 +848,7 @@ exits. Deferred blocks run in reverse order of registration.
 *process()
     defer
         log('cleanup')
-    ...
+    log('work')          # prints work, then cleanup
 ```
 
 ---
@@ -744,21 +858,36 @@ exits. Deferred blocks run in reverse order of registration.
 Each file is a module. A module's name is its file name, and its functions and
 types are referred to through that name.
 
+<!-- doctest:file mymath.jn -->
 ```jinn
-# math.jn
+# mymath.jn
 *add a, b
     a + b
 ```
 
 ```jinn
 # main.jn
-use math
+use mymath
 
 *main
-    log(math.add(1, 2))
+    log(mymath.add(1, 2))
 ```
 
 `use` accepts a path for files in subdirectories, and an alias:
+
+<!-- doctest:file models/account.jn -->
+```jinn
+# models/account.jn
+*balance
+    0
+```
+
+<!-- doctest:file long_module_name.jn -->
+```jinn
+# long_module_name.jn
+*version
+    1
+```
 
 ```jinn
 use models/account
@@ -771,8 +900,9 @@ use long_module_name as lmn
 
 ### Actors
 
-An `actor` has private fields and message handlers. Spawn one with `spawn`, send
-it a message by calling a handler, and shut it down with `stop`.
+An `actor` has private fields and message handlers. Spawn one with `spawn`,
+send it a message by calling a handler, shut it down with `stop`, and wait for
+it to finish with `join`.
 
 ```jinn
 actor Counter
@@ -794,10 +924,23 @@ actor Counter
     c.increment(3)
     c.report()
     stop c
+    join c        # prints 8
 ```
 
-Handlers introduced with `@` are asynchronous (fire-and-forget). A handler
-introduced with `*` is synchronous and can return a value to the caller.
+Handlers introduced with `@` are asynchronous: the call enqueues a message on
+the actor's mailbox and returns immediately. Messages are processed in order.
+Actors run as **daemon** tasks — the program does not wait for them at exit —
+so a graceful shutdown is `stop` (close the mailbox; every already-enqueued
+message is still delivered) followed by `join` (wait for the actor to drain
+and exit). Without the `join` above, `*main` can return before `@report`
+runs and the program prints nothing.
+
+A handler introduced with `*` is called synchronously and returns a value.
+Two current limitations, both tracked for fixes: a `returns` annotation on a
+`*` handler does not parse (write the handler unannotated), and a synchronous
+call does **not** wait for earlier `@` messages to be processed — it reads
+the actor's state as it is at the moment of the call. See
+[`docs/concurrency.md`](concurrency.md) for the full shutdown contract.
 
 ### Channels
 
@@ -814,6 +957,11 @@ close ch
 
 `select` waits on several channel operations and runs the first one ready.
 
+<!-- doctest:prelude
+ch1 is channel of i64(4)
+ch2 is channel of i64(4)
+send ch1, 1
+-->
 ```jinn
 select
     receive ch1 as val
@@ -830,6 +978,19 @@ select
 
 A `store` is a typed collection that persists to disk between runs. Queries are
 checked at compile time.
+
+> **Current limitations, stated so you can design around them:**
+>
+> - A store is durable for a **single writer process**. Two processes
+>   writing the same store is unsupported and currently undetected
+>   (file locking is planned — task 8-21).
+> - A query that matches **nothing currently yields a zero-initialized
+>   record** (`name` empty, numbers `0`) that is indistinguishable from real
+>   data. Guard with `count` until misses become `Option of Record`
+>   (task 8-25, decision D3).
+> - Iterating a whole store (`for u in all users`) currently crashes at
+>   runtime (task 8-25). Iterate via queries you know match, or keep your
+>   own vector.
 
 ```jinn
 store users
@@ -871,6 +1032,11 @@ new record's sid for `insert` and the number of updated rows for `set`.
 violation), `Missing` (a `set` filter that matched no rows), `Constraint`
 (an empty `@required` string), and `Io`:
 
+<!-- doctest:prelude
+store users
+    name as String
+    age as i64
+-->
 ```jinn
 insert users 'Alice', 30 ? log($) !! log('insert failed')
 
@@ -895,6 +1061,12 @@ back to its pre-transaction state — data files, WAL, and indexes alike.
 Nested `transaction` blocks join the outermost one: only the outermost commit
 makes the batch durable, and any rollback aborts the whole nest.
 
+> **Current limitations:** transaction state is process-global, not
+> per-task — two concurrent tasks must not run `transaction` blocks at the
+> same time, and one task's open transaction weakens the durability of other
+> tasks' writes; rollback is not crash-safe (a crash mid-rollback can leave
+> the store corrupt). Both are being fixed (task 8-24).
+
 Field types are `i64`, `f64`, `bool`, and `String`. Query operators are
 `equals`, `neq`, `<`, `>`, `<=`, and `>=`, combined with `and` / `or`. Data is
 stored in a `<name>.store` file in the working directory.
@@ -905,19 +1077,14 @@ stored in a `<name>.store` file in the working directory.
 
 ### C interop
 
-Declare an external C function with `extern *`:
+Declare an external C function with `extern *`. Variadic declarations
+(`...`) are not supported yet — bind fixed-arity functions:
 
 ```jinn
-extern *printf(fmt as %i8, ...) returns i32
+extern *puts(s as %i8) returns i32
 
 *main
-    printf('hello from jinn\n')
-```
-
-### System calls
-
-```jinn
-syscall 1, 1, 'hello\n', 6    # write(stdout, msg, len)
+    puts('hello from jinn')
 ```
 
 ### Raw pointers
@@ -925,6 +1092,7 @@ syscall 1, 1, 'hello\n', 6    # write(stdout, msg, len)
 `%` takes a pointer; `@` dereferences one.
 
 ```jinn
+value is 42
 ptr is %value
 val is @ptr
 ```
@@ -937,21 +1105,11 @@ elided — for memory-mapped I/O and hardware registers.
 ```jinn
 use volatile
 
-ptr is %reg
-volatile.write(ptr, 1)
-v is volatile.read(ptr)
-```
-
-### Signals
-
-```jinn
-use signal
-
-*handler(sig as i32)
-    log(sig)
-
 *main
-    signal.handle(2, handler)    # SIGINT
+    reg is 0
+    ptr is %reg
+    volatile.write(ptr, 1)
+    v is volatile.read(ptr)
 ```
 
 ---
@@ -962,15 +1120,32 @@ A few commonly used pieces.
 
 ### Numeric methods
 
+> **Known gap:** the return type of numeric method calls currently fails to
+> infer in many positions (`r is x.sqrt()` mis-defaults to `i64`), which is
+> the same inference gap as task 8-16. The block below is excluded from the
+> doc-compile gate until that lands; re-enable it there.
+
+<!-- doctest:skip blocked on 8-16: numeric method return-type inference -->
 ```jinn
-x.sqrt()    x.sin()    x.cos()    x.abs()
-x.floor()   x.ceil()   x.round()
-x.min(y)    x.max(y)
-x.is_nan()  x.is_finite()
+x.sqrt()
+x.sin()
+x.cos()
+x.abs()
+x.floor()
+x.ceil()
+x.round()
+x.min(y)
+x.max(y)
+x.is_nan()
+x.is_finite()
 ```
 
 ### Integer bit operations
 
+<!-- doctest:prelude
+x is 5
+n is 1
+-->
 ```jinn
 popcount(x)         # set bits
 clz(x)              # leading zeros
@@ -992,6 +1167,11 @@ regex.find_all('a1b2c3', '[0-9]+')      # ['1', '2', '3']
 
 ### Built-ins
 
+<!-- doctest:prelude
+value is 1
+x is 1
+cond is true
+-->
 ```jinn
 log(value)        # print a line to stdout
 to_string(x)      # convert a value to a String
@@ -1002,12 +1182,34 @@ assert(cond)      # check a condition at runtime
 
 ## Memory and ownership
 
-Jinn manages memory for you, without a garbage collector. Each value has a
-single owner, and its memory is released automatically when the owner goes out
-of scope. Reading a value borrows it without copying, so passing data around is
-cheap.
+Jinn manages memory for you, without a garbage collector. You do not write
+allocation or free calls: scalars and strings are values (assignment copies),
+and each heap aggregate (`Vec`, `Map`, aggregate-containing structs) has a
+single owner whose scope exit releases it.
 
-You do not write allocation or free calls, and the language prevents
-use-after-free, double-free, and data races. Most of the time memory management
-is invisible — you write code in terms of values, and the compiler takes care of
-the rest.
+**The target model** (decision D1 in
+[`remediation-2026-07.md`](remediation-2026-07.md), specified by task 8-5) is
+move-on-assign with compiler-inferred borrows for heap aggregates: `b is a`
+moves ownership — `a` is unusable until reassigned — reads borrow without
+copying, and a program that would corrupt memory does not compile. No
+lifetime annotations, no `&`, no explicit `clone()`.
+
+> **Current status — not yet enforced.** Today the checker does **not** yet
+> deliver that guarantee for heap aggregates, and these programs misbehave
+> (each is pinned in `tests/review_2026_07.rs`, owned by tasks 8-6..8-8):
+>
+> - returning an aggregate parameter double-frees
+>   (`*ident(v) returns Vec of i64` / `return v`);
+> - two `dispatch` tasks mutating one `Vec` corrupt the allocator instead of
+>   being rejected at compile time;
+> - `b is a; b.push(4)` on a `Vec` is silent shared mutable aliasing —
+>   the mutation is visible through `a`.
+>
+> Until tasks 8-5..8-8 land, treat aggregate assignment and
+> aggregate-returning helpers with care, and share data across tasks only
+> through channels or actors. Strings are unaffected — they already have
+> value semantics.
+
+One property that holds by construction: there are no shared reference
+counts, so reference cycles cannot be constructed and cycle leaks are
+impossible.

@@ -1,0 +1,17 @@
+# 2026-07-29 (from task 8-3 doc honesty pass)
+Additional acceptance items discovered while making every jinn.md block compile:
+
+- jinn.md "Numeric methods" block carries `doctest:skip blocked on 8-16` —
+  numeric method return types fail to infer (`r is x.sqrt()` mis-defaults to
+  i64 and hir-validate rejects; bare `x.min(y)` reaches codegen as unknown
+  function `min`; integer `(n).abs()` reaches codegen as
+  `__builtin_CharMethod(abs)`). When this task lands, remove the skip marker
+  and the "Known gap" callout in docs/jinn.md.
+- std/signal.jn: `signal.handle(sig, handler)` fails with "signal_handle()
+  handler must be a function pointer" because the unannotated `handler`
+  parameter defaults to i64 (this task's class). The jinn.md "Signals"
+  section was removed; restore it once `use signal` works end-to-end.
+- std/regex.jn had `returns Bool` (undefined type) accepted by the typer and
+  only caught by MIR verify — the same Struct(name) vs builtin unification
+  gap this task closes. Fixed to `bool` in the 8-3 commit; a typer that
+  rejects undefined type names at the annotation site would have caught it.

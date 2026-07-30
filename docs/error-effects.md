@@ -1,7 +1,12 @@
 # Checked error-effect system
 
-**Status: fully implemented and conformance-tested (2026-06).**
-All subsystems are live end-to-end:
+This document describes the error-effect system as implemented today, not
+aspiration. Its guarantees hold only as far as the conformance tests in
+`tests/error_effects.rs` pin them; known gaps found by the 2026-07 review
+(e.g. instantiation-site diagnostics, `From` resolution by name pattern) are
+tracked in [`remediation-2026-07.md`](remediation-2026-07.md).
+
+Subsystems exercised by the conformance suite:
 - §2 canonical `Option`/`Result` prelude with combinator surfaces
 - §3 `err` declaration + raise
 - §4 quaternary `e ? ok ! nothing !! err` with `$` / `err` bindings

@@ -1,0 +1,19 @@
+# 2026-07-29 (from tasks 8-3/8-4)
+Additional user-reachable ICE/diagnostic-quality cases pinned in
+tests/review_2026_07.rs, to be flipped by this task:
+
+- Top-level statements with a reassignment (`x is 41` / `x is x + 1` /
+  `log(x)`, no *main) crash the compiler with a stack overflow. Never an ICE:
+  accept or diagnose cleanly.
+- `syscall(1, ...)` parses and lowers but codegen has no `__syscall`
+  implementation — the user sees "unknown function `__syscall`". Per this
+  task's DoD, a codegen-reached gap must be an ICE-with-report-prompt or a
+  clean "not supported" diagnostic. The jinn.md "System calls" section was
+  removed until the feature exists.
+- Declared-return-type mismatch (`*f(x as i64) returns String` / `x + 1`) is
+  now caught but reported as "MIR verification failed after lowering — this
+  is a compiler bug"; `'abc' + 1` is caught by `hir-validate:`. Both must be
+  ordinary typer diagnostics with spans.
+- The multi-clause arity panic currently exits 101 via the Rust panic path
+  when invoked as `jinnc` directly (the review measured exit 0 through
+  `jinn run`); either way it must become a Diagnostic with non-panic exit 1.

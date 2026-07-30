@@ -1,10 +1,10 @@
 title: Documentation honesty pass
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []
 created_at: '2026-07-29T00:00:00'
-updated_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T14:00:00'
 description: 'Review item 9 part 1. Correct claims contradicted by observed behavior now, before the
   code is fixed: remove ''Status: fully implemented and conformance-tested'' from
   docs/error-effects.md:3; replace jinn.md''s ''prevents use-after-free, double-free,

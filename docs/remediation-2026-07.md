@@ -190,7 +190,7 @@ comment and no comment-preserving path exists yet; in-place modification require
 explicit `--write` (default prints to stdout). A test asserts a commented file is
 byte-identical after `jinn fmt --write`. Full fix is 8-18.
 
-### ◻ 8-3 Documentation honesty pass — **P0**, blocked_by: []
+### ✅ 8-3 Documentation honesty pass — **P0**, blocked_by: []
 *Review item 9, part 1.*
 
 Claims contradicted by observed behavior, to be corrected or removed now rather than
@@ -219,7 +219,7 @@ a documented example that does not compile fails CI. Adopt the
 actually exist today, not aspiration" — as a header contract on `jinn.md` and
 `error-effects.md`.
 
-### ◻ 8-4 Pin the review's repros as tests — **P0**, blocked_by: []
+### ✅ 8-4 Pin the review's repros as tests — **P0**, blocked_by: []
 *Review item 1, part 1.*
 
 Nine programs from the review, added now so Tier 1 and Tier 3 are verifiable rather
