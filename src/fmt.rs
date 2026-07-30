@@ -5,32 +5,163 @@ use crate::parser::Parser;
 pub fn format_source(src: &str) -> Result<String, String> {
     let mut lexer = Lexer::new(src);
     let tokens = lexer.tokenize().map_err(|e| e.to_string())?;
-    // The formatter reprints from the AST, and comments are not part of the
-    // AST yet (task 8-18 makes them lexer trivia). Until they are, formatting
-    // a commented file would silently delete every comment — refuse instead
-    // (decision D5: fmt must never destroy source).
-    if let Some(span) = lexer.comments().first() {
-        return Err(format!(
-            "file contains a comment (line {}); refusing to format because \
-             `jinn fmt` cannot preserve comments yet and would delete it",
-            span.line
-        ));
-    }
+    let mut sink = CommentSink::new(src, lexer.comments());
     let prog = Parser::new(tokens)
         .parse_program()
         .map_err(|e| e.to_string())?;
-    Ok(format_program(&prog))
+    Ok(format_program(&prog, &mut sink))
 }
 
-fn format_program(prog: &Program) -> String {
+/// Comment trivia carried through formatting (task 8-18, decision D5).
+///
+/// The lexer records every `#` comment's span; the printer flushes
+/// pending comments before each declaration/statement whose source
+/// position follows them, at the current indent. A comment that shares
+/// its line with code re-attaches as a trailing `  # …`; a standalone
+/// comment keeps a preceding blank line if the source had one.
+/// Comments inside a single expression re-anchor to its statement —
+/// position within one logical line is not preserved.
+struct CommentSink {
+    entries: Vec<CmtEntry>,
+    idx: usize,
+}
+
+struct CmtEntry {
+    start: usize,
+    line: u32,
+    text: String,
+    own_line: bool,
+    blank_before: bool,
+}
+
+impl CommentSink {
+    fn new(src: &str, spans: &[crate::ast::Span]) -> Self {
+        let bytes = src.as_bytes();
+        let entries = spans
+            .iter()
+            .map(|sp| {
+                let text = src[sp.start..sp.end].trim_end().to_string();
+                // Standalone iff only whitespace precedes it on its line.
+                let mut i = sp.start;
+                let mut own_line = true;
+                while i > 0 && bytes[i - 1] != b'\n' {
+                    if !bytes[i - 1].is_ascii_whitespace() {
+                        own_line = false;
+                        break;
+                    }
+                    i -= 1;
+                }
+                // Blank line directly above? (two newlines with only
+                // whitespace between them)
+                let mut blank_before = false;
+                if own_line && i > 0 {
+                    let mut j = i - 1; // the '\n' ending the previous line
+                    if bytes[j] == b'\n' {
+                        let mut k = j;
+                        let mut saw_content = false;
+                        while k > 0 {
+                            k -= 1;
+                            if bytes[k] == b'\n' {
+                                break;
+                            }
+                            if !bytes[k].is_ascii_whitespace() {
+                                saw_content = true;
+                                break;
+                            }
+                        }
+                        let _ = j;
+                        j = k;
+                        let _ = j;
+                        blank_before = !saw_content && sp.line > 1;
+                    }
+                }
+                CmtEntry {
+                    start: sp.start,
+                    line: sp.line,
+                    text,
+                    own_line,
+                    blank_before,
+                }
+            })
+            .collect();
+        CommentSink { entries, idx: 0 }
+    }
+
+    /// Emit every pending standalone comment positioned before `upto`.
+    fn flush_before(&mut self, out: &mut String, upto: usize, level: usize) {
+        while self.idx < self.entries.len() && self.entries[self.idx].start < upto {
+            let e = &self.entries[self.idx];
+            if e.blank_before && !out.is_empty() && !out.ends_with("\n\n") {
+                out.push('\n');
+            }
+            indent(out, level);
+            out.push_str(&e.text);
+            out.push('\n');
+            self.idx += 1;
+        }
+    }
+
+    /// If the next pending comment shares `line` with just-printed code,
+    /// re-attach it as a trailing comment (the printed text ends with a
+    /// newline; splice before it).
+    fn attach_trailing(&mut self, out: &mut String, line: u32) {
+        while self.idx < self.entries.len()
+            && !self.entries[self.idx].own_line
+            && self.entries[self.idx].line == line
+        {
+            let text = self.entries[self.idx].text.clone();
+            if out.ends_with('\n') {
+                out.pop();
+            }
+            out.push_str("  ");
+            out.push_str(&text);
+            out.push('\n');
+            self.idx += 1;
+        }
+    }
+
+    /// End of input: whatever remains prints standalone at column 0.
+    fn flush_rest(&mut self, out: &mut String) {
+        let end = usize::MAX;
+        self.flush_before(out, end, 0);
+    }
+}
+
+fn decl_span(d: &Decl) -> crate::ast::Span {
+    match d {
+        Decl::Fn(f) => f.span,
+        Decl::Type(t) => t.span,
+        Decl::Enum(e) => e.span,
+        Decl::Use(u) => u.span,
+        Decl::Extern(e) => e.span,
+        Decl::ErrDef(e) => e.span,
+        Decl::Actor(a) => a.span,
+        Decl::Store(s) => s.span,
+        Decl::Trait(t) => t.span,
+        Decl::Impl(i) => i.span,
+        Decl::Supervisor(s) => s.span,
+        Decl::Migration(m) => m.span,
+        Decl::View(v) => v.span,
+        Decl::Test(t) => t.span,
+        Decl::Const(_, _, s)
+        | Decl::Global(_, _, s)
+        | Decl::TypeAlias(_, _, s)
+        | Decl::Newtype(_, _, s) => *s,
+        Decl::TopStmt(st) => st.span(),
+    }
+}
+
+fn format_program(prog: &Program, sink: &mut CommentSink) -> String {
     let mut out = String::new();
     for (i, decl) in prog.decls.iter().enumerate() {
         if i > 0 {
             out.push('\n');
         }
-        format_decl(&mut out, decl, 0);
+        sink.flush_before(&mut out, decl_span(decl).start, 0);
+        format_decl(&mut out, decl, 0, sink);
         out.push('\n');
     }
+    sink.flush_rest(&mut out);
     out
 }
 
@@ -40,17 +171,17 @@ fn indent(out: &mut String, level: usize) {
     }
 }
 
-fn format_decl(out: &mut String, decl: &Decl, level: usize) {
+fn format_decl(out: &mut String, decl: &Decl, level: usize, sink: &mut CommentSink) {
     match decl {
-        Decl::Fn(f) => format_fn(out, f, level),
+        Decl::Fn(f) => format_fn(out, f, level, sink),
         Decl::Type(t) => {
             indent(out, level);
-            out.push_str(&format!("type {} is\n", t.name));
+            out.push_str(&format!("type {}\n", t.name));
             for field in &t.fields {
                 indent(out, level + 1);
                 out.push_str(&field.name.to_string());
                 if let Some(ref ty) = field.ty {
-                    out.push_str(&format!(" is {}", format_type(ty)));
+                    out.push_str(&format!(" as {}", format_type(ty)));
                 }
                 out.push('\n');
             }
@@ -62,19 +193,20 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
                 indent(out, level + 1);
                 out.push_str(&v.name.as_str());
                 if !v.fields.is_empty() {
-                    out.push_str(" of ");
+                    out.push('(');
                     let fields: Vec<String> = v
                         .fields
                         .iter()
                         .map(|f| {
                             if let Some(ref name) = f.name {
-                                format!("{name} is {}", format_type(&f.ty))
+                                format!("{name} as {}", format_type(&f.ty))
                             } else {
                                 format_type(&f.ty)
                             }
                         })
                         .collect();
                     out.push_str(&fields.join(", "));
+                    out.push(')');
                 }
                 out.push('\n');
             }
@@ -122,7 +254,7 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
                 }
                 out.push('\n');
                 if let Some(ref body) = m.default_body {
-                    format_block(out, body, level + 2);
+                    format_block(out, body, level + 2, sink);
                 }
             }
         }
@@ -134,7 +266,7 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
                 out.push_str(&format!("impl {}\n", im.type_name));
             }
             for m in &im.methods {
-                format_fn(out, m, level + 1);
+                format_fn(out, m, level + 1, sink);
             }
         }
         Decl::Const(name, expr, _) => {
@@ -148,7 +280,7 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
         Decl::Test(t) => {
             indent(out, level);
             out.push_str(&format!("test '{}'\n", t.name));
-            format_block(out, &t.body, level + 1);
+            format_block(out, &t.body, level + 1, sink);
         }
         Decl::Actor(a) => {
             indent(out, level);
@@ -171,7 +303,7 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
                     }
                 }
                 out.push('\n');
-                format_block(out, &h.body, level + 2);
+                format_block(out, &h.body, level + 2, sink);
             }
         }
         Decl::Store(s) => {
@@ -188,7 +320,7 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
         }
         Decl::ErrDef(e) => {
             indent(out, level);
-            out.push_str(&format!("error {}\n", e.name));
+            out.push_str(&format!("err {}\n", e.name));
             for v in &e.variants {
                 indent(out, level + 1);
                 out.push_str(&v.name.to_string());
@@ -212,39 +344,81 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize) {
             out.push_str(&format!("type {} is {}\n", name, format_type(ty)));
         }
         Decl::TopStmt(stmt) => {
-            format_stmt(out, stmt, level);
+            format_stmt(out, stmt, level, sink);
         }
         Decl::Migration(_) => {}
         Decl::View(_) => {}
     }
 }
 
-fn format_fn(out: &mut String, f: &Fn, level: usize) {
+fn format_fn(out: &mut String, f: &Fn, level: usize, sink: &mut CommentSink) {
     indent(out, level);
     out.push('*');
     out.push_str(&f.name.to_string());
-    for p in &f.params {
-        out.push(' ');
-        out.push_str(&p.name.to_string());
-        if let Some(ref ty) = p.ty {
-            out.push(' ');
-            out.push_str(&format_type(ty));
+    if !f.params.is_empty() {
+        out.push('(');
+        for (i, p) in f.params.iter().enumerate() {
+            if i > 0 {
+                out.push_str(", ");
+            }
+            if let Some(ref lit) = p.literal {
+                out.push_str(&format_expr(lit));
+                continue;
+            }
+            out.push_str(&p.name.to_string());
+            if p.ty.is_some() || p.access_mod.is_some() {
+                out.push_str(" as ");
+                if let Some(am) = p.access_mod {
+                    out.push_str(match am {
+                        crate::ast::AccessMod::Take => "take ",
+                        crate::ast::AccessMod::Copy => "copy ",
+                        crate::ast::AccessMod::Const => "const ",
+                        _ => "",
+                    });
+                }
+                if let Some(ref ty) = p.ty {
+                    out.push_str(&format_type(ty));
+                }
+            }
+            if let Some(ref d) = p.default {
+                out.push_str(&format!(" is {}", format_expr(d)));
+            }
         }
+        out.push(')');
     }
     if let Some(ref ret) = f.ret {
         out.push_str(&format!(" returns {}", format_type(ret)));
     }
     out.push('\n');
-    format_block(out, &f.body, level + 1);
+    format_block(out, &f.body, level + 1, sink);
 }
 
-fn format_block(out: &mut String, stmts: &[Stmt], level: usize) {
+fn format_block(out: &mut String, stmts: &[Stmt], level: usize, sink: &mut CommentSink) {
     for stmt in stmts {
-        format_stmt(out, stmt, level);
+        sink.flush_before(out, stmt.span().start, level);
+        format_stmt(out, stmt, level, sink);
+        /* Trailing comments re-attach to single-line statements only; a
+         * compound statement's interior comments flush inside its body. */
+        let compound = matches!(
+            stmt,
+            Stmt::If(_)
+                | Stmt::While(_)
+                | Stmt::For(_)
+                | Stmt::SimFor(_, _)
+                | Stmt::Loop(_)
+                | Stmt::Match(_)
+                | Stmt::Defer(_, _)
+                | Stmt::Transaction(_, _)
+                | Stmt::SimBlock(_, _)
+                | Stmt::Together(_, _, _, _)
+        );
+        if !compound {
+            sink.attach_trailing(out, stmt.span().line);
+        }
     }
 }
 
-fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
+fn format_stmt(out: &mut String, stmt: &Stmt, level: usize, sink: &mut CommentSink) {
     match stmt {
         Stmt::Bind(b) => {
             indent(out, level);
@@ -274,13 +448,13 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             }
             out.push('\n');
         }
-        Stmt::If(i) => format_if(out, i, level),
+        Stmt::If(i) => format_if(out, i, level, sink),
         Stmt::While(w) => {
             indent(out, level);
             out.push_str("while ");
             out.push_str(&format_expr(&w.cond));
             out.push('\n');
-            format_block(out, &w.body, level + 1);
+            format_block(out, &w.body, level + 1, sink);
         }
         Stmt::For(f) => {
             indent(out, level);
@@ -292,7 +466,7 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             out.push_str(" in ");
             out.push_str(&format_expr(&f.iter));
             out.push('\n');
-            format_block(out, &f.body, level + 1);
+            format_block(out, &f.body, level + 1, sink);
         }
         Stmt::SimFor(f, _) => {
             indent(out, level);
@@ -301,17 +475,17 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
             out.push_str(" in ");
             out.push_str(&format_expr(&f.iter));
             out.push('\n');
-            format_block(out, &f.body, level + 1);
+            format_block(out, &f.body, level + 1, sink);
         }
         Stmt::SimBlock(b, _) => {
             indent(out, level);
             out.push_str("sim\n");
-            format_block(out, b, level + 1);
+            format_block(out, b, level + 1, sink);
         }
         Stmt::Loop(l) => {
             indent(out, level);
             out.push_str("loop\n");
-            format_block(out, &l.body, level + 1);
+            format_block(out, &l.body, level + 1, sink);
         }
         Stmt::Break(_, _) => {
             indent(out, level);
@@ -337,8 +511,19 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
                     out.push_str(" if ");
                     out.push_str(&format_expr(guard));
                 }
-                out.push_str(" =>\n");
-                format_block(out, &arm.body, level + 2);
+                out.push_str(" ?");
+                // Single-expression arms print inline (`Pat ? expr`);
+                // multi-statement arms indent underneath.
+                if arm.body.len() == 1
+                    && let Stmt::Expr(e) = &arm.body[0]
+                {
+                    out.push(' ');
+                    out.push_str(&format_expr(e));
+                    out.push('\n');
+                } else {
+                    out.push('\n');
+                    format_block(out, &arm.body, level + 2, sink);
+                }
             }
         }
         Stmt::TupleBind(bindings, expr, _) => {
@@ -395,17 +580,17 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
         }
         Stmt::ErrReturn(e, _) => {
             indent(out, level);
-            out.push_str(&format!("throw {}\n", format_expr(e)));
+            out.push_str(&format!("err {}\n", format_expr(e)));
         }
         Stmt::Defer(body, _) => {
             indent(out, level);
             out.push_str("defer\n");
-            format_block(out, body, level + 1);
+            format_block(out, body, level + 1, sink);
         }
         Stmt::Transaction(body, _) => {
             indent(out, level);
             out.push_str("transaction\n");
-            format_block(out, body, level + 1);
+            format_block(out, body, level + 1, sink);
         }
         Stmt::Together(name, body, _, _) => {
             indent(out, level);
@@ -413,7 +598,7 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
                 Some(n) => out.push_str(&format!("together {n}\n")),
                 None => out.push_str("together\n"),
             }
-            format_block(out, body, level + 1);
+            format_block(out, body, level + 1, sink);
         }
         Stmt::ChannelClose(e, _) => {
             indent(out, level);
@@ -440,23 +625,23 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize) {
     }
 }
 
-fn format_if(out: &mut String, i: &If, level: usize) {
+fn format_if(out: &mut String, i: &If, level: usize, sink: &mut CommentSink) {
     indent(out, level);
     out.push_str("if ");
     out.push_str(&format_expr(&i.cond));
     out.push('\n');
-    format_block(out, &i.then, level + 1);
+    format_block(out, &i.then, level + 1, sink);
     for (cond, body) in &i.elifs {
         indent(out, level);
         out.push_str("else if ");
         out.push_str(&format_expr(cond));
         out.push('\n');
-        format_block(out, body, level + 1);
+        format_block(out, body, level + 1, sink);
     }
     if let Some(ref els) = i.els {
         indent(out, level);
         out.push_str("else\n");
-        format_block(out, els, level + 1);
+        format_block(out, els, level + 1, sink);
     }
 }
 
@@ -466,7 +651,20 @@ fn format_expr(e: &Expr) -> String {
         Expr::Void(_) => "void".into(),
         Expr::Int(n, _) => n.to_string(),
         Expr::Float(f, _) => format!("{f}"),
-        Expr::Str(s, _) => format!("'{s}'"),
+        Expr::Str(s, _) => {
+            // Single quotes interpolate `{ident}`; there are no escape
+            // sequences. Quote choice must keep the reparse identical:
+            //  - contains braces or a single quote, and no double quote →
+            //    double-quote (raw) so nothing interpolates/terminates;
+            //  - otherwise single-quote (a brace next to a double quote
+            //    cannot interpolate as an identifier, so it stays literal).
+            let braceish = s.contains('{') || s.contains('}') || s.contains('\'');
+            if braceish && !s.contains('"') {
+                format!("\"{s}\"")
+            } else {
+                format!("'{s}'")
+            }
+        }
         Expr::Bool(true, _) => "true".into(),
         Expr::Bool(false, _) => "false".into(),
         Expr::Ident(name, _) => name.to_string(),
@@ -505,25 +703,17 @@ fn format_expr(e: &Expr) -> String {
         }
         Expr::Call(callee, args, _) => {
             let arg_strs: Vec<String> = args.iter().map(format_expr).collect();
-            if arg_strs.is_empty() {
-                format!("{}()", format_expr(callee))
-            } else {
-                format!("{} {}", format_expr(callee), arg_strs.join(", "))
-            }
+            format!("{}({})", format_expr(callee), arg_strs.join(", "))
         }
         Expr::Method(obj, method, args, _) => {
             let arg_strs: Vec<String> = args.iter().map(format_expr).collect();
-            if arg_strs.is_empty() {
-                format!("{}.{method}()", format_expr(obj))
-            } else {
-                format!("{}.{method} {}", format_expr(obj), arg_strs.join(", "))
-            }
+            format!("{}.{method}({})", format_expr(obj), arg_strs.join(", "))
         }
         Expr::Field(obj, field, _) => format!("{}.{field}", format_expr(obj)),
         Expr::Index(arr, idx, _) => format!("{}[{}]", format_expr(arr), format_expr(idx)),
         Expr::Ternary(c, t, f, _) => {
             format!(
-                "if {} then {} else {}",
+                "{} ? {} ! {}",
                 format_expr(c),
                 format_expr(t),
                 format_expr(f)
@@ -562,11 +752,11 @@ fn format_expr(e: &Expr) -> String {
                     }
                 })
                 .collect();
-            format!("{name} {{ {} }}", fs.join(", "))
+            format!("{name}({})", fs.join(", "))
         }
         Expr::IfExpr(i) => {
             format!(
-                "if {} then {} else {}",
+                "{} ? {} ! {}",
                 format_expr(&i.cond),
                 if i.then.len() == 1 {
                     format_expr_from_stmt(&i.then[0])
@@ -584,11 +774,27 @@ fn format_expr(e: &Expr) -> String {
                 }
             )
         }
-        Expr::Pipe(l, r, _, _) => format!("{} |> {}", format_expr(l), format_expr(r)),
+        Expr::Pipe(l, r, rest, _) => {
+            // The pipeline operator is `~` (the old printer emitted `|>`,
+            // which does not lex as one token).
+            let mut out = format!("{} ~ {}", format_expr(l), format_expr(r));
+            for e in rest {
+                out.push_str(&format!(", {}", format_expr(e)));
+            }
+            out
+        }
         Expr::Block(_, _) => "do ... end".into(),
-        Expr::Lambda(params, _, _, _) => {
+        Expr::Lambda(params, _, body, _) => {
             let ps: Vec<String> = params.iter().map(|p| p.name.to_string()).collect();
-            format!("({}) => ...", ps.join(", "))
+            // Lambdas print in the `|x| expr` form; a multi-statement body
+            // reprints its final expression (the printer never emits the
+            // old invalid `=> ...` placeholder).
+            let body_txt = match body.last() {
+                Some(Stmt::Expr(e)) => format_expr(e),
+                Some(Stmt::Ret(Some(e), _)) => format_expr(e),
+                _ => "0".to_string(),
+            };
+            format!("|{}| {}", ps.join(", "), body_txt)
         }
         Expr::Placeholder(_) => "$".into(),
         Expr::IndexPlaceholder(_) => "$$".into(),
@@ -612,6 +818,32 @@ fn format_expr(e: &Expr) -> String {
                 format_expr(from),
                 format_expr(to)
             )
+        }
+        Expr::NamedArg(name, value, _) => {
+            format!("{name} is {}", format_expr(value))
+        }
+        Expr::Yield(v, _) => format!("yield {}", format_expr(v)),
+        Expr::Spawn(name, inits, _) => {
+            if inits.is_empty() {
+                format!("spawn {name}")
+            } else {
+                let fs: Vec<String> = inits
+                    .iter()
+                    .map(|(n, e)| format!("{n} is {}", format_expr(e)))
+                    .collect();
+                format!("spawn {name}({})", fs.join(", "))
+            }
+        }
+        Expr::ChannelCreate(ty, cap, _) => match ty {
+            Some(t) => format!("channel of {}({})", format_type(t), format_expr(cap)),
+            None => format!("channel({})", format_expr(cap)),
+        },
+        Expr::ChannelRecv(ch, _) => format!("receive {}", format_expr(ch)),
+        Expr::ChannelSend(ch, v, _) => {
+            format!("send {}, {}", format_expr(ch), format_expr(v))
+        }
+        Expr::OfCall(f, arg, _) => {
+            format!("{} of {}", format_expr(f), format_expr(arg))
         }
         _ => "...".into(),
     }
@@ -640,7 +872,7 @@ fn format_pat(p: &Pat) -> String {
                 name.to_string()
             } else {
                 let ps: Vec<String> = pats.iter().map(format_pat).collect();
-                format!("{name} of {}", ps.join(", "))
+                format!("{name}({})", ps.join(", "))
             }
         }
         Pat::Or(pats, _) => {
@@ -656,5 +888,16 @@ fn format_pat(p: &Pat) -> String {
 }
 
 fn format_type(ty: &crate::types::Type) -> String {
-    format!("{ty}")
+    use crate::types::Type;
+    match ty {
+        // Display prints `(a) -> r`, which the parser does not accept;
+        // source syntax is `(a) returns r`.
+        Type::Fn(params, ret) => {
+            let ps: Vec<String> = params.iter().map(format_type).collect();
+            format!("({}) returns {}", ps.join(", "), format_type(ret))
+        }
+        Type::Vec(inner) => format!("Vec of {}", format_type(inner)),
+        Type::Map(k, v) => format!("Map of {}, {}", format_type(k), format_type(v)),
+        _ => format!("{ty}"),
+    }
 }

@@ -482,3 +482,28 @@ and the whole corpus's runtime output is pinned identical before and after by
 the conformance suite. The result: a single command that turns the accumulated
 syntactic debt of the codebase into the clean, inference-driven,
 implicit-self, prose-like Jinn the language was designed to be.
+
+## Comment trivia (task 8-18)
+
+Comments are lexer trivia carried through the printer, not AST nodes.
+The rules:
+
+- **Standalone comments** (only whitespace before the `#` on their line)
+  print on their own line at the indent of the next statement or
+  declaration, in source order. A standalone comment that had a blank
+  line directly above keeps one blank line above.
+- **Trailing comments** (code before the `#` on the same line) re-attach
+  to the end of that statement's formatted line, separated by two
+  spaces. Trailing comments on compound statements (`if`, loops,
+  `match`, `together`, …) print as standalone lines inside the body
+  instead.
+- A comment inside a single expression re-anchors to its statement —
+  position within one logical line is not preserved.
+- Shebang lines are trivia like any comment and stay first.
+- String quoting on reprint preserves meaning, not bytes: a raw string
+  containing braces (or a single quote) and no double quote reprints
+  double-quoted; everything else reprints single-quoted.
+
+Guarantees, enforced by `tests/fmt_nondestructive.rs` over the whole
+`snippets/` corpus: formatting is idempotent, every comment's text
+survives, and the formatted output reparses to the same program.

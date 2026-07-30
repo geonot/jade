@@ -549,7 +549,7 @@ regression to pin); a codegen-reached type error is impossible or is reported as
 ICE with an issue-report prompt, never as IR. Per D2, instantiation-site errors name
 both the call site and the definition.
 
-### ◻ 8-18 Comment-preserving formatter — **P1**, blocked_by: [8-2]
+### ✅ 8-18 Comment-preserving formatter — **P1**, blocked_by: [8-2]
 *Review item 3, part 2. Decision D5.*
 
 Add a `Comment` token / trivia channel to the lexer (`src/lexer/mod.rs:196-197`

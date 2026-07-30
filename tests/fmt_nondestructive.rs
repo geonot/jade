@@ -1,10 +1,9 @@
-//! `jinn fmt` must never destroy source (task 8-2, decision D5).
-//!
-//! The formatter reprints from the AST and comments are not represented in
-//! the AST yet (task 8-18 gives them a trivia channel). Until that lands,
-//! `fmt` must refuse any file containing a comment rather than silently
-//! deleting every one of them, and in-place modification must require an
-//! explicit `--write` (the default prints to stdout).
+//! `jinn fmt` must never destroy source (task 8-2, decision D5; task
+//! 8-18 made comments lexer trivia carried through the printer). A
+//! commented file formats WITH its comments — every comment text, its
+//! position kind (leading/trailing/standalone), and blank-line grouping
+//! survive, and formatting is idempotent. In-place modification still
+//! requires an explicit `--write` (the default prints to stdout).
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -28,7 +27,7 @@ const UNCOMMENTED_UGLY: &str = "\
 ";
 
 #[test]
-fn fmt_write_refuses_commented_file_and_leaves_it_byte_identical() {
+fn fmt_write_preserves_comments_and_is_idempotent() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("commented.jn");
     std::fs::write(&path, COMMENTED).unwrap();
@@ -38,21 +37,29 @@ fn fmt_write_refuses_commented_file_and_leaves_it_byte_identical() {
         .arg(&path)
         .output()
         .unwrap();
+    assert!(
+        out.status.success(),
+        "fmt --write on a commented file must succeed (8-18): {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let once = std::fs::read_to_string(&path).unwrap();
+    assert!(once.contains("# leading comment"), "{once}");
+    assert!(once.contains("# trailing comment"), "{once}");
+    assert!(once.contains("# standalone comment"), "{once}");
+    // Trailing stays trailing (same line as its code).
+    assert!(
+        once.lines().any(|l| l.contains("x is 1") && l.contains("# trailing comment")),
+        "trailing comment must stay on its statement's line: {once}"
+    );
 
-    assert!(
-        !out.status.success(),
-        "fmt --write on a commented file must exit non-zero"
-    );
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("comment"),
-        "diagnostic must say why it refused, got: {stderr}"
-    );
-    let after = std::fs::read_to_string(&path).unwrap();
-    assert_eq!(
-        after, COMMENTED,
-        "a commented file must be byte-identical after `jinn fmt --write`"
-    );
+    let out = Command::new(jinn())
+        .args(["fmt", "--write"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let twice = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(once, twice, "fmt must be idempotent on commented files");
 }
 
 #[test]
@@ -97,9 +104,9 @@ fn fmt_write_formats_uncommented_file() {
 }
 
 #[test]
-fn fmt_refuses_shebang_file() {
-    // A shebang is source the AST does not carry, so reprinting would
-    // delete it — same non-destructiveness rule as comments.
+fn fmt_preserves_shebang() {
+    // A shebang is lexer trivia like a comment; it must survive at the
+    // top of the file.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("script.jn");
     let src = "#!/usr/bin/env jinn\n*main\n    log(1)\n";
@@ -110,7 +117,52 @@ fn fmt_refuses_shebang_file() {
         .arg(&path)
         .output()
         .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        after.starts_with("#!/usr/bin/env jinn"),
+        "shebang must stay first: {after}"
+    );
+}
 
-    assert!(!out.status.success());
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), src);
+/// Task 8-18 round-trip property over the whole snippets corpus: for
+/// every parseable snippet, `fmt` succeeds, is idempotent, and preserves
+/// the multiset of comment texts.
+#[test]
+fn fmt_roundtrip_over_snippets_corpus() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("snippets");
+    let mut checked = 0usize;
+    let mut stack = vec![root];
+    while let Some(dir) = stack.pop() {
+        for e in std::fs::read_dir(&dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+                continue;
+            }
+            if p.extension().map(|x| x == "jn").unwrap_or(false) {
+                let src = std::fs::read_to_string(&p).unwrap();
+                let comments = |s: &str| -> Vec<String> {
+                    s.lines()
+                        .filter_map(|l| l.find('#').map(|i| l[i..].trim_end().to_string()))
+                        .collect::<Vec<_>>()
+                };
+                let once = match jinnc::fmt::format_source(&src) {
+                    Ok(o) => o,
+                    Err(_) => continue, // unparseable corpus entries are out of scope
+                };
+                let twice = jinnc::fmt::format_source(&once).unwrap_or_else(|e| {
+                    panic!("reformat failed for {}: {e}", p.display())
+                });
+                assert_eq!(once, twice, "fmt not idempotent for {}", p.display());
+                let mut a = comments(&src);
+                let mut b = comments(&once);
+                a.sort();
+                b.sort();
+                assert_eq!(a, b, "comments not preserved for {}", p.display());
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 300, "corpus scan looks wrong: only {checked} files");
 }

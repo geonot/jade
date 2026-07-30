@@ -1,0 +1,28 @@
+# 2026-07-30 implementation notes
+- Comments are lexer trivia (the lexer already recorded their spans for
+  the 8-2 refusal) carried by a CommentSink threaded through the AST
+  printer: standalone comments flush before the next stmt/decl at its
+  indent (keeping one blank line if the source had one); trailing
+  comments re-attach to their statement's formatted line; shebangs stay
+  first. The 8-2 refusal is removed; docs/fmt.md documents the rules.
+- The corpus round-trip property (every snippets/ file: fmt twice is
+  idempotent, comment multiset preserved) exposed a PILE of latent
+  printer bugs — the AST printer had never round-tripped real programs:
+  params printed without parens/`as`/commas, lambdas printed as the
+  invalid `(x) => ...` placeholder, struct literals used braces, type
+  fields used `is`, enum variants and ctor patterns used `of`, match
+  arms used `=>`, calls/methods dropped parentheses, if-expressions
+  printed `if..then..else`, fn types printed `->`, `err` decls/raises
+  printed `error`/`throw`, pipes printed `|>` (the operator is `~` —
+  `|>` lexes as `|` + ident `gt`!), and yield/spawn/channel/OfCall/
+  NamedArg all printed `...`. All fixed; formatted output now reparses
+  to the same program for the entire corpus.
+- String quoting on reprint preserves MEANING: raw strings containing
+  braces (and no double quote) reprint double-quoted; a string with
+  braces AND double quotes stays single-quoted (invalid interpolations
+  are literal, so the reparse is identical — there are no escape
+  sequences in the lexer).
+- Found but not fixed here: snippets/guide_tour.jn's pipeline section
+  uses `|>`, which parses as bitwise-or plus a bare `gt` identifier —
+  the section is semantically broken source (the formatter now prints
+  what it actually parses as). Candidate cleanup for 8-26's docs pass.
