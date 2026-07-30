@@ -580,7 +580,7 @@ void jinn_ver_append(FILE *f, int64_t sid, int64_t version, const void *record_d
 int64_t jinn_ver_count(FILE *f, int64_t sid, int64_t rec_size);
 int64_t jinn_ver_at(FILE *f, int64_t sid, int64_t version, void *out_buf, int64_t rec_size);
 int64_t jinn_ver_history(FILE *f, int64_t sid, void *out_buf, int64_t rec_size, int64_t max_versions);
-void jinn_ver_compact(FILE *f, int64_t rec_size, int64_t keep_n);
+void jinn_ver_compact(FILE **fpp, const char *path, int64_t rec_size, int64_t keep_n);
 /* runtime/wal.c */
 void jinn_txn_begin(void);
 void jinn_txn_commit(void);
@@ -596,6 +596,16 @@ void jinn_wal_checkpoint(FILE *wal);
 void jinn_wal_close(FILE *wal);
 int64_t jinn_wal_size(FILE *wal);
 int64_t jinn_wal_replay(FILE *wal, jinn_wal_replay_cb callback, void *user_data);
+
+/* ── Atomic durable rewrites + single-writer lock (task 8-21) ────── */
+typedef int (*jinn_fill_fn)(FILE *tmp, void *arg);
+int  jinn_fsync_checked(int fd, const char *what);
+int  jinn_dir_fsync(const char *filepath);
+int  jinn_atomic_rewrite(const char *path, jinn_fill_fn fill, void *arg);
+int  jinn_atomic_rewrite_reopen(const char *path, jinn_fill_fn fill, void *arg,
+                                FILE **fpp);
+int  jinn_writer_lock(const char *path);
+void jinn_writer_unlock(int lock_fd);
 
 /* ── Optional modules (only linked when feature available) ── */
 /* runtime/crypto.c (requires OpenSSL) */

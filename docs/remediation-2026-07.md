@@ -610,7 +610,7 @@ have to meet, so the next attempt does not rebuild the same broken design.
 
 ## Tier 4 — Persistence
 
-### ◻ 8-21 Atomic durable write discipline — **P0**, blocked_by: []
+### ✅ 8-21 Atomic durable write discipline — **P0**, blocked_by: []
 *Review item 11. Decision D6.*
 
 Zero `rename()` calls and zero directory fsyncs exist in the layer; `fsync`/`fdatasync`

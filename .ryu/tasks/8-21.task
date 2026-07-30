@@ -1,5 +1,5 @@
 title: Atomic durable write discipline for all store rewrites
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []

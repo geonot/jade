@@ -30,7 +30,8 @@ typedef struct {
 } KvSlot;
 
 struct JinnKV {
-    FILE    *fp;
+    char    *path;     /* saves go through jinn_atomic_rewrite (task 8-21) */
+    int      lock_fd;  /* D6 single-writer advisory lock */
     KvSlot  *slots;
     int64_t  capacity;
     int64_t  count;
@@ -90,50 +91,57 @@ static void kv_grow(JinnKV *kv) {
     free(old_slots);
 }
 
-static void kv_save(JinnKV *kv) {
-    if (!kv->fp) return;
-    if (fseek(kv->fp, 0, SEEK_SET) != 0) {
-        fprintf(stderr, "jinn: kv: fseek failed during save\n");
-        return;
-    }
-
+/* Fill callback for the atomic rewrite: the complete new image. The old
+ * in-place rewrite left stale trailing entries when the table shrank, so
+ * deleted keys resurrected on the next load; a temp+rename replace makes
+ * both torn writes and stale tails impossible. */
+static int kv_fill(FILE *tmp, void *arg) {
+    JinnKV *kv = (JinnKV *)arg;
     char magic[KV_MAGIC_SIZE];
     memcpy(magic, KV_MAGIC, KV_MAGIC_SIZE);
-    if (fwrite(magic, 1, KV_MAGIC_SIZE, kv->fp) != KV_MAGIC_SIZE ||
-        fwrite(&kv->count, sizeof(int64_t), 1, kv->fp) != 1) {
+    if (fwrite(magic, 1, KV_MAGIC_SIZE, tmp) != KV_MAGIC_SIZE ||
+        fwrite(&kv->count, sizeof(int64_t), 1, tmp) != 1) {
         fprintf(stderr, "jinn: kv: write header failed\n");
-        return;
+        return -1;
     }
-
-    /* Write only occupied entries */
     for (int64_t i = 0; i < kv->capacity; i++) {
         if (kv->slots[i].status == KV_OCCUPIED) {
-            if (fwrite(&kv->slots[i], sizeof(KvSlot), 1, kv->fp) != 1) {
+            if (fwrite(&kv->slots[i], sizeof(KvSlot), 1, tmp) != 1) {
                 fprintf(stderr, "jinn: kv: write entry failed\n");
-                return;
+                return -1;
             }
         }
     }
-    fflush(kv->fp);
+    return 0;
+}
+
+static void kv_save(JinnKV *kv) {
+    if (!kv->path) return;
+    (void)jinn_atomic_rewrite(kv->path, kv_fill, kv);
 }
 
 /* ── Public API ───────────────────────────────────────────────── */
 
 JinnKV *jinn_kv_open(const char *path) {
+    int lock_fd = jinn_writer_lock(path);
+    if (lock_fd < 0) return NULL; /* contention diagnostic already printed */
+
     JinnKV *kv = (JinnKV *)calloc(1, sizeof(JinnKV));
+    kv->path = strdup(path);
+    kv->lock_fd = lock_fd;
     kv->capacity = KV_INIT_CAP;
     kv->slots = (KvSlot *)calloc((size_t)kv->capacity, sizeof(KvSlot));
     kv->count = 0;
 
-    kv->fp = fopen(path, "r+b");
-    if (kv->fp) {
+    FILE *fp = fopen(path, "r+b");
+    if (fp) {
         /* Load existing data */
         char magic[KV_MAGIC_SIZE];
-        if (fread(magic, 1, KV_MAGIC_SIZE, kv->fp) == KV_MAGIC_SIZE
+        if (fread(magic, 1, KV_MAGIC_SIZE, fp) == KV_MAGIC_SIZE
             && memcmp(magic, KV_MAGIC, KV_MAGIC_SIZE) == 0) {
 
             int64_t entry_count = 0;
-            fread(&entry_count, sizeof(int64_t), 1, kv->fp);
+            fread(&entry_count, sizeof(int64_t), 1, fp);
 
             /* Ensure capacity */
             while ((double)(entry_count + 1) / (double)kv->capacity > KV_LOAD_MAX) {
@@ -146,7 +154,7 @@ JinnKV *jinn_kv_open(const char *path) {
             /* Read entries and insert into hash table */
             for (int64_t i = 0; i < entry_count; i++) {
                 KvSlot entry;
-                if (fread(&entry, sizeof(KvSlot), 1, kv->fp) != 1) break;
+                if (fread(&entry, sizeof(KvSlot), 1, fp) != 1) break;
                 entry.status = KV_OCCUPIED;
 
                 int64_t key_len = (int64_t)strnlen(entry.key, KV_KEY_SIZE);
@@ -156,12 +164,10 @@ JinnKV *jinn_kv_open(const char *path) {
                 kv->count++;
             }
         }
+        fclose(fp);
     } else {
-        /* Create new file */
-        kv->fp = fopen(path, "w+b");
-        if (kv->fp) {
-            kv_save(kv);
-        }
+        /* Create new file (atomically, so a crash never leaves a torn one) */
+        kv_save(kv);
     }
     return kv;
 }
@@ -169,7 +175,8 @@ JinnKV *jinn_kv_open(const char *path) {
 void jinn_kv_close(JinnKV *kv) {
     if (!kv) return;
     kv_save(kv);
-    if (kv->fp) fclose(kv->fp);
+    jinn_writer_unlock(kv->lock_fd);
+    free(kv->path);
     free(kv->slots);
     free(kv);
 }

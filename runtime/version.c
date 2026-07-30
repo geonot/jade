@@ -122,8 +122,29 @@ int64_t jinn_ver_history(FILE *f, int64_t sid,
 }
 
 /* ── Compact: keep only the latest N versions per record ────────── */
-void jinn_ver_compact(FILE *f, int64_t rec_size, int64_t keep_n) {
-    if (!f || keep_n <= 0) return;
+/* Fill callback for the atomic rewrite (task 8-21). */
+typedef struct {
+    const uint8_t *entries;
+    const uint8_t *keep;
+    int64_t        total;
+    size_t         entry_size;
+} VerImage;
+
+static int ver_fill(FILE *tmp, void *arg) {
+    VerImage *im = (VerImage *)arg;
+    if (fwrite(VER_MAGIC, 1, 8, tmp) != 8) return -1;
+    for (int64_t i = 0; i < im->total; i++) {
+        if (im->keep[i] &&
+            fwrite(im->entries + (size_t)i * im->entry_size, im->entry_size, 1, tmp) != 1) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+void jinn_ver_compact(FILE **fpp, const char *path, int64_t rec_size, int64_t keep_n) {
+    if (!fpp || !*fpp || !path || keep_n <= 0) return;
+    FILE *f = *fpp;
 
     /* First pass: count entries per sid */
     fseek(f, VER_HEADER, SEEK_SET);
@@ -161,18 +182,10 @@ void jinn_ver_compact(FILE *f, int64_t rec_size, int64_t keep_n) {
         if (kept < keep_n) keep[i] = 1;
     }
 
-    /* Rewrite file with only kept entries */
-    fseek(f, 0, SEEK_SET);
-    fwrite(VER_MAGIC, 1, 8, f);
-    for (int64_t i = 0; i < total; i++) {
-        if (keep[i]) {
-            fwrite(entries + i * entry_size, entry_size, 1, f);
-        }
-    }
-    /* Truncate */
-    long pos = ftell(f);
-    ftruncate(fileno(f), pos);
-    fflush(f);
+    /* Atomic rewrite with only kept entries (the old in-place rewrite +
+     * ftruncate corrupted the log on a mid-compact crash). */
+    VerImage im = { entries, keep, total, entry_size };
+    (void)jinn_atomic_rewrite_reopen(path, ver_fill, &im, fpp);
 
     free(entries);
     free(keep);

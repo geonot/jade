@@ -1,0 +1,23 @@
+# 2026-07-30 implementation notes
+- New runtime/durable.c: jinn_atomic_rewrite (write temp in same dir →
+  fsync → rename → fsync dir; any failure leaves the original untouched),
+  jinn_atomic_rewrite_reopen (for callers holding a long-lived FILE* —
+  the old handle points at the replaced inode after rename), checked
+  fsync helpers, and the D6 single-writer advisory lock (flock on
+  <path>.lock — a stable lock file, never renamed, so the lock cannot be
+  lost to a rewrite of the data file).
+- Converted: kv.c (now path-based — also fixes deleted-key resurrection
+  from stale tails, since a temp file can never carry old trailing
+  entries), migrate.c's three close/"w+b"-truncate sites (add_field,
+  drop_field, compact), version.c's compact (signature gained the path —
+  the function had zero callers), bloom.c's close-persist.
+- kv single-writer: jinn_kv_open takes the lock; contention prints the
+  D6 diagnostic and returns NULL (all kv API is NULL-tolerant, so ops
+  degrade to no-ops after the loud message).
+- tests/durable_crash.c + durable_crash.rs: die-mid-fill at every prefix
+  (old image always intact), SIGKILL-during-kv-churn ×25 (image always
+  complete and self-consistent), and lock refusal/re-admission.
+- Store `.store` writes themselves (insert/update/delete paths in
+  codegen) still rewrite in place — their crash story is the WAL's
+  (8-22/8-23), not per-write rename; the migration/compact paths those
+  tasks lean on are now atomic.

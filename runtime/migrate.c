@@ -184,6 +184,35 @@ void jinn_mig_log_record(FILE *fp, int64_t version, int64_t direction) {
  *
  * Returns 0 on success, -1 on error.
  */
+
+/* Fill callback: complete store image (header + records) for the atomic
+ * rewrite (task 8-21 — the old close/`fopen(path, "w+b")` rewrite
+ * destroyed the store if the process died mid-migration). */
+typedef struct {
+    int64_t        count;
+    int64_t        rec_size;
+    int64_t        fingerprint;
+    int64_t        version;
+    const uint8_t *records;
+} MigImage;
+
+static int mig_fill(FILE *tmp, void *arg) {
+    MigImage *im = (MigImage *)arg;
+    if (fwrite(STORE_MAGIC, 1, 8, tmp) != 8 ||
+        fwrite(&im->count, 8, 1, tmp) != 1 ||
+        fwrite(&im->rec_size, 8, 1, tmp) != 1 ||
+        fwrite(&im->fingerprint, 8, 1, tmp) != 1 ||
+        fwrite(&im->version, 8, 1, tmp) != 1) {
+        return -1;
+    }
+    if (im->count > 0 &&
+        fwrite(im->records, (size_t)im->rec_size, (size_t)im->count, tmp)
+            != (size_t)im->count) {
+        return -1;
+    }
+    return 0;
+}
+
 int64_t jinn_mig_add_field(FILE **store_fp_ptr, const char *store_path,
                            int64_t field_offset, int64_t field_size,
                            const void *default_val) {
@@ -234,25 +263,16 @@ int64_t jinn_mig_add_field(FILE **store_fp_ptr, const char *store_path,
                    src + field_offset, (size_t)tail);
     }
 
-    /* close, rewrite, reopen */
-    fclose(fp);
-    fp = fopen(store_path, "w+b");
-    if (!fp) { free(old_data); free(new_data); return -1; }
-
-    /* write header (magic, count, rec_size, fingerprint, version) */
-    fwrite(STORE_MAGIC, 1, 8, fp);
-    fwrite(&count, 8, 1, fp);
-    fwrite(&new_rec_size, 8, 1, fp);
-    int64_t zero = 0;
-    fwrite(&zero, 8, 1, fp);
-    fwrite(&zero, 8, 1, fp);
-    /* write records */
-    fwrite(new_data, (size_t)new_rec_size, (size_t)count, fp);
-    fflush(fp);
+    /* atomic rewrite + reopen (old handle points at the replaced inode) */
+    MigImage im = { count, new_rec_size, 0, 0, new_data };
+    if (jinn_atomic_rewrite_reopen(store_path, mig_fill, &im, store_fp_ptr) != 0) {
+        free(old_data);
+        free(new_data);
+        return -1;
+    }
 
     free(old_data);
     free(new_data);
-    *store_fp_ptr = fp;
     return 0;
 }
 
@@ -308,23 +328,16 @@ int64_t jinn_mig_drop_field(FILE **store_fp_ptr, const char *store_path,
                    src + field_offset + field_size, (size_t)tail);
     }
 
-    /* close, rewrite, reopen */
-    fclose(fp);
-    fp = fopen(store_path, "w+b");
-    if (!fp) { free(old_data); free(new_data); return -1; }
-
-    fwrite(STORE_MAGIC, 1, 8, fp);
-    fwrite(&count, 8, 1, fp);
-    fwrite(&new_rec_size, 8, 1, fp);
-    int64_t zero2 = 0;
-    fwrite(&zero2, 8, 1, fp);
-    fwrite(&zero2, 8, 1, fp);
-    fwrite(new_data, (size_t)new_rec_size, (size_t)count, fp);
-    fflush(fp);
+    /* atomic rewrite + reopen */
+    MigImage im = { count, new_rec_size, 0, 0, new_data };
+    if (jinn_atomic_rewrite_reopen(store_path, mig_fill, &im, store_fp_ptr) != 0) {
+        free(old_data);
+        free(new_data);
+        return -1;
+    }
 
     free(old_data);
     free(new_data);
-    *store_fp_ptr = fp;
     return 0;
 }
 
@@ -377,20 +390,13 @@ int64_t jinn_store_compact(FILE **store_fp_ptr, const char *store_path,
         return 0;
     }
 
-    fclose(fp);
-    fp = fopen(store_path, "w+b");
-    if (!fp) { free(data); return -1; }
-
-    fwrite(STORE_MAGIC, 1, 8, fp);
-    fwrite(&kept, 8, 1, fp);
-    fwrite(&rec_size, 8, 1, fp);
-    fwrite(&stored_fp, 8, 1, fp);
-    fwrite(&stored_ver, 8, 1, fp);
-    if (kept > 0) fwrite(data, (size_t)rec_size, (size_t)kept, fp);
-    fflush(fp);
+    MigImage im = { kept, rec_size, stored_fp, stored_ver, data };
+    if (jinn_atomic_rewrite_reopen(store_path, mig_fill, &im, store_fp_ptr) != 0) {
+        free(data);
+        return -1;
+    }
 
     free(data);
-    *store_fp_ptr = fp;
     return reclaimed;
 }
 

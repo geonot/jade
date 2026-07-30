@@ -85,19 +85,23 @@ JinnBloom *jinn_bloom_open(const char *path, int64_t expected_items) {
     return b;
 }
 
+static int bloom_fill(FILE *tmp, void *arg) {
+    JinnBloom *b = (JinnBloom *)arg;
+    int64_t bytes = (b->num_bits + 7) / 8;
+    if (fwrite(BLOOM_MAGIC, 1, 8, tmp) != 8 ||
+        fwrite(&b->num_bits, 8, 1, tmp) != 1 ||
+        fwrite(&b->num_hashes, 8, 1, tmp) != 1 ||
+        fwrite(b->bits, 1, (size_t)bytes, tmp) != (size_t)bytes) {
+        return -1;
+    }
+    return 0;
+}
+
 void jinn_bloom_close(JinnBloom *b) {
     if (!b) return;
-    /* persist if path set */
+    /* persist if path set — atomically (task 8-21) */
     if (b->path[0]) {
-        FILE *fp = fopen(b->path, "wb");
-        if (fp) {
-            fwrite(BLOOM_MAGIC, 1, 8, fp);
-            fwrite(&b->num_bits, 8, 1, fp);
-            fwrite(&b->num_hashes, 8, 1, fp);
-            int64_t bytes = (b->num_bits + 7) / 8;
-            fwrite(b->bits, 1, bytes, fp);
-            fclose(fp);
-        }
+        (void)jinn_atomic_rewrite(b->path, bloom_fill, b);
     }
     free(b->bits);
     free(b);

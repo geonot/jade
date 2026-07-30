@@ -46,6 +46,7 @@ fn main() {
         .file("runtime/regex_helper.c")
         .file("runtime/process.c")
         .file("runtime/util.c")
+        .file("runtime/durable.c")
         .file("runtime/terminal.c")
         .file("runtime/event.c")
         .file("runtime/random.c")
