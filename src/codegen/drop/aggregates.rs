@@ -163,6 +163,45 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
+    /// Emit (once) and call `__drop_enum_<name>`: a function wrapping
+    /// drop_enum_variants so recursive enums drop by RUNTIME recursion
+    /// instead of infinite inline expansion.
+    pub(in crate::codegen) fn call_enum_drop_fn(
+        &mut self,
+        val: inkwell::values::BasicValueEnum<'ctx>,
+        name: &str,
+    ) -> Result<(), String> {
+        let fn_name = format!("__drop_enum_{name}");
+        let fv = if let Some(f) = self.module.get_function(&fn_name) {
+            f
+        } else {
+            let st = match self.module.get_struct_type(name) {
+                Some(st) => st,
+                None => return Ok(()), /* payload-less or undeclared: nothing to drop */
+            };
+            let ft = self.ctx.void_type().fn_type(&[st.into()], false);
+            let f = self
+                .module
+                .add_function(&fn_name, ft, Some(inkwell::module::Linkage::Internal));
+            self.tag_fn(f);
+            let entry = self.ctx.append_basic_block(f, "entry");
+            let old_fn = self.cur_fn;
+            let old_bb = self.bld.get_insert_block();
+            self.cur_fn = Some(f);
+            self.bld.position_at_end(entry);
+            let param = f.get_nth_param(0).expect("drop fn param");
+            self.drop_enum_variants(param, name)?;
+            b!(self.bld.build_return(None));
+            self.cur_fn = old_fn;
+            if let Some(bb) = old_bb {
+                self.bld.position_at_end(bb);
+            }
+            f
+        };
+        b!(self.bld.build_call(fv, &[val.into()], ""));
+        Ok(())
+    }
+
     pub(in crate::codegen::drop) fn drop_enum_variants(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -228,14 +267,53 @@ impl<'ctx> Compiler<'ctx> {
 
         for (vd, (_tag_iv, case_bb)) in drop_variants.iter().zip(case_bbs.iter()) {
             self.bld.position_at_end(*case_bb);
-            for (fi, fty) in vd.field_types.iter().enumerate() {
-                if fty.is_trivially_droppable() {
+            /* The enum's LLVM layout is {tag, [N x i8] payload}: fields live
+             * at 8-aligned BYTE offsets inside member 1, exactly as the
+             * constructor writes them. The old code struct_gep'd member
+             * fi+1, which is out of range for any droppable field past the
+             * first (the json_parser/linked_list ICE class, task 8-19) —
+             * and recursive fields are boxed, so their slot holds a heap
+             * pointer, which must be freed after its pointee drops. */
+            let payload_gep = b!(self.bld.build_struct_gep(st, ptr, 1, "de.payload"));
+            let mut byte_offset: u64 = 0;
+            for fty in vd.field_types.iter() {
+                let is_rec = Compiler::is_recursive_field(fty, name);
+                let slot_size: u64 = if is_rec {
+                    8
+                } else {
+                    self.type_store_size(self.llvm_ty(fty))
+                };
+                if fty.is_trivially_droppable() && !is_rec {
+                    byte_offset += (slot_size + 7) & !7;
                     continue;
                 }
-
-                let f_gep = b!(self.bld.build_struct_gep(st, ptr, (fi + 1) as u32, "de.vf"));
-                let f_val = b!(self.bld.build_load(self.llvm_ty(fty), f_gep, "de.vfv"));
-                self.drop_value(f_val, fty)?;
+                let f_ptr = if byte_offset == 0 {
+                    payload_gep
+                } else {
+                    let off = self.ctx.i64_type().const_int(byte_offset, false);
+                    unsafe {
+                        b!(self.bld.build_gep(
+                            self.ctx.i8_type(),
+                            payload_gep,
+                            &[off],
+                            "de.vf"
+                        ))
+                    }
+                };
+                if is_rec {
+                    let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                    let heap = b!(self.bld.build_load(ptr_ty, f_ptr, "de.box"))
+                        .into_pointer_value();
+                    let inner =
+                        b!(self.bld.build_load(self.llvm_ty(fty), heap, "de.boxv"));
+                    self.drop_value(inner, fty)?;
+                    let free_fn = self.ensure_free();
+                    b!(self.bld.build_call(free_fn, &[heap.into()], ""));
+                } else {
+                    let f_val = b!(self.bld.build_load(self.llvm_ty(fty), f_ptr, "de.vfv"));
+                    self.drop_value(f_val, fty)?;
+                }
+                byte_offset += (slot_size + 7) & !7;
             }
             b!(self.bld.build_unconditional_branch(done_bb));
         }

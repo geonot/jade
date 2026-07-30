@@ -397,15 +397,17 @@ impl<'ctx> Compiler<'ctx> {
                         return Ok(val.into());
                     }
 
-                    if let Some(idx_str) = field.strip_prefix('_')
-                        && let Ok(idx) = idx_str.parse::<usize>()
+                    if let Some((vtag, idx)) = Self::parse_payload_field(field)
                     {
                         let st = sv.get_type();
                         let alloca = self.entry_alloca(st.into(), "enum.tmp");
                         b!(self.bld.build_store(alloca, sv));
                         let payload_gep = b!(self.bld.build_struct_gep(st, alloca, 1, "payload"));
                         let res_llvm = self.llvm_ty(result_ty);
-                        let byte_offset = self.compute_enum_payload_offset(name, idx);
+                        let byte_offset = match vtag {
+                            Some(t) => self.compute_variant_payload_offset(name, t, idx),
+                            None => self.compute_enum_payload_offset(name, idx),
+                        };
                         let field_ptr = if byte_offset == 0 {
                             payload_gep
                         } else {
@@ -504,11 +506,13 @@ impl<'ctx> Compiler<'ctx> {
                         ));
                         return Ok(val.into());
                     }
-                    if let Some(idx_str) = field.strip_prefix('_')
-                        && let Ok(idx) = idx_str.parse::<usize>()
+                    if let Some((vtag, idx)) = Self::parse_payload_field(field)
                     {
                         let payload_gep = b!(self.bld.build_struct_gep(st, ptr, 1, "payload"));
-                        let byte_offset = self.compute_enum_payload_offset(&name.as_str(), idx);
+                        let byte_offset = match vtag {
+                            Some(t) => self.compute_variant_payload_offset(&name.as_str(), t, idx),
+                            None => self.compute_enum_payload_offset(&name.as_str(), idx),
+                        };
                         let field_ptr = if byte_offset == 0 {
                             payload_gep
                         } else {

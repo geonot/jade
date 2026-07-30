@@ -1,0 +1,11 @@
+ok
+caught division by zero
+sqrt ok
+caught negative root
+factorial ok
+caught overflow
+file opened
+empty path
+/root/secret
+read ok
+caught timeout

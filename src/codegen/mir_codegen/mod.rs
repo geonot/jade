@@ -102,6 +102,30 @@ impl<'ctx> Compiler<'ctx> {
             self.structs.insert(td.name, fields);
         }
 
+        /* Pre-register every enum's variant list before ANY body is
+         * sized: payload sizing consults other enums' layouts, and a
+         * monomorphized Result declared before the user's err enum sized
+         * its payload from the 8-byte fallback — the stored error value
+         * then clobbered the stack past the alloca (task 8-19). */
+        for ed in &hir_prog.enums {
+            let variants: Vec<(String, Vec<Type>)> = ed
+                .variants
+                .iter()
+                .map(|v| {
+                    let ftys: Vec<Type> = v.fields.iter().map(|f| f.ty.clone()).collect();
+                    (v.name.as_str(), ftys)
+                })
+                .collect();
+            self.enums.insert(ed.name.as_str().into(), variants);
+        }
+        for ed in &hir_prog.err_defs {
+            let variants: Vec<(String, Vec<Type>)> = ed
+                .variants
+                .iter()
+                .map(|v| (v.name.as_str(), v.fields.clone()))
+                .collect();
+            self.enums.insert(ed.name.as_str().into(), variants);
+        }
         for ed in &hir_prog.enums {
             let _ = self.declare_enum(ed);
         }

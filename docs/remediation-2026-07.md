@@ -561,7 +561,7 @@ and preserve it through `format_source`.
 (leading, trailing, standalone), and blank-line grouping; the 8-2 refusal is removed;
 `docs/fmt.md` documents the trivia rules.
 
-### ◻ 8-19 Repair and wire `tests/programs` — **P1**, blocked_by: [8-16, 8-17]
+### ✅ 8-19 Repair and wire `tests/programs` — **P1**, blocked_by: [8-16, 8-17]
 *Review item 14.*
 
 16 of 89 programs fail in isolation — `binary_search`, `clause_fns_ext`,

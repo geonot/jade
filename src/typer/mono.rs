@@ -565,6 +565,22 @@ impl Typer {
             .get(name)
             .ok_or_else(|| format!("no generic enum: {name}"))?
             .clone();
+        /* Resolve type args BEFORE mangling: minting an instance keyed by a
+         * still-unresolved var ("List__G_?0") bakes a stale name into the
+         * HIR — the var solves later, a sibling mint gets the real name,
+         * and codegen faults on the phantom enum (the linked_list ICE,
+         * task 8-19). */
+        let type_map: HashMap<Symbol, Type> = {
+            let was_strict = self.infer_ctx.is_strict();
+            self.infer_ctx.set_strict(false);
+            let m = type_map
+                .iter()
+                .map(|(k, v)| (*k, self.infer_ctx.resolve(v)))
+                .collect();
+            self.infer_ctx.set_strict(was_strict);
+            m
+        };
+        let type_map = &type_map;
         let mangled: Symbol = Self::mangle_generic(name, type_map, &ge.type_params).into();
         if self.enums.contains_key(&mangled) {
             return Ok(mangled);

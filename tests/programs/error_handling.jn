@@ -12,88 +12,98 @@ err IoError
     PermissionDenied(String)
     Timeout(i64)
 
-*safe_divide(a, b)
+*safe_divide(a as i64, b as i64) returns i64 ! MathError
     if b equals 0
-        ! DivisionByZero
+        err DivisionByZero
     a / b
 
-*safe_sqrt(x as f64)
+*safe_sqrt(x as f64) returns f64 ! MathError
     if x < 0.0
-        ! NegativeRoot
+        err NegativeRoot
     x.sqrt()
 
-*checked_factorial(n)
+*checked_factorial(n as i64) returns i64 ! MathError
     if n < 0
-        ! Overflow
+        err Overflow
     if n > 20
-        ! Overflow
+        err Overflow
     result is 1
     for i from 2 to n + 1
         result is result * i
     result
 
-*open_file(path as String)
+*open_file(path as String) returns i64 ! IoError
     if path equals ''
-        ! FileNotFound('empty path')
+        err FileNotFound('empty path')
     if path equals '/root/secret'
-        ! PermissionDenied('/root/secret')
+        err PermissionDenied('/root/secret')
     42   # file descriptor
 
-*read_with_timeout(fd as i64, timeout_ms as i64)
+*read_with_timeout(fd as i64, timeout_ms as i64) returns i64 ! IoError
     if timeout_ms <= 0
-        ! Timeout(0)
+        err Timeout(0)
     if fd < 0
-        ! FileNotFound('bad fd')
+        err FileNotFound('bad fd')
     'data'
 
 *main
     # Safe division
     match safe_divide(10, 3)
-        DivisionByZero ? log('div by zero')
-        _ ? log('ok')
+        Ok(v) ? log('ok')
+        Err(e) ? log('div by zero')
 
     match safe_divide(10, 0)
-        DivisionByZero ? log('caught division by zero')
-        _ ? log('ok')
+        Ok(v) ? log('ok')
+        Err(e) ? log('caught division by zero')
 
     # Safe sqrt
     match safe_sqrt(16.0)
-        NegativeRoot ? log('negative')
-        _ ? log('sqrt ok')
+        Ok(v) ? log('sqrt ok')
+        Err(e) ? log('negative')
 
     match safe_sqrt(-1.0)
-        NegativeRoot ? log('caught negative root')
-        _ ? log('ok')
+        Ok(v) ? log('ok')
+        Err(e) ? log('caught negative root')
 
     # Checked factorial
     match checked_factorial(10)
-        Overflow ? log('overflow')
-        _ ? log('factorial ok')
+        Ok(v) ? log('factorial ok')
+        Err(e) ? log('overflow')
 
     match checked_factorial(21)
-        Overflow ? log('caught overflow')
-        _ ? log('ok')
+        Ok(v) ? log('ok')
+        Err(e) ? log('caught overflow')
 
-    # IO errors
+    # IO errors: match the error payload to branch per variant
     match open_file('test.txt')
-        FileNotFound(msg) ? log(msg)
-        PermissionDenied(msg) ? log(msg)
-        _ ? log('file opened')
+        Ok(fd) ? log('file opened')
+        Err(e) ? match e
+            FileNotFound(msg) ? log(msg)
+            PermissionDenied(msg) ? log(msg)
+            Timeout(ms) ? log('timeout')
 
     match open_file('')
-        FileNotFound(msg) ? log(msg)
-        _ ? log('ok')
+        Ok(fd) ? log('ok')
+        Err(e) ? match e
+            FileNotFound(msg) ? log(msg)
+            _ ? log('other')
 
     match open_file('/root/secret')
-        PermissionDenied(msg) ? log(msg)
-        _ ? log('ok')
+        Ok(fd) ? log('ok')
+        Err(e) ? match e
+            PermissionDenied(msg) ? log(msg)
+            _ ? log('other')
 
     # Chained operations
     match read_with_timeout(42, 1000)
-        Timeout(ms) ? log('timed out')
-        FileNotFound(msg) ? log(msg)
-        _ ? log('read ok')
+        Ok(v) ? log('read ok')
+        Err(e) ? match e
+            Timeout(ms) ? log('timed out')
+            FileNotFound(msg) ? log(msg)
+            _ ? log('other')
 
     match read_with_timeout(42, 0)
-        Timeout(ms) ? log('caught timeout')
-        _ ? log('ok')
+        Ok(v) ? log('ok')
+        Err(e) ? match e
+            Timeout(ms) ? log('caught timeout')
+            _ ? log('other')

@@ -224,7 +224,7 @@ impl Typer {
         }
         for td in &mut prog.types {
             for field in &mut td.fields {
-                field.ty = self.infer_ctx.resolve(&field.ty);
+                field.ty = self.resolve_canon(&field.ty);
                 if let Some(def) = &mut field.default {
                     self.resolve_expr(def);
                 }
@@ -243,33 +243,33 @@ impl Typer {
         for ed in &mut prog.enums {
             for v in &mut ed.variants {
                 for vf in &mut v.fields {
-                    vf.ty = self.infer_ctx.resolve(&vf.ty);
+                    vf.ty = self.resolve_canon(&vf.ty);
                 }
             }
         }
         for ef in &mut prog.externs {
-            ef.ret = self.infer_ctx.resolve(&ef.ret);
+            ef.ret = self.resolve_canon(&ef.ret);
             for (_, ty) in &mut ef.params {
-                *ty = self.infer_ctx.resolve(ty);
+                *ty = self.resolve_canon(ty);
             }
         }
         for errdef in &mut prog.err_defs {
             for v in &mut errdef.variants {
                 for ft in &mut v.fields {
-                    *ft = self.infer_ctx.resolve(ft);
+                    *ft = self.resolve_canon(ft);
                 }
             }
         }
         for ad in &mut prog.actors {
             for field in &mut ad.fields {
-                field.ty = self.infer_ctx.resolve(&field.ty);
+                field.ty = self.resolve_canon(&field.ty);
                 if let Some(def) = &mut field.default {
                     self.resolve_expr(def);
                 }
             }
             for h in &mut ad.handlers {
                 for p in &mut h.params {
-                    p.ty = self.infer_ctx.resolve(&p.ty);
+                    p.ty = self.resolve_canon(&p.ty);
                 }
                 if let Some(sleep_ms) = &mut h.loop_sleep_ms {
                     self.resolve_expr(sleep_ms);
@@ -279,7 +279,7 @@ impl Typer {
         }
         for sd in &mut prog.stores {
             for field in &mut sd.fields {
-                field.ty = self.infer_ctx.resolve(&field.ty);
+                field.ty = self.resolve_canon(&field.ty);
             }
         }
         for ti in &mut prog.trait_impls {
@@ -288,15 +288,15 @@ impl Typer {
             }
         }
         for g in &mut prog.globals {
-            g.ty = self.infer_ctx.resolve(&g.ty);
+            g.ty = self.resolve_canon(&g.ty);
             self.resolve_expr(&mut g.init);
         }
     }
 
     pub(in crate::typer) fn resolve_fn(&mut self, f: &mut hir::Fn) {
-        f.ret = self.infer_ctx.resolve(&f.ret);
+        f.ret = self.resolve_canon(&f.ret);
         for p in &mut f.params {
-            p.ty = self.infer_ctx.resolve(&p.ty);
+            p.ty = self.resolve_canon(&p.ty);
         }
         self.resolve_block(&mut f.body);
     }
@@ -310,12 +310,12 @@ impl Typer {
     pub(in crate::typer) fn resolve_stmt(&mut self, stmt: &mut hir::Stmt) {
         match stmt {
             hir::Stmt::Bind(b) => {
-                b.ty = self.infer_ctx.resolve(&b.ty);
+                b.ty = self.resolve_canon(&b.ty);
                 self.resolve_expr(&mut b.value);
             }
             hir::Stmt::TupleBind(bindings, expr, _) => {
                 for (_, _, ty) in bindings {
-                    *ty = self.infer_ctx.resolve(ty);
+                    *ty = self.resolve_canon(ty);
                 }
                 self.resolve_expr(expr);
             }
@@ -340,9 +340,9 @@ impl Typer {
                 self.resolve_block(&mut w.body);
             }
             hir::Stmt::For(f) => {
-                f.bind_ty = self.infer_ctx.resolve(&f.bind_ty);
+                f.bind_ty = self.resolve_canon(&f.bind_ty);
                 if let Some(ref mut ty2) = f.bind2_ty {
-                    *ty2 = self.infer_ctx.resolve(ty2);
+                    *ty2 = self.resolve_canon(ty2);
                 }
                 self.resolve_expr(&mut f.iter);
                 if let Some(end) = &mut f.end {
@@ -357,7 +357,7 @@ impl Typer {
                 self.resolve_block(&mut l.body);
             }
             hir::Stmt::Ret(expr, ty, _) => {
-                *ty = self.infer_ctx.resolve(ty);
+                *ty = self.resolve_canon(ty);
                 if let Some(e) = expr {
                     self.resolve_expr(e);
                 }
@@ -371,7 +371,7 @@ impl Typer {
             hir::Stmt::Nop(_) => {}
             hir::Stmt::Match(m) => {
                 self.resolve_expr(&mut m.subject);
-                m.ty = self.infer_ctx.resolve(&m.ty);
+                m.ty = self.resolve_canon(&m.ty);
                 for arm in &mut m.arms {
                     self.resolve_pat(&mut arm.pat);
                     if let Some(g) = &mut arm.guard {
@@ -382,10 +382,10 @@ impl Typer {
             }
             hir::Stmt::Asm(_) => {}
             hir::Stmt::Drop(_, _, ty, _) => {
-                *ty = self.infer_ctx.resolve(ty);
+                *ty = self.resolve_canon(ty);
             }
             hir::Stmt::ErrReturn(e, ty, _) => {
-                *ty = self.infer_ctx.resolve(ty);
+                *ty = self.resolve_canon(ty);
                 self.resolve_expr(e);
             }
             hir::Stmt::Defer(body, _) => self.resolve_block(body),
@@ -417,7 +417,7 @@ impl Typer {
             hir::Stmt::Together(_, block, _, handler, _) => {
                 self.resolve_block(block);
                 if let Some(h) = handler {
-                    h.err_ty = self.infer_ctx.resolve(&h.err_ty);
+                    h.err_ty = self.resolve_canon(&h.err_ty);
                     if let Some(ok) = &mut h.ok_arm {
                         self.resolve_block(ok);
                     }
@@ -431,7 +431,7 @@ impl Typer {
             hir::Stmt::ScopeCancel(_, _) => {}
             hir::Stmt::Join(e, _) => self.resolve_expr(e),
             hir::Stmt::SimFor(f, _) => {
-                f.bind_ty = self.infer_ctx.resolve(&f.bind_ty);
+                f.bind_ty = self.resolve_canon(&f.bind_ty);
                 self.resolve_expr(&mut f.iter);
                 if let Some(end) = &mut f.end {
                     self.resolve_expr(end);
@@ -452,7 +452,7 @@ impl Typer {
     }
 
     pub(in crate::typer) fn resolve_expr(&mut self, expr: &mut hir::Expr) {
-        expr.ty = self.infer_ctx.resolve(&expr.ty);
+        expr.ty = self.resolve_canon(&expr.ty);
         match &mut expr.kind {
             hir::ExprKind::Int(_)
             | hir::ExprKind::Float(_)
@@ -561,7 +561,7 @@ impl Typer {
             hir::ExprKind::Coerce(e, _) => self.resolve_expr(e),
             hir::ExprKind::Cast(e, ty) => {
                 self.resolve_expr(e);
-                *ty = self.infer_ctx.resolve(ty);
+                *ty = self.resolve_canon(ty);
             }
             hir::ExprKind::Array(elems) | hir::ExprKind::Tuple(elems) => {
                 for e in elems {
@@ -593,7 +593,7 @@ impl Typer {
             hir::ExprKind::Block(block) => self.resolve_block(block),
             hir::ExprKind::Lambda(params, body) => {
                 for p in params {
-                    p.ty = self.infer_ctx.resolve(&p.ty);
+                    p.ty = self.resolve_canon(&p.ty);
                 }
                 self.resolve_block(body);
             }
@@ -644,7 +644,7 @@ impl Typer {
             | hir::ExprKind::StoreAtVersion(_, _, _) => {}
             hir::ExprKind::IterNext(_, _, _) => {}
             hir::ExprKind::ChannelCreate(ty, cap) => {
-                *ty = self.infer_ctx.resolve(ty);
+                *ty = self.resolve_canon(ty);
                 self.resolve_expr(cap);
             }
             hir::ExprKind::ChannelSend(ch, val) => {
@@ -655,7 +655,7 @@ impl Typer {
             hir::ExprKind::Unreachable => {}
             hir::ExprKind::StrictCast(e, ty) => {
                 self.resolve_expr(e);
-                *ty = self.infer_ctx.resolve(ty);
+                *ty = self.resolve_canon(ty);
             }
             hir::ExprKind::AsFormat(e, _) | hir::ExprKind::AtomicLoad(e) => self.resolve_expr(e),
             hir::ExprKind::AtomicStore(a, b)
@@ -676,7 +676,7 @@ impl Typer {
             }
             hir::ExprKind::Select(arms, default) => {
                 for arm in arms {
-                    arm.elem_ty = self.infer_ctx.resolve(&arm.elem_ty);
+                    arm.elem_ty = self.resolve_canon(&arm.elem_ty);
                     self.resolve_expr(&mut arm.chan);
                     if let Some(v) = &mut arm.value {
                         self.resolve_expr(v);
@@ -733,7 +733,7 @@ impl Typer {
         match pat {
             hir::Pat::Wild(_) => {}
             hir::Pat::Bind(_, _, ty, _) => {
-                *ty = self.infer_ctx.resolve(ty);
+                *ty = self.resolve_canon(ty);
             }
             hir::Pat::Lit(e) => self.resolve_expr(e),
             hir::Pat::Ctor(_, _, pats, _)
@@ -755,6 +755,71 @@ impl Typer {
         self.resolve_expr(&mut filter.value);
         for (_, cond) in &mut filter.extra {
             self.resolve_expr(&mut cond.value);
+        }
+    }
+}
+
+impl Typer {
+    /// Resolve a type and fold any generic-enum application
+    /// (`Struct("List", [i64])`) into its monomorphized enum
+    /// (`Enum(List__G_i64)`). Mono function signatures carried the
+    /// unfolded application into codegen, which then looked up a struct
+    /// named "List" that never exists as an LLVM type (the linked_list
+    /// FieldGet-`__tag` ICE, task 8-19).
+    pub(in crate::typer) fn resolve_canon(&mut self, ty: &Type) -> Type {
+        let r = self.infer_ctx.resolve(ty);
+        self.canonicalize_generic_enums(&r)
+    }
+
+    fn canonicalize_generic_enums(&mut self, ty: &Type) -> Type {
+        match ty {
+            Type::Struct(n, args)
+                if !args.is_empty() && self.generic_enums.contains_key(n) =>
+            {
+                let ge = self.generic_enums.get(n).cloned().unwrap();
+                let cargs: Vec<Type> = args
+                    .iter()
+                    .map(|a| self.canonicalize_generic_enums(a))
+                    .collect();
+                if cargs.len() == ge.type_params.len()
+                    && cargs.iter().all(Self::is_concrete_type)
+                {
+                    let mut m = std::collections::HashMap::new();
+                    for (tp, ta) in ge.type_params.iter().zip(cargs.iter()) {
+                        m.insert(*tp, ta.clone());
+                    }
+                    if let Ok(mangled) = self.monomorphize_enum(&n.as_str(), &m) {
+                        return Type::Enum(mangled);
+                    }
+                }
+                Type::Struct(*n, cargs)
+            }
+            Type::Param(n) if self.enums.contains_key(n) => Type::Enum(*n),
+            Type::Param(n) if self.structs.contains_key(n) => Type::Struct(*n, vec![]),
+            Type::Vec(i) => Type::Vec(Box::new(self.canonicalize_generic_enums(i))),
+            Type::Map(k, v) => Type::Map(
+                Box::new(self.canonicalize_generic_enums(k)),
+                Box::new(self.canonicalize_generic_enums(v)),
+            ),
+            Type::Array(i, n2) => {
+                Type::Array(Box::new(self.canonicalize_generic_enums(i)), *n2)
+            }
+            Type::Ptr(i) => Type::Ptr(Box::new(self.canonicalize_generic_enums(i))),
+            Type::Channel(i) => Type::Channel(Box::new(self.canonicalize_generic_enums(i))),
+            Type::Coroutine(i) => {
+                Type::Coroutine(Box::new(self.canonicalize_generic_enums(i)))
+            }
+            Type::Generator(i) => {
+                Type::Generator(Box::new(self.canonicalize_generic_enums(i)))
+            }
+            Type::Tuple(ts) => Type::Tuple(
+                ts.iter().map(|t| self.canonicalize_generic_enums(t)).collect(),
+            ),
+            Type::Fn(ps, r) => Type::Fn(
+                ps.iter().map(|t| self.canonicalize_generic_enums(t)).collect(),
+                Box::new(self.canonicalize_generic_enums(r)),
+            ),
+            _ => ty.clone(),
         }
     }
 }

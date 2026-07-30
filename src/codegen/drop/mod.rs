@@ -44,7 +44,10 @@ impl<'ctx> Compiler<'ctx> {
                 }
             }
             Type::Enum(name) => {
-                self.drop_enum_variants(val, &name.as_str())?;
+                /* Through a memoized per-enum drop FUNCTION: inline
+                 * expansion recursed forever for self-referential enums
+                 * once their boxed fields became droppable (task 8-19). */
+                self.call_enum_drop_fn(val, &name.as_str())?;
             }
             Type::Alias(_, inner) | Type::Newtype(_, inner) => {
                 self.drop_value(val, inner)?;

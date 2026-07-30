@@ -210,6 +210,54 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
+    /// Parse a variant-tagged payload field name (`__v{tag}_{idx}`) into
+    /// (tag, idx). Untagged `_{idx}` names return None for the tag.
+    pub(in crate::codegen) fn parse_payload_field(field: &str) -> Option<(Option<u32>, usize)> {
+        if let Some(rest) = field.strip_prefix("__v") {
+            let (tag_s, idx_s) = rest.split_once('_')?;
+            return Some((Some(tag_s.parse().ok()?), idx_s.parse().ok()?));
+        }
+        if let Some(idx_s) = field.strip_prefix('_') {
+            return Some((None, idx_s.parse().ok()?));
+        }
+        None
+    }
+
+    /// Byte offset of payload field `target_idx` within VARIANT `tag` of
+    /// `enum_name` — offsets differ per variant, so reads must use the
+    /// variant they were checked against (task 8-19).
+    pub(in crate::codegen) fn compute_variant_payload_offset(
+        &self,
+        enum_name: &str,
+        tag: u32,
+        target_idx: usize,
+    ) -> u64 {
+        if let Some(variants) = self.enums.get(enum_name) {
+            for (vname, field_types) in variants {
+                let vtag = self
+                    .variant_tags
+                    .get(vname)
+                    .map(|(_, t)| *t)
+                    .unwrap_or(u32::MAX);
+                if vtag == tag && field_types.len() > target_idx {
+                    let mut offset: u64 = 0;
+                    for (i, fty) in field_types.iter().enumerate() {
+                        if i == target_idx {
+                            return offset;
+                        }
+                        let type_size = if Compiler::is_recursive_field(fty, enum_name) {
+                            8
+                        } else {
+                            self.type_store_size(self.llvm_ty(fty))
+                        };
+                        offset += (type_size + 7) & !7;
+                    }
+                }
+            }
+        }
+        (target_idx * 8) as u64
+    }
+
     pub(in crate::codegen) fn compute_enum_payload_offset(
         &self,
         enum_name: &str,
@@ -226,10 +274,9 @@ impl<'ctx> Compiler<'ctx> {
                         let type_size = if Compiler::is_recursive_field(fty, enum_name) {
                             8
                         } else {
-                            self.llvm_ty(fty)
-                                .size_of()
-                                .map(|s| s.get_zero_extended_constant().unwrap_or(8))
-                                .unwrap_or(8)
+                            /* Target-data size, matching the constructor —
+                             * see aggregates.rs (task 8-19). */
+                            self.type_store_size(self.llvm_ty(fty))
                         };
                         offset += (type_size + 7) & !7;
                     }

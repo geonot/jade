@@ -1,0 +1,4 @@
+Line @ 0x7ffee3b45f88 { p1: Point @ 0x7ffee3b45f28 { x: 1, y: 2, z: 3 }, p2: Point @ 0x7ffee3b45f40 { x: 3, y: 2, z: 1 } }
+Point @ 0x7ffee3b45f58 { x: 1, y: 2, z: 3 }
+Point @ 0x7ffee3b45f70 { x: 3, y: 2, z: 1 }
+[Point @ 0x7ffee3b45f08 { x: 1, y: 2, z: 3 }]

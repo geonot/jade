@@ -1,0 +1,45 @@
+# 2026-07-30 implementation notes
+- All 87 surviving programs are wired: tests/programs_harness.rs runs
+  each in a clean tempdir against tests/programs/expected/<name>.out
+  snapshots; missing snapshots and orphaned snapshots both fail, so rot
+  cannot recur. Addresses are scrubbed (pointy.jn prints pointers).
+- The two named ICEs, fixed — each turned out to be a REAL miscompile
+  class, not just an ICE:
+  1. linked_list (FieldGet `__tag`): generic-enum instances minted
+     against unresolved type vars baked stale names (List__G_?0) into
+     the HIR, and mono fn signatures carried unfolded Struct("List",
+     [i64]) applications into codegen. Fixed by resolving args before
+     mangling and canonicalizing generic-enum applications to their
+     mono enum in resolve_canon.
+  2. json_parser (GEP index out of range): three stacked layout bugs —
+     (a) enum drop glue struct_gep'd member fi+1 on a {tag, [N x i8]}
+     struct (out of range past the first droppable field) and inlined
+     recursive drops (infinite expansion once boxed fields dropped);
+     now byte-offset walks inside a memoized per-enum __drop_enum_ fn
+     that also frees the boxes; (b) payload offsets were computed with
+     `.size_of().get_zero_extended_constant().unwrap_or(8)` — not
+     foldable for aggregates, so a 24-byte String counted as 8 and
+     every later field overlapped it; now target-data sizes everywhere;
+     (c) payload field reads used the FIRST variant with enough fields
+     for offsets, misreading e.g. JObject fields at JArray offsets —
+     MIR now emits variant-tagged field names (__v{tag}_{idx}) and
+     codegen computes offsets from THAT variant.
+- Also found and fixed: enum payload sizing consulted self.enums before
+  later-declared enums were registered, so a monomorphized Result over
+  a user err enum sized its payload from the 8-byte fallback and the
+  stored error value clobbered the stack (error_handling's (null)
+  payloads). All enums pre-register their variant lists before any
+  body is sized.
+- error_handling.jn migrated: prefix-`!` raises → `err <Variant>`,
+  raising functions annotated with `returns T ! ErrEnum`, main
+  rewritten to the Ok/Err match idiom. store_index.jn: `==` → equals.
+- Deleted with reasons: syntax.jn (1084 lines of removed syntax;
+  superseded by guide_tour), data_structures.jn (functional-update
+  structs sharing one Vec — predates D1 move semantics).
+- Pinned known-ICE: compiler_pipeline.jn — phi type mismatch (i64 vs
+  (Ast, i64)) in mutually recursive tuple-returning parse functions; a
+  real mid-end bug, kept reproducible by known_ice_still_reproduces.
+- Found, recorded, not fixed here: inferable-generic functions DROP
+  their declared `! ErrEnum` union at instantiation (unannotated params
+  + error union = "returns a value of err X but this function returns
+  i64"). Workaround is annotating params; needs its own fix.

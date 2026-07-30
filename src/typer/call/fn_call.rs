@@ -78,7 +78,8 @@ impl Typer {
                              * deref/reinterpret), and numeric pairs are the
                              * coercion pass's business. */
                             let lax = |this: &mut Self, t: &Type| {
-                                matches!(t, Type::Ptr(_)) || this.infer_ctx.type_has_unresolved(t)
+                                matches!(t, Type::Ptr(_) | Type::Param(_))
+                                    || this.infer_ctx.type_has_unresolved(t)
                             };
                             if !lax(self, &pl) && !lax(self, &al) && !(pl.is_num() && al.is_num()) {
                                 return Err(format!(
@@ -190,7 +191,8 @@ impl Typer {
                              * deref/reinterpret), and numeric pairs are the
                              * coercion pass's business. */
                             let lax = |this: &mut Self, t: &Type| {
-                                matches!(t, Type::Ptr(_)) || this.infer_ctx.type_has_unresolved(t)
+                                matches!(t, Type::Ptr(_) | Type::Param(_))
+                                    || this.infer_ctx.type_has_unresolved(t)
                             };
                             if !lax(self, &pl) && !lax(self, &al) && !(pl.is_num() && al.is_num()) {
                                 return Err(format!(

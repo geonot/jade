@@ -1,5 +1,5 @@
 title: Repair and wire tests/programs into the harness
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: ['8-16', '8-17']

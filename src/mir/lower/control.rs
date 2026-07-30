@@ -213,11 +213,21 @@ impl Lowerer {
                         self.switch_to(arm_bb);
                         self.seal_block(arm_bb);
 
-                        if let Pat::Ctor(_, _, sub_pats, _) = &arm.pat {
+                        if let Pat::Ctor(_, ctor_tag, sub_pats, _) = &arm.pat {
                             for (i, sp) in sub_pats.iter().enumerate() {
                                 if let Pat::Bind(_, name, ty, _) = sp {
+                                    /* Variant-tagged field name: payload
+                                     * offsets differ per variant, and codegen
+                                     * must compute them from THIS variant's
+                                     * field list (task 8-19 — the untagged
+                                     * `_i` form used the first variant with
+                                     * enough fields, misreading e.g.
+                                     * JObject's fields at JArray's offsets). */
                                     let field = self.emit(
-                                        InstKind::FieldGet(subj, Symbol::intern(&format!("_{i}"))),
+                                        InstKind::FieldGet(
+                                            subj,
+                                            Symbol::intern(&format!("__v{ctor_tag}_{i}")),
+                                        ),
                                         ty.clone(),
                                         arm.span,
                                     );
@@ -329,7 +339,7 @@ impl Lowerer {
                                             let field_val = self.emit(
                                                 InstKind::FieldGet(
                                                     subj,
-                                                    Symbol::intern(&format!("_{idx}")),
+                                                    Symbol::intern(&format!("__v{tag}_{idx}")),
                                                 ),
                                                 Type::I64,
                                                 arm.span,
@@ -465,11 +475,21 @@ impl Lowerer {
                             self.write_var(*name, self.current_block, subj);
                         }
 
-                        if let Pat::Ctor(_, _, sub_pats, _) = &arm.pat {
+                        if let Pat::Ctor(_, ctor_tag, sub_pats, _) = &arm.pat {
                             for (i, sp) in sub_pats.iter().enumerate() {
                                 if let Pat::Bind(_, name, ty, _) = sp {
+                                    /* Variant-tagged field name: payload
+                                     * offsets differ per variant, and codegen
+                                     * must compute them from THIS variant's
+                                     * field list (task 8-19 — the untagged
+                                     * `_i` form used the first variant with
+                                     * enough fields, misreading e.g.
+                                     * JObject's fields at JArray's offsets). */
                                     let field = self.emit(
-                                        InstKind::FieldGet(subj, Symbol::intern(&format!("_{i}"))),
+                                        InstKind::FieldGet(
+                                            subj,
+                                            Symbol::intern(&format!("__v{ctor_tag}_{i}")),
+                                        ),
                                         ty.clone(),
                                         arm.span,
                                     );

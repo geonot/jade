@@ -469,6 +469,12 @@ impl Typer {
     fn resolve_ty(&self, ty: Type) -> Type {
         match &ty {
             Type::Struct(n, _) if self.enums.contains_key(n) => Type::Enum(*n),
+            /* A single-uppercase annotation parses as a type parameter;
+             * when a DECLARED type has that name (enum `J`), the
+             * annotation means the type, not a generic (task 8-19 — the
+             * collision sent Param('J') into codegen). */
+            Type::Param(n) if self.enums.contains_key(n) => Type::Enum(*n),
+            Type::Param(n) if self.structs.contains_key(n) => Type::Struct(*n, vec![]),
             _ => ty,
         }
     }

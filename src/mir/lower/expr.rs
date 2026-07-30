@@ -205,7 +205,14 @@ impl Lowerer {
                     span,
                 );
 
-                self.emit(InstKind::FieldGet(subj, "_0".into()), ty.clone(), span)
+                self.emit(
+                    InstKind::FieldGet(
+                        subj,
+                        crate::intern::Symbol::intern(&format!("__v{success_tag}_0")),
+                    ),
+                    ty.clone(),
+                    span,
+                )
             }
             ExprKind::EnumIs(inner, check_tag) => {
                 let subj = self.lower_expr(inner);

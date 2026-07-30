@@ -1,0 +1,27 @@
+=== overflow ===
+-9223372036854775808
+9223372036854775807
+0
+-1
+-9223372036854775808
+=== bits ===
+8
+0
+1
+63
+3
+4
+578437695752307201
+8
+1
+1
+8
+=== pointers ===
+42
+=== volatile ===
+99
+=== ffi ===
+ffi demo (variadic printf not yet supported)
+=== signals ===
+signal demo (signal_handle codegen has type mismatch bug)
+=== done ===
