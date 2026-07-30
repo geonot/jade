@@ -222,8 +222,13 @@ static void *jinn_worker_loop(void *arg) {
         }
 
         if (w->last_action == SCHED_ACTION_DESTROY) {
-            /* Notify the owning structured-concurrency scope, if any. */
+            /* Notify the owning structured-concurrency scope, if any.
+             * Unregister BEFORE child_done: until the live-count decrement
+             * the parent's join cannot return (the scope stays alive), and
+             * once removed under the scope lock no cancel/wake iteration
+             * can reach the coroutine we are about to free (task 8-12). */
             if (c->scope) {
+                jinn_scope_unregister_child((jinn_scope_t *)c->scope, c);
                 jinn_scope_child_done((jinn_scope_t *)c->scope);
             }
             if (!c->daemon) {

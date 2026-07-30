@@ -414,7 +414,7 @@ if one is retained; retry exhaustion never masquerades as default. Tests: two-ch
 select woken by either channel, select on a closed channel, select with 32 cases,
 select with no default and no ready case, fairness under contention.
 
-### ◻ 8-12 Scope child lifecycle — **P0**, blocked_by: []
+### ✅ 8-12 Scope child lifecycle — **P0**, blocked_by: []
 *Review item 7a.*
 
 `s->children[]` is appended at registration (`scope.c:92-94`) and never pruned, but

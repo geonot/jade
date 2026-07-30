@@ -1,10 +1,10 @@
 title: Fix scope child lifecycle (dangling children[])
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []
 created_at: '2026-07-29T00:00:00'
-updated_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-29T20:00:00'
 description: 'Review item 7a. s->children[] is appended at registration (scope.c:92-94) and never
   pruned, but sched.c:225-238 calls jinn_coro_destroy(c) when a child exits.
   jinn_scope_cancel then reads snapshot[i]->cancelled and ->wait_chan (scope.c:159-167),

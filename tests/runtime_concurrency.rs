@@ -70,6 +70,89 @@ fn sorted_lines(out: &[u8]) -> Vec<i64> {
     v
 }
 
+/// Task 8-12 — cancelling a scope after some children have already
+/// completed used to iterate freed coroutines: `s->children[]` was never
+/// pruned on exit, while the scheduler `jinn_coro_destroy`ed the child, so
+/// `jinn_scope_cancel` read `->cancelled`/`->wait_chan` of freed memory
+/// and could enqueue a freed coroutine (heap-use-after-free under ASan,
+/// 3/3 before the fix). Four quick children complete and are destroyed
+/// long before the fifth errors and triggers cancellation.
+#[test]
+fn scope_cancel_after_children_completed() {
+    let src = "\
+err Boom
+    Bang
+
+*quick(id as i64)
+    log(id)
+
+*slow_fail(n as i64) returns i64 ! Boom
+    t is 0
+    for i in 0 to n
+        t is (t * 3 + i) % 1000003
+    if t >= 0
+        err Bang
+    t
+
+*work() returns i64 ! Boom
+    together
+        dispatch
+            quick(1)
+        dispatch
+            quick(2)
+        dispatch
+            quick(3)
+        dispatch
+            quick(4)
+        dispatch
+            x is slow_fail(30000000) ? $ !! err
+            log(x)
+    ? log(7)
+    !! log(0 - 1)
+    0
+
+*main
+    match work()
+        Ok(v) ? log(v)
+        Err(e) ? log(0 - 2)
+    log(99)
+";
+    let c = compile(src);
+    for round in 0..3 {
+        let out = c.run_within(15);
+        assert!(
+            out.status.success(),
+            "round {round}: {:?} stderr={}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            sorted_lines(&out.stdout),
+            vec![-1, 0, 1, 2, 3, 4, 99],
+            "round {round}"
+        );
+    }
+}
+
+/// Task 8-12 — the child registry used to be a fixed 64-slot array;
+/// children past 64 were counted but silently not registered, so
+/// cancellation missed them. The registry now grows: 100 children all
+/// register, run, and join.
+#[test]
+fn scope_handles_more_than_64_children() {
+    let dispatches: String = (1..=100)
+        .map(|i| format!("        dispatch\n            task({i})\n"))
+        .collect();
+    let src =
+        format!("*task(id as i64)\n    log(id)\n\n*main\n    together\n{dispatches}    log(999)\n");
+    let c = compile(&src);
+    let out = c.run_within(15);
+    assert!(out.status.success(), "{:?}", out.status);
+    let mut expected: Vec<i64> = (1..=100).collect();
+    expected.push(999);
+    assert_eq!(sorted_lines(&out.stdout), expected);
+}
+
 /// Task 8-13 — `tl_gen_coro` was set on every `jinn_gen_resume` but cleared
 /// only on the trampoline's first entry, so a worker that resumed a
 /// generator more than once kept a stale value forever, and the next fresh

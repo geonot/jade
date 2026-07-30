@@ -160,6 +160,16 @@ void jinn_actor_join(void *join_slot_ptr) {
  */
 void jinn_actor_destroy(void *mailbox_ptr) {
     if (!mailbox_ptr) return;
+    /* A scope-owned actor's mailbox is tracked in its scope's registry;
+     * leave it before freeing or a later cancel/stop would close freed
+     * memory (task 8-12). Runs on the actor's own coroutine (the exit
+     * block), so the owning scope is reachable via the current coroutine
+     * and — because our live-children slot is still counted — guaranteed
+     * alive. */
+    jinn_worker_t *w = jinn_worker_self();
+    if (w && w->current && w->current->scope) {
+        jinn_scope_unregister_actor((jinn_scope_t *)w->current->scope, mailbox_ptr);
+    }
     jinn_chan_t *ch = *(jinn_chan_t **)mailbox_ptr;
     if (ch) {
         /* Close if not already closed, then destroy */

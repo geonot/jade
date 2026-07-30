@@ -286,6 +286,11 @@ jinn_scope_t *jinn_scope_current(void);
 void jinn_scope_register_child(jinn_coro_t *child);
 /* Track a scope-owned actor mailbox so the scope can stop it on exit. */
 void jinn_scope_add_actor(jinn_scope_t *s, void *mailbox_ptr);
+/* Remove an exiting child/mailbox from the scope registry BEFORE it is
+ * destroyed, so cancellation and wake can never touch freed memory
+ * (task 8-12). Must precede jinn_scope_child_done for the same child. */
+void jinn_scope_unregister_child(jinn_scope_t *s, jinn_coro_t *child);
+void jinn_scope_unregister_actor(jinn_scope_t *s, void *mailbox_ptr);
 /* A child completed; decrement live count and wake the parent at zero. */
 void jinn_scope_child_done(jinn_scope_t *s);
 /* Mark the scope (and its live children) cancelled and wake them. */
