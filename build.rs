@@ -144,5 +144,20 @@ fn main() {
         println!("cargo:warning=SQLite3 not found; std.sqlite will not be available");
     }
 
+    // std/regex.jn binds PCRE2 directly (`pcre2_*` externs); the helper
+    // shims live in runtime/regex_helper.c (already part of jinn_rt). All
+    // the compiler needs at link time is -lpcre2-8, so only probe for it.
+    let has_pcre2 = std::process::Command::new("pkg-config")
+        .args(["--exists", "libpcre2-8"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if has_pcre2 {
+        println!("cargo:rustc-env=JINN_HAS_PCRE2=1");
+    } else {
+        println!("cargo:rustc-env=JINN_HAS_PCRE2=0");
+        println!("cargo:warning=PCRE2 not found; std.regex will not be available");
+    }
+
     println!("cargo:rerun-if-changed=runtime/");
 }

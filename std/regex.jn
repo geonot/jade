@@ -49,7 +49,7 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
 
 # ── Match predicates ─────────────────────────────────────────
 
-*is_match(text as String, pattern as String) returns Bool
+*is_match(text as String, pattern as String) returns bool
     code is compile(pattern)
     if code equals 0
         return false
@@ -119,8 +119,9 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
         extern.pcre2_code_free_8(code as %void)
         return out
     ovector is extern.pcre2_get_ovector_pointer_8(md)
+    n is rc as i64
     i is 0
-    while i < rc
+    while i < n
         s is extern.jinn_ovector_get(ovector, i * 2)
         e is extern.jinn_ovector_get(ovector, i * 2 + 1)
         out.push(text.slice(s, e))
@@ -143,8 +144,9 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
             break
         ovector is extern.pcre2_get_ovector_pointer_8(md)
         groups is vec()
+        n is rc as i64
         i is 0
-        while i < rc
+        while i < n
             s is extern.jinn_ovector_get(ovector, i * 2)
             e is extern.jinn_ovector_get(ovector, i * 2 + 1)
             groups.push(text.slice(s, e))

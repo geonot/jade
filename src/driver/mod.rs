@@ -685,6 +685,12 @@ pub fn run() {
             .arg("-ljinn_sqlite")
             .arg("-lsqlite3");
     }
+    if comp.needs_pcre2 {
+        if env!("JINN_HAS_PCRE2") != "1" {
+            die("program uses std.regex but PCRE2 was not available when the compiler was built");
+        }
+        cc.arg("-lpcre2-8");
+    }
     cc.arg("-lm");
     for extra in &cli.link {
         cc.arg(extra);

@@ -226,6 +226,9 @@ impl<'ctx> Compiler<'ctx> {
             .any(|e| e.name.starts_with("jinn_sqlite_"));
         self.needs_sqlite = needs_sqlite;
 
+        let needs_pcre2 = prog.externs.iter().any(|e| e.name.starts_with("pcre2_"));
+        self.needs_pcre2 = needs_pcre2;
+
         let uses_coro = prog.functions.iter().any(|f| {
             f.blocks.iter().any(|bb| {
                 bb.insts.iter().any(|i| match &i.kind {

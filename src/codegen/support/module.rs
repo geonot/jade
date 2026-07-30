@@ -33,6 +33,7 @@ impl<'ctx> Compiler<'ctx> {
             needs_runtime: false,
             needs_ssl: false,
             needs_sqlite: false,
+            needs_pcre2: false,
             globals: IndexMap::new(),
             target_triple: None,
             target_cpu: None,

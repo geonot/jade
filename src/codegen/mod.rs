@@ -116,6 +116,8 @@ pub struct Compiler<'ctx> {
     pub needs_ssl: bool,
 
     pub needs_sqlite: bool,
+
+    pub needs_pcre2: bool,
     pub(crate) globals: IndexMap<Symbol, (inkwell::values::GlobalValue<'ctx>, Type)>,
 
     pub(crate) alloca_bld: Builder<'ctx>,
