@@ -1,5 +1,5 @@
 title: Explicit module resolution (remove directory absorption)
-status: pending
+status: complete
 atomic: true
 priority: high
 blocked_by: []

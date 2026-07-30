@@ -1,0 +1,27 @@
+# 2026-07-30 implementation notes
+- Deleted merge_source_files (recursive directory absorption) and the
+  whole identifier-driven implicit importer (sources/implicit.rs +
+  sources/index.rs, 642 lines). All three pipelines (jinnc inline,
+  build/run/test, check) now see exactly the entry file plus the
+  transitive closure of explicit `use` declarations. resolve_modules
+  (explicit use, std, packages, JINN_PACKAGE_PATH) is unchanged.
+- A qualified call on an unimported-but-importable module (std or a
+  sibling .jn) is now a targeted error naming the fix ("add `use fmt`"),
+  emitted at the method-call receiver in the typer via
+  importable_module_exists — previously it either auto-imported
+  silently or died in codegen with "Load of undefined variable".
+- resolve_modules now re-emits submodules' `use` decls into the
+  flattened program: the typer's module registry is built from Use
+  decls, and without them a qualified call INSIDE a submodule
+  (convert.parse_float in std/json.jn) failed to rewrite — the implicit
+  importer had papered over this.
+- Real D4 violation found in std: json.jn used `convert` without
+  importing it (it only worked via directory absorption). Fixed.
+- snippets/guide_tour.jn now compiles IN PLACE (the review's headline
+  repro: it failed with a misattributed operator error caused by an
+  unrelated sibling file).
+- tests/module_resolution.rs: sibling syntax error / colliding type /
+  store all leave the target compile unaffected and produce no
+  diagnostic naming the sibling; explicit use of a sibling still works;
+  unimported sibling reference errors naming `use`. The three
+  auto_import_* pins in integration.rs are flipped to assert rejection.

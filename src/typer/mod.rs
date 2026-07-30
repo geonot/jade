@@ -497,6 +497,40 @@ impl Typer {
         }
     }
 
+    /// D4 (task 8-15): does `name` denote a module the user could import
+    /// with `use name` — a sibling `.jn` next to the entry file, or a std
+    /// module? Mirrors the path candidates `resolve_modules` probes.
+    pub(crate) fn importable_module_exists(&self, name: &str) -> bool {
+        if let Some(dir) = &self.source_dir
+            && dir.join(format!("{name}.jn")).exists()
+        {
+            return true;
+        }
+        let std_name = format!("{name}.jn");
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(exe_dir) = exe.parent()
+        {
+            for base in [
+                Some(exe_dir.to_path_buf()),
+                exe_dir.parent().map(|p| p.to_path_buf()),
+                exe_dir.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if base.join("std").join(&std_name).exists() {
+                    return true;
+                }
+            }
+        }
+        if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR")
+            && std::path::PathBuf::from(manifest).join("std").join(&std_name).exists()
+        {
+            return true;
+        }
+        false
+    }
+
     pub(crate) fn mark_field_moved(&mut self, parent: DefId, field: Symbol) {
         self.moved_fields.entry(parent).or_default().insert(field);
     }

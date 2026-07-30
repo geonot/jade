@@ -471,7 +471,7 @@ no longer silently overwrites a queued coroutine (`:27-28`).
 
 ## Tier 3 — Front end and tooling
 
-### ◻ 8-15 Explicit module resolution — **P0**, blocked_by: []
+### ✅ 8-15 Explicit module resolution — **P0**, blocked_by: []
 *Review item 8. Decision D4.*
 
 `merge_source_files` (`src/driver/pipeline.rs:53` → `sources/modules.rs:229-239`)

@@ -26,8 +26,7 @@ use cmd_pkg::{cmd_fetch, cmd_package, cmd_publish, cmd_update};
 use pipeline::compile_and_link;
 use project::ProjectConfig;
 use sources::{
-    EntityIndex, find_project_entry, load_packages, merge_source_files, resolve_implicit_imports,
-    resolve_modules,
+    find_project_entry, load_packages, resolve_modules,
 };
 
 /// Initialize the `tracing` subscriber based on CLI verbosity flags.
@@ -258,19 +257,15 @@ pub fn run() {
                     .parse_program()
                     .unwrap_or_else(|e| die(&format!("{e}")));
                 let base_dir = entry.parent().unwrap_or(std::path::Path::new("."));
-                let input_canon = entry.canonicalize().unwrap_or_else(|_| entry.clone());
-                let merged = merge_source_files(&mut prog, base_dir, &input_canon);
-                let mut loaded: HashSet<Symbol> = merged;
+                /* D4 (task 8-15): the compile sees exactly this file plus the
+                 * transitive closure of its explicit `use` declarations —
+                 * no directory absorption, no identifier-driven imports. */
+                let mut loaded: HashSet<Symbol> = HashSet::new();
+                if let Ok(canon) = entry.canonicalize() {
+                    loaded.insert(Symbol::intern(&canon.to_string_lossy()));
+                }
                 let packages = load_packages(base_dir);
                 resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
-                let entity_index = EntityIndex::build(base_dir, &packages);
-                resolve_implicit_imports(
-                    &mut prog,
-                    base_dir,
-                    &mut loaded,
-                    &packages,
-                    &entity_index,
-                );
                 let mut typer = Typer::new();
                 typer.set_source_dir(base_dir.to_path_buf());
                 /* The typer's lowering is also the ownership analysis
@@ -407,8 +402,6 @@ pub fn run() {
     let packages = load_packages(base_dir);
 
     resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
-    let entity_index = EntityIndex::build(base_dir, &packages);
-    resolve_implicit_imports(&mut prog, base_dir, &mut loaded, &packages, &entity_index);
 
     if !cli.lib && !cli.test && !cli.standalone {
         let has_main = prog

@@ -17,8 +17,7 @@ use super::cli::strip_codegen_prefix;
 use super::cli::*;
 use super::project::ProjectConfig;
 use super::sources::{
-    EntityIndex, flatten_workspace, load_packages_with_ids, merge_source_files,
-    resolve_implicit_imports, resolve_modules, resolve_scoped_pkg_ids,
+    flatten_workspace, load_packages_with_ids, resolve_modules, resolve_scoped_pkg_ids,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -49,15 +48,17 @@ pub(super) fn compile_and_link(
 
     let base_dir = input.parent().unwrap_or(std::path::Path::new("."));
     let input_canon = input.canonicalize().unwrap_or_else(|_| input.to_path_buf());
-    let merged = merge_source_files(&mut prog, base_dir, &input_canon);
 
-    let mut loaded: HashSet<Symbol> = merged;
-
+    /* D4 (task 8-15): the compile sees exactly the entry file plus the
+     * transitive closure of its explicit `use` declarations — the old
+     * merge_source_files absorbed every .jn under the entry directory
+     * (so a broken sibling file changed what this program means), and
+     * resolve_implicit_imports pulled in any file whose stem matched an
+     * undefined `x.y` identifier. Both are gone. */
+    let mut loaded: HashSet<Symbol> = HashSet::new();
     loaded.insert(Symbol::intern(&input_canon.to_string_lossy()));
     let (packages, pkg_id_map) = load_packages_with_ids(base_dir);
     resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
-    let entity_index = EntityIndex::build(base_dir, &packages);
-    resolve_implicit_imports(&mut prog, base_dir, &mut loaded, &packages, &entity_index);
 
     if !standalone && !test_mode {
         let has_main = prog

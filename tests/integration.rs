@@ -2188,8 +2188,11 @@ fn comptime_type_of_string() {
 }
 
 #[test]
-fn auto_import_qualified_fmt_without_use() {
-    expect("*main\n    log(fmt.hex(255))\n", "ff");
+fn qualified_module_without_use_is_rejected() {
+    // D4 (task 8-15): imports are explicit; the old auto-import silently
+    // pulled in any std module named in x.y position.
+    let err = expect_compile_fail("*main\n    log(fmt.hex(255))\n");
+    assert!(err.contains("not imported") && err.contains("`use fmt`"), "{err}");
 }
 
 #[test]
@@ -2199,16 +2202,14 @@ fn auto_import_rejects_bare_std_function() {
 }
 
 #[test]
-fn auto_import_qualified_signal_name_without_use() {
-    expect("*main\n    log(signal.name(signal.SIGINT))\n", "SIGINT");
+fn qualified_module_with_use_still_works() {
+    expect("use fmt\n\n*main\n    log(fmt.hex(255))\n", "ff");
 }
 
 #[test]
-fn auto_import_qualified_terminal_size_without_use() {
-    expect(
-        "*main\n    sz is terminal.size()\n    log(sz.cols > 0)\n",
-        "1",
-    );
+fn qualified_terminal_without_use_is_rejected() {
+    let err = expect_compile_fail("*main\n    sz is terminal.size()\n    log(sz.cols > 0)\n");
+    assert!(err.contains("`use terminal`"), "{err}");
 }
 
 #[test]

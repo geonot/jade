@@ -142,6 +142,26 @@ impl Typer {
         match expr {
             ast::Expr::Method(obj, method, args, span) => {
                 if let ast::Expr::Ident(ref name, _) = **obj {
+                    /* D4 (task 8-15): imports are explicit. A qualified call
+                     * on a name that is not in scope but names an importable
+                     * module (std or a sibling file) used to be silently
+                     * auto-imported; now it is an error naming the fix. */
+                    if !self.modules.contains(name)
+                        && self.find_var(&name.as_str()).is_none()
+                        && !self.structs.contains_key(name)
+                        && !self.enums.contains_key(name)
+                        && !self.actors.contains_key(name)
+                        && self.importable_module_exists(&name.as_str())
+                    {
+                        return Err(format!(
+                            "{}: module `{}` is used here but not imported; add \
+                             `use {}` at the top of the file (imports are explicit \
+                             — nothing is pulled in by directory or by name)",
+                            span.loc(),
+                            name,
+                            name,
+                        ));
+                    }
                     if self.modules.contains(name) && self.find_var(&name.as_str()).is_none() {
                         let qualified_name = Symbol::intern(&format!("{}_{}", name, method));
 
