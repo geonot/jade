@@ -1,5 +1,5 @@
 title: Remove dead aspirational subsystems
-status: pending
+status: complete
 atomic: true
 priority: low
 blocked_by: ['8-7']

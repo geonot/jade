@@ -67,9 +67,6 @@ pub(super) struct Cli {
     #[arg(long)]
     pub(super) deterministic_fp: bool,
 
-    #[arg(long, hide = true)]
-    pub(super) incremental: bool,
-
     #[arg(long, default_value = "0")]
     pub(super) threads: usize,
 

@@ -29,7 +29,6 @@ pub(super) fn compile_and_link(
     test_mode: bool,
     _bench: bool,
     emit_mir: bool,
-    incremental: bool,
     target: Option<&str>,
     cpu: Option<&str>,
     features: Option<&str>,
@@ -186,20 +185,6 @@ pub(super) fn compile_and_link(
         print!("{}", crate::mir::printer::print_program(&mir_prog));
     }
 
-    if incremental {
-        let incr_cache = crate::incr::ArtifactCache::new();
-        let (dirty, _keys) = crate::incr::compute_dirty_set(&hir_prog, &incr_cache);
-        if dirty.is_empty() {
-            tracing::info!(target: "jinnc::incr", "all functions up to date");
-        } else {
-            tracing::info!(
-                target: "jinnc::incr",
-                "{} of {} functions need recompilation",
-                dirty.len(),
-                hir_prog.fns.len()
-            );
-        }
-    }
 
     let ctx = Context::create();
     let name = input

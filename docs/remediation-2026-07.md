@@ -581,7 +581,7 @@ output or deleted with a reason; a harness test enumerates the directory and fai
 any unreferenced file, so rot cannot recur; the two ICEs are fixed with conformance
 tests.
 
-### ◻ 8-20 Remove dead aspirational subsystems — **P2**, blocked_by: [8-7]
+### ✅ 8-20 Remove dead aspirational subsystems — **P2**, blocked_by: [8-7]
 *Review item 17.*
 
 - `src/codegen/rc.rs` — 250 lines of retain/release/atomic-RC with **zero call sites

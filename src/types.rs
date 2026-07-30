@@ -126,20 +126,6 @@ impl Type {
         }
     }
 
-    pub fn needs_atomic_rc(&self) -> bool {
-        match self {
-            Self::ActorRef(_) | Self::Channel(_) | Self::Coroutine(_) | Self::Generator(_) => true,
-            Self::Vec(inner) | Self::Ptr(inner) => inner.needs_atomic_rc(),
-            Self::Map(k, v) => k.needs_atomic_rc() || v.needs_atomic_rc(),
-            Self::Array(inner, _) => inner.needs_atomic_rc(),
-            Self::Tuple(tys) => tys.iter().any(|t| t.needs_atomic_rc()),
-            Self::Fn(params, ret) => {
-                params.iter().any(|t| t.needs_atomic_rc()) || ret.needs_atomic_rc()
-            }
-            Self::Alias(_, inner) | Self::Newtype(_, inner) => inner.needs_atomic_rc(),
-            _ => false,
-        }
-    }
 }
 
 impl std::fmt::Display for Type {

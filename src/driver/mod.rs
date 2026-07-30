@@ -149,7 +149,6 @@ pub fn run() {
                     false,
                     false,
                     cli.emit_mir,
-                    cli.incremental,
                     chosen_target,
                     chosen_cpu,
                     chosen_features,
@@ -208,7 +207,6 @@ pub fn run() {
                         false,
                         false,
                         false,
-                        cli.incremental,
                         cli.target.as_deref(),
                         cli.cpu.as_deref(),
                         cli.features.as_deref(),
@@ -231,7 +229,6 @@ pub fn run() {
                     true,
                     false,
                     false,
-                    cli.incremental,
                     cli.target.as_deref(),
                     cli.cpu.as_deref(),
                     cli.features.as_deref(),
@@ -544,20 +541,6 @@ pub fn run() {
         return;
     }
 
-    if cli.incremental {
-        let incr_cache = crate::incr::ArtifactCache::new();
-        let (dirty, _keys) = crate::incr::compute_dirty_set(&hir_prog, &incr_cache);
-        if dirty.is_empty() {
-            tracing::info!(target: "jinnc::incr", "all functions up to date");
-        } else {
-            tracing::info!(
-                target: "jinnc::incr",
-                "{} of {} functions need recompilation",
-                dirty.len(),
-                hir_prog.fns.len()
-            );
-        }
-    }
 
     let ctx = Context::create();
     let name = input

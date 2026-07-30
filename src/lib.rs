@@ -12,7 +12,6 @@ pub mod escape;
 pub mod fmt;
 pub mod hir;
 pub mod hir_validate;
-pub mod incr;
 pub mod interface;
 pub mod intern;
 pub mod lexer;
