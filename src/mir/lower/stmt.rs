@@ -73,7 +73,7 @@ impl Lowerer {
                         // produce a new struct value with the field
                         // zeroed, and write the new value back as the
                         // parent's definition. No memory demotion
-                        // needed — Perceus + drop see the cleared
+                        // needed — the drop pass sees the cleared
                         // field on the new SSA value.
                         let parent_val = self.read_var(
                             *parent_name,

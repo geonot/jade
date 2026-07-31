@@ -224,7 +224,7 @@ impl<'ctx> Compiler<'ctx> {
             return *p;
         }
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let alloca = self.entry_alloca(ptr_ty.into(), &format!("perceus.slot.{slot}"));
+        let alloca = self.entry_alloca(ptr_ty.into(), &format!("drops.slot.{slot}"));
 
         let fv = self.current_fn();
         let entry = fv.get_first_basic_block().expect("entry block");
@@ -264,35 +264,35 @@ impl<'ctx> Compiler<'ctx> {
         let free_fn = self.ensure_free();
         let header_ty = self.vec_header_type();
         for (slot, alloca) in pairs {
-            let cur = match self.bld.build_load(ptr_ty, alloca, "perceus.drain.load") {
+            let cur = match self.bld.build_load(ptr_ty, alloca, "drops.drain.load") {
                 Ok(v) => v.into_pointer_value(),
                 Err(_) => continue,
             };
-            let is_null = match self.bld.build_is_null(cur, "perceus.drain.null") {
+            let is_null = match self.bld.build_is_null(cur, "drops.drain.null") {
                 Ok(b) => b,
                 Err(_) => continue,
             };
             let fv = self.current_fn();
-            let free_bb = self.ctx.append_basic_block(fv, "perceus.drain.free");
-            let cont_bb = self.ctx.append_basic_block(fv, "perceus.drain.cont");
+            let free_bb = self.ctx.append_basic_block(fv, "drops.drain.free");
+            let cont_bb = self.ctx.append_basic_block(fv, "drops.drain.cont");
             let _ = self.bld.build_conditional_branch(is_null, cont_bb, free_bb);
             self.bld.position_at_end(free_bb);
 
-            if self.current_perceus_meta.vec_slots.contains(&slot)
+            if self.current_drop_meta.vec_slots.contains(&slot)
                 && let Ok(data_gep) =
                     self.bld
-                        .build_struct_gep(header_ty, cur, 0, "perceus.drain.dgep")
-                && let Ok(data_v) = self.bld.build_load(ptr_ty, data_gep, "perceus.drain.d")
+                        .build_struct_gep(header_ty, cur, 0, "drops.drain.dgep")
+                && let Ok(data_v) = self.bld.build_load(ptr_ty, data_gep, "drops.drain.d")
             {
                 let _ = self.bld.build_call(
                     free_fn,
                     &[data_v.into_pointer_value().into()],
-                    "perceus.drain.free.buf",
+                    "drops.drain.free.buf",
                 );
             }
             let _ = self
                 .bld
-                .build_call(free_fn, &[cur.into()], "perceus.drain.free");
+                .build_call(free_fn, &[cur.into()], "drops.drain.free");
 
             let null = ptr_ty.const_null();
             let _ = self.bld.build_store(alloca, null);
@@ -306,8 +306,8 @@ impl<'ctx> Compiler<'ctx> {
         dropped: mir::ValueId,
         header_ptr: PointerValue<'ctx>,
     ) -> bool {
-        let slot = match self.current_perceus_meta.reuse_save.get(&dropped).copied() {
-            Some(s) if self.current_perceus_meta.vec_slots.contains(&s) => s,
+        let slot = match self.current_drop_meta.reuse_save.get(&dropped).copied() {
+            Some(s) if self.current_drop_meta.vec_slots.contains(&s) => s,
             _ => return false,
         };
         let alloca = self.get_or_create_reuse_alloca(slot);
@@ -347,8 +347,8 @@ impl<'ctx> Compiler<'ctx> {
 
     pub(crate) fn try_consume_vec_slot(&mut self) -> Option<PointerValue<'ctx>> {
         let dest = self.current_alloc_dest?;
-        let slot = *self.current_perceus_meta.reuse_consume.get(&dest)?;
-        if !self.current_perceus_meta.vec_slots.contains(&slot) {
+        let slot = *self.current_drop_meta.reuse_consume.get(&dest)?;
+        if !self.current_drop_meta.vec_slots.contains(&slot) {
             return None;
         }
         let alloca = self.get_or_create_reuse_alloca(slot);

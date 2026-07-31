@@ -17,7 +17,7 @@ use inkwell::values::{BasicValue, BasicValueEnum};
 
 use crate::hir;
 use crate::mir;
-use crate::perceus::PerceusHints;
+use crate::drops::DropHints;
 use crate::types::Type;
 
 use super::Compiler;
@@ -63,7 +63,7 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         prog: &mir::Program,
         hir_prog: &hir::Program,
-        hints: PerceusHints,
+        hints: DropHints,
     ) -> Result<(), String> {
         self.hints = hints;
         // Multi-package builds mangle symbols by owning package (scope.md §1.3);
@@ -558,7 +558,7 @@ impl<'ctx> Compiler<'ctx> {
         self.value_types.clear();
         self.self_allocs.clear();
         self.vec_growth_floor_by_value = Self::compute_vec_growth_floors(func);
-        self.current_perceus_meta = func.perceus.clone();
+        self.current_drop_meta = func.drops.clone();
         self.current_reuse_slots.clear();
         self.current_reuse_alloca_slots.clear();
         self.current_alloc_dest = None;
@@ -932,7 +932,7 @@ mod mangle_tests {
             is_coroutine: false,
             scheduler_task: false,
             cancel_cleanup: None,
-            perceus: mir::PerceusMeta::default(),
+            drops: mir::DropMeta::default(),
         }
     }
 

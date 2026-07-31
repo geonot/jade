@@ -247,7 +247,7 @@ impl HirValidator {
                     Add | Sub | Mul | Div | Mod | Lt | Gt | Le | Ge => {
                         let is_ptr_arith = matches!(
                             (&lhs.ty, &rhs.ty),
-                            (Type::Ptr(_), Type::I64) | (Type::I64, Type::Ptr(_))
+                            (Type::Ptr(_), t) | (t, Type::Ptr(_)) if t.is_int()
                         );
 
                         if lhs.ty != rhs.ty && !is_ptr_arith {

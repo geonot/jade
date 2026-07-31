@@ -619,29 +619,32 @@ impl Typer {
                 .into_iter()
                 .filter(|w| seen_warn.insert(w.clone())),
         );
+        // Every recorded type error is fatal: unification failures
+        // (recorded inside `unify_at` itself, so no call site can discard
+        // one), collected typer errors, and strict-mode unconstrained-var
+        // errors are drained together and reported deduplicated. Nothing
+        // ill-typed may proceed to codegen.
         let strict_errors = self.infer_ctx.drain_strict_errors();
-        if !strict_errors.is_empty() {
-            let mut seen = std::collections::HashSet::new();
-            let mut unique_errors: Vec<&String> = Vec::new();
-            for e in &strict_errors {
-                if seen.insert(e) {
-                    unique_errors.push(e);
-                }
+        let unify_errors = self.infer_ctx.drain_unify_errors();
+        let type_errors = std::mem::take(&mut self.type_errors);
+        let mut seen = std::collections::HashSet::new();
+        let mut unique_errors: Vec<&String> = Vec::new();
+        for e in unify_errors
+            .iter()
+            .chain(type_errors.iter())
+            .chain(strict_errors.iter())
+        {
+            if seen.insert(e) {
+                unique_errors.push(e);
             }
-            if !self.type_errors.is_empty() {
-                let mut type_seen = std::collections::HashSet::new();
-                for te in &self.type_errors {
-                    if type_seen.insert(te) {
-                        unique_errors.push(te);
-                    }
-                }
-            }
+        }
+        if !unique_errors.is_empty() {
             let combined = unique_errors
                 .iter()
                 .map(|e| e.as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
-            return Err(format!("strict type checking failed:\n{combined}"));
+            return Err(format!("type checking failed:\n{combined}"));
         }
         // Attribute every top-level item to its owning dependency package
         // exactly once (scope.md §1.1), after monomorphization so generated

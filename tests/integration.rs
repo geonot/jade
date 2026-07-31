@@ -2133,7 +2133,7 @@ fn unlikely_builtin() {
 }
 
 #[test]
-fn fbip_match_reconstruct_enum() {
+fn inplace_match_reconstruct_enum() {
     expect(
         "enum Shape\n    Circle(f64)\n    Square(f64)\n\n*double_shape(s as Shape) returns Shape\n    match s\n        Circle(r) ? Circle(r * 2.0)\n        Square(side) ? Square(side * 2.0)\n\n*main()\n    c is double_shape(Circle(5.0))\n    match c\n        Circle(r) ? log(r)\n        Square(_) ? log(0.0)\n",
         "10.000000",
@@ -2141,7 +2141,7 @@ fn fbip_match_reconstruct_enum() {
 }
 
 #[test]
-fn fbip_match_transform_variant() {
+fn inplace_match_transform_variant() {
     expect(
         "enum Op\n    Add(i64)\n    Mul(i64)\n\n*negate(op as Op) returns Op\n    match op\n        Add(n) ? Add(0 - n)\n        Mul(n) ? Mul(0 - n)\n\n*main()\n    r is negate(Add(42))\n    match r\n        Add(n) ? log(n)\n        Mul(n) ? log(n)\n",
         "-42",

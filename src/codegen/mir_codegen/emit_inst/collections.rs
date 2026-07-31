@@ -13,10 +13,10 @@ impl<'ctx> Compiler<'ctx> {
                     if let Type::Vec(elem) = ty
                         && v.is_pointer_value()
                         && self
-                            .current_perceus_meta
+                            .current_drop_meta
                             .reuse_save
                             .get(val)
-                            .map(|s| self.current_perceus_meta.vec_slots.contains(s))
+                            .map(|s| self.current_drop_meta.vec_slots.contains(s))
                             .unwrap_or(false)
                     {
                         self.drop_vec_elements_only(v, elem)?;

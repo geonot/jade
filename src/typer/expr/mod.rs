@@ -173,6 +173,26 @@ impl Typer {
 
             ast::Expr::As(inner, target_ty, span) => {
                 let hi = self.lower_expr(inner)?;
+                let src = self.infer_ctx.resolve(&hi.ty);
+                let tgt = self.infer_ctx.resolve(target_ty);
+                if !Self::cast_legal(&src, &tgt) {
+                    let help = match (&src, &tgt) {
+                        (Type::String, t) if t.is_num() => {
+                            "\n  help: use `convert.parse_int(s)` / `convert.parse_float(s)` (use std/convert) to parse a number from a string"
+                        }
+                        (t, Type::String) if t.is_num() => {
+                            "\n  help: use `to_string(value)` to format a number as a string"
+                        }
+                        _ => "",
+                    };
+                    return Err(format!(
+                        "{}: `as` cannot convert `{}` to `{}`; `as` converts between numeric/bool scalars, enum discriminants, and raw pointers (FFI){}",
+                        span.loc(),
+                        src,
+                        tgt,
+                        help
+                    ));
+                }
                 let ty = target_ty.clone();
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Cast(Box::new(hi), ty.clone()),
@@ -229,7 +249,15 @@ impl Typer {
             ast::Expr::Ref(inner, span) => {
                 let hi = self.lower_expr(inner)?;
 
-                let ty = Type::Ptr(Box::new(Type::I8));
+                // `%x : T` is `&T` — codegen materializes the value into a
+                // stack slot and passes that slot's address. `%s` on a String
+                // is the C-string marshal (`&i8`): extern call emission passes
+                // the string's data pointer, not the header struct.
+                let resolved = self.infer_ctx.shallow_resolve(&hi.ty);
+                let ty = match resolved {
+                    Type::String => Type::Ptr(Box::new(Type::I8)),
+                    _ => Type::Ptr(Box::new(hi.ty.clone())),
+                };
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Ref(Box::new(hi)),
                     ty,
@@ -362,6 +390,35 @@ impl Typer {
             ast::Expr::Einsum(..) => self.lower_expr_einsum(expr, expected),
             ast::Expr::Builder(..) => self.lower_expr_builder(expr, expected),
             ast::Expr::OfCall(..) => self.lower_expr_of_call(expr, expected),
+        }
+    }
+
+    /// The legality lattice for `as`. Scalars (numeric/bool) convert among
+    /// themselves; enums convert to/from integers via their discriminant; raw
+    /// pointers convert to/from integers and each other (the C FFI needs
+    /// opaque handles). Everything else — and in particular any conversion
+    /// into or out of a managed type (String, Vec, Map, structs) — is
+    /// rejected: `as` is a conversion, never a reinterpretation.
+    fn cast_legal(from: &Type, to: &Type) -> bool {
+        fn unwrap(t: &Type) -> &Type {
+            match t {
+                Type::Alias(_, inner) | Type::Newtype(_, inner) => unwrap(inner),
+                t => t,
+            }
+        }
+        let f = unwrap(from);
+        let t = unwrap(to);
+        let scalar = |x: &Type| x.is_num() || matches!(x, Type::Bool);
+        match (f, t) {
+            _ if f == t => true,
+            (Type::TypeVar(_), _) | (_, Type::TypeVar(_)) => true,
+            (a, b) if scalar(a) && scalar(b) => true,
+            (Type::Enum(_), b) if b.is_int() => true,
+            (a, Type::Enum(_)) if a.is_int() => true,
+            (Type::Ptr(_), Type::Ptr(_)) => true,
+            (Type::Ptr(_) | Type::Fn(..), b) if b.is_int() => true,
+            (a, Type::Ptr(_) | Type::Fn(..)) if a.is_int() => true,
+            _ => false,
         }
     }
 

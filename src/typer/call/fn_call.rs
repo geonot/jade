@@ -64,7 +64,7 @@ impl Typer {
                     if let Some(pt) = inst_params.get(i) {
                         let r = self
                             .infer_ctx
-                            .unify_at(pt, &ha.ty, span, "function argument");
+                            .unify_at_tolerant(pt, &ha.ty, span, "function argument");
                         /* Hard error (task 8-17): a swallowed mismatch here
                          * reached codegen and printed raw LLVM verifier IR
                          * at the user. */
@@ -180,7 +180,7 @@ impl Typer {
                     if let Some(pt) = param_tys.get(i) {
                         let r = self
                             .infer_ctx
-                            .unify_at(pt, &ha.ty, span, "function argument");
+                            .unify_at_tolerant(pt, &ha.ty, span, "function argument");
                         if let Err(e) = r {
                             /* Numeric pairs coerce downstream (i64 -> f64,
                              * widening); everything else is a hard error. */
@@ -404,11 +404,10 @@ impl Typer {
                 for arg in args.iter() {
                     hargs.push(self.lower_expr(arg)?);
                 }
-                for (i, ha) in hargs.iter().enumerate() {
-                    if let Some(pt) = ptys.get(i) {
-                        let _ = self
-                            .infer_ctx
-                            .unify_at(pt, &ha.ty, span, "extern call argument");
+                let arg_tys: Vec<_> = hargs.iter().map(|ha| ha.ty.clone()).collect();
+                for (i, aty) in arg_tys.iter().enumerate() {
+                    if let Some(pt) = ptys.get(i).cloned() {
+                        self.check_extern_arg(&pt, aty, span, "extern call argument");
                     }
                 }
                 return Ok(hir::Expr {

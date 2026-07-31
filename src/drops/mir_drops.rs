@@ -4,14 +4,14 @@ use crate::ast::Span;
 use crate::mir::{self, InstKind, Instruction, Terminator, ValueId};
 use crate::types::Type;
 
-use super::PerceusHints;
+use super::DropHints;
 
-pub fn analyze_mir_program(prog: &mut mir::Program) -> PerceusHints {
+pub fn analyze_mir_program(prog: &mut mir::Program) -> DropHints {
     run(prog)
 }
 
-pub fn run(prog: &mut mir::Program) -> PerceusHints {
-    let mut hints = PerceusHints::default();
+pub fn run(prog: &mut mir::Program) -> DropHints {
+    let mut hints = DropHints::default();
     let mut next_slot: u32 = 0;
     for func in &mut prog.functions {
         run_on_function(func, &mut hints, &mut next_slot);
@@ -19,7 +19,7 @@ pub fn run(prog: &mut mir::Program) -> PerceusHints {
     hints
 }
 
-fn run_on_function(func: &mut mir::Function, hints: &mut PerceusHints, next_slot: &mut u32) {
+fn run_on_function(func: &mut mir::Function, hints: &mut DropHints, next_slot: &mut u32) {
     let uses = count_uses(func);
     hints.stats.total_bindings_analyzed += uses.len() as u32;
 
@@ -328,7 +328,7 @@ fn drop_sinking(func: &mut mir::Function, uses: &HashMap<ValueId, UseInfo>) -> u
     sunk
 }
 
-fn drop_elision(func: &mut mir::Function, hints: &mut PerceusHints) {
+fn drop_elision(func: &mut mir::Function, hints: &mut DropHints) {
     let mut elided = 0u32;
     for bb in &mut func.blocks {
         bb.insts.retain(|inst| match &inst.kind {
@@ -438,7 +438,7 @@ fn block_is_loop_body(func: &mir::Function, bi: usize) -> bool {
     false
 }
 
-fn vec_reuse_pairing(func: &mut mir::Function, hints: &mut PerceusHints, next_slot: &mut u32) {
+fn vec_reuse_pairing(func: &mut mir::Function, hints: &mut DropHints, next_slot: &mut u32) {
     let mut pairs = 0u32;
 
     for bi in 0..func.blocks.len() {
@@ -457,7 +457,7 @@ fn vec_reuse_pairing(func: &mut mir::Function, hints: &mut PerceusHints, next_sl
         let mut kill_idxs: Vec<usize> = Vec::new();
         for (ii, inst) in func.blocks[bi].insts.iter().enumerate() {
             match &inst.kind {
-                InstKind::Drop(v, Type::Vec(elem)) if !func.perceus.reuse_save.contains_key(v) => {
+                InstKind::Drop(v, Type::Vec(elem)) if !func.drops.reuse_save.contains_key(v) => {
                     drops.push(DropSite {
                         inst_idx: ii,
                         value: *v,
@@ -466,7 +466,7 @@ fn vec_reuse_pairing(func: &mut mir::Function, hints: &mut PerceusHints, next_sl
                 }
                 InstKind::VecNew(elems) if elems.is_empty() => {
                     if let (Some(dest), Type::Vec(elem)) = (inst.dest, &inst.ty)
-                        && !func.perceus.reuse_consume.contains_key(&dest)
+                        && !func.drops.reuse_consume.contains_key(&dest)
                     {
                         allocs.push(AllocSite {
                             inst_idx: ii,
@@ -544,9 +544,9 @@ fn vec_reuse_pairing(func: &mut mir::Function, hints: &mut PerceusHints, next_sl
         }
 
         for (drop_v, alloc_dest, slot) in decisions {
-            func.perceus.reuse_save.insert(drop_v, slot);
-            func.perceus.reuse_consume.insert(alloc_dest, slot);
-            func.perceus.vec_slots.insert(slot);
+            func.drops.reuse_save.insert(drop_v, slot);
+            func.drops.reuse_consume.insert(alloc_dest, slot);
+            func.drops.vec_slots.insert(slot);
             pairs += 1;
         }
     }
@@ -575,13 +575,13 @@ fn vec_reuse_pairing(func: &mut mir::Function, hints: &mut PerceusHints, next_sl
             for inst in &func.blocks[bi].insts {
                 match &inst.kind {
                     InstKind::Drop(v, Type::Vec(elem))
-                        if !func.perceus.reuse_save.contains_key(v) =>
+                        if !func.drops.reuse_save.contains_key(v) =>
                     {
                         drops.push((*v, (**elem).clone()));
                     }
                     InstKind::VecNew(elems) if elems.is_empty() => {
                         if let (Some(dest), Type::Vec(elem)) = (inst.dest, &inst.ty)
-                            && !func.perceus.reuse_consume.contains_key(&dest)
+                            && !func.drops.reuse_consume.contains_key(&dest)
                         {
                             allocs.push((dest, (**elem).clone()));
                         }
@@ -598,9 +598,9 @@ fn vec_reuse_pairing(func: &mut mir::Function, hints: &mut PerceusHints, next_sl
                 }
                 let slot = *next_slot;
                 *next_slot += 1;
-                func.perceus.reuse_save.insert(*dv, slot);
-                func.perceus.reuse_consume.insert(*av, slot);
-                func.perceus.vec_slots.insert(slot);
+                func.drops.reuse_save.insert(*dv, slot);
+                func.drops.reuse_consume.insert(*av, slot);
+                func.drops.vec_slots.insert(slot);
                 used_a[ai] = true;
                 pairs += 1;
                 break;
@@ -611,7 +611,7 @@ fn vec_reuse_pairing(func: &mut mir::Function, hints: &mut PerceusHints, next_sl
     hints.stats.reuse_sites += pairs;
 }
 
-fn drop_fusion(func: &mut mir::Function, hints: &mut PerceusHints) {
+fn drop_fusion(func: &mut mir::Function, hints: &mut DropHints) {
     let mut fused = 0u32;
     for bb in &mut func.blocks {
         let mut new_insts: Vec<Instruction> = Vec::with_capacity(bb.insts.len());
@@ -620,7 +620,7 @@ fn drop_fusion(func: &mut mir::Function, hints: &mut PerceusHints) {
         let drained: Vec<Instruction> = std::mem::take(&mut bb.insts);
         for inst in drained {
             let is_fusible = matches!(&inst.kind, InstKind::Drop(v, _)
-                if !func.perceus.reuse_save.contains_key(v));
+                if !func.drops.reuse_save.contains_key(v));
             if is_fusible {
                 if let InstKind::Drop(v, ty) = inst.kind {
                     if run.is_empty() {

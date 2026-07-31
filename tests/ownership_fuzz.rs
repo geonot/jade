@@ -5,7 +5,7 @@
 //! diagnostic, or (b) compiles and runs to completion WITHOUT a use-after-free,
 //! double-free, leak, or abort (exit 134 / SIGSEGV 139). When the C runtime is
 //! built under ASan/UBSan (ci/sanitize.sh), this same corpus catches heap
-//! corruption (UAF/double-free/OOB) in the Perceus + escape + tombstone passes
+//! corruption (UAF/double-free/OOB) in the drop + escape + tombstone passes
 //! — the soundness-critical core that previously hosted the `vec_get` aliasing
 //! bug and the `take`-inside-loop double-free.
 //!

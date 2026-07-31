@@ -175,10 +175,10 @@ impl Typer {
                                 let expected_ty = ptys.get(i);
                                 hargs.push(self.lower_expr_expected(arg, expected_ty)?);
                             }
-                            for (i, harg) in hargs.iter().enumerate() {
-                                if let Some(pty) = ptys.get(i) {
-                                    let _ =
-                                        self.infer_ctx.unify_at(pty, &harg.ty, *span, "extern arg");
+                            let arg_tys: Vec<_> = hargs.iter().map(|ha| ha.ty.clone()).collect();
+                            for (i, aty) in arg_tys.iter().enumerate() {
+                                if let Some(pty) = ptys.get(i).cloned() {
+                                    self.check_extern_arg(&pty, aty, *span, "extern arg");
                                 }
                             }
                             return Ok(hir::Expr {
@@ -202,10 +202,10 @@ impl Typer {
                                 let expected_ty = ptys.get(i);
                                 hargs.push(self.lower_expr_expected(arg, expected_ty)?);
                             }
-                            for (i, harg) in hargs.iter().enumerate() {
-                                if let Some(pty) = ptys.get(i) {
-                                    let _ =
-                                        self.infer_ctx.unify_at(pty, &harg.ty, *span, "extern arg");
+                            let arg_tys: Vec<_> = hargs.iter().map(|ha| ha.ty.clone()).collect();
+                            for (i, aty) in arg_tys.iter().enumerate() {
+                                if let Some(pty) = ptys.get(i).cloned() {
+                                    self.check_extern_arg(&pty, aty, *span, "extern arg");
                                 }
                             }
                             return Ok(hir::Expr {

@@ -14,15 +14,44 @@ impl Typer {
             ast::Expr::BinOp(lhs, op, rhs, span) => {
                 let hl = self.lower_expr(lhs)?;
                 let hr = self.lower_expr_expected(rhs, Some(&hl.ty))?;
-                /* Operands always unify (that drives inference), but the
-                 * FAILURE is surfaced only for equality (task 8-16):
-                 * `'abc' equals 5` used to type-check and segfault in the
-                 * String comparison the backend emitted. Arithmetic keeps
-                 * its historical laxity for now — pointer arithmetic
-                 * (`buf + n`) and string concatenation with coercible
-                 * operands are legitimate and handled downstream. */
                 let rl0 = self.infer_ctx.shallow_resolve(&hl.ty);
                 let rr0 = self.infer_ctx.shallow_resolve(&hr.ty);
+
+                // Pointer arithmetic: `ptr + int`, `ptr - int`, `int + ptr`
+                // type as the pointer's type. The operands deliberately do
+                // NOT unify — unifying would bind the integer side's
+                // inference variable to the pointer type and poison every
+                // later use of that variable.
+                let int_like = |t: &Type| t.is_int() || matches!(t, Type::TypeVar(_));
+                let ptr_l = matches!(rl0, Type::Ptr(_));
+                let ptr_r = matches!(rr0, Type::Ptr(_));
+                let ptr_arith_op = match op {
+                    BinOp::Add => true,        // ptr + int, int + ptr
+                    BinOp::Sub => ptr_l,       // ptr - int only
+                    _ => false,
+                };
+                let is_ptr_arith =
+                    ptr_arith_op && (ptr_l ^ ptr_r) && int_like(if ptr_l { &rr0 } else { &rl0 });
+                if is_ptr_arith {
+                    let int_ty = if ptr_l { &hr.ty } else { &hl.ty };
+                    let _ = self.infer_ctx.constrain(
+                        int_ty,
+                        super::unify::TypeConstraint::Integer,
+                        *span,
+                        "pointer arithmetic offset",
+                    );
+                    let ptr_ty = if ptr_l { hl.ty.clone() } else { hr.ty.clone() };
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::BinOp(Box::new(hl), *op, Box::new(hr)),
+                        ty: ptr_ty,
+                        span: *span,
+                    });
+                }
+
+                // Operand unification both drives inference and, since it is
+                // recorded inside `unify_at`, rejects ill-typed operand pairs
+                // (`'abc' equals 5`, `'n=' + 5`) instead of letting them
+                // reach codegen.
                 let r = self
                     .infer_ctx
                     .unify_at(&hl.ty, &hr.ty, *span, "binary operands");

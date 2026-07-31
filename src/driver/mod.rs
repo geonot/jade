@@ -36,7 +36,7 @@ use sources::{
 /// - `--verbose`: INFO
 /// - `--debug`: DEBUG for all `jinnc::*` targets
 /// - `--debug-types`: TRACE for `jinnc::type`
-/// - `--debug-perceus`: TRACE for `jinnc::perceus`
+/// - `--debug-drops`: TRACE for `jinnc::drops`
 ///
 /// Output goes to stderr without timestamps to keep diagnostics terse.
 fn init_tracing(cli: &Cli) {
@@ -52,8 +52,8 @@ fn init_tracing(cli: &Cli) {
     if cli.debug_types {
         filter = filter.add_directive("jinnc::type=trace".parse().unwrap());
     }
-    if cli.debug_perceus {
-        filter = filter.add_directive("jinnc::perceus=trace".parse().unwrap());
+    if cli.debug_drops {
+        filter = filter.add_directive("jinnc::drops=trace".parse().unwrap());
     }
     if let Ok(env) = std::env::var("JINN_LOG")
         && let Ok(extra) = EnvFilter::try_new(env)
@@ -571,17 +571,17 @@ pub fn run() {
     }
 
     {
-        use crate::perceus::mir_perceus;
+        use crate::drops::mir_drops;
         comp.tune_empty_vec_growth_floor_from_mir(&mir_prog);
-        let mir_hints = mir_perceus::run(&mut mir_prog);
-        if cli.debug_perceus
+        let mir_hints = mir_drops::run(&mut mir_prog);
+        if cli.debug_drops
             || mir_hints.stats.drops_elided > 0
             || mir_hints.stats.reuse_sites > 0
             || mir_hints.stats.drops_fused > 0
             || mir_hints.stats.last_use_tracked > 0
         {
             eprintln!(
-                "mir-perceus: {} drops elided, {} drops sunk, {} drops fused, {} reuse pairs ({} bindings)",
+                "mir-drops: {} drops elided, {} drops sunk, {} drops fused, {} reuse pairs ({} bindings)",
                 mir_hints.stats.drops_elided,
                 mir_hints.stats.last_use_tracked,
                 mir_hints.stats.drops_fused,

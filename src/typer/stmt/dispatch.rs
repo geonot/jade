@@ -968,7 +968,7 @@ impl Typer {
                     }
                     _ => resolved_val.clone(),
                 };
-                let unify_res = self.infer_ctx.unify_at(
+                let unify_res = self.infer_ctx.unify_at_tolerant(
                     &normalized_val,
                     &normalized_ret,
                     *span,

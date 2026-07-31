@@ -40,6 +40,10 @@ pub(crate) struct InferCtx {
     default_warnings: Vec<String>,
     strict_types: bool,
     strict_errors: Vec<String>,
+    /// Every `unify_at` failure lands here, regardless of what the call site
+    /// does with the returned `Result`. Drained at the end of lowering and
+    /// always fatal: a failed unification is a type error, never a hint.
+    unify_errors: Vec<String>,
     pedantic: bool,
     quantified_vars: std::collections::HashSet<u32>,
 
@@ -61,6 +65,7 @@ impl InferCtx {
             default_warnings: Vec::new(),
             strict_types: true,
             strict_errors: Vec::new(),
+            unify_errors: Vec::new(),
             pedantic: false,
             quantified_vars: std::collections::HashSet::new(),
             trait_impls: IndexMap::new(),
@@ -112,6 +117,10 @@ impl InferCtx {
 
     pub(crate) fn drain_strict_errors(&mut self) -> Vec<String> {
         std::mem::take(&mut self.strict_errors)
+    }
+
+    pub(crate) fn drain_unify_errors(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.unify_errors)
     }
 
     pub(crate) fn mark_quantified(&mut self, vars: &[u32]) {
@@ -302,12 +311,41 @@ impl InferCtx {
         }
     }
 
+    /// Unify with a rich, located diagnostic on failure. The failure is also
+    /// recorded in `unify_errors` (always fatal at the end of lowering), so a
+    /// call site that discards the `Result` cannot drop a type error. Sites
+    /// that consume the `Result` and apply their own policy (coercion
+    /// classification, custom diagnostics) use `unify_at_tolerant`.
     pub(crate) fn unify_at(
         &mut self,
         a: &Type,
         b: &Type,
         span: Span,
         reason: &'static str,
+    ) -> Result<(), String> {
+        self.unify_at_inner(a, b, span, reason, true)
+    }
+
+    /// `unify_at` without auto-recording: the caller owns the failure and is
+    /// responsible for either tolerating it (an implicit-coercion pair the
+    /// coercion pass will lower) or reporting it fatally.
+    pub(crate) fn unify_at_tolerant(
+        &mut self,
+        a: &Type,
+        b: &Type,
+        span: Span,
+        reason: &'static str,
+    ) -> Result<(), String> {
+        self.unify_at_inner(a, b, span, reason, false)
+    }
+
+    fn unify_at_inner(
+        &mut self,
+        a: &Type,
+        b: &Type,
+        span: Span,
+        reason: &'static str,
+        record: bool,
     ) -> Result<(), String> {
         if self.debug {
             let ra = self.shallow_resolve(a);
@@ -334,38 +372,50 @@ impl InferCtx {
             }
             self.usage_sites[root as usize].push((span, reason));
         }
-        self.unify(a, b).map_err(|e| {
-            let ra = self.shallow_resolve(a);
-            let rb = self.shallow_resolve(b);
-            let a_origin = self.origin_of(a);
-            let b_origin = self.origin_of(b);
+        match self.unify(a, b) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let ra = self.shallow_resolve(a);
+                let rb = self.shallow_resolve(b);
+                let a_origin = self.origin_of(a);
+                let b_origin = self.origin_of(b);
 
-            let mut msg = format!("{}: {} ({})", span.loc(), e, reason);
+                let mut msg = format!("{}: {} ({})", span.loc(), e, reason);
 
-            if let Some(origin) = &a_origin
-                && origin.span.line != span.line
-            {
-                msg.push_str(&format!(
-                    "\n  note: expected `{}` because of line {} ({})",
-                    ra, origin.span.line, origin.reason
-                ));
+                if let Some(origin) = &a_origin
+                    && origin.span.line != span.line
+                {
+                    msg.push_str(&format!(
+                        "\n  note: expected `{}` because of line {} ({})",
+                        ra, origin.span.line, origin.reason
+                    ));
+                }
+                if let Some(origin) = &b_origin
+                    && origin.span.line != span.line
+                {
+                    msg.push_str(&format!(
+                        "\n  note: found `{}` because of line {} ({})",
+                        rb, origin.span.line, origin.reason
+                    ));
+                }
+
+                let suggestion = self.suggest_fix(reason, &ra, &rb);
+                if let Some(s) = suggestion {
+                    msg.push_str(&format!("\n  help: {s}"));
+                }
+
+                // Record so a call site that discards the Result cannot
+                // silently drop a type error. The definition-site pre-pass of
+                // inferable generics is exempt: its HIR is discarded and the
+                // body is re-checked at every instantiation with concrete
+                // types.
+                if record && !self.suppress_unsolved_reports {
+                    self.unify_errors.push(msg.clone());
+                }
+
+                Err(msg)
             }
-            if let Some(origin) = &b_origin
-                && origin.span.line != span.line
-            {
-                msg.push_str(&format!(
-                    "\n  note: found `{}` because of line {} ({})",
-                    rb, origin.span.line, origin.reason
-                ));
-            }
-
-            let suggestion = self.suggest_fix(reason, &ra, &rb);
-            if let Some(s) = suggestion {
-                msg.push_str(&format!("\n  help: {s}"));
-            }
-
-            msg
-        })
+        }
     }
 
     fn suggest_fix(&self, reason: &str, expected: &Type, found: &Type) -> Option<String> {

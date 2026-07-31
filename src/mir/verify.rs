@@ -415,7 +415,7 @@ mod tests {
     use crate::ast::{FnAttrs, Span};
     use crate::hir::DefId;
     use crate::intern::Symbol;
-    use crate::mir::{BasicBlock, Function, Instruction, Param, PerceusMeta, Phi};
+    use crate::mir::{BasicBlock, Function, Instruction, Param, DropMeta, Phi};
 
     fn func(blocks: Vec<BasicBlock>, ret_ty: Type) -> Function {
         Function {
@@ -437,7 +437,7 @@ mod tests {
             is_coroutine: false,
             scheduler_task: false,
             cancel_cleanup: None,
-            perceus: PerceusMeta::default(),
+            drops: DropMeta::default(),
         }
     }
 

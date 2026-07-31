@@ -485,6 +485,37 @@ impl Typer {
         }
     }
 
+    /// Check one argument at the C FFI boundary. A Jinn `String` is accepted
+    /// where the extern declares a byte pointer (`&i8`/`&u8`/`&void`) —
+    /// codegen marshals the string's data pointer across — everything else
+    /// must unify with the declared parameter type.
+    pub(crate) fn check_extern_arg(
+        &mut self,
+        pty: &Type,
+        aty: &Type,
+        span: crate::ast::Span,
+        reason: &'static str,
+    ) {
+        let rp = self.infer_ctx.shallow_resolve(pty);
+        let ra = self.infer_ctx.shallow_resolve(aty);
+        if matches!(ra, Type::String)
+            && matches!(&rp, Type::Ptr(inner) if matches!(**inner, Type::I8 | Type::U8 | Type::Void))
+        {
+            return;
+        }
+        let _ = self.infer_ctx.unify_at(pty, aty, span, reason);
+    }
+
+    /// Propagate an expectation into a call result for inference only.
+    ///
+    /// `expected` here is a hint from surrounding context (e.g. the enclosing
+    /// function's return type flowing into a tail expression), not an
+    /// obligation: a void call in statement/tail position is legal even when
+    /// the context "expects" a value. Hard checks live at the boundaries that
+    /// own them — bind annotations, assignments, call arguments, `return`,
+    /// and declared-return tail checks — all of which report fatally through
+    /// `unify_at`. This must therefore use the speculative `unify`, never
+    /// `unify_at`.
     pub(crate) fn unify_call_result(
         &mut self,
         expected: &Type,
@@ -492,9 +523,10 @@ impl Typer {
         span: crate::ast::Span,
         ctx: &'static str,
     ) {
+        let _ = (span, ctx);
         let resolved = self.infer_ctx.shallow_resolve(result_ty);
         if !matches!(resolved, Type::TypeVar(_)) {
-            let _ = self.infer_ctx.unify_at(expected, result_ty, span, ctx);
+            let _ = self.infer_ctx.unify(expected, result_ty);
         }
     }
 

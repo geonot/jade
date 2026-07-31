@@ -89,7 +89,7 @@ impl Lowerer {
             next_value: 0,
             next_block: 1,
             attrs: crate::ast::FnAttrs::default(),
-            perceus: crate::mir::PerceusMeta::default(),
+            drops: crate::mir::DropMeta::default(),
             is_coroutine: false,
             scheduler_task: false,
             cancel_cleanup: None,

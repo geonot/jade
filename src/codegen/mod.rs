@@ -44,7 +44,7 @@ use inkwell::debug_info::{
 
 use crate::hir;
 use crate::mir;
-use crate::perceus::PerceusHints;
+use crate::drops::DropHints;
 use crate::types::Type;
 
 macro_rules! b {
@@ -96,7 +96,7 @@ pub struct Compiler<'ctx> {
     pub(crate) enums: IndexMap<Symbol, Vec<(String, Vec<Type>)>>,
     pub(crate) variant_tags: IndexMap<Symbol, (String, u32)>,
     pub(crate) source: String,
-    pub(crate) hints: PerceusHints,
+    pub(crate) hints: DropHints,
     pub(crate) lib_mode: bool,
     /// True when the program links more than one distinct package (scope.md
     /// §1.3): symbols are then mangled `<pkgid_hash>_<module>_<name>`. False for
@@ -162,7 +162,7 @@ pub struct Compiler<'ctx> {
 
     pub(crate) vec_growth_floor_by_value: std::collections::HashMap<mir::ValueId, u64>,
 
-    pub(crate) current_perceus_meta: mir::PerceusMeta,
+    pub(crate) current_drop_meta: mir::DropMeta,
 
     pub(crate) current_reuse_slots: std::collections::HashMap<u32, PointerValue<'ctx>>,
 

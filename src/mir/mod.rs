@@ -65,11 +65,11 @@ pub struct Function {
     /// task unwinds through its defers instead of running to completion.
     pub cancel_cleanup: Option<BlockId>,
 
-    pub perceus: PerceusMeta,
+    pub drops: DropMeta,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct PerceusMeta {
+pub struct DropMeta {
     pub reuse_save: HashMap<ValueId, u32>,
 
     pub reuse_consume: HashMap<ValueId, u32>,
@@ -82,14 +82,14 @@ pub struct PerceusMeta {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct PerceusStats {
+pub struct DropStats {
     pub functions_analyzed: u32,
     pub bindings_analyzed: u32,
     pub drops_elided: u32,
     pub drops_sunk: u32,
     pub drops_fused: u32,
     pub reuse_pairs: u32,
-    pub fbip_sites: u32,
+    pub inplace_sites: u32,
     pub tail_reuse_sites: u32,
     pub pool_hints: u32,
 }

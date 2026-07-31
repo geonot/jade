@@ -244,11 +244,28 @@ impl Typer {
                 name.push('_');
             }
             if let Some(ty) = type_map.get(tp) {
-                let encoded = ty.to_string().replace('_', "U").replace(' ', "");
-                name.push_str(&encoded);
+                name.push_str(&Self::encode_type_for_mangle(&ty.to_string()));
             }
         }
         name
+    }
+
+    /// Injective encoding of a type's display string for symbol mangling.
+    /// `U` is the escape character (`U`→`UU`, `_`→`UX`, ` `→`US`), so the
+    /// encoded form contains no bare `_` and decodes uniquely: distinct
+    /// instantiations can never collide (`A_B` vs `AUB` used to map to the
+    /// same symbol and silently fuse two monomorphizations).
+    fn encode_type_for_mangle(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        for c in s.chars() {
+            match c {
+                'U' => out.push_str("UU"),
+                '_' => out.push_str("UX"),
+                ' ' => out.push_str("US"),
+                c => out.push(c),
+            }
+        }
+        out
     }
 
     pub(crate) fn effective_type_params(&self, f: &ast::Fn) -> Vec<Symbol> {

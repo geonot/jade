@@ -27,7 +27,7 @@ fn parse_bindings(part: &str) -> Option<u32> {
 }
 
 fn parse_mir_summary(line: &str) -> Option<MirSummary> {
-    let payload = line.strip_prefix("mir-perceus: ")?.trim();
+    let payload = line.strip_prefix("mir-drops: ")?.trim();
     let parts: Vec<&str> = payload.split(", ").collect();
     if parts.len() != 4 {
         return None;
@@ -51,7 +51,7 @@ fn compile(src: &str) -> (Option<MirSummary>, String) {
         .arg(&jinn)
         .arg("-o")
         .arg(&out)
-        .arg("--debug-perceus")
+        .arg("--debug-drops")
         .output()
         .expect("jinnc failed to start");
 
@@ -59,23 +59,23 @@ fn compile(src: &str) -> (Option<MirSummary>, String) {
 
     let summary = stderr
         .lines()
-        .find(|l| l.starts_with("mir-perceus: "))
+        .find(|l| l.starts_with("mir-drops: "))
         .and_then(parse_mir_summary);
     (summary, stderr)
 }
 
 fn require(summary: Option<MirSummary>, stderr: &str) -> MirSummary {
-    summary.unwrap_or_else(|| panic!("missing or malformed mir-perceus summary:\n{stderr}"))
+    summary.unwrap_or_else(|| panic!("missing or malformed mir-drops summary:\n{stderr}"))
 }
 
 #[test]
-fn perceus_stats_line_is_emitted() {
+fn drop_stats_line_is_emitted() {
     let src = "*main() returns i32\n    0\n";
     let (summary, stderr) = compile(src);
     let s = require(summary, &stderr);
     assert!(
         s.bindings > 0,
-        "expected MIR-perceus to analyze >0 bindings, got {s:?}"
+        "expected MIR-drops to analyze >0 bindings, got {s:?}"
     );
 }
 
@@ -95,7 +95,7 @@ fn drop_fusion_coalesces_consecutive_scope_exit_drops() {
 }
 
 #[test]
-fn perceus_stats_are_nondestructive_for_trivial_main() {
+fn drop_stats_are_nondestructive_for_trivial_main() {
     let src = "*main() returns i32\n    a is 1\n    b is 2\n    log(a + b)\n    0\n";
     let (summary, stderr) = compile(src);
     let s = require(summary, &stderr);

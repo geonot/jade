@@ -5,16 +5,16 @@ use crate::hir::DefId;
 use crate::types::Type;
 
 #[derive(Debug, Clone, Default)]
-pub struct PerceusHints {
+pub struct DropHints {
     pub elide_drops: std::collections::HashSet<DefId>,
     pub reuse_candidates: HashMap<DefId, ReuseInfo>,
     pub speculative_reuse: HashMap<DefId, ReuseInfo>,
     pub last_use: HashMap<DefId, Span>,
     pub drop_fusions: Vec<DropFusion>,
-    pub fbip_sites: Vec<FbipSite>,
+    pub inplace_sites: Vec<InPlaceSite>,
     pub tail_reuse: HashMap<DefId, TailReuseInfo>,
     pub pool_hints: Vec<PoolHint>,
-    pub stats: PerceusStats,
+    pub stats: DropStats,
 }
 
 #[derive(Debug, Clone)]
@@ -31,7 +31,7 @@ pub struct DropFusion {
 }
 
 #[derive(Debug, Clone)]
-pub struct FbipSite {
+pub struct InPlaceSite {
     pub subject_id: DefId,
     pub subject_ty: Type,
     pub constructed_ty: Type,
@@ -54,11 +54,11 @@ pub struct PoolHint {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct PerceusStats {
+pub struct DropStats {
     pub drops_elided: u32,
     pub reuse_sites: u32,
     pub speculative_reuse_sites: u32,
-    pub fbip_sites: u32,
+    pub inplace_sites: u32,
     pub tail_reuse_sites: u32,
     pub drops_fused: u32,
     pub last_use_tracked: u32,
@@ -66,4 +66,4 @@ pub struct PerceusStats {
     pub pool_hints_found: u32,
 }
 
-pub mod mir_perceus;
+pub mod mir_drops;

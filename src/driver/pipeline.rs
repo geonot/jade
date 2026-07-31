@@ -208,9 +208,9 @@ pub(super) fn compile_and_link(
     }
 
     {
-        use crate::perceus::mir_perceus;
+        use crate::drops::mir_drops;
         comp.tune_empty_vec_growth_floor_from_mir(&mir_prog);
-        let mir_hints = mir_perceus::run(&mut mir_prog);
+        let mir_hints = mir_drops::run(&mut mir_prog);
         if let Err(e) = comp.compile_program(&mir_prog, &hir_prog, mir_hints) {
             die(&strip_codegen_prefix(&e.to_string()));
         }

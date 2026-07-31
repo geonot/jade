@@ -339,6 +339,24 @@ impl Typer {
         Ok(result)
     }
 
+    /// Is `resolved` the same nominal enum as `en`, modulo the two spellings
+    /// a generic enum instance can carry (`List<i64>` as `Struct(List, [i64])`
+    /// vs the monomorphized `Enum(List__G_i64)`)? Used to avoid "unifying" a
+    /// type with itself under a different spelling, which is not an error.
+    fn same_enum_modulo_mono(&self, en: crate::intern::Symbol, resolved: &Type) -> bool {
+        fn base(s: &str) -> &str {
+            s.split("__G_").next().unwrap_or(s)
+        }
+        let en_str = en.as_str();
+        match resolved {
+            Type::Enum(n) => base(&n.as_str()) == base(&en_str),
+            Type::Struct(n, _) if self.generic_enums.contains_key(n) => {
+                base(&en_str) == n.as_str()
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn lower_pat(
         &mut self,
         pat: &ast::Pat,
@@ -348,13 +366,16 @@ impl Typer {
             ast::Pat::Wild(span) => Ok(hir::Pat::Wild(*span)),
             ast::Pat::Ident(name, span) => {
                 if let Some((en, tag)) = self.variant_tags.get(name).cloned() {
-                    let enum_ty = Type::Enum(en);
-                    let _ = self.infer_ctx.unify_at(
-                        expected_ty,
-                        &enum_ty,
-                        *span,
-                        "match pattern implies enum type",
-                    );
+                    let resolved_expected = self.infer_ctx.resolve(expected_ty);
+                    if !self.same_enum_modulo_mono(en, &resolved_expected) {
+                        let enum_ty = Type::Enum(en);
+                        let _ = self.infer_ctx.unify_at(
+                            expected_ty,
+                            &enum_ty,
+                            *span,
+                            "match pattern implies enum type",
+                        );
+                    }
                     return Ok(hir::Pat::Ctor(name.as_str(), tag, vec![], *span));
                 }
                 let id = self.fresh_id();
@@ -406,7 +427,9 @@ impl Typer {
                 let enum_name =
                     expected_enum.or_else(|| self.variant_tags.get(name).map(|(en, _)| *en));
 
-                if let Some(ref en) = enum_name {
+                if let Some(ref en) = enum_name
+                    && !self.same_enum_modulo_mono(*en, &resolved_expected)
+                {
                     let enum_ty = Type::Enum(*en);
                     let _ = self.infer_ctx.unify_at(
                         expected_ty,

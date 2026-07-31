@@ -39,3 +39,9 @@ cc = "1.0"
 pretty_assertions = "1.4"
 tempfile = "3"
 proptest = "1.5"
+
+# Fast edit-rebuild cycle: recompile only changed codegen units. The
+# published-artifact profile (CI releases) overrides this with
+# `CARGO_PROFILE_RELEASE_INCREMENTAL=false`.
+[profile.release]
+incremental = true

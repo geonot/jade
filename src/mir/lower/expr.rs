@@ -122,7 +122,7 @@ impl Lowerer {
             ExprKind::Coerce(inner, kind) => match kind {
                 // Array-to-Vec is a representation change, not a numeric cast:
                 // read each element out of the fixed array and rebuild a heap vec
-                // (Perceus already understands VecNew ownership).
+                // (the drop pass already understands VecNew ownership).
                 hir::CoercionKind::ArrayToVec { elem_ty, len } => {
                     let arr = self.lower_expr(inner);
                     let elem_ty = elem_ty.clone();
