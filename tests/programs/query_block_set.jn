@@ -10,5 +10,6 @@ store users
         where name equals 'Bob'
         set age is 99
 
-    r is users where name equals 'Bob'
-    log r.age
+    match users where name equals 'Bob'
+        Ok(r) ? log r.age
+        Err(e) ? log 'miss'

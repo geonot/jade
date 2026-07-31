@@ -64,7 +64,7 @@ fn string_index_persists_and_reopens() {
 
     assert!(dir.path().join("people.name.idx").exists());
 
-    let reader = "store people\n    name as String @index\n    age as i64\n\n*main\n    r is people where name equals 'bob'\n    log r.age\n    r2 is people where name equals 'amy'\n    log r2.age\n";
+    let reader = "store people\n    name as String @index\n    age as i64\n\n*main\n    match people where name equals 'bob'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n    match people where name equals 'amy'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n";
     let rbin = compile_in(dir.path(), "reader", reader);
     let r = run(dir.path(), &rbin);
     assert!(
@@ -84,7 +84,7 @@ fn missing_index_rebuilds_from_store() {
 
     std::fs::remove_file(dir.path().join("people.name.idx")).unwrap();
 
-    let reader = "store people\n    name as String @index\n    age as i64\n\n*main\n    r is people where name equals 'bob'\n    log r.age\n    r2 is people where name equals 'zoe'\n    log r2.age\n";
+    let reader = "store people\n    name as String @index\n    age as i64\n\n*main\n    match people where name equals 'bob'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n    match people where name equals 'zoe'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n";
     let rbin = compile_in(dir.path(), "reader", reader);
     let r = run(dir.path(), &rbin);
     assert!(
@@ -110,7 +110,7 @@ fn corrupt_index_rebuilds() {
     }
     std::fs::write(&idx_path, &bytes).unwrap();
 
-    let reader = "store people\n    name as String @index\n    age as i64\n\n*main\n    r is people where name equals 'amy'\n    log r.age\n";
+    let reader = "store people\n    name as String @index\n    age as i64\n\n*main\n    match people where name equals 'amy'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n";
     let rbin = compile_in(dir.path(), "reader", reader);
     let r = run(dir.path(), &rbin);
     assert!(
@@ -130,7 +130,7 @@ fn integer_index_rebuilds_from_store() {
 
     std::fs::remove_file(dir.path().join("nums.key.idx")).unwrap();
 
-    let reader = "store nums\n    key as i64 @index\n    val as i64\n\n*main\n    r is nums where key equals 200\n    log r.val\n";
+    let reader = "store nums\n    key as i64 @index\n    val as i64\n\n*main\n    match nums where key equals 200\n        Ok(r) ? log(r.val)\n        Err(e) ? log(0 - 1)\n";
     let rbin = compile_in(dir.path(), "reader", reader);
     let r = run(dir.path(), &rbin);
     assert!(
@@ -150,7 +150,7 @@ fn rebuild_skips_soft_deleted_records() {
 
     std::fs::remove_file(dir.path().join("people.name.idx")).unwrap();
 
-    let reader = "store people\n    name as String @index\n    age as i64\n\n*main\n    r is people where name equals 'zoe'\n    log r.age\n    c is count people\n    log c\n";
+    let reader = "store people\n    name as String @index\n    age as i64\n\n*main\n    match people where name equals 'zoe'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n    c is count people\n    log c\n";
     let rbin = compile_in(dir.path(), "reader", reader);
     let r = run(dir.path(), &rbin);
     assert!(

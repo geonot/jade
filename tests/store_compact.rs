@@ -59,7 +59,7 @@ fn header(dir: &Path, store: &str) -> (i64, i64, i64) {
 #[test]
 fn compact_reclaims_tombstones_and_keeps_live_rows() {
     let dir = tempfile::tempdir().unwrap();
-    let src = "store people\n    name as String\n    age as i64\n\n*main\n    insert people 'zoe', 30\n    insert people 'amy', 25\n    insert people 'bob', 40\n    delete people where name equals 'amy'\n    log(count people)\n    compact people\n    log(count people)\n    r is people where name equals 'bob'\n    log r.age\n    z is people where name equals 'zoe'\n    log z.age\n";
+    let src = "store people\n    name as String\n    age as i64\n\n*main\n    insert people 'zoe', 30\n    insert people 'amy', 25\n    insert people 'bob', 40\n    delete people where name equals 'amy'\n    log(count people)\n    compact people\n    log(count people)\n    match people where name equals 'bob'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n    match people where name equals 'zoe'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n";
     let bin = compile_in(dir.path(), "p", src);
     let r = run(dir.path(), &bin);
     assert!(
@@ -98,7 +98,7 @@ fn compact_survives_reopen() {
     let wbin = compile_in(dir.path(), "writer", writer);
     assert!(run(dir.path(), &wbin).status.success());
 
-    let reader = "store people\n    name as String\n    age as i64\n\n*main\n    log(count people)\n    r is people where name equals 'bob'\n    log r.age\n";
+    let reader = "store people\n    name as String\n    age as i64\n\n*main\n    log(count people)\n    match people where name equals 'bob'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n";
     let rbin = compile_in(dir.path(), "reader", reader);
     let r = run(dir.path(), &rbin);
     assert!(
@@ -112,7 +112,7 @@ fn compact_survives_reopen() {
 #[test]
 fn compact_with_no_tombstones_is_a_noop() {
     let dir = tempfile::tempdir().unwrap();
-    let src = "store t\n    name as String\n    age as i64\n\n*main\n    insert t 'a', 1\n    insert t 'b', 2\n    compact t\n    log(count t)\n    r is t where name equals 'a'\n    log r.age\n";
+    let src = "store t\n    name as String\n    age as i64\n\n*main\n    insert t 'a', 1\n    insert t 'b', 2\n    compact t\n    log(count t)\n    match t where name equals 'a'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n";
     let bin = compile_in(dir.path(), "t", src);
     let r = run(dir.path(), &bin);
     assert!(
@@ -128,7 +128,7 @@ fn compact_with_no_tombstones_is_a_noop() {
 #[test]
 fn compact_policy_decorator_auto_reclaims_at_threshold() {
     let dir = tempfile::tempdir().unwrap();
-    let src = "store people @compact(2)\n    name as String\n    age as i64\n\n*main\n    insert people 'zoe', 30\n    insert people 'amy', 25\n    insert people 'bob', 40\n    insert people 'cat', 5\n    delete people where name equals 'amy'\n    log(count people)\n    delete people where name equals 'cat'\n    log(count people)\n    r is people where name equals 'bob'\n    log r.age\n";
+    let src = "store people @compact(2)\n    name as String\n    age as i64\n\n*main\n    insert people 'zoe', 30\n    insert people 'amy', 25\n    insert people 'bob', 40\n    insert people 'cat', 5\n    delete people where name equals 'amy'\n    log(count people)\n    delete people where name equals 'cat'\n    log(count people)\n    match people where name equals 'bob'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n";
     let bin = compile_in(dir.path(), "p", src);
     let r = run(dir.path(), &bin);
     assert!(

@@ -3,7 +3,7 @@
 //! zero annotations and run CORRECTLY (not "compile via a silent i64
 //! default"): a String element stays a String.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 fn jinnc() -> PathBuf {

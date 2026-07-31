@@ -19,8 +19,8 @@ store users
         where name equals 'Bob'
         set age is 26
 
-    b is users where name equals 'Bob'
-    log b.age
+    b is users where name equals 'Bob' ? $.age ! 0 - 1
+    log b
 
     # Delete query block
     users query

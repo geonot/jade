@@ -9,6 +9,8 @@ store Users
         insert Users 'Charlie', 35
     c is count Users
     log c
-    results is Users where name equals 'Bob'
-    log results.name
-    log results.age
+    match Users where name equals 'Bob'
+        Ok(results) ?
+            log results.name
+            log results.age
+        Err(e) ? log 'miss'

@@ -979,18 +979,11 @@ select
 A `store` is a typed collection that persists to disk between runs. Queries are
 checked at compile time.
 
-> **Current limitations, stated so you can design around them:**
+> **Current limitation, stated so you can design around it:**
 >
 > - A store is durable for a **single writer process**. Two processes
 >   writing the same store is unsupported and currently undetected
->   (file locking is planned — task 8-21).
-> - A query that matches **nothing currently yields a zero-initialized
->   record** (`name` empty, numbers `0`) that is indistinguishable from real
->   data. Guard with `count` until misses become `Option of Record`
->   (task 8-25, decision D3).
-> - Iterating a whole store (`for u in all users`) currently crashes at
->   runtime (task 8-25). Iterate via queries you know match, or keep your
->   own vector.
+>   (file locking is planned).
 
 ```jinn
 store users
@@ -1001,12 +994,13 @@ store users
 insert users 'Alice', 30
 insert users 'Bob', 25
 
-# Query — returns the first matching record
-young is users where age < 30
-log(young.name)
+# A query can miss, so it has type `Result of <row>, StoreError` — match it
+match users where age < 30
+    Ok(young) ? log(young.name)
+    Err(e) ? log('nobody under 30')
 
-# Compound filters
-adult is users where age > 20 and name equals 'Alice'
+# … or collapse it with the quaternary; compound filters compose with `and`/`or`
+adult_age is users where age > 20 and name equals 'Alice' ? $.age ! 0 - 1
 
 # Update matching records
 set users where name equals 'Alice' age 31
@@ -1052,6 +1046,24 @@ set users where name equals 'Alice' age 31
 A bare `insert` with no handler arms that violates a constraint traps with a
 diagnostic — silent data loss is never an option.
 
+Queries are fallible the same way: `users where …` is a
+`Result of <row>, StoreError` whose miss is `Err(Missing)`. In a
+non-fallible function it must be handled where it appears — `match` it or
+collapse it with the quaternary. In a function whose error union includes
+`StoreError`, binding the query needs no ceremony: the row comes out
+unwrapped and a miss propagates to the caller:
+
+<!-- doctest:prelude
+store users
+    name as String
+    age as i64
+-->
+```jinn
+*age_of(who as String) returns i64 ! StoreError
+    r is users where name equals who   # miss propagates as Err(Missing)
+    r.age
+```
+
 A `transaction` block is atomic with respect to escaping errors: if an error
 propagates out of the block (`err`, a failed `?` propagation), if `return`
 leaves mid-block, the writes are handled as a unit. Normal completion and
@@ -1061,11 +1073,12 @@ back to its pre-transaction state — data files, WAL, and indexes alike.
 Nested `transaction` blocks join the outermost one: only the outermost commit
 makes the batch durable, and any rollback aborts the whole nest.
 
-> **Current limitations:** transaction state is process-global, not
-> per-task — two concurrent tasks must not run `transaction` blocks at the
-> same time, and one task's open transaction weakens the durability of other
-> tasks' writes; rollback is not crash-safe (a crash mid-rollback can leave
-> the store corrupt). Both are being fixed (task 8-24).
+> **Current limitation:** rollback is ordered for safety (WAL truncated
+> first, then the data file restored atomically), but a crash exactly
+> between the two steps leaves the last transaction's writes in the data
+> file — structurally intact, not torn. Transaction state is per-task:
+> concurrent tasks each get their own, and one task's open transaction
+> does not weaken the durability of others' writes.
 
 Field types are `i64`, `f64`, `bool`, and `String`. Query operators are
 `equals`, `neq`, `<`, `>`, `<=`, and `>=`, combined with `and` / `or`. Data is

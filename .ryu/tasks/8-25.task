@@ -1,10 +1,10 @@
 title: Store query results as Option and first-class rows
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-07-29T00:00:00'
-updated_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-30T00:00:00'
 description: 'Review item 12, decision D3. Two defects. A no-match query silently returns a
   fabricated zero row: ''missing is users where age > 100'' then logging
   missing.name/missing.age prints ''name=[] age=0'', indistinguishable from a real

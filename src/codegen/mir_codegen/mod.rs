@@ -102,6 +102,19 @@ impl<'ctx> Compiler<'ctx> {
             self.structs.insert(td.name, fields);
         }
 
+        /* Stores must be declared before enums are sized: a query result
+         * is `Result of Row(store), StoreError` (task 8-25), and sizing
+         * that Ok payload needs the `__store_N` struct type — declared
+         * after enums, the payload fell back to 8 bytes and the stored
+         * row clobbered the stack past the alloca. */
+        if !hir_prog.stores.is_empty() {
+            self.declare_store_runtime();
+            for sd in &hir_prog.stores {
+                self.declare_store(sd)?;
+                self.store_defs.insert(sd.name, sd.clone());
+            }
+        }
+
         /* Pre-register every enum's variant list before ANY body is
          * sized: payload sizing consults other enums' layouts, and a
          * monomorphized Result declared before the user's err enum sized
@@ -277,14 +290,6 @@ impl<'ctx> Compiler<'ctx> {
             for ad in &hir_prog.actors {
                 self.declare_actor(ad)?;
                 self.actor_defs.insert(ad.name, ad.clone());
-            }
-        }
-
-        if !hir_prog.stores.is_empty() {
-            self.declare_store_runtime();
-            for sd in &hir_prog.stores {
-                self.declare_store(sd)?;
-                self.store_defs.insert(sd.name, sd.clone());
             }
         }
 

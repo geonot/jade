@@ -380,6 +380,25 @@ impl Typer {
                     return self.lower_expr_expected(&call_expr, expected);
                 }
 
+                /* D3 (task 8-25): a query is `Result of <row>, StoreError`
+                 * — reading a field straight off it is the old fabricated-
+                 * zero-row bug wearing a new type. Refuse at compile time
+                 * with the two idiomatic forms. */
+                if let Type::Enum(ename) = &resolved_ty
+                    && ename.as_str().starts_with("Result__G_Row<")
+                {
+                    return Err(format!(
+                        "{}: `.{}` on a query result — a query can miss, so it has \
+                         type `Result of <row>, StoreError`; match it:\n    match <query>\n        \
+                         Ok(r) ? r.{}\n        Err(e) ? <miss>\nor use the quaternary: \
+                         `<store> where <cond> ? $.{} ! <fallback>`",
+                        span.loc(),
+                        field,
+                        field,
+                        field,
+                    ));
+                }
+
                 let peeled_ty = resolved_ty.clone();
                 let struct_name = match &peeled_ty {
                     Type::Struct(name, _) => Some(*name),

@@ -8,6 +8,8 @@ store people
     insert people 'Charlie', 35
     insert people 'Alice', 22
 
-    found is people where name equals 'Bob'
-    log found.name
-    log found.age
+    match people where name equals 'Bob'
+        Ok(found) ?
+            log found.name
+            log found.age
+        Err(e) ? log 'miss'

@@ -13,6 +13,8 @@ store items
     log c
 
     # Should only have Beta left
-    r is items where name equals 'Beta'
-    log r.name
-    log r.value
+    match items where name equals 'Beta'
+        Ok(r) ?
+            log r.name
+            log r.value
+        Err(e) ? log 'miss'

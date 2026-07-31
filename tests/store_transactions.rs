@@ -82,7 +82,7 @@ fn rollback_on_escaping_error_discards_inserts() {
 #[test]
 fn rollback_restores_sets_and_deletes() {
     expect(
-        "err XferErr\n    Bad\n\nstore accts\n    name as String\n    bal as i64\n\n*xfer(ok as bool) returns Result of i64, XferErr\n    transaction\n        set accts where name equals 'a' bal 50\n        delete accts where name equals 'b'\n        if not ok\n            err Bad\n    Ok(1)\n\n*main\n    insert accts 'a', 100\n    insert accts 'b', 200\n    match xfer(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    r is accts where name equals 'a'\n    log r.bal\n    log(count accts)\n    match xfer(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    r2 is accts where name equals 'a'\n    log r2.bal\n    log(count accts)\n",
+        "err XferErr\n    Bad\n\nstore accts\n    name as String\n    bal as i64\n\n*xfer(ok as bool) returns Result of i64, XferErr\n    transaction\n        set accts where name equals 'a' bal 50\n        delete accts where name equals 'b'\n        if not ok\n            err Bad\n    Ok(1)\n\n*main\n    insert accts 'a', 100\n    insert accts 'b', 200\n    match xfer(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match accts where name equals 'a'\n        Ok(r) ? log(r.bal)\n        Err(e) ? log(0 - 1)\n    log(count accts)\n    match xfer(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match accts where name equals 'a'\n        Ok(r) ? log(r.bal)\n        Err(e) ? log(0 - 1)\n    log(count accts)\n",
         "-1\n100\n2\n1\n50\n1",
     );
 }
@@ -90,8 +90,8 @@ fn rollback_restores_sets_and_deletes() {
 #[test]
 fn rollback_restores_secondary_index() {
     expect(
-        "err TErr\n    Nope\n    S(StoreError)\n\nimpl From of StoreError for TErr\n    *from(e as StoreError) returns TErr is S(e)\n\nstore people\n    name as String @index\n    age as i64\n\n*addp(ok as bool) returns Result of i64, TErr\n    transaction\n        insert people 'zoe', 30\n        if not ok\n            err Nope\n    Ok(1)\n\n*main\n    match addp(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    log(count people)\n    r is people where name equals 'zoe'\n    log r.age\n    match addp(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    r2 is people where name equals 'zoe'\n    log r2.age\n",
-        "-1\n0\n0\n1\n30",
+        "err TErr\n    Nope\n    S(StoreError)\n\nimpl From of StoreError for TErr\n    *from(e as StoreError) returns TErr is S(e)\n\nstore people\n    name as String @index\n    age as i64\n\n*addp(ok as bool) returns Result of i64, TErr\n    transaction\n        insert people 'zoe', 30\n        if not ok\n            err Nope\n    Ok(1)\n\n*main\n    match addp(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    log(count people)\n    match people where name equals 'zoe'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n    match addp(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match people where name equals 'zoe'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n",
+        "-1\n0\n-1\n1\n30",
     );
 }
 
@@ -157,7 +157,7 @@ fn committed_transaction_survives_process_restart() {
     let reader = compile_in(
         dir.path(),
         "reader",
-        "store ledger\n    amount as i64\n\n*main\n    log(count ledger)\n    r is ledger where amount equals 20\n    log r.amount\n",
+        "store ledger\n    amount as i64\n\n*main\n    log(count ledger)\n    match ledger where amount equals 20\n        Ok(r) ? log(r.amount)\n        Err(e) ? log(0 - 1)\n",
     );
 
     let w = run_in(dir.path(), &writer);
@@ -180,7 +180,7 @@ fn committed_transaction_survives_process_restart() {
 #[test]
 fn rollback_then_retry_succeeds_cleanly() {
     expect(
-        "err RErr\n    Fail\n    S(StoreError)\n\nimpl From of StoreError for RErr\n    *from(e as StoreError) returns RErr is S(e)\n\nstore jobs\n    pri as i64\n\n*enqueue(ok as bool) returns Result of i64, RErr\n    transaction\n        insert jobs 7\n        if not ok\n            err Fail\n    Ok(7)\n\n*main\n    match enqueue(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match enqueue(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match enqueue(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    log(count jobs)\n    r is jobs where pri equals 7\n    log r.pri\n",
+        "err RErr\n    Fail\n    S(StoreError)\n\nimpl From of StoreError for RErr\n    *from(e as StoreError) returns RErr is S(e)\n\nstore jobs\n    pri as i64\n\n*enqueue(ok as bool) returns Result of i64, RErr\n    transaction\n        insert jobs 7\n        if not ok\n            err Fail\n    Ok(7)\n\n*main\n    match enqueue(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match enqueue(false)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match enqueue(true)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    log(count jobs)\n    match jobs where pri equals 7\n        Ok(r) ? log(r.pri)\n        Err(e) ? log(0 - 1)\n",
         "-1\n-1\n7\n1\n7",
     );
 }

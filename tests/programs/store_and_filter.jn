@@ -10,9 +10,11 @@ store products
     insert products 'Dragonfruit', 200, 5
 
     # AND filter as price equals 100 and stock > 20
-    r is products where price equals 100 and stock > 20
-    log r.name
-    log r.stock
+    match products where price equals 100 and stock > 20
+        Ok(r) ?
+            log r.name
+            log r.stock
+        Err(e) ? log 'miss'
 
     # Delete with AND filter
     delete products where price equals 100 and stock < 20

@@ -10,6 +10,8 @@ store users
     n is count users
     log n
 
-    young is users where age < 30
-    log young.name
-    log young.age
+    match users where age < 30
+        Ok(young) ?
+            log young.name
+            log young.age
+        Err(e) ? log 'miss'

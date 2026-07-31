@@ -10,6 +10,8 @@ store products
     n is count products
     log n
 
-    a is products where name equals 'Apple'
-    log a.name
-    log a.price
+    match products where name equals 'Apple'
+        Ok(a) ?
+            log a.name
+            log a.price
+        Err(e) ? log 'miss'

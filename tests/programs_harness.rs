@@ -135,13 +135,13 @@ fn every_program_is_wired_and_matches_its_snapshot() {
         }
     }
 
-    assert!(checked > 80, "corpus scan looks wrong: only {checked} programs");
     assert!(
         failures.is_empty(),
         "{} program(s) failed:\n{}",
         failures.len(),
         failures.join("\n\n")
     );
+    assert!(checked > 80, "corpus scan looks wrong: only {checked} programs");
 }
 
 /// The known ICE stays reproducible; when it starts compiling, promote

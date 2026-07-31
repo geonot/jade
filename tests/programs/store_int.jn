@@ -9,5 +9,6 @@ store scores
     n is count scores
     log n
 
-    big is scores where value > 15
-    log big.value
+    match scores where value > 15
+        Ok(big) ? log big.value
+        Err(e) ? log 'miss'

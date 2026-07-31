@@ -121,7 +121,7 @@ fn store_error_variants_matchable() {
 #[test]
 fn handled_set_yields_updated_count() {
     expect(
-        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Ann', 30\n    insert users 'Bo', 30\n    set users where age equals 30 age 31 ? log($) !! log(-7)\n    r is users where name equals 'Ann'\n    log r.age\n",
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Ann', 30\n    insert users 'Bo', 30\n    set users where age equals 30 age 31 ? log($) !! log(-7)\n    match users where name equals 'Ann'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n",
         "2\n31",
     );
 }
@@ -129,7 +129,7 @@ fn handled_set_yields_updated_count() {
 #[test]
 fn handled_set_no_match_yields_missing() {
     expect(
-        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Ann', 30\n    set users where name equals 'Zed' age 99 ? log($) !! log(-7)\n    r is users where name equals 'Ann'\n    log r.age\n",
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Ann', 30\n    set users where name equals 'Zed' age 99 ? log($) !! log(-7)\n    match users where name equals 'Ann'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n",
         "-7\n30",
     );
 }

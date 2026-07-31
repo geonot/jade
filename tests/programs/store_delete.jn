@@ -15,6 +15,8 @@ store users
     n2 is count users
     log n2
 
-    remaining is users where age < 30
-    log remaining.name
-    log remaining.age
+    match users where age < 30
+        Ok(remaining) ?
+            log remaining.name
+            log remaining.age
+        Err(e) ? log 'miss'

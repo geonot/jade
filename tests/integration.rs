@@ -1765,7 +1765,7 @@ fn store_insert_count_string() {
 #[test]
 fn store_query_int() {
     expect_store(
-        "store vals\n    x as i64\n\n*main\n    insert vals 10\n    insert vals 20\n    insert vals 30\n    r is vals where x > 15\n    log r.x\n",
+        "store vals\n    x as i64\n\n*main\n    insert vals 10\n    insert vals 20\n    insert vals 30\n    match vals where x > 15\n        Ok(r) ? log(r.x)\n        Err(e) ? log(0 - 1)\n",
         "20",
     );
 }
@@ -1773,7 +1773,7 @@ fn store_query_int() {
 #[test]
 fn store_query_string_field() {
     expect_store(
-        "store people\n    name as String\n    age as i64\n\n*main\n    insert people 'Alice', 30\n    insert people 'Bob', 25\n    insert people 'Charlie', 35\n    young is people where age < 30\n    log young.name\n    log young.age\n",
+        "store people\n    name as String\n    age as i64\n\n*main\n    insert people 'Alice', 30\n    insert people 'Bob', 25\n    insert people 'Charlie', 35\n    match people where age < 30\n        Ok(r) ?\n            log(r.name)\n            log(r.age)\n        Err(e) ? log(0 - 1)\n",
         "Bob\n25",
     );
 }
@@ -1781,7 +1781,7 @@ fn store_query_string_field() {
 #[test]
 fn store_query_string_equality() {
     expect_store(
-        "store people\n    name as String\n    age as i64\n\n*main\n    insert people 'Alice', 30\n    insert people 'Bob', 25\n    found is people where name equals 'Bob'\n    log found.name\n    log found.age\n",
+        "store people\n    name as String\n    age as i64\n\n*main\n    insert people 'Alice', 30\n    insert people 'Bob', 25\n    match people where name equals 'Bob'\n        Ok(r) ?\n            log(r.name)\n            log(r.age)\n        Err(e) ? log(0 - 1)\n",
         "Bob\n25",
     );
 }
@@ -1805,7 +1805,7 @@ fn store_empty_count() {
 #[test]
 fn store_set_basic() {
     expect_store(
-        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    set users where name equals 'Bob' age 99\n    r is users where name equals 'Bob'\n    log r.name\n    log r.age\n",
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    set users where name equals 'Bob' age 99\n    match users where name equals 'Bob'\n        Ok(r) ?\n            log(r.name)\n            log(r.age)\n        Err(e) ? log(0 - 1)\n",
         "Bob\n99",
     );
 }
@@ -1813,7 +1813,7 @@ fn store_set_basic() {
 #[test]
 fn store_set_multiple_fields() {
     expect_store(
-        "store items\n    name as String\n    price as i64\n    qty as i64\n\n*main\n    insert items 'Widget', 100, 50\n    set items where name equals 'Widget' price 200, qty 10\n    r is items where name equals 'Widget'\n    log r.price\n    log r.qty\n",
+        "store items\n    name as String\n    price as i64\n    qty as i64\n\n*main\n    insert items 'Widget', 100, 50\n    set items where name equals 'Widget' price 200, qty 10\n    match items where name equals 'Widget'\n        Ok(r) ?\n            log(r.price)\n            log(r.qty)\n        Err(e) ? log(0 - 1)\n",
         "200\n10",
     );
 }
@@ -1821,7 +1821,7 @@ fn store_set_multiple_fields() {
 #[test]
 fn store_set_no_match() {
     expect_store(
-        "store nums\n    val as i64\n\n*main\n    insert nums 10\n    insert nums 20\n    set nums where val equals 999 val 99\n    n is count nums\n    log n\n    r is nums where val equals 10\n    log r.val\n",
+        "store nums\n    val as i64\n\n*main\n    insert nums 10\n    insert nums 20\n    set nums where val equals 999 val 99\n    n is count nums\n    log n\n    match nums where val equals 10\n        Ok(r) ? log(r.val)\n        Err(e) ? log(0 - 1)\n",
         "2\n10",
     );
 }
@@ -1877,7 +1877,7 @@ fn store_filter_grouping() {
 #[test]
 fn store_filter_in_query() {
     expect_store(
-        "store nums\n    val as i64\n    tag as String\n\n*main\n    insert nums 10, 'a'\n    insert nums 20, 'b'\n    insert nums 30, 'c'\n    r is nums where val in [20]\n    log r.tag\n",
+        "store nums\n    val as i64\n    tag as String\n\n*main\n    insert nums 10, 'a'\n    insert nums 20, 'b'\n    insert nums 30, 'c'\n    match nums where val in [20]\n        Ok(r) ? log(r.tag)\n        Err(e) ? log(0 - 1)\n",
         "b",
     );
 }
@@ -1885,7 +1885,7 @@ fn store_filter_in_query() {
 #[test]
 fn store_transaction() {
     expect_store(
-        "store users\n    name as String\n    age as i64\n\n*main\n    transaction\n        insert users 'Alice', 30\n        insert users 'Bob', 25\n        insert users 'Charlie', 35\n    c is count users\n    log c\n    r is users where name equals 'Bob'\n    log r.name\n    log r.age\n",
+        "store users\n    name as String\n    age as i64\n\n*main\n    transaction\n        insert users 'Alice', 30\n        insert users 'Bob', 25\n        insert users 'Charlie', 35\n    c is count users\n    log c\n    match users where name equals 'Bob'\n        Ok(r) ?\n            log(r.name)\n            log(r.age)\n        Err(e) ? log(0 - 1)\n",
         "3\nBob\n25",
     );
 }
@@ -1893,7 +1893,7 @@ fn store_transaction() {
 #[test]
 fn store_and_filter_query() {
     expect_store(
-        "store products\n    name as String\n    price as i64\n    stock as i64\n\n*main\n    insert products 'Apple', 100, 50\n    insert products 'Banana', 50, 100\n    insert products 'Cherry', 100, 10\n    r is products where price equals 100 and stock > 20\n    log r.name\n    log r.stock\n",
+        "store products\n    name as String\n    price as i64\n    stock as i64\n\n*main\n    insert products 'Apple', 100, 50\n    insert products 'Banana', 50, 100\n    insert products 'Cherry', 100, 10\n    match products where price equals 100 and stock > 20\n        Ok(r) ?\n            log(r.name)\n            log(r.stock)\n        Err(e) ? log(0 - 1)\n",
         "Apple\n50",
     );
 }
@@ -1909,7 +1909,7 @@ fn store_and_filter_delete() {
 #[test]
 fn store_or_filter_delete() {
     expect_store(
-        "store items\n    name as String\n    value as i64\n\n*main\n    insert items 'Alpha', 10\n    insert items 'Beta', 20\n    insert items 'Gamma', 30\n    delete items where value equals 10 or value equals 30\n    c is count items\n    log c\n    r is items where name equals 'Beta'\n    log r.value\n",
+        "store items\n    name as String\n    value as i64\n\n*main\n    insert items 'Alpha', 10\n    insert items 'Beta', 20\n    insert items 'Gamma', 30\n    delete items where value equals 10 or value equals 30\n    c is count items\n    log c\n    match items where name equals 'Beta'\n        Ok(r) ? log(r.value)\n        Err(e) ? log(0 - 1)\n",
         "1\n20",
     );
 }
@@ -1917,7 +1917,7 @@ fn store_or_filter_delete() {
 #[test]
 fn store_and_filter_set() {
     expect_store(
-        "store users\n    name as String\n    age as i64\n    active as i64\n\n*main\n    insert users 'Alice', 30, 1\n    insert users 'Bob', 25, 1\n    insert users 'Charlie', 25, 0\n    set users where age equals 25 and active equals 1 age 99\n    r is users where name equals 'Bob'\n    log r.age\n    r2 is users where name equals 'Charlie'\n    log r2.age\n",
+        "store users\n    name as String\n    age as i64\n    active as i64\n\n*main\n    insert users 'Alice', 30, 1\n    insert users 'Bob', 25, 1\n    insert users 'Charlie', 25, 0\n    set users where age equals 25 and active equals 1 age 99\n    match users where name equals 'Bob'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n    match users where name equals 'Charlie'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n",
         "99\n25",
     );
 }
@@ -1925,7 +1925,7 @@ fn store_and_filter_set() {
 #[test]
 fn store_delete_then_query() {
     expect_store(
-        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n    delete users where name equals 'Bob'\n    r is users where name equals 'Charlie'\n    log r.name\n    log r.age\n",
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n    delete users where name equals 'Bob'\n    match users where name equals 'Charlie'\n        Ok(r) ?\n            log(r.name)\n            log(r.age)\n        Err(e) ? log(0 - 1)\n",
         "Charlie\n35",
     );
 }
@@ -1933,7 +1933,7 @@ fn store_delete_then_query() {
 #[test]
 fn store_multi_type_fields() {
     expect_store(
-        "store data\n    x as i64\n    y as f64\n\n*main\n    insert data 42, 3.14\n    r is data where x equals 42\n    log r.x\n",
+        "store data\n    x as i64\n    y as f64\n\n*main\n    insert data 42, 3.14\n    match data where x equals 42\n        Ok(r) ? log(r.x)\n        Err(e) ? log(0 - 1)\n",
         "42",
     );
 }
@@ -2263,7 +2263,7 @@ fn query_block_delete() {
 #[test]
 fn query_block_set() {
     expect_store(
-        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n\n    users query\n        where name equals 'Bob'\n        set age is 99\n\n    r is users where name equals 'Bob'\n    log r.age\n",
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n\n    users query\n        where name equals 'Bob'\n        set age is 99\n\n    match users where name equals 'Bob'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n",
         "99",
     );
 }
@@ -2279,7 +2279,7 @@ fn query_block_multi_where() {
 #[test]
 fn store_index_basic() {
     expect_store(
-        "store products\n    name as String @index\n    price as i64\n\n*main\n    insert products 'Apple', 100\n    insert products 'Banana', 50\n    insert products 'Cherry', 75\n    n is count products\n    log n\n    a is products where name equals 'Apple'\n    log a.name\n    log a.price\n",
+        "store products\n    name as String @index\n    price as i64\n\n*main\n    insert products 'Apple', 100\n    insert products 'Banana', 50\n    insert products 'Cherry', 75\n    n is count products\n    log n\n    match products where name equals 'Apple'\n        Ok(r) ?\n            log(r.name)\n            log(r.price)\n        Err(e) ? log(0 - 1)\n",
         "3\nApple\n100",
     );
 }
@@ -2287,7 +2287,7 @@ fn store_index_basic() {
 #[test]
 fn store_index_int_field() {
     expect_store(
-        "store scores\n    player as String\n    pts as i64 @index\n\n*main\n    insert scores 'Alice', 100\n    insert scores 'Bob', 200\n    insert scores 'Charlie', 150\n    n is count scores\n    log n\n    r is scores where pts > 120\n    log r.player\n",
+        "store scores\n    player as String\n    pts as i64 @index\n\n*main\n    insert scores 'Alice', 100\n    insert scores 'Bob', 200\n    insert scores 'Charlie', 150\n    n is count scores\n    log n\n    match scores where pts > 120\n        Ok(r) ? log(r.player)\n        Err(e) ? log(0 - 1)\n",
         "3\nBob",
     );
 }
@@ -2837,7 +2837,7 @@ fn store_destroy_removes_record() {
 #[test]
 fn store_destroy_then_query() {
     expect_store(
-        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n    destroy users where name equals 'Bob'\n    r is users where name equals 'Charlie'\n    log r.name\n    log r.age\n",
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    insert users 'Charlie', 35\n    destroy users where name equals 'Bob'\n    match users where name equals 'Charlie'\n        Ok(r) ?\n            log(r.name)\n            log(r.age)\n        Err(e) ? log(0 - 1)\n",
         "Charlie\n35",
     );
 }
@@ -2869,7 +2869,7 @@ fn store_count_where_no_match() {
 #[test]
 fn store_restore_query_after() {
     expect_store(
-        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    delete users where name equals 'Bob'\n    restore users where name equals 'Bob'\n    r is users where name equals 'Bob'\n    log r.name\n    log r.age\n",
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    delete users where name equals 'Bob'\n    restore users where name equals 'Bob'\n    match users where name equals 'Bob'\n        Ok(r) ?\n            log(r.name)\n            log(r.age)\n        Err(e) ? log(0 - 1)\n",
         "Bob\n25",
     );
 }
@@ -2933,7 +2933,7 @@ fn store_destroy_and_filter() {
 #[test]
 fn store_set_skips_deleted() {
     expect_store(
-        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    delete users where name equals 'Alice'\n    set users where age < 50 age 99\n    r is users where name equals 'Bob'\n    log r.age\n",
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    delete users where name equals 'Alice'\n    set users where age < 50 age 99\n    match users where name equals 'Bob'\n        Ok(r) ? log(r.age)\n        Err(e) ? log(0 - 1)\n",
         "99",
     );
 }
@@ -2968,7 +2968,7 @@ store bench
     t0 is monotonic()
     j is 0
     while j < 100
-        r1 is bench where key equals 2500
+        r1 is bench where key equals 2500 ? $.value ! 0 - 1
         j is j + 1
     log('query_eq_x100')
     log(elapsed(t0))
@@ -4151,7 +4151,7 @@ fn hof_passed_as_argument() {
 #[test]
 fn store_insert_named_basic() {
     expect_store(
-        "store users\n    name as String\n    age as i64\n\n*main\n    insert users (name is 'Alice', age is 30)\n    r is users where name equals 'Alice'\n    log r.name\n    log r.age\n",
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users (name is 'Alice', age is 30)\n    match users where name equals 'Alice'\n        Ok(r) ?\n            log(r.name)\n            log(r.age)\n        Err(e) ? log(0 - 1)\n",
         "Alice\n30",
     );
 }
@@ -4159,7 +4159,7 @@ fn store_insert_named_basic() {
 #[test]
 fn store_insert_named_reordered() {
     expect_store(
-        "store users\n    name as String\n    age as i64\n\n*main\n    insert users (age is 25, name is 'Bob')\n    r is users where name equals 'Bob'\n    log r.name\n    log r.age\n",
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users (age is 25, name is 'Bob')\n    match users where name equals 'Bob'\n        Ok(r) ?\n            log(r.name)\n            log(r.age)\n        Err(e) ? log(0 - 1)\n",
         "Bob\n25",
     );
 }
@@ -4167,7 +4167,7 @@ fn store_insert_named_reordered() {
 #[test]
 fn store_insert_positional_still_works() {
     expect_store(
-        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Carol', 40\n    r is users where name equals 'Carol'\n    log r.name\n    log r.age\n",
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Carol', 40\n    match users where name equals 'Carol'\n        Ok(r) ?\n            log(r.name)\n            log(r.age)\n        Err(e) ? log(0 - 1)\n",
         "Carol\n40",
     );
 }

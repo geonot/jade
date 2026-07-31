@@ -287,12 +287,99 @@ impl Typer {
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
                 let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
+                let hfilter_exists =
+                    self.lower_store_filter(filter, &schema, &store.as_str())?;
 
-                let _struct_name = Symbol::intern(&format!("__store_{store}"));
-                Ok(hir::Expr {
+                /* D3 (task 8-25): a query that can match nothing has type
+                 * `Result of <row>, StoreError` — reading a field of a miss
+                 * is no longer expressible. It used to fabricate a zero row
+                 * (`name=[] age=0`) indistinguishable from real data. The
+                 * quaternary handles it with no ceremony
+                 * (`users where … ? $.field ! fallback`), and `!! err`
+                 * propagates inside a fallible function. Desugar:
+                 * `exists ? Ok(row-read) ! Err(Missing)`. */
+                let span = *span;
+                let row_ty = Type::Row(*store);
+                let store_err = Symbol::intern("StoreError");
+                let result_enum = {
+                    let mut m = std::collections::HashMap::new();
+                    m.insert(Symbol::intern("T"), row_ty.clone());
+                    m.insert(Symbol::intern("E"), Type::Enum(store_err));
+                    self.monomorphize_enum("Result", &m)?
+                };
+                let result_ty = Type::Enum(result_enum);
+                self.current_fn_error_types.insert(store_err);
+
+                let ok_tag = self
+                    .enums
+                    .get(&result_enum)
+                    .and_then(|vs| vs.iter().position(|(n, _)| n.as_str() == "Ok"))
+                    .unwrap_or(0) as u32;
+                let err_tag = self
+                    .enums
+                    .get(&result_enum)
+                    .and_then(|vs| vs.iter().position(|(n, _)| n.as_str() == "Err"))
+                    .unwrap_or(1) as u32;
+                let missing_tag = self
+                    .enums
+                    .get(&store_err)
+                    .and_then(|vs| vs.iter().position(|(n, _)| n.as_str() == "Missing"))
+                    .unwrap_or(0) as u32;
+
+                let exists = hir::Expr {
+                    kind: hir::ExprKind::StoreExists(*store, Box::new(hfilter_exists)),
+                    ty: Type::Bool,
+                    span,
+                };
+                let row_read = hir::Expr {
                     kind: hir::ExprKind::StoreQuery(*store, Box::new(hfilter)),
-                    ty: Type::Row(*store),
-                    span: *span,
+                    ty: row_ty,
+                    span,
+                };
+                let ok_val = hir::Expr {
+                    kind: hir::ExprKind::VariantCtor(
+                        result_enum,
+                        "Ok".into(),
+                        ok_tag,
+                        vec![hir::FieldInit {
+                            name: None,
+                            value: row_read,
+                        }],
+                    ),
+                    ty: result_ty.clone(),
+                    span,
+                };
+                let missing = hir::Expr {
+                    kind: hir::ExprKind::VariantCtor(
+                        store_err,
+                        "Missing".into(),
+                        missing_tag,
+                        vec![],
+                    ),
+                    ty: Type::Enum(store_err),
+                    span,
+                };
+                let err_val = hir::Expr {
+                    kind: hir::ExprKind::VariantCtor(
+                        result_enum,
+                        "Err".into(),
+                        err_tag,
+                        vec![hir::FieldInit {
+                            name: None,
+                            value: missing,
+                        }],
+                    ),
+                    ty: result_ty.clone(),
+                    span,
+                };
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Ternary(
+                        Box::new(exists),
+                        Box::new(ok_val),
+                        Box::new(err_val),
+                    ),
+                    ty: result_ty,
+                    span,
                 })
             }
             _ => unreachable!(),

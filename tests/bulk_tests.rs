@@ -2778,7 +2778,7 @@ fn b_store_insert_and_count() {
 #[test]
 fn b_store_query_equals() {
     let out = compile_and_run_in_dir(
-        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    insert data 3, 300\n    r is data where key equals 2\n    log(r.val)\n",
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    insert data 3, 300\n    match data where key equals 2\n        Ok(r) ? log(r.val)\n        Err(e) ? log(0 - 1)\n",
     );
     assert_eq!(out, "200");
 }
@@ -2786,7 +2786,7 @@ fn b_store_query_equals() {
 #[test]
 fn b_store_query_less_than() {
     let out = compile_and_run_in_dir(
-        "store nums\n    id as i64\n    score as i64\n\n*main()\n    insert nums 1, 50\n    insert nums 2, 30\n    insert nums 3, 70\n    r is nums where score < 40\n    log(r.id)\n",
+        "store nums\n    id as i64\n    score as i64\n\n*main()\n    insert nums 1, 50\n    insert nums 2, 30\n    insert nums 3, 70\n    match nums where score < 40\n        Ok(r) ? log(r.id)\n        Err(e) ? log(0 - 1)\n",
     );
     assert_eq!(out, "2");
 }
@@ -2794,7 +2794,7 @@ fn b_store_query_less_than() {
 #[test]
 fn b_store_query_greater_than() {
     let out = compile_and_run_in_dir(
-        "store vals\n    x as i64\n    y as i64\n\n*main()\n    insert vals 10, 1\n    insert vals 20, 2\n    insert vals 30, 3\n    r is vals where x > 15\n    log(r.y)\n",
+        "store vals\n    x as i64\n    y as i64\n\n*main()\n    insert vals 10, 1\n    insert vals 20, 2\n    insert vals 30, 3\n    match vals where x > 15\n        Ok(r) ? log(r.y)\n        Err(e) ? log(0 - 1)\n",
     );
     assert_eq!(out, "2");
 }
@@ -2818,7 +2818,7 @@ fn b_store_all() {
 #[test]
 fn b_store_set_update() {
     let out = compile_and_run_in_dir(
-        "store users\n    id as i64\n    score as i64\n\n*main()\n    insert users 1, 100\n    insert users 2, 200\n    set users where id equals 1 score 999\n    r is users where id equals 1\n    log(r.score)\n",
+        "store users\n    id as i64\n    score as i64\n\n*main()\n    insert users 1, 100\n    insert users 2, 200\n    set users where id equals 1 score 999\n    match users where id equals 1\n        Ok(r) ? log(r.score)\n        Err(e) ? log(0 - 1)\n",
     );
     assert_eq!(out, "999");
 }
@@ -2826,7 +2826,7 @@ fn b_store_set_update() {
 #[test]
 fn b_store_multiple_inserts_query() {
     let out = compile_and_run_in_dir(
-        "store db\n    key as i64\n    val as i64\n\n*main()\n    i is 0\n    while i < 100\n        insert db i, i * 7\n        i is i + 1\n    r is db where key equals 50\n    log(r.val)\n",
+        "store db\n    key as i64\n    val as i64\n\n*main()\n    i is 0\n    while i < 100\n        insert db i, i * 7\n        i is i + 1\n    match db where key equals 50\n        Ok(r) ? log(r.val)\n        Err(e) ? log(0 - 1)\n",
     );
     assert_eq!(out, "350");
 }
@@ -2842,7 +2842,7 @@ fn b_store_transaction_basic() {
 #[test]
 fn b_store_compound_filter_and() {
     let out = compile_and_run_in_dir(
-        "store items\n    cat as i64\n    val as i64\n\n*main()\n    insert items 1, 10\n    insert items 1, 20\n    insert items 2, 30\n    insert items 2, 40\n    r is items where cat equals 1 and val > 15\n    log(r.val)\n",
+        "store items\n    cat as i64\n    val as i64\n\n*main()\n    insert items 1, 10\n    insert items 1, 20\n    insert items 2, 30\n    insert items 2, 40\n    match items where cat equals 1 and val > 15\n        Ok(r) ? log(r.val)\n        Err(e) ? log(0 - 1)\n",
     );
     assert_eq!(out, "20");
 }
@@ -2850,7 +2850,7 @@ fn b_store_compound_filter_and() {
 #[test]
 fn b_store_string_field() {
     let out = compile_and_run_in_dir(
-        "store people\n    name as String\n    age as i64\n\n*main()\n    insert people 'Alice', 30\n    insert people 'Bob', 25\n    r is people where age equals 25\n    log(r.name)\n",
+        "store people\n    name as String\n    age as i64\n\n*main()\n    insert people 'Alice', 30\n    insert people 'Bob', 25\n    match people where age equals 25\n        Ok(r) ? log(r.name)\n        Err(e) ? log(0 - 1)\n",
     );
     assert_eq!(out, "Bob");
 }
@@ -6681,7 +6681,7 @@ fn field_take_loop_no_leak_post_loop_read_ok() {
 #[test]
 fn store_row_field_read_works() {
     expect(
-        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    r is data where key equals 2\n    log(r.val)\n",
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    match data where key equals 2\n        Ok(r) ? log(r.val)\n        Err(e) ? log(0 - 1)\n",
         "200",
     );
 }
@@ -6689,7 +6689,7 @@ fn store_row_field_read_works() {
 #[test]
 fn store_row_snapshot_yields_struct() {
     expect(
-        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 7, 777\n    r is data where key equals 7\n    s is r.snapshot()\n    log(s.val)\n",
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 7, 777\n    match data where key equals 7\n        Ok(r) ?\n            s is r.snapshot()\n            log(s.val)\n        Err(e) ? log(0 - 1)\n",
         "777",
     );
 }
@@ -6705,7 +6705,7 @@ fn store_first_returns_row() {
 #[test]
 fn store_row_snapshot_no_args() {
     let err = expect_compile_fail(
-        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 10\n    r is data where key equals 1\n    s is r.snapshot(42)\n    log(s.val)\n",
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 10\n    match data where key equals 1\n        Ok(r) ?\n            s is r.snapshot(42)\n            log(s.val)\n        Err(e) ? log(0 - 1)\n",
     );
     assert!(
         err.contains("snapshot") && err.contains("no arguments"),
@@ -6716,7 +6716,7 @@ fn store_row_snapshot_no_args() {
 #[test]
 fn store_snapshot_is_copy() {
     expect(
-        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    r is data where key equals 1\n    s is r.snapshot()\n    s.val is 999\n    t is data where key equals 1\n    log(t.val)\n",
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    match data where key equals 1\n        Ok(r) ?\n            s is r.snapshot()\n            s.val is 999\n        Err(e) ? log(0 - 1)\n    match data where key equals 1\n        Ok(r) ? log(r.val)\n        Err(e) ? log(0 - 1)\n",
         "100",
     );
 }
@@ -6724,7 +6724,7 @@ fn store_snapshot_is_copy() {
 #[test]
 fn store_row_copy_rejected() {
     let err = expect_compile_fail(
-        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    r is data where key equals 1\n    s is copy r\n    log(s.val)\n",
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    match data where key equals 1\n        Ok(r) ?\n            s is copy r\n            log(s.val)\n        Err(e) ? log(0 - 1)\n",
     );
     assert!(
         err.contains("@resource") || err.contains("resource"),
@@ -6735,7 +6735,7 @@ fn store_row_copy_rejected() {
 #[test]
 fn store_row_write_through_via_field() {
     expect(
-        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    r is data where key equals 2\n    r.val is 999\n    s is data where key equals 2\n    log(s.val)\n",
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    match data where key equals 2\n        Ok(r) ?\n            r.val is 999\n        Err(e) ? log(0 - 1)\n    match data where key equals 2\n        Ok(r) ? log(r.val)\n        Err(e) ? log(0 - 1)\n",
         "999",
     );
 }
@@ -6743,7 +6743,7 @@ fn store_row_write_through_via_field() {
 #[test]
 fn store_row_write_through_preserves_others() {
     expect(
-        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    insert data 3, 300\n    r is data where key equals 2\n    r.val is 42\n    a is data where key equals 1\n    b is data where key equals 3\n    log(a.val + b.val)\n",
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    insert data 3, 300\n    match data where key equals 2\n        Ok(r) ?\n            r.val is 42\n        Err(e) ? log(0 - 1)\n    a is data where key equals 1 ? $.val ! 0 - 1\n    b is data where key equals 3 ? $.val ! 0 - 1\n    log(a + b)\n",
         "400",
     );
 }
@@ -6813,7 +6813,7 @@ fn file_drop_idempotent_after_explicit_shut() {
 #[test]
 fn store_row_field_access_in_coroutine_body() {
     expect(
-        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    foo is dispatch reader\n        r is data where key equals 2\n        r.val is 777\n        yield 0\n    reader.next()\n    s is data where key equals 2\n    log(s.val)\n",
+        "store data\n    key as i64\n    val as i64\n\n*main()\n    insert data 1, 100\n    insert data 2, 200\n    foo is dispatch reader\n        match data where key equals 2\n            Ok(r) ?\n                r.val is 777\n            Err(e) ? log(0 - 1)\n        yield 0\n    reader.next()\n    match data where key equals 2\n        Ok(r) ? log(r.val)\n        Err(e) ? log(0 - 1)\n",
         "777",
     );
 }

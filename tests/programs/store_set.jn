@@ -12,6 +12,8 @@ store users
 
     set users where name equals 'Bob' age 99
 
-    updated is users where name equals 'Bob'
-    log updated.name
-    log updated.age
+    match users where name equals 'Bob'
+        Ok(updated) ?
+            log updated.name
+            log updated.age
+        Err(e) ? log 'miss'

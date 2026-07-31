@@ -16,15 +16,20 @@ actor Accumulator
     insert accounts 2, 250
     insert accounts 3, 300
 
-    r is accounts where id equals 2
-    log(r.balance)
-    r.balance is 333
-    s is accounts where id equals 2
-    log(s.balance)
-    snap is s.snapshot()
-    snap.balance is 1
-    again is accounts where id equals 2
-    log(again.balance)
+    match accounts where id equals 2
+        Ok(r) ?
+            log(r.balance)
+            r.balance is 333
+        Err(e) ? log(0 - 1)
+    match accounts where id equals 2
+        Ok(s) ?
+            log(s.balance)
+            snap is s.snapshot()
+            snap.balance is 1
+        Err(e) ? log(0 - 1)
+    match accounts where id equals 2
+        Ok(again) ? log(again.balance)
+        Err(e) ? log(0 - 1)
 
     ch is channel of i64(4)
     send ch, 11

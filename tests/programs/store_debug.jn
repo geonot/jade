@@ -10,6 +10,8 @@ store items
     n is count items
     log n
 
-    x is items where val > 0
-    log x.val
-    log x.name
+    match items where val > 0
+        Ok(x) ?
+            log x.val
+            log x.name
+        Err(e) ? log 'miss'

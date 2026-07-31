@@ -1,24 +1,64 @@
-# 2026-07-30 progress notes (task still OPEN — second half pending)
-- LANDED (first half): `all <store>` is a first-class row set — a real
-  Vec of the store's in-memory record structs, built by emit_store_all
-  pushing each live (non-tombstoned) record through the normal vec
-  machinery. Bindable, iterable, `.length`-able, passable to an
-  unannotated (inferable-generic) function. The old emission returned a
-  bare malloc'd array typed Ptr(Struct) with no length traveling with
-  it, so `for u in all users` walked garbage and crashed. Pin flipped;
-  conformance test covers empty/many/tombstone-excluded/pass-to-fn.
-- OPEN (second half): queries as `Result of <row>, StoreError`. A full
-  desugar (`exists ? Ok(row) ! Err(Missing)`) was implemented and
-  REVERTED: the Err/miss path worked, but the Ok payload read garbage —
-  `row.age` after `match r / Ok(row)` returned the first bytes of the
-  name field ("Alic" as an i64). Root cause: Type::Row has a dual
-  representation (fixed-256-byte record strings on disk vs 24-byte SSO
-  in the jinn view), and enum-payload store/unwrap goes through a
-  layout that disagrees with Row field-access offsets. Fixing requires
-  teaching enum payload codegen a canonical Row representation (or
-  lowering Row to the __store_N struct type before it enters a
-  VariantCtor). Also: annotating a parameter `as Vec of items` (store
-  name as element type) resolves to the wrong struct — user-facing row
-  type naming needs a decision.
-- The zero-row fabrication on a miss therefore still stands; docs
-  continue to carry the "guard with count" warning until this lands.
+# 2026-07-30 progress notes — COMPLETE (both halves)
+
+## First half: `all <store>` as a first-class row set
+- A real Vec of the store's in-memory record structs, built by
+  emit_store_all pushing each live (non-tombstoned) record through the
+  normal vec machinery. Bindable, iterable, `.length`-able, passable to
+  an unannotated (inferable-generic) function. The old emission returned
+  a bare malloc'd array typed Ptr(Struct) with no length traveling with
+  it, so `for u in all users` walked garbage and crashed. Conformance
+  test covers empty/many/tombstone-excluded/pass-to-fn.
+
+## Second half: queries as `Result of <row>, StoreError`
+- Desugar in `lower_expr_store_query` (src/typer/expr/store.rs):
+  `exists ? Ok(StoreQuery-row) ! Err(Missing)` — a Ternary over
+  StoreExists, typed by `monomorphize_enum("Result", {T: Row(store),
+  E: Enum(StoreError)})`. StoreError joins `current_fn_error_types`, so
+  the pre-existing propagation machinery handles the rest:
+  - non-fallible fn: bare bind is a compile error ("bare use
+    propagates ... declare `! E` or handle with `? $ !! ...`").
+  - fallible fn with StoreError in the union: `r is users where …`
+    binds the UNWRAPPED row; a miss propagates as Err(Missing). No
+    ceremony (DoD's implicit propagation).
+  - `match <query>` and the quaternary (`? $.f ! fallback`) handle it
+    explicitly. Write-through (`r.val is 999`), `.snapshot()`, and the
+    @resource copy-rejection all still work on a match-bound row.
+- Field read straight off the Result is a compile error
+  (src/typer/expr/access.rs, scoped to enum names starting
+  `Result__G_Row<` so generic-enum laxity elsewhere is untouched), with
+  the two idiomatic forms in the message.
+- The blocker that forced the 2026-07-29 revert was NOT a Row dual-
+  representation problem: it was enum payload sizing. `type_size_of`
+  had no `Type::Row` arm (fell to `_ => 8`), so
+  `Result__G_Row<users>_StoreError` got an 8-byte payload for a
+  112-byte row — ctor clobbered the stack, reads returned the name
+  bytes ("Alic" as an i64 = 0x63696C41). Fixed by (a) a `Type::Row`
+  arm in type_size_of resolving the `__store_N` struct, and (b) moving
+  store declaration BEFORE enum declaration in mir_codegen/mod.rs so
+  the struct exists when enum bodies are sized. The 8-19 pre-
+  registration fix was necessary but not sufficient.
+- Migration: ~70 sites. Script-migrated direct binds in
+  bulk_tests/integration/store_index_persist/store_errors/
+  store_compact/store_transactions (single-read → match, double-read →
+  block arm); by hand: snapshot/write-through/coroutine bulk sites,
+  audit fixture, 12 tests/programs/*.jn files, docs/jinn.md examples
+  (+ new fallibility/propagation section; removed the two now-fixed
+  "current limitations" bullets; corrected the stale 8-24 transaction
+  limitation note). Conformance tests in tests/review_2026_07.rs
+  (review_5_4_query_miss_*, review_5_4_unhandled_query_*).
+
+## Recorded follow-ups (not in this task's DoD)
+- `first <store> where …` (hir::StoreFirst) still returns a raw Row —
+  it can also miss and should get the same Result treatment for
+  consistency.
+- Query BLOCKS (`r is users query / where …`) also still return a raw
+  Row on the read path (tests/programs/query_parse.jn exercises this).
+- Matching a raw Row against `Ok/Err` ctor patterns compiles silently
+  and reads garbage as the tag (observed while migrating: an already-
+  unwrapped row matched `Err`) — ill-typed match scrutinee should be
+  rejected.
+- Annotating a parameter `as Vec of <store-name>` resolves to the wrong
+  struct — user-facing row type naming still needs a decision.
+- The DoD says `Option of <Record>`; implementation uses
+  `Result of <row>, StoreError` to compose with the store error union
+  and `!! err` propagation — consistent with 8-22's insert/set Results.

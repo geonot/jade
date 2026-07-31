@@ -698,7 +698,7 @@ temp+rename path; snapshot memory is bounded (undo log rather than whole-file co
 with a documented limit and a clear error when exceeded; `docs/jinn.md`'s atomicity
 claims are verified by a concurrent-transaction test.
 
-### ◻ 8-25 Query results as `Option` and first-class rows — **P1**, blocked_by: []
+### ✅ 8-25 Query results as `Option` and first-class rows — **P1**, blocked_by: []
 *Review item 12. Decision D3.*
 
 Two defects. A no-match query silently returns a fabricated zero row:

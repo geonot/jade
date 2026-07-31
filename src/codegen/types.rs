@@ -151,6 +151,22 @@ impl<'ctx> Compiler<'ctx> {
                     8
                 }
             }
+            Type::Row(name) => {
+                let sname = format!("__store_{}", name.as_str());
+                if let Some(st) = self.module.get_struct_type(&sname)
+                    && !st.get_field_types().is_empty()
+                {
+                    self.type_store_size(st.into())
+                } else if let Some(fields) = self.structs.get(&crate::intern::Symbol::intern(&sname)) {
+                    fields
+                        .iter()
+                        .map(|(_, t)| self.type_size_of(t).next_multiple_of(8))
+                        .sum::<u64>()
+                        .max(1)
+                } else {
+                    8
+                }
+            }
             Type::Enum(name) => {
                 if let Some(variants) = self.enums.get(name) {
                     let max_payload = variants

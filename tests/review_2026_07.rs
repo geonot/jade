@@ -280,6 +280,63 @@ fn review_5_4_all_store_iteration_works() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "Alice\nBob\n2\n");
 }
 
+/// §5.4 — a query that matched nothing used to fabricate a zero row
+/// (`name=[] age=0`), indistinguishable from real data. A query is now
+/// `Result of <row>, StoreError` (task 8-25, decision D3): hit and miss
+/// are distinct values, the quaternary collapses them, and write-through
+/// still works on a match-bound row.
+#[test]
+fn review_5_4_query_miss_is_a_value_not_a_zero_row() {
+    let c = compile(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    match users where name equals 'Alice'\n        Ok(r) ?\n            log(r.name)\n            log(r.age)\n        Err(e) ? log('hit expected')\n    match users where age > 100\n        Ok(r) ? log(r.name)\n        Err(e) ? log('miss is a miss')\n    q is users where age > 100 ? $.age ! 0 - 1\n    log(q)\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "Alice\n30\nmiss is a miss\n-1\n"
+    );
+}
+
+/// §5.4 — the original review repro is now a compile error, both at the
+/// bare bind (an unhandled fallible value in a non-fallible function)
+/// and at a direct field read off the query result.
+#[test]
+fn review_5_4_unhandled_query_is_a_compile_error() {
+    let c = compile(
+        "store users\n    name as String\n    age as i64\n\n*main\n    missing is users where age > 100\n    log('name=[{missing.name}] age={missing.age}')\n",
+    );
+    assert!(!c.ok(), "bare bind of a query must not compile");
+    let stderr = c.stderr();
+    assert!(
+        stderr.contains("query result")
+            || stderr.contains("propagat")
+            || stderr.contains("fallible"),
+        "{stderr}"
+    );
+
+    let c = compile(
+        "store users\n    name as String\n    age as i64\n\n*main\n    log((users where age > 100).age)\n",
+    );
+    assert!(!c.ok(), "field read on a query result must not compile");
+    let stderr = c.stderr();
+    assert!(stderr.contains("query result"), "{stderr}");
+}
+
+/// §5.4 — in a fallible function the bind needs no ceremony: the row
+/// comes out unwrapped and a miss propagates as `Err(Missing)`.
+#[test]
+fn review_5_4_query_miss_propagates_in_fallible_fn() {
+    let c = compile(
+        "store users\n    name as String\n    age as i64\n\n*find(n as String) returns i64 ! StoreError\n    r is users where name equals n\n    r.age\n\n*main\n    insert users 'Alice', 30\n    match find('Alice')\n        Ok(a) ? log(a)\n        Err(e) ? log('unexpected miss')\n    match find('Zed')\n        Ok(a) ? log(a)\n        Err(e) ? log('propagated')\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "30\npropagated\n");
+}
+
 // ─── Marker lifecycle ───────────────────────────────────────────────────────
 
 /// A `FIXME(8-N)` marker asserting observed-bad behavior must not outlive

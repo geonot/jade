@@ -373,7 +373,6 @@ fn format_fn(out: &mut String, f: &Fn, level: usize, sink: &mut CommentSink) {
                         crate::ast::AccessMod::Take => "take ",
                         crate::ast::AccessMod::Copy => "copy ",
                         crate::ast::AccessMod::Const => "const ",
-                        _ => "",
                     });
                 }
                 if let Some(ref ty) = p.ty {
