@@ -1,4 +1,4 @@
-use crate::ast::{self, Decl, Expr, Stmt};
+use crate::ast::{self, Decl, Expr, Pat, Stmt};
 use crate::intern::Symbol;
 use std::collections::HashMap;
 
@@ -10,341 +10,541 @@ use std::collections::HashMap;
 /// (scope.md §1, `crate::pkgid::build_item_pkgs`), never recovered from the
 /// names this stamps. The legacy "the prefix *is* the identity" model
 /// (scope.md §0) is retired.
+///
+/// Renaming is lexically scoped: a local binder (`is`-bind, tuple bind,
+/// `for`/match/lambda/select/receive binder, ...) shadows a module-level
+/// fn/const of the same name for the rest of its scope, so local uses are
+/// never rewritten to the flattened global.
 pub fn flatten_module(decls: Vec<Decl>, module: &str) -> Vec<Decl> {
-    let mut rename_map: HashMap<Symbol, String> = HashMap::new();
+    let mut rename_map: HashMap<Symbol, Symbol> = HashMap::new();
     for d in &decls {
         match d {
             Decl::Fn(f) => {
                 if f.name.contains_str("_") && f.name.as_str().starts_with(char::is_uppercase) {
                     continue;
                 }
-                rename_map.insert(f.name, format!("{}_{}", module, f.name));
+                rename_map.insert(f.name, Symbol::intern(&format!("{}_{}", module, f.name)));
             }
             Decl::Const(name, _, _) => {
-                rename_map.insert(*name, format!("{}_{}", module, name));
+                rename_map.insert(*name, Symbol::intern(&format!("{}_{}", module, name)));
             }
             _ => {}
         }
     }
 
+    let mut r = Renamer::new(&rename_map);
     decls
         .into_iter()
         .map(|d| match d {
             Decl::Fn(mut f) => {
                 if let Some(new) = rename_map.get(&f.name) {
-                    f.name = Symbol::intern(new);
+                    f.name = *new;
                 }
-
-                let mut fn_renames = rename_map.clone();
-                for p in &f.params {
-                    fn_renames.remove(&p.name);
-                }
-                rewrite_block(&mut f.body, &fn_renames);
-
-                for p in &mut f.params {
-                    if let Some(ref mut def) = p.default {
-                        rewrite_expr(def, &fn_renames);
+                let pnames: Vec<Symbol> = f.params.iter().map(|p| p.name).collect();
+                r.in_fn_scope(&pnames, |r| {
+                    r.rewrite_block(&mut f.body);
+                    for p in &mut f.params {
+                        if let Some(ref mut def) = p.default {
+                            r.rewrite_expr(def);
+                        }
                     }
-                }
+                });
                 Decl::Fn(f)
             }
             Decl::Const(name, mut expr, span) => {
-                let new_name = rename_map.get(&name).cloned().unwrap_or(name.as_str());
-                rewrite_expr(&mut expr, &rename_map);
-                Decl::Const(Symbol::intern(&new_name), expr, span)
+                let new_name = rename_map.get(&name).copied().unwrap_or(name);
+                r.rewrite_expr(&mut expr);
+                Decl::Const(new_name, expr, span)
+            }
+            Decl::Global(name, mut expr, span) => {
+                r.rewrite_expr(&mut expr);
+                Decl::Global(name, expr, span)
             }
             Decl::Type(mut td) => {
-                for m in &mut td.methods {
-                    let mut mr = rename_map.clone();
-                    for p in &m.params {
-                        mr.remove(&p.name);
+                for fld in &mut td.fields {
+                    if let Some(ref mut def) = fld.default {
+                        r.rewrite_expr(def);
                     }
-                    rewrite_block(&mut m.body, &mr);
+                }
+                for m in &mut td.methods {
+                    let pnames: Vec<Symbol> = m.params.iter().map(|p| p.name).collect();
+                    r.in_fn_scope(&pnames, |r| r.rewrite_block(&mut m.body));
                 }
                 Decl::Type(td)
             }
             Decl::Impl(mut ib) => {
                 for m in &mut ib.methods {
-                    let mut mr = rename_map.clone();
-                    for p in &m.params {
-                        mr.remove(&p.name);
-                    }
-                    rewrite_block(&mut m.body, &mr);
+                    let pnames: Vec<Symbol> = m.params.iter().map(|p| p.name).collect();
+                    r.in_fn_scope(&pnames, |r| r.rewrite_block(&mut m.body));
                 }
                 Decl::Impl(ib)
+            }
+            Decl::Actor(mut ad) => {
+                for fld in &mut ad.fields {
+                    if let Some(ref mut def) = fld.default {
+                        r.rewrite_expr(def);
+                    }
+                }
+                for h in &mut ad.handlers {
+                    let pnames: Vec<Symbol> = h.params.iter().map(|p| p.name).collect();
+                    r.in_fn_scope(&pnames, |r| {
+                        if let Some(ref mut e) = h.loop_sleep_ms {
+                            r.rewrite_expr(e);
+                        }
+                        r.rewrite_block(&mut h.body);
+                    });
+                }
+                Decl::Actor(ad)
+            }
+            Decl::Test(mut tb) => {
+                r.in_fn_scope(&[], |r| r.rewrite_block(&mut tb.body));
+                Decl::Test(tb)
             }
             other => other,
         })
         .collect()
 }
 
-pub fn rewrite_block(block: &mut ast::Block, renames: &HashMap<Symbol, String>) {
-    for stmt in block.iter_mut() {
-        rewrite_stmt(stmt, renames);
+/// Scope-aware identifier rewriter. `shadowed` counts, per name, how many
+/// enclosing scopes have bound it locally; a name is only rewritten to its
+/// flattened module global when that count is zero.
+struct Renamer<'a> {
+    renames: &'a HashMap<Symbol, Symbol>,
+    scopes: Vec<Vec<Symbol>>,
+    shadowed: HashMap<Symbol, u32>,
+}
+
+impl<'a> Renamer<'a> {
+    fn new(renames: &'a HashMap<Symbol, Symbol>) -> Self {
+        Renamer {
+            renames,
+            scopes: Vec::new(),
+            shadowed: HashMap::new(),
+        }
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(Vec::new());
+    }
+
+    fn pop_scope(&mut self) {
+        for name in self.scopes.pop().expect("scope underflow") {
+            match self.shadowed.get_mut(&name) {
+                Some(1) => {
+                    self.shadowed.remove(&name);
+                }
+                Some(n) => *n -= 1,
+                None => unreachable!("unshadowing a name that was never shadowed"),
+            }
+        }
+    }
+
+    fn shadow(&mut self, name: Symbol) {
+        self.scopes
+            .last_mut()
+            .expect("shadow outside any scope")
+            .push(name);
+        *self.shadowed.entry(name).or_insert(0) += 1;
+    }
+
+    fn lookup(&self, name: Symbol) -> Option<Symbol> {
+        if self.shadowed.contains_key(&name) {
+            return None;
+        }
+        self.renames.get(&name).copied()
+    }
+
+    /// Run `f` in a fresh scope with `params` pre-shadowed (a function or
+    /// handler body: parameters shield same-named module globals).
+    fn in_fn_scope(&mut self, params: &[Symbol], f: impl FnOnce(&mut Self)) {
+        self.push_scope();
+        for p in params {
+            self.shadow(*p);
+        }
+        f(self);
+        self.pop_scope();
+    }
+
+    fn rewrite_block(&mut self, block: &mut ast::Block) {
+        self.push_scope();
+        for stmt in block.iter_mut() {
+            self.rewrite_stmt(stmt);
+        }
+        self.pop_scope();
+    }
+
+    fn rewrite_stmt(&mut self, stmt: &mut Stmt) {
+        match stmt {
+            Stmt::Bind(b) => {
+                // The RHS is evaluated before the name is bound, so it still
+                // sees the module-level name; the binding shadows from here on.
+                self.rewrite_expr(&mut b.value);
+                self.shadow(b.name);
+            }
+            Stmt::TupleBind(names, e, _) => {
+                self.rewrite_expr(e);
+                for n in names.iter() {
+                    self.shadow(*n);
+                }
+            }
+            Stmt::Assign(l, r, _) => {
+                self.rewrite_expr(l);
+                self.rewrite_expr(r);
+            }
+            Stmt::Expr(e) => self.rewrite_expr(e),
+            Stmt::If(i) => self.rewrite_if(i),
+            Stmt::While(w) => {
+                self.rewrite_expr(&mut w.cond);
+                self.rewrite_block(&mut w.body);
+            }
+            Stmt::For(f) => {
+                self.rewrite_expr(&mut f.iter);
+                if let Some(ref mut e) = f.end {
+                    self.rewrite_expr(e);
+                }
+                if let Some(ref mut e) = f.step {
+                    self.rewrite_expr(e);
+                }
+                self.push_scope();
+                self.shadow(f.bind);
+                if let Some(b2) = f.bind2 {
+                    self.shadow(b2);
+                }
+                self.rewrite_block(&mut f.body);
+                self.pop_scope();
+            }
+            Stmt::Loop(l) => self.rewrite_block(&mut l.body),
+            Stmt::Ret(e, _) => {
+                if let Some(e) = e {
+                    self.rewrite_expr(e);
+                }
+            }
+            Stmt::Break(e, _) => {
+                if let Some(e) = e {
+                    self.rewrite_expr(e);
+                }
+            }
+            Stmt::Match(m) => {
+                self.rewrite_expr(&mut m.subject);
+                for arm in &mut m.arms {
+                    self.push_scope();
+                    let mut binders = Vec::new();
+                    collect_pat_binders(&arm.pat, &mut binders);
+                    for b in binders {
+                        self.shadow(b);
+                    }
+                    if let Some(ref mut g) = arm.guard {
+                        self.rewrite_expr(g);
+                    }
+                    self.rewrite_block(&mut arm.body);
+                    self.pop_scope();
+                }
+            }
+            Stmt::ErrReturn(e, _) => self.rewrite_expr(e),
+            Stmt::Defer(b, _) => self.rewrite_block(b),
+            Stmt::StoreInsert(_, exprs, _) => {
+                for fi in exprs {
+                    self.rewrite_expr(&mut fi.value);
+                }
+            }
+            Stmt::StoreSet(_, pairs, _, _) => {
+                for (_, e) in pairs {
+                    self.rewrite_expr(e);
+                }
+            }
+            Stmt::Transaction(block, _) | Stmt::SimBlock(block, _) => self.rewrite_block(block),
+            Stmt::Together(name, block, handler, _) => {
+                self.push_scope();
+                if let Some(n) = name {
+                    self.shadow(*n);
+                }
+                for stmt in block.iter_mut() {
+                    self.rewrite_stmt(stmt);
+                }
+                if let Some(ref mut e) = handler.ok_arm {
+                    self.rewrite_expr(e);
+                }
+                if let Some(ref mut e) = handler.err_arm {
+                    self.rewrite_expr(e);
+                }
+                self.pop_scope();
+            }
+            Stmt::SimFor(f, _) => {
+                self.rewrite_expr(&mut f.iter);
+                if let Some(ref mut e) = f.end {
+                    self.rewrite_expr(e);
+                }
+                if let Some(ref mut e) = f.step {
+                    self.rewrite_expr(e);
+                }
+                self.push_scope();
+                self.shadow(f.bind);
+                if let Some(b2) = f.bind2 {
+                    self.shadow(b2);
+                }
+                self.rewrite_block(&mut f.body);
+                self.pop_scope();
+            }
+            Stmt::ChannelClose(e, _) | Stmt::Stop(e, _) | Stmt::Join(e, _) => self.rewrite_expr(e),
+            Stmt::Continue(_)
+            | Stmt::Nop(_)
+            | Stmt::Asm(_)
+            | Stmt::StoreSave(_, _)
+            | Stmt::StoreCompact(_, _)
+            | Stmt::StoreDelete(_, _, _)
+            | Stmt::StoreDestroy(_, _, _)
+            | Stmt::StoreRestore(_, _, _)
+            | Stmt::UseLocal(_) => {}
+        }
+    }
+
+    fn rewrite_if(&mut self, i: &mut ast::If) {
+        self.rewrite_expr(&mut i.cond);
+        self.rewrite_block(&mut i.then);
+        for (c, b) in &mut i.elifs {
+            self.rewrite_expr(c);
+            self.rewrite_block(b);
+        }
+        if let Some(ref mut b) = i.els {
+            self.rewrite_block(b);
+        }
+    }
+
+    fn rewrite_filter(&mut self, filter: &mut ast::StoreFilter) {
+        self.rewrite_expr(&mut filter.value);
+        for (_, cond) in &mut filter.extra {
+            self.rewrite_expr(&mut cond.value);
+        }
+    }
+
+    fn rewrite_expr(&mut self, expr: &mut Expr) {
+        match expr {
+            Expr::Ident(name, _) => {
+                if let Some(new) = self.lookup(*name) {
+                    *name = new;
+                }
+            }
+            Expr::Call(callee, args, _) => {
+                self.rewrite_expr(callee);
+                for a in args {
+                    self.rewrite_expr(a);
+                }
+            }
+            Expr::Method(obj, _, args, _) => {
+                self.rewrite_expr(obj);
+                for a in args {
+                    self.rewrite_expr(a);
+                }
+            }
+            Expr::Field(obj, _, _) => self.rewrite_expr(obj),
+            Expr::BinOp(l, _, r, _) => {
+                self.rewrite_expr(l);
+                self.rewrite_expr(r);
+            }
+            Expr::UnaryOp(_, e, _) => self.rewrite_expr(e),
+            Expr::Index(a, b, _) => {
+                self.rewrite_expr(a);
+                self.rewrite_expr(b);
+            }
+            Expr::Ternary(a, b, c, _) => {
+                self.rewrite_expr(a);
+                self.rewrite_expr(b);
+                self.rewrite_expr(c);
+            }
+            Expr::Quaternary(subj, ok, nothing, err, _) => {
+                self.rewrite_expr(subj);
+                if let Some(ok) = ok {
+                    self.rewrite_expr(ok);
+                }
+                if let Some(nothing) = nothing {
+                    self.rewrite_expr(nothing);
+                }
+                if let Some(err) = err {
+                    self.rewrite_expr(err);
+                }
+            }
+            Expr::As(e, _, _)
+            | Expr::Ref(e, _)
+            | Expr::Deref(e, _)
+            | Expr::Yield(e, _)
+            | Expr::Grad(e, _)
+            | Expr::StrictCast(e, _, _)
+            | Expr::Spread(e, _) => {
+                self.rewrite_expr(e);
+            }
+            Expr::Array(es, _) | Expr::Tuple(es, _) | Expr::Syscall(es, _) => {
+                for e in es {
+                    self.rewrite_expr(e);
+                }
+            }
+            Expr::Struct(name, fields, span) => {
+                if let Some(renamed) = self.lookup(*name) {
+                    // A struct literal whose type ctor was flattened becomes a
+                    // call; named field inits are preserved as named args so
+                    // out-of-declaration-order literals keep their meaning.
+                    let mut args: Vec<Expr> = Vec::with_capacity(fields.len());
+                    for fi in fields.drain(..) {
+                        let mut v = fi.value;
+                        self.rewrite_expr(&mut v);
+                        match fi.name {
+                            Some(n) => args.push(Expr::NamedArg(n, Box::new(v), *span)),
+                            None => args.push(v),
+                        }
+                    }
+                    *expr = Expr::Call(Box::new(Expr::Ident(renamed, *span)), args, *span);
+                    return;
+                }
+                for f in fields {
+                    self.rewrite_expr(&mut f.value);
+                }
+            }
+            Expr::Builder(_, fields, _) => {
+                for f in fields {
+                    self.rewrite_expr(&mut f.value);
+                }
+            }
+            Expr::IfExpr(i) => self.rewrite_if(i),
+            Expr::Pipe(a, b, args, _) => {
+                self.rewrite_expr(a);
+                self.rewrite_expr(b);
+                for e in args {
+                    self.rewrite_expr(e);
+                }
+            }
+            Expr::Block(block, _) => self.rewrite_block(block),
+            Expr::Lambda(params, _, body, _) => {
+                self.push_scope();
+                for p in params.iter() {
+                    self.shadow(p.name);
+                }
+                self.rewrite_block(body);
+                self.pop_scope();
+            }
+            Expr::ListComp(body, binder, iter, cond, end, _) => {
+                self.rewrite_expr(iter);
+                if let Some(e) = end {
+                    self.rewrite_expr(e);
+                }
+                self.push_scope();
+                self.shadow(Symbol::intern(binder));
+                self.rewrite_expr(body);
+                if let Some(c) = cond {
+                    self.rewrite_expr(c);
+                }
+                self.pop_scope();
+            }
+            Expr::Query(e, _, _) => self.rewrite_expr(e),
+            Expr::Send(target, _, args, _) => {
+                self.rewrite_expr(target);
+                for a in args {
+                    self.rewrite_expr(a);
+                }
+            }
+            Expr::ChannelSend(a, b, _) => {
+                self.rewrite_expr(a);
+                self.rewrite_expr(b);
+            }
+            Expr::ChannelRecv(e, _) => self.rewrite_expr(e),
+            Expr::ChannelCreate(_, e, _) => self.rewrite_expr(e),
+            Expr::Select(arms, default, _) => {
+                for arm in arms {
+                    self.rewrite_expr(&mut arm.chan);
+                    if let Some(ref mut v) = arm.value {
+                        self.rewrite_expr(v);
+                    }
+                    self.push_scope();
+                    if let Some(b) = arm.binding {
+                        self.shadow(b);
+                    }
+                    self.rewrite_block(&mut arm.body);
+                    self.pop_scope();
+                }
+                if let Some(b) = default {
+                    self.rewrite_block(b);
+                }
+            }
+            Expr::Slice(a, b, c, _) => {
+                self.rewrite_expr(a);
+                self.rewrite_expr(b);
+                self.rewrite_expr(c);
+            }
+            Expr::OfCall(a, b, _) => {
+                self.rewrite_expr(a);
+                self.rewrite_expr(b);
+            }
+            Expr::NamedArg(_, e, _) => self.rewrite_expr(e),
+            Expr::AsFormat(e, _, _) => self.rewrite_expr(e),
+            Expr::Einsum(_, es, _) => {
+                for e in es {
+                    self.rewrite_expr(e);
+                }
+            }
+            Expr::StoreGet(_, e, _) => self.rewrite_expr(e),
+            Expr::StoreInsert(_, fis, _) => {
+                for fi in fis {
+                    self.rewrite_expr(&mut fi.value);
+                }
+            }
+            Expr::StoreUpdate(_, pairs, filter, _) => {
+                for (_, e) in pairs {
+                    self.rewrite_expr(e);
+                }
+                self.rewrite_filter(filter);
+            }
+            Expr::StoreQuery(_, filter, _)
+            | Expr::StoreFirst(_, filter, _)
+            | Expr::StoreExists(_, filter, _) => self.rewrite_filter(filter),
+            Expr::StoreCount(_, filter, _) => {
+                if let Some(f) = filter {
+                    self.rewrite_filter(f);
+                }
+            }
+            Expr::Spawn(_, inits, _) => {
+                for (_, e) in inits {
+                    self.rewrite_expr(e);
+                }
+            }
+            Expr::DispatchBlock(_, block, _) => self.rewrite_block(block),
+            Expr::Receive(arms, _) => {
+                for arm in arms {
+                    self.push_scope();
+                    for b in &arm.bindings {
+                        self.shadow(*b);
+                    }
+                    self.rewrite_block(&mut arm.body);
+                    self.pop_scope();
+                }
+            }
+
+            Expr::None(_)
+            | Expr::Void(_)
+            | Expr::Int(_, _)
+            | Expr::Float(_, _)
+            | Expr::Str(_, _)
+            | Expr::Bool(_, _)
+            | Expr::Placeholder(_)
+            | Expr::IndexPlaceholder(_)
+            | Expr::Embed(_, _)
+            | Expr::Unreachable(_)
+            | Expr::StoreAll(_, _)
+            | Expr::StoreDistinct(_, _, _)
+            | Expr::QualifiedIdent(_, _, _) => {}
+        }
     }
 }
 
-pub fn rewrite_stmt(stmt: &mut Stmt, renames: &HashMap<Symbol, String>) {
-    match stmt {
-        Stmt::Bind(b) => rewrite_expr(&mut b.value, renames),
-        Stmt::TupleBind(_, e, _) => rewrite_expr(e, renames),
-        Stmt::Assign(l, r, _) => {
-            rewrite_expr(l, renames);
-            rewrite_expr(r, renames);
-        }
-        Stmt::Expr(e) => rewrite_expr(e, renames),
-        Stmt::If(i) => rewrite_if(i, renames),
-        Stmt::While(w) => {
-            rewrite_expr(&mut w.cond, renames);
-            rewrite_block(&mut w.body, renames);
-        }
-        Stmt::For(f) => {
-            rewrite_expr(&mut f.iter, renames);
-            rewrite_block(&mut f.body, renames);
-        }
-        Stmt::Loop(l) => rewrite_block(&mut l.body, renames),
-        Stmt::Ret(e, _) => {
-            if let Some(e) = e {
-                rewrite_expr(e, renames);
+/// Collect every name a pattern binds (`Ident` leaves and all nested
+/// positions). Unit-variant patterns are indistinguishable from binders here;
+/// shadowing them is harmless because variant names are never in the rename
+/// map.
+fn collect_pat_binders(pat: &Pat, out: &mut Vec<Symbol>) {
+    match pat {
+        Pat::Ident(s, _) => out.push(*s),
+        Pat::Ctor(_, ps, _) | Pat::Or(ps, _) | Pat::Tuple(ps, _) | Pat::Array(ps, _) => {
+            for p in ps {
+                collect_pat_binders(p, out);
             }
         }
-        Stmt::Break(e, _) => {
-            if let Some(e) = e {
-                rewrite_expr(e, renames);
-            }
-        }
-        Stmt::Match(m) => {
-            rewrite_expr(&mut m.subject, renames);
-            for arm in &mut m.arms {
-                if let Some(ref mut g) = arm.guard {
-                    rewrite_expr(g, renames);
-                }
-                rewrite_block(&mut arm.body, renames);
-            }
-        }
-        Stmt::ErrReturn(e, _) => rewrite_expr(e, renames),
-        Stmt::Defer(b, _) => rewrite_block(b, renames),
-        Stmt::StoreInsert(_, exprs, _) => {
-            for fi in exprs {
-                rewrite_expr(&mut fi.value, renames);
-            }
-        }
-        Stmt::StoreSet(_, pairs, _, _) => {
-            for (_, e) in pairs {
-                rewrite_expr(e, renames);
-            }
-        }
-        Stmt::Transaction(block, _) | Stmt::SimBlock(block, _) => rewrite_block(block, renames),
-        Stmt::Together(_, block, _, _) => rewrite_block(block, renames),
-        Stmt::SimFor(f, _) => {
-            rewrite_expr(&mut f.iter, renames);
-            rewrite_block(&mut f.body, renames);
-        }
-        Stmt::ChannelClose(e, _) | Stmt::Stop(e, _) | Stmt::Join(e, _) => rewrite_expr(e, renames),
-        Stmt::Continue(_)
-        | Stmt::Nop(_)
-        | Stmt::Asm(_)
-        | Stmt::StoreSave(_, _)
-        | Stmt::StoreCompact(_, _)
-        | Stmt::StoreDelete(_, _, _)
-        | Stmt::StoreDestroy(_, _, _)
-        | Stmt::StoreRestore(_, _, _)
-        | Stmt::UseLocal(_) => {}
-    }
-}
-
-pub fn rewrite_if(i: &mut ast::If, renames: &HashMap<Symbol, String>) {
-    rewrite_expr(&mut i.cond, renames);
-    rewrite_block(&mut i.then, renames);
-    for (c, b) in &mut i.elifs {
-        rewrite_expr(c, renames);
-        rewrite_block(b, renames);
-    }
-    if let Some(ref mut b) = i.els {
-        rewrite_block(b, renames);
-    }
-}
-
-pub fn rewrite_expr(expr: &mut Expr, renames: &HashMap<Symbol, String>) {
-    match expr {
-        Expr::Ident(name, _) => {
-            if let Some(new) = renames.get(name) {
-                *name = Symbol::intern(new);
-            }
-        }
-        Expr::Call(callee, args, _) => {
-            rewrite_expr(callee, renames);
-            for a in args {
-                rewrite_expr(a, renames);
-            }
-        }
-        Expr::Method(obj, _, args, _) => {
-            rewrite_expr(obj, renames);
-            for a in args {
-                rewrite_expr(a, renames);
-            }
-        }
-        Expr::Field(obj, _, _) => rewrite_expr(obj, renames),
-        Expr::BinOp(l, _, r, _) => {
-            rewrite_expr(l, renames);
-            rewrite_expr(r, renames);
-        }
-        Expr::UnaryOp(_, e, _) => rewrite_expr(e, renames),
-        Expr::Index(a, b, _) => {
-            rewrite_expr(a, renames);
-            rewrite_expr(b, renames);
-        }
-        Expr::Ternary(a, b, c, _) => {
-            rewrite_expr(a, renames);
-            rewrite_expr(b, renames);
-            rewrite_expr(c, renames);
-        }
-        Expr::Quaternary(subj, ok, nothing, err, _) => {
-            rewrite_expr(subj, renames);
-            if let Some(ok) = ok {
-                rewrite_expr(ok, renames);
-            }
-            if let Some(nothing) = nothing {
-                rewrite_expr(nothing, renames);
-            }
-            if let Some(err) = err {
-                rewrite_expr(err, renames);
-            }
-        }
-        Expr::As(e, _, _)
-        | Expr::Ref(e, _)
-        | Expr::Deref(e, _)
-        | Expr::Yield(e, _)
-        | Expr::Grad(e, _)
-        | Expr::StrictCast(e, _, _)
-        | Expr::Spread(e, _) => {
-            rewrite_expr(e, renames);
-        }
-        Expr::Array(es, _) | Expr::Tuple(es, _) | Expr::Syscall(es, _) => {
-            for e in es {
-                rewrite_expr(e, renames);
-            }
-        }
-        Expr::Struct(name, fields, span) => {
-            if let Some(new) = renames.get(name) {
-                let renamed = Symbol::intern(new);
-                let mut args: Vec<Expr> = Vec::with_capacity(fields.len());
-                for fi in fields.drain(..) {
-                    let mut v = fi.value;
-                    rewrite_expr(&mut v, renames);
-                    args.push(v);
-                }
-                *expr = Expr::Call(Box::new(Expr::Ident(renamed, *span)), args, *span);
-                return;
-            }
-            for f in fields {
-                rewrite_expr(&mut f.value, renames);
-            }
-        }
-        Expr::Builder(_, fields, _) => {
-            for f in fields {
-                rewrite_expr(&mut f.value, renames);
-            }
-        }
-        Expr::IfExpr(i) => rewrite_if(i, renames),
-        Expr::Pipe(a, b, args, _) => {
-            rewrite_expr(a, renames);
-            rewrite_expr(b, renames);
-            for e in args {
-                rewrite_expr(e, renames);
-            }
-        }
-        Expr::Block(block, _) => rewrite_block(block, renames),
-        Expr::Lambda(_, _, body, _) => rewrite_block(body, renames),
-        Expr::ListComp(body, _, iter, cond, end, _) => {
-            rewrite_expr(body, renames);
-            rewrite_expr(iter, renames);
-            if let Some(c) = cond {
-                rewrite_expr(c, renames);
-            }
-            if let Some(e) = end {
-                rewrite_expr(e, renames);
-            }
-        }
-        Expr::Query(e, _, _) => rewrite_expr(e, renames),
-        Expr::Send(target, _, args, _) => {
-            rewrite_expr(target, renames);
-            for a in args {
-                rewrite_expr(a, renames);
-            }
-        }
-        Expr::ChannelSend(a, b, _) => {
-            rewrite_expr(a, renames);
-            rewrite_expr(b, renames);
-        }
-        Expr::ChannelRecv(e, _) => rewrite_expr(e, renames),
-        Expr::ChannelCreate(_, e, _) => rewrite_expr(e, renames),
-        Expr::Select(arms, default, _) => {
-            for arm in arms {
-                if let Some(ref mut v) = arm.value {
-                    rewrite_expr(v, renames);
-                }
-                rewrite_block(&mut arm.body, renames);
-            }
-            if let Some(b) = default {
-                rewrite_block(b, renames);
-            }
-        }
-        Expr::Slice(a, b, c, _) => {
-            rewrite_expr(a, renames);
-            rewrite_expr(b, renames);
-            rewrite_expr(c, renames);
-        }
-        Expr::OfCall(a, b, _) => {
-            rewrite_expr(a, renames);
-            rewrite_expr(b, renames);
-        }
-        Expr::NamedArg(_, e, _) => rewrite_expr(e, renames),
-        Expr::AsFormat(e, _, _) => rewrite_expr(e, renames),
-        Expr::Einsum(_, es, _) => {
-            for e in es {
-                rewrite_expr(e, renames);
-            }
-        }
-        Expr::StoreGet(_, e, _) => rewrite_expr(e, renames),
-        Expr::StoreInsert(_, fis, _) => {
-            for fi in fis {
-                rewrite_expr(&mut fi.value, renames);
-            }
-        }
-        Expr::StoreUpdate(_, pairs, filter, _) => {
-            for (_, e) in pairs {
-                rewrite_expr(e, renames);
-            }
-            rewrite_expr(&mut filter.value, renames);
-            for (_, cond) in &mut filter.extra {
-                rewrite_expr(&mut cond.value, renames);
-            }
-        }
-        Expr::Receive(arms, _) => {
-            for arm in arms {
-                rewrite_block(&mut arm.body, renames);
-            }
-        }
-
-        Expr::None(_)
-        | Expr::Void(_)
-        | Expr::Int(_, _)
-        | Expr::Float(_, _)
-        | Expr::Str(_, _)
-        | Expr::Bool(_, _)
-        | Expr::Placeholder(_)
-        | Expr::IndexPlaceholder(_)
-        | Expr::Embed(_, _)
-        | Expr::Unreachable(_)
-        | Expr::Spawn(_, _, _)
-        | Expr::StoreQuery(_, _, _)
-        | Expr::StoreCount(_, _, _)
-        | Expr::StoreAll(_, _)
-        | Expr::StoreFirst(_, _, _)
-        | Expr::StoreExists(_, _, _)
-        | Expr::StoreDistinct(_, _, _)
-        | Expr::DispatchBlock(_, _, _)
-        | Expr::QualifiedIdent(_, _, _) => {}
+        Pat::Wild(_) | Pat::Lit(_) | Pat::Range(_, _, _) => {}
     }
 }
