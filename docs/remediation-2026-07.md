@@ -722,7 +722,7 @@ tests for hit, miss, iterate-empty, iterate-many, and row-passed-to-a-function.
 
 ## Tier 5 — Closing
 
-### ◻ 8-26 Regenerate benchmarks and methodology — **P2**, blocked_by: [8-1 … 8-25]
+### ✅ 8-26 Regenerate benchmarks and methodology — **P2**, blocked_by: [8-1 … 8-25]
 *Review item 9, part 2.*
 
 `benchmarks/results.csv` reports `fibonacci` at 340.82 ms (Jinn) / 339.61 ms (C),

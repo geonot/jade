@@ -185,6 +185,42 @@ jobs:
         working-directory: fuzz
         run: cargo +nightly fuzz run typer -- -max_total_time=30
 
+  bench-regression:
+    # Benchmark regression gate (task 8-26). Re-runs the benchmark suite
+    # and fails on a >10% regression of any comparable benchmark's jinn/c
+    # ratio versus the committed baseline (benchmarks/results.csv). The
+    # ratio — not absolute time — is compared, because the baseline was
+    # measured on developer hardware and this job runs on whatever the CI
+    # pool provides; the ratio of the same run on the same machine is
+    # hardware-normalized. Rows tagged non-comparable and rows under the
+    # 50ms noise floor are reported but not gated (ci/bench_regression.py).
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      LLVM_SYS_211_PREFIX: /usr/lib/llvm-21
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install LLVM 21 + build deps
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg lsb-release software-properties-common
+          wget https://apt.llvm.org/llvm-snapshot.gpg.key
+          sudo apt-key add llvm-snapshot.gpg.key
+          sudo add-apt-repository "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main"
+          sudo apt-get update
+          sudo apt-get install -y llvm-21 llvm-21-dev clang-21 lld-21 pkg-config libssl-dev libsqlite3-dev
+
+      - name: Benchmark regression gate
+        env:
+          CC: clang-21
+        run: python3 ci/bench_regression.py
+
   sanitize:
     # Runtime C sanitizer sweep (P0-11). Builds the C runtime under
     # ASan+UBSan and again under TSan, then runs the full test

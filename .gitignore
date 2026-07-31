@@ -13,7 +13,10 @@ a.out
 *.store
 *.wal
 
-# Benchmark run outputs (timings are reproduced by run_benchmarks.py)
+# Benchmark run outputs. results.csv is deliberately TRACKED: it is the
+# published baseline (with hardware/run-count header and per-row
+# comparability tags) that ci/bench_regression.py gates against; regenerate
+# and commit it only as a deliberate re-baselining. The JSON outputs are
+# scratch.
 benchmarks/_build/
-benchmarks/results.csv
 benchmarks/results*.json

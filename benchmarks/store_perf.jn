@@ -38,21 +38,21 @@ store bench
     # ── Phase 3: Point Query (where equals) ─────────────────
     t0 is time.monotonic()
     for j in 0 to 100
-        r1 is bench where key equals 2500
+        r1 is bench where key equals 2500 ? $.value ! 0
     log('query_eq_x100')
     log(time.elapsed(t0))
 
     # ── Phase 4: Range Query (where >) ──────────────────────
     t0 is time.monotonic()
     for j in 0 to 100
-        r2 is bench where key > 4990
+        r2 is bench where key > 4990 ? $.value ! 0
     log('query_gt_x100')
     log(time.elapsed(t0))
 
     # ── Phase 5: AND filter ─────────────────────────────────
     t0 is time.monotonic()
     for j in 0 to 100
-        r3 is bench where key > 100 and value < 1000
+        r3 is bench where key > 100 and value < 1000 ? $.value ! 0
     log('query_and_x100')
     log(time.elapsed(t0))
 

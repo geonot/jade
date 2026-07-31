@@ -19,7 +19,14 @@ fn reachable_from(func: &Function, start: BlockId) -> HashSet<BlockId> {
 }
 
 fn runs_in_coroutine_context(func: &Function) -> bool {
-    func.is_coroutine || func.name.as_str().starts_with("__actor_")
+    // Lazy generators (`is_coroutine && !scheduler_task`) are excluded: they
+    // run by direct context swap from their consumer, so there is no scheduler
+    // to yield to and no cancellation to observe. On a worker the injected
+    // yield is dead weight per iteration; on the main thread it falls into
+    // jinn_sched_yield's anti-spin nanosleep — ~50µs of timer slack per loop
+    // back-edge, which turned a 30M-iteration generator into a half-hour run
+    // (found regenerating benchmarks/results.csv, task 8-26).
+    (func.is_coroutine && func.scheduler_task) || func.name.as_str().starts_with("__actor_")
 }
 
 pub fn inject_yields(func: &mut Function) -> bool {

@@ -25,7 +25,8 @@ JADEC = os.path.join(JINN_DIR, "target", "release", "jinnc")
 BENCH_DIR = os.path.join(JINN_DIR, "benchmarks")
 CMP_DIR = os.path.join(BENCH_DIR, "comparison")
 HISTORY_FILE = os.path.join(BENCH_DIR, "history.json")
-CC = "clang"
+CC = os.environ.get("CC") or next(
+    (c for c in ("clang", "gcc", "cc") if shutil.which(c)), "cc")
 RUSTC = "rustc"
 PYTHON = "python3"
 
@@ -34,7 +35,11 @@ ALL_LANGS = ["jinn", "c", "rust", "python"]
 def build_compiler():
     print("Building jinnc (release)...")
     env = os.environ.copy()
-    env["LLVM_SYS_211_PREFIX"] = "/usr/lib/llvm-21"
+    if "LLVM_SYS_211_PREFIX" not in env:
+        for prefix in ("/usr/lib/llvm-21", "/usr/lib/llvm21"):
+            if os.path.isdir(prefix):
+                env["LLVM_SYS_211_PREFIX"] = prefix
+                break
     r = subprocess.run(["cargo", "build", "--release"], cwd=JINN_DIR, env=env, capture_output=True)
     if r.returncode != 0:
         print("Build failed:", r.stderr.decode())
@@ -64,18 +69,34 @@ def compile_rust(rs_path, opt, out_dir):
     return (out, None) if r.returncode == 0 else (None, r.stderr.decode())
 
 
-def time_binary(binary, runs, warmup, timeout):
+STORE_ARTIFACT_EXTS = (".wal", ".store")
+
+
+def _fresh_run_dir(run_cwd):
+    """Give every timed run identical starting state. Store benchmarks persist
+    WAL/record files in their cwd; without this, run N measures a store holding
+    N copies of the data (observed: store_ops count 10000/20000/30000 across
+    three runs) and the median is meaningless."""
+    os.makedirs(run_cwd, exist_ok=True)
+    for f in os.listdir(run_cwd):
+        if f.endswith(STORE_ARTIFACT_EXTS):
+            os.remove(os.path.join(run_cwd, f))
+
+
+def time_binary(binary, runs, warmup, timeout, run_cwd):
     for _ in range(warmup):
+        _fresh_run_dir(run_cwd)
         try:
-            subprocess.run([binary], capture_output=True, timeout=timeout)
+            subprocess.run([binary], capture_output=True, timeout=timeout, cwd=run_cwd)
         except subprocess.TimeoutExpired:
             pass
     times = []
     output = None
     for _ in range(runs):
+        _fresh_run_dir(run_cwd)
         start = time.perf_counter()
         try:
-            r = subprocess.run([binary], capture_output=True, timeout=timeout)
+            r = subprocess.run([binary], capture_output=True, timeout=timeout, cwd=run_cwd)
         except subprocess.TimeoutExpired:
             return None, None, "timeout"
         elapsed = time.perf_counter() - start
@@ -86,18 +107,20 @@ def time_binary(binary, runs, warmup, timeout):
     return times, output, None
 
 
-def time_python(py_path, runs, warmup, timeout):
+def time_python(py_path, runs, warmup, timeout, run_cwd):
     for _ in range(warmup):
+        _fresh_run_dir(run_cwd)
         try:
-            subprocess.run([PYTHON, py_path], capture_output=True, timeout=timeout)
+            subprocess.run([PYTHON, py_path], capture_output=True, timeout=timeout, cwd=run_cwd)
         except subprocess.TimeoutExpired:
             pass
     times = []
     output = None
     for _ in range(runs):
+        _fresh_run_dir(run_cwd)
         start = time.perf_counter()
         try:
-            r = subprocess.run([PYTHON, py_path], capture_output=True, timeout=timeout)
+            r = subprocess.run([PYTHON, py_path], capture_output=True, timeout=timeout, cwd=run_cwd)
         except subprocess.TimeoutExpired:
             return None, None, "timeout"
         elapsed = time.perf_counter() - start
@@ -143,6 +166,14 @@ def ratio_str(jinn_s, other_s):
     return f"{r:.2f}x"
 
 
+def cc_version():
+    try:
+        out = subprocess.run([CC, "--version"], capture_output=True, text=True).stdout
+        return out.splitlines()[0] if out else CC
+    except OSError:
+        return CC
+
+
 def cpu_info():
     """Detect CPU model and governor if available."""
     info = {"model": "unknown", "governor": "unknown", "cores": os.cpu_count()}
@@ -177,6 +208,34 @@ def save_history(history):
 
 SKIP_BENCHMARKS = set()
 
+# Comparability of the jinn/c ratio, carried into results.csv per row (task
+# 8-26): a ratio is only a language comparison when both sides exercise the
+# same algorithm against the same memory hierarchy. Anything involving the
+# Jinn M:N scheduler against a single-pthread C loop, or an on-disk store
+# against an in-memory array, is tagged so the CSV itself says what the
+# number means. See benchmarks/README.md for the per-benchmark rationale.
+COMPARABILITY = {
+    "store_ops": "disk-vs-memory",
+    "store_perf": "single-language",
+    "coroutine_spawn": "cross-paradigm",
+    "channel_throughput": "cross-paradigm",
+    "select_latency": "cross-paradigm",
+    "dispatch_yield": "cross-paradigm",
+    "dispatch_vs_direct": "single-language",
+    "sim_for": "cross-paradigm",
+    "actor_single": "single-thread-C-baseline",
+    "actor_pingpong": "single-thread-C-baseline",
+    "actor_fanout": "single-thread-C-baseline",
+    "actor_throughput": "single-thread-C-baseline",
+    "parallel_actors": "single-thread-C-baseline",
+    "parallel_fib": "single-thread-C-baseline",
+    "parallel_pipeline": "single-thread-C-baseline",
+    "parallel_sim_block": "single-thread-C-baseline",
+}
+
+def comparability(name):
+    return COMPARABILITY.get(name, "comparable")
+
 def discover_benchmarks(bench_filter=None):
     """Find .jn benchmarks, optionally filtered by comma-separated patterns."""
     all_benches = sorted(f.replace(".jn", "") for f in os.listdir(BENCH_DIR)
@@ -206,11 +265,12 @@ def run_lang(lang, name, opt, runs, warmup, timeout, out_dir, c_files, rs_files,
     """Compile and time a single benchmark for a single language.
     Returns (stats_dict | None, output_str | None, error_str | None, raw_times | None)
     """
+    run_cwd = os.path.join(out_dir, f"cwd_{name}_{lang}")
     if lang == "jinn":
         binary, err = compile_jinn(os.path.join(BENCH_DIR, f"{name}.jn"), opt, out_dir)
         if err:
             return None, None, err.strip()[:80], None
-        times, out, rerr = time_binary(binary, runs, warmup, timeout)
+        times, out, rerr = time_binary(binary, runs, warmup, timeout, run_cwd)
         if rerr:
             return None, None, rerr, None
         return calc_stats(times), out, None, times
@@ -221,7 +281,7 @@ def run_lang(lang, name, opt, runs, warmup, timeout, out_dir, c_files, rs_files,
         binary, err = compile_c(c_files[name], opt, out_dir)
         if err:
             return None, None, err.strip()[:80], None
-        times, out, rerr = time_binary(binary, runs, warmup, timeout)
+        times, out, rerr = time_binary(binary, runs, warmup, timeout, run_cwd)
         if rerr:
             return None, None, rerr, None
         return calc_stats(times), out, None, times
@@ -232,7 +292,7 @@ def run_lang(lang, name, opt, runs, warmup, timeout, out_dir, c_files, rs_files,
         binary, err = compile_rust(rs_files[name], opt, out_dir)
         if err:
             return None, None, err.strip()[:80], None
-        times, out, rerr = time_binary(binary, runs, warmup, timeout)
+        times, out, rerr = time_binary(binary, runs, warmup, timeout, run_cwd)
         if rerr:
             return None, None, rerr, None
         return calc_stats(times), out, None, times
@@ -240,7 +300,7 @@ def run_lang(lang, name, opt, runs, warmup, timeout, out_dir, c_files, rs_files,
     elif lang == "python":
         if name not in py_files:
             return None, None, None, None
-        times, out, rerr = time_python(py_files[name], runs, warmup, timeout)
+        times, out, rerr = time_python(py_files[name], runs, warmup, timeout, run_cwd)
         if rerr:
             return None, None, rerr, None
         return calc_stats(times), out, None, times
@@ -442,19 +502,33 @@ def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
     # CSV export
     if emit_csv:
         csv_path = os.path.join(BENCH_DIR, "results.csv")
+        try:
+            commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=JINN_DIR,
+                                    capture_output=True, text=True).stdout.strip() or "unknown"
+            dirty = subprocess.run(["git", "status", "--porcelain"], cwd=JINN_DIR,
+                                   capture_output=True, text=True).stdout.strip()
+            if dirty:
+                commit += "-dirty"
+        except OSError:
+            commit = "unknown"
         with open(csv_path, "w", newline="") as f:
+            f.write(f"# generated: {datetime.now().isoformat()}  commit: {commit}  "
+                    f"cpu: {hw['model']}  cores: {hw['cores']}  governor: {hw['governor']}  "
+                    f"runs: {runs}  warmup: {warmup}  cc: {cc_version()}\n")
             writer = csvmod.writer(f)
-            header = ["opt", "benchmark"]
+            header = ["opt", "benchmark", "comparability", "runs"]
             for l in langs:
-                header.extend([f"{l}_median_ms", f"{l}_stddev_ms", f"{l}_min_ms", f"{l}_max_ms"])
+                header.extend([f"{l}_median_ms", f"{l}_stddev_ms", f"{l}_variance_ms2",
+                               f"{l}_min_ms", f"{l}_max_ms"])
             header.extend([f"ratio_{r}" for r in langs if r != "jinn"])
             writer.writerow(header)
             for opt_key, level_data in all_results.items():
                 for name, entry in sorted(level_data.items()):
-                    row = [opt_key, name]
+                    row = [opt_key, name, comparability(name), runs]
                     for l in langs:
                         row.append(entry.get(f"{l}_ms", ""))
                         row.append(entry.get(f"{l}_stddev_ms", ""))
+                        row.append(entry.get(f"{l}_variance_ms2", ""))
                         row.append(entry.get(f"{l}_min_ms", ""))
                         row.append(entry.get(f"{l}_max_ms", ""))
                     for r in langs:

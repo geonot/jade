@@ -611,3 +611,37 @@ actor Echo
         );
     }
 }
+
+/// Task 8-26 regression — a lazy generator must not carry injected
+/// `__sched_yield` calls on its loop back-edges. Generators run by direct
+/// context swap from their consumer (no scheduler), so on the main thread
+/// the injected call fell into jinn_sched_yield's anti-spin nanosleep:
+/// ~50µs of timer slack per iteration, turning this 2M-yield loop into a
+/// ~100-second run (the benchmark's 30M iterations took ~half an hour).
+/// After the fix it completes in well under a second.
+#[test]
+fn generator_back_edges_carry_no_scheduler_yield() {
+    let src = "
+*main
+    gen is dispatch
+        for i in 2000000
+            yield i
+    total is 0
+    for x in gen
+        total is total + x
+    log(total)
+";
+    let c = compile(src);
+    let out = c.run_within(20);
+    assert!(
+        out.status.success(),
+        "{:?} stderr={}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "1999999000000",
+        "generator sum mismatch"
+    );
+}
