@@ -1,10 +1,28 @@
-title: Untitled
+title: 'Redesign select: multi-channel wait, close, no truncation'
 status: complete
-atomic: false
-priority: medium
-blocked_by: []
-created_at: '2026-07-31T13:35:44'
-updated_at: '2026-07-31T13:35:44'
+atomic: true
+priority: high
+blocked_by:
+- 8-10
+created_at: '2026-07-29T00:00:00'
+updated_at: '2026-07-31T13:39:17'
 result: 'Select redesigned: per-case waiter nodes for simultaneous multi-channel enqueue,
   close detection, no case cap, retry exhaustion cannot masquerade as default.'
-description: ''
+description: 'Review item 6. Three independent defects in runtime/select.c. (1) It
+  can only wait on one channel: a single intrusive next pointer means the selector
+  enqueues on one channel per attempt, round-robin (admitted at select.c:227-234),
+  so a selector parked on ''a'' is never woken when only ''b'' becomes ready - round-robin
+  needs the selector to keep waking and a parked selector rotates nothing. This is
+  a hang. (2) Retry exhaustion is reported as the default case: max_retries = 256
+  (242) prints ''possible deadlock'' then returns -1, which the caller reads as default
+  fired (334-338). (3) Close is never checked: no closed test in any readiness scan
+  or after wake, so select-recv on a closed empty channel parks forever (jinn_chan_recv
+  handles this at channel.c:283-288) and select-send to a closed channel silently
+  reports success. Plus a silent cap: int poll_order[16] with limit = n < 16 ? n :
+  16 (167-169) never polls cases 17+. DoD: per-case waiter nodes so a selector is
+  enqueued on every case simultaneously (Go''s model); close observed in scans and
+  after wake with send-to-closed reporting false consistently with jinn_chan_send;
+  no case cap or a compile-time diagnostic if one is retained; retry exhaustion never
+  masquerades as default. Tests: two-channel select woken by either channel, select
+  on a closed channel, select with 32 cases, select with no default and no ready case,
+  fairness under contention.'
