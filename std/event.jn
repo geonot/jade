@@ -95,7 +95,7 @@ type EventLoop
         fds_buf is extern.malloc(max * 4)
         evts_buf is extern.malloc(max * 4)
         n is extern.jinn_event_loop_poll(self.handle, timeout_ms, fds_buf as %i32, evts_buf as %i32, max as i32)
-        result is [] as [Event]
+        result is vec()
         if n <= 0
             extern.free(fds_buf)
             extern.free(evts_buf)

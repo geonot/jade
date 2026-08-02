@@ -14,6 +14,8 @@
 #   built is url.build("https", "example.com", "/search", map_of("q", "café"))
 #   # -> "https://example.com/search?q=caf%C3%A9"
 
+use convert
+
 # ── URL value type ───────────────────────────────────────────
 
 type Url
@@ -38,7 +40,7 @@ type Url
             out is out + "@"
         out is out + self.host
         if self.port > 0 and self.port neq default_port(self.scheme)
-            out is out + ":" + self.port
+            out is out + ":" + to_string(self.port)
         out is out + self.path
         if self.raw_query.length > 0
             out is out + "?" + self.raw_query
@@ -51,7 +53,7 @@ type Url
             return ""
         port_part is ""
         if self.port > 0 and self.port neq default_port(self.scheme)
-            port_part is ":" + self.port
+            port_part is ":" + to_string(self.port)
         self.scheme + "://" + self.host + port_part
 
     *with_path(p as String) returns Url
@@ -116,7 +118,7 @@ type Url
         host is authority.slice(0, colon)
         port_str is authority.slice(colon + 1, authority.length)
         if port_str.length > 0
-            port is port_str as i64
+            port is convert.parse_int(port_str)
     else
         host is authority
     query is decode_query(raw_query)

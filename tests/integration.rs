@@ -822,6 +822,19 @@ fn extern_puts() {
     );
 }
 
+/// A declared `%i8` / `%u8` / `%void` extern parameter is C's opaque-handle
+/// convention (`char *` / `void *`): any raw pointer satisfies it. The
+/// runtime's `jinn_spawn_exec(const void *vec_ptr, ...)` takes a vec header
+/// this way, so `%argv` on a `Vec of String` must be accepted without the
+/// typer demanding the pointee match.
+#[test]
+fn extern_opaque_pointer_accepts_any_raw_pointer() {
+    expect(
+        "extern *jinn_spawn_exec(vec_ptr as %i8, exit_code as %i32) returns i32\n\n*main() returns i32\n    argv is [\"/bin/true\"]\n    code is 0\n    extern.jinn_spawn_exec(%argv, %code as %i32)\n    log(code)\n    0\n",
+        "0",
+    );
+}
+
 #[test]
 fn struct_method_basic() {
     expect(

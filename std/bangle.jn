@@ -70,7 +70,7 @@ type App
     *use_middleware(name as String)
         self.middleware.push(name)
 
-    *listen(port as i64)
+    *listen(port as i64) ! NetError
         self.port is port
         __serve(self)
 
@@ -277,7 +277,7 @@ type App
 
 # ── Server loop ──────────────────────────────────────────────
 
-*__serve(app as App)
+*__serve(app as App) ! NetError
     log("bangle listening on " + app.host + ":" + to_string(app.port))
     server is net.tcp_listen(app.host, app.port)
     loop

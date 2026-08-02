@@ -1,4 +1,33 @@
 # Changelog
+- **[136]** (2026-08-02 18:12) std gate: remove sqlite; fix `! E` on methods; clean error diagnostics
+
+Removed std/sqlite.jn — the wrapper never type-checked and shipping a
+broken binding is worse than shipping none. runtime/sqlite.c stays: it is
+live FFI with a passing integration test, usable via `extern
+*jinn_sqlite_*`. build.rs/jinn_rt.h/std.md updated.
+
+Compiler bug found while fixing std/net: `! E` was desugared to
+`Result of T, E` for free functions (resolve.rs:140) but BOTH method
+signature paths dropped f.error_types, so `err X` inside any method was
+rejected with "this function returns T". Methods now honor `! E`
+end-to-end through codegen.
+
+Six user-facing diagnostics printed raw `Span { start, end, line, .. }`
+Debug output. All now use span.loc() -> file:line:col.
+
+std sources fixed:
+- argon/rational/date/logging: `"" + n` is not concatenation; the typer
+  deliberately rejects it. Use to_string(n), the idiom the rest of std
+  already uses.
+- net: replaced the `return false` C-ism sentinel with a real `err
+  NetError` union. This is what the error-effect system is for, and it
+  unblocked bangle/http/event which consumed the sentinel API.
+
+tests/programs/actors_multi.jn was racy — two independent actors have no
+cross-mailbox ordering guarantee, so the snapshot flaked ~40% of runs.
+Sequenced the drains; 20/20 deterministic.
+
+std gate 13 -> 7 failing modules. clippy clean, fmt clean.
 - **[135]** (2026-08-02 17:37) review eval: P1-6 — mir-drops summary is behind --debug-drops only
 
 The driver printed the mir-drops summary on any compile where the pass

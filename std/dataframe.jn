@@ -99,7 +99,7 @@ type DataFrame
     *where_eq(col_name as String, target as String) returns DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
-            return self
+            return __clone_df(self)
         col_data is copy self.data.get(idx)
         mask is vec()
         loop col_data
@@ -111,7 +111,7 @@ type DataFrame
     *where_neq(col_name as String, target as String) returns DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
-            return self
+            return __clone_df(self)
         col_data is copy self.data.get(idx)
         mask is vec()
         loop col_data
@@ -123,7 +123,7 @@ type DataFrame
     *where_gt(col_name as String, threshold as f64) returns DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
-            return self
+            return __clone_df(self)
         col_data is copy self.data.get(idx)
         mask is vec()
         loop col_data
@@ -136,7 +136,7 @@ type DataFrame
     *where_lt(col_name as String, threshold as f64) returns DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
-            return self
+            return __clone_df(self)
         col_data is copy self.data.get(idx)
         mask is vec()
         loop col_data
@@ -149,7 +149,7 @@ type DataFrame
     *where_contains(col_name as String, substr as String) returns DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
-            return self
+            return __clone_df(self)
         col_data is copy self.data.get(idx)
         mask is vec()
         loop col_data
@@ -184,7 +184,7 @@ type DataFrame
     *sort_by(col_name as String) returns DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
-            return self
+            return __clone_df(self)
         col_data is copy self.data.get(idx)
         # Build index array and sort by values
         indices is vec()
@@ -197,7 +197,7 @@ type DataFrame
     *sort_by_num(col_name as String) returns DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
-            return self
+            return __clone_df(self)
         col_data is copy self.data.get(idx)
         indices is vec()
         for i in 0 to self.nrows
@@ -442,6 +442,19 @@ type DataFrame
         if $ equals name
             return $$
     -1
+
+# An independent DataFrame with the same contents. Used where a query
+# matches nothing and the result must still be an owned value: `self` is a
+# borrow, so returning it directly would hand out a reference to the
+# receiver.
+*__clone_df(df as DataFrame) returns DataFrame
+    new_cols is vec()
+    loop df.columns
+        new_cols.push($)
+    new_data is vec()
+    loop df.data
+        new_data.push(__copy_vec($))
+    DataFrame(columns is new_cols, data is new_data, nrows is df.nrows, ncols is df.ncols)
 
 *__copy_vec(v as Vec of String) returns Vec of String
     result is vec()

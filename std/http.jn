@@ -184,7 +184,7 @@ type ParsedUrl
 type PoolEntry
     host as String
     port as i64
-    fd as i64
+    fd as i32
     is_tls as bool
 
 type ConnectionPool
@@ -230,7 +230,7 @@ type ConnectionPool
         if $.host equals parsed.host and $.port equals parsed.port and $.is_tls is false
             idx is $$
             break
-    fd is -1
+    fd is -1 as i32
     if idx >= 0
         fd is p.entries.get(idx).fd
     else

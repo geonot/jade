@@ -498,9 +498,14 @@ impl Typer {
     ) {
         let rp = self.infer_ctx.shallow_resolve(pty);
         let ra = self.infer_ctx.shallow_resolve(aty);
-        if matches!(ra, Type::String)
-            && matches!(&rp, Type::Ptr(inner) if matches!(**inner, Type::I8 | Type::U8 | Type::Void))
-        {
+        // A declared `%i8` / `%u8` / `%void` parameter is C's opaque-handle
+        // convention (`char *` / `void *`). At an extern boundary the C
+        // signature is the user's assertion, not something the typer can
+        // recover, so a `String` (marshalled to its data pointer) and any
+        // raw pointer both satisfy it. Every other pointee must still match.
+        let param_is_opaque_ptr =
+            matches!(&rp, Type::Ptr(inner) if matches!(**inner, Type::I8 | Type::U8 | Type::Void));
+        if param_is_opaque_ptr && matches!(ra, Type::String | Type::Ptr(_)) {
             return;
         }
         let _ = self.infer_ctx.unify_at(pty, aty, span, reason);

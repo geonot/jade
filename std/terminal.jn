@@ -171,7 +171,7 @@ type Size
 *size returns Size
     cols_buf is extern.malloc(4)
     rows_buf is extern.malloc(4)
-    rc is extern.jinn_terminal_size(cols_buf, rows_buf)
+    rc is extern.jinn_terminal_size(cols_buf as %i32, rows_buf as %i32)
     if rc neq 0
         extern.free(cols_buf)
         extern.free(rows_buf)

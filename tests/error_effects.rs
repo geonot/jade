@@ -435,3 +435,44 @@ fn match_on_fallible_struct_return() {
         "6\n-2",
     );
 }
+
+/// `! E` on a **method** desugars to `Result of T, E` exactly as it does on
+/// a free function. Regression: both method-signature paths in
+/// `typer/resolve.rs` dropped `error_types`, so `err X` inside any method
+/// was rejected with "this function returns T" and the whole error-effect
+/// system was unreachable from methods.
+#[test]
+fn method_declares_error_union() {
+    expect(
+        "err MyErr\n    Bad\n\ntype Box\n    v as i64\n\n    *get(n as i64) returns i64 ! MyErr\n        if n < 0\n            err Bad\n        n * 2\n\n*main()\n    b is Box(v is 1)\n    match b.get(5)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match b.get(-1)\n        Ok(v) ? log(v)\n        Err(e) ? log(-2)\n",
+        "10\n-2",
+    );
+}
+
+/// A ptr-method (`self` by pointer) honours `! E` the same way.
+#[test]
+fn ptr_method_declares_error_union() {
+    expect(
+        "err MyErr\n    Bad\n\ntype Counter\n    n as i64\n\n    *bump(by as i64) returns i64 ! MyErr\n        if by < 0\n            err Bad\n        self.n is self.n + by\n        self.n\n\n*main()\n    c is Counter(n is 0)\n    match c.bump(3)\n        Ok(v) ? log(v)\n        Err(e) ? log(-1)\n    match c.bump(-1)\n        Ok(v) ? log(v)\n        Err(e) ? log(-2)\n",
+        "3\n-2",
+    );
+}
+
+/// Error diagnostics carry `file:line:col`, never a raw `Span { .. }` Debug
+/// dump. Regression: six diagnostics in the error-effect paths printed the
+/// internal span struct straight at the user.
+#[test]
+fn error_diagnostics_have_no_debug_spans() {
+    let err = compile_fails(
+        "err E1\n    Bad\nerr E2\n    Other\n\n*f(n as i64) returns i64 ! E1\n    if n < 0\n        err Other\n    n\n\n*main()\n    log(1)\n",
+    );
+    assert!(
+        !err.contains("Span {"),
+        "diagnostic leaked a Debug span:\n{err}"
+    );
+    assert!(err.contains("no conversion `E2 -> E1`"), "{err}");
+    assert!(
+        err.contains(".jn:8:9"),
+        "expected file:line:col, got:\n{err}"
+    );
+}
