@@ -1,16 +1,3 @@
-//! Conformance suite pinning Jinn's String/Unicode semantics.
-//!
-//! Every assertion here mirrors a rule in `docs/strings.md`:
-//!
-//!   * `String` is UTF-8;
-//!   * `.length` / `.len()` is the Unicode scalar count;
-//!   * `.byte_count` is the storage byte count and the unit for `char_at`,
-//!     indexing, and `slice`;
-//!   * `char_at` / `s[i]` return a single UTF-8 byte as `i64`;
-//!   * equality and search are byte-exact (no normalisation).
-//!
-//! These compile and run real `.jn` programs through `jinnc`.
-
 use std::path::PathBuf;
 use std::process::Command;
 

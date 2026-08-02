@@ -1,24 +1,3 @@
-# std.crypto — Cryptographic primitives index
-#
-# This module provides the cross-cutting primitives that don't belong to a
-# single algorithm family:
-#
-#   * `random_bytes` / `random_hex`    — CSPRNG (OpenSSL `RAND_bytes`)
-#   * `hmac` / `hmac_sha256` / etc.    — HMAC (RFC 2104) over any digest
-#   * `chacha20_poly1305_*`            — RFC 8439 AEAD
-#   * `pbkdf2`                         — RFC 8018 PBKDF2-HMAC
-#   * `scrypt`                         — RFC 7914
-#   * `secure_compare`                 — constant-time byte comparison
-#
-# Single-algorithm families live in dedicated modules:
-#
-#   * `std.sha`     — SHA-1, SHA-2, SHA-3 hashing
-#   * `std.blake`   — BLAKE2 / BLAKE3 hashing
-#   * `std.aes`     — AES-256 (GCM, CBC)
-#   * `std.argon`   — Argon2id password hashing / KDF
-#
-# All inputs/outputs are raw byte strings unless suffixed with `_hex`.
-# Standards: RFC 2104, RFC 7914, RFC 8018, RFC 8439, RFC 9106.
 
 extern *jinn_random_bytes(buf as %i8, n as i64) returns i32
 extern *jinn_evp_hmac(alg as %i8, key as %i8, key_len as i64, data as %i8, data_len as i64, out as %i8) returns i64
@@ -32,7 +11,6 @@ extern *jinn_hex_to_bytes(hex as %i8, hex_len as i64, out as %i8) returns i64
 extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
 
-# ── Random ───────────────────────────────────────────────────
 
 *random_bytes(n as i64) returns String
     if n <= 0
@@ -71,7 +49,6 @@ extern *free(ptr as %i8)
 *random_token returns String
     random_hex(32)
 
-# ── HMAC (RFC 2104) ──────────────────────────────────────────
 
 *hmac(alg as String, key as String, data as String) returns String
     out is extern.malloc(64)
@@ -106,7 +83,6 @@ extern *free(ptr as %i8)
 *hmac_sha512(key as String, data as String) returns String
     hmac_hex("SHA512", key, data)
 
-# ── ChaCha20-Poly1305 AEAD (RFC 8439) ───────────────────────
 
 type AeadResult
     ciphertext as String
@@ -141,7 +117,6 @@ type AeadResult
     extern.free(pt_buf)
     result
 
-# ── PBKDF2 (RFC 8018) ───────────────────────────────────────
 
 *pbkdf2(alg as String, password as String, salt as String, iters as i64, dklen as i64) returns String
     if dklen <= 0 or iters < 1
@@ -161,7 +136,6 @@ type AeadResult
 *pbkdf2_sha512(password as String, salt as String, iters as i64, dklen as i64) returns String
     pbkdf2("SHA512", password, salt, iters, dklen)
 
-# ── scrypt (RFC 7914) ───────────────────────────────────────
 
 *scrypt(password as String, salt as String, n as i64, r as i64, p as i64, dklen as i64) returns String
     if dklen <= 0
@@ -178,7 +152,6 @@ type AeadResult
 *scrypt_default(password as String, salt as String, dklen as i64) returns String
     scrypt(password, salt, 16384, 8, 1, dklen)
 
-# ── Constant-time comparison ────────────────────────────────
 
 *secure_compare(a as String, b as String) returns bool
     if a.length neq b.length
@@ -190,7 +163,6 @@ type AeadResult
         i is i + 1
     diff equals 0
 
-# ── Hex helpers (re-exported for convenience) ───────────────
 
 *to_hex(data as String) returns String
     __bytes_to_hex(data)

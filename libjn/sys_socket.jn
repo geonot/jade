@@ -1,6 +1,4 @@
-# libjn.sys_socket — drop-in for POSIX <sys/socket.h>
 
-# ── Address families ──
 AF_UNSPEC    is 0
 AF_UNIX      is 1
 AF_LOCAL     is 1
@@ -14,7 +12,6 @@ PF_UNIX   is 1
 PF_INET   is 2
 PF_INET6  is 10
 
-# ── Socket types ──
 SOCK_STREAM    is 1
 SOCK_DGRAM     is 2
 SOCK_RAW       is 3
@@ -25,17 +22,14 @@ SOCK_PACKET    is 10
 SOCK_NONBLOCK  is 0x800
 SOCK_CLOEXEC   is 0x80000
 
-# ── Protocols ──
 IPPROTO_IP   is 0
 IPPROTO_TCP  is 6
 IPPROTO_UDP  is 17
 IPPROTO_IPV6 is 41
 
-# ── Levels ──
 SOL_SOCKET is 1
 SOL_TCP    is 6
 
-# ── Options ──
 SO_DEBUG     is 1
 SO_REUSEADDR is 2
 SO_TYPE      is 3
@@ -53,7 +47,6 @@ SO_SNDTIMEO  is 21
 TCP_NODELAY  is 1
 TCP_KEEPIDLE is 4
 
-# ── Message flags ──
 MSG_OOB       is 0x01
 MSG_PEEK      is 0x02
 MSG_DONTROUTE is 0x04
@@ -61,7 +54,6 @@ MSG_TRUNC     is 0x20
 MSG_DONTWAIT  is 0x40
 MSG_NOSIGNAL  is 0x4000
 
-# ── Shutdown ──
 SHUT_RD   is 0
 SHUT_WR   is 1
 SHUT_RDWR is 2
@@ -95,7 +87,6 @@ type Msghdr
     msg_controllen as u64
     msg_flags      as i32
 
-# ── Operations ──
 *socket(domain as i32, type as i32, protocol as i32) returns i32
     nop
     -1

@@ -1,4 +1,3 @@
-# Sorted-set union of two sorted Vecs (merge).
 *main
     a is vec()
     a.push(1)

@@ -1,4 +1,3 @@
-# Max via single pass; lambda chooses extremum direction.
 *extremum(xs as Vec of i64, better as (i64, i64) returns bool) returns i64
     best is xs.get(0)
     i is 1

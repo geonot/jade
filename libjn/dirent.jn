@@ -1,4 +1,3 @@
-# libjn.dirent — drop-in for POSIX <dirent.h>
 
 DT_UNKNOWN is 0
 DT_FIFO    is 1

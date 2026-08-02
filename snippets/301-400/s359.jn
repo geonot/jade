@@ -1,4 +1,3 @@
-# Parity (XOR fold over bits).
 *parity(n as i64) returns i64
     p is 0
     while n > 0

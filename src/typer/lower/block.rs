@@ -79,10 +79,6 @@ impl Typer {
         }
     }
 
-    /// Finalize drops for a block, additionally treating `extra` def-ids as
-    /// already-consumed (never dropped here). Used by `match` arms, whose
-    /// pattern bindings alias the subject value (they lower to `FieldGet` /
-    /// whole-subject projections in MIR) and must not be double-dropped.
     pub(in crate::typer) fn finalize_block_drops_excluding(
         &mut self,
         stmts: &mut Vec<hir::Stmt>,
@@ -113,10 +109,6 @@ impl Typer {
         }
     }
 
-    /// Finalize drops for a loop body. Unlike a value block, a loop body has
-    /// no tail value, so a trailing expression statement is not treated as a
-    /// returned value; all owned locals are dropped (except those referenced
-    /// by a trailing jump).
     pub(in crate::typer) fn finalize_loop_body_drops(&mut self, stmts: &mut Vec<hir::Stmt>) {
         let ends_with_jump = stmts.last().is_some_and(|s| {
             matches!(
@@ -135,8 +127,6 @@ impl Typer {
         }
     }
 
-    /// Collect the def-ids bound by a pattern (recursively through composite
-    /// patterns), used to exclude `match` arm pattern bindings from drops.
     pub(in crate::typer) fn collect_pat_bind_ids(
         pat: &hir::Pat,
         out: &mut std::collections::HashSet<crate::hir::DefId>,
@@ -161,19 +151,6 @@ impl Typer {
         self.emit_scope_drops_excluding(stmts, &std::collections::HashSet::new());
     }
 
-    /// Collect every def-id whose drop obligation has been transferred away
-    /// somewhere inside `stmts` — by a plain-variable bind/assign (the new
-    /// binding owns the buffer), by being pushed into a container, or by
-    /// being passed to a `take` (explicit or inferred-consuming, task 8-6)
-    /// parameter. Recurses into nested statement bodies: a bind inside an
-    /// `if`/`while`/`for`/`match` arm consumes the outer variable just as a
-    /// same-scope bind does (review §3.1 contributing cause; the old scan's
-    /// `_ => {}` left the outer drop in place and double-freed).
-    ///
-    /// Flow-insensitive by design: a consumption on *any* path suppresses
-    /// the scope-exit drop, which trades the double-free for a leak on the
-    /// paths that did not consume. Task 8-7's flow-sensitive analysis
-    /// rejects the conditional-move-then-use programs outright.
     fn collect_block_consumed_ids(
         &mut self,
         stmts: &[hir::Stmt],
@@ -350,9 +327,6 @@ impl Typer {
                 }
             }
 
-            // Structural recursion: a consuming call can sit anywhere in an
-            // expression tree (`total is tally(take_all(v)) + 1`), so walk
-            // every subexpression.
             hir::ExprKind::BinOp(l, _, r) | hir::ExprKind::Index(l, r) => {
                 self.collect_consumed_in_expr(l, out);
                 self.collect_consumed_in_expr(r, out);
@@ -430,11 +404,6 @@ impl Typer {
         )
     }
 
-    /// D1's Aggregate category (memory-model.md §1): the types for which
-    /// `b is a` MOVES. Distinct from `needs_drop`: `String` drops but
-    /// deep-copies on assignment (Value category), `Channel`/`ActorRef`
-    /// are runtime-refcounted handles, and `@resource` structs have their
-    /// own linear discipline with explicit modifiers.
     pub(in crate::typer) fn type_is_aggregate(&self, ty: &Type) -> bool {
         let mut visiting: std::collections::HashSet<crate::intern::Symbol> =
             std::collections::HashSet::new();
@@ -493,8 +462,6 @@ impl Typer {
         }
     }
 
-    /// Peel value-preserving wrappers so move detection sees the source
-    /// variable through coercions.
     fn peel_move_wrappers(e: &hir::Expr) -> &hir::Expr {
         match &e.kind {
             hir::ExprKind::Coerce(inner, _) | hir::ExprKind::Cast(inner, _) => {
@@ -512,12 +479,6 @@ impl Typer {
             .find(|v| v.def_id == id)
     }
 
-    /// M8 (memory-model.md, task 8-8): the pre-existing aggregate
-    /// variables a task body captures. `outer_ids` is the in-scope
-    /// def-id snapshot taken BEFORE the body was lowered — dispatch
-    /// bodies share the enclosing scope (`lower_block_no_scope`), so
-    /// body-local binds are distinguishable from captures only by that
-    /// snapshot. Sorted by def-id for deterministic diagnostics.
     pub(in crate::typer) fn collect_aggregate_captures(
         &mut self,
         body: &[hir::Stmt],
@@ -549,9 +510,6 @@ impl Typer {
         captured
     }
 
-    /// Mark every aggregate the task body captures as moved into that
-    /// task (M8) — a second capture or a later parent use is then a
-    /// use-after-move with the task-capture diagnostic.
     pub(in crate::typer) fn mark_task_captures(
         &mut self,
         body: &[hir::Stmt],
@@ -564,16 +522,6 @@ impl Typer {
         Ok(())
     }
 
-    /// Record every move a lowered statement performs so that a later use
-    /// of the source is diagnosed as a use-after-move (the flow-sensitive
-    /// single analysis of task 8-7; memory-model.md M1/M6/M9/M10). This is
-    /// distinct from `collect_block_consumed_ids`, which drives
-    /// drop-exclusion. Moves recorded here: explicit `take` binds,
-    /// consuming-call arguments (task 8-6), plain aggregate binds and
-    /// assignments (M1 — aggregates move on assignment), and channel
-    /// sends (M9). Each is rejected outright if a registered `defer`
-    /// reads the source (M10), and a `return` of a reference to an owned
-    /// local is rejected here too.
     pub(in crate::typer) fn record_take_moves_in_stmt(
         &mut self,
         s: &hir::Stmt,
@@ -747,8 +695,7 @@ impl Typer {
                 self.record_take_moves_in_expr(ch)?;
                 self.record_take_moves_in_expr(v)?;
             }
-            /* M8: actor message payloads and spawn initializers move
-             * into the actor's task. */
+
             hir::ExprKind::Send(actor, _, _, _, args) => {
                 for a in args {
                     let src = Self::peel_move_wrappers(a);
@@ -999,11 +946,6 @@ impl Typer {
         Self::collect_hir_var_ids_stmt_inner(stmt, out, false);
     }
 
-    /// With `shield_copies`, a `c is copy x` bind does not count `x` as a
-    /// use — the task gets a clone, not the value (M8's sanctioned
-    /// snapshot pattern). Only statement-position binds are shielded;
-    /// copy-binds nested in expression-position blocks still count
-    /// (conservative: a false capture, never a missed one).
     fn collect_hir_var_ids_stmt_inner(
         stmt: &hir::Stmt,
         out: &mut std::collections::HashSet<crate::hir::DefId>,

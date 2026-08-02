@@ -1,17 +1,4 @@
-# std.codec — Byte encoding and decoding
-#
-# Hex (RFC 4648 §8), Base64 (§4), Base64URL (§5), and Base32 (§6).
-# All encoders/decoders operate on Jinn `String` (treated as raw bytes).
-#
-# Usage:
-#   codec.to_hex("hi")              # "6869"
-#   codec.from_hex("6869")          # "hi"
-#   codec.to_base64("hello")        # "aGVsbG8="
-#   codec.from_base64("aGVsbG8=")   # "hello"
-#   codec.to_base64_url(data)       # url-safe, no padding
-#   codec.to_base32(data)           # "NBSWY3DP"
 
-# ── Hex ──────────────────────────────────────────────────────
 
 HEX_CHARS is "0123456789abcdef"
 HEX_CHARS_UPPER is "0123456789ABCDEF"
@@ -57,7 +44,6 @@ HEX_CHARS_UPPER is "0123456789ABCDEF"
         return ch - 55
     0
 
-# ── Base64 (RFC 4648 §4) ─────────────────────────────────────
 
 B64_TABLE     is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 B64_URL_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
@@ -65,7 +51,6 @@ B64_URL_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
 *to_base64(data as String) returns String
     __b64_encode(data, B64_TABLE, true)
 
-# Base64URL (RFC 4648 §5) — url-safe alphabet, no padding by default.
 *to_base64_url(data as String) returns String
     __b64_encode(data, B64_URL_TABLE, false)
 
@@ -73,7 +58,6 @@ B64_URL_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
     __b64_decode(encoded)
 
 *from_base64_url(encoded as String) returns String
-    # Translate '-' -> '+' and '_' -> '/' then decode.
     converted is ""
     i is 0
     while i < encoded.length
@@ -154,7 +138,6 @@ B64_URL_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
         return 63
     0
 
-# ── Base32 (RFC 4648 §6) ─────────────────────────────────────
 
 B32_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
@@ -163,13 +146,11 @@ B32_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
     i is 0
     n is data.length
     while i < n
-        # Take 5 bytes -> 8 base32 chars
         b is vec()
         j is 0
         while j < 5
             b.push(i + j < n ? data.char_at(i + j) ! 0)
             j is j + 1
-        # Pack into 40 bits then split into 5-bit groups.
         idx is vec()
         idx.push((b.get(0) >> 3) & 31)
         idx.push(((b.get(0) & 7) << 2) | ((b.get(1) >> 6) & 3))
@@ -179,7 +160,6 @@ B32_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
         idx.push((b.get(3) >> 2) & 31)
         idx.push(((b.get(3) & 3) << 3) | ((b.get(4) >> 5) & 7))
         idx.push(b.get(4) & 31)
-        # How many output chars valid (depends on remaining bytes)?
         remaining is n - i
         keep is 8
         if remaining equals 1
@@ -212,7 +192,6 @@ B32_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
         while j < 8
             v.push(__b32_val(encoded.char_at(i + j)))
             j is j + 1
-        # Reconstruct 5 bytes from 8 5-bit groups.
         out is out + chr(((v.get(0) << 3) | (v.get(1) >> 2)) & 255)
         if encoded.char_at(i + 2) neq 61
             out is out + chr((((v.get(1) & 3) << 6) | (v.get(2) << 1) | (v.get(3) >> 4)) & 255)

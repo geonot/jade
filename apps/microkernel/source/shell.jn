@@ -1,5 +1,3 @@
-# Tiny shell actor.  `exec(line)` parses the verb and prints a result.
-# Only first letter is inspected (the kernel doesn't need a real lexer).
 
 actor Shell
     n_cmds as i64
@@ -7,8 +5,6 @@ actor Shell
     *exec line as String
         n_cmds is n_cmds + 1
         c is line.char_at(0)
-        # 'a'=97 alloc, 'r'=114 read, 'w'=119 write, 'f'=102 fork,
-        # 'p'=112 ps,    'h'=104 halt
         if c equals 97
             log 'sh: alloc ok'
         if c equals 114

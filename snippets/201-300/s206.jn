@@ -1,4 +1,3 @@
-# Bond YTM via Newton-like bisection on price function (integer approx).
 *price_at(rate as i64, coupon as i64, face as i64, n as i64) returns i64
     p is 0
     factor is 1000

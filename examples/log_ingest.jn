@@ -1,9 +1,3 @@
-# log_ingest.jn — an access-log ingestion pipeline.
-#
-# Reads Common-Log-Format lines, parses + validates each with checked
-# error-effects, classifies a severity from the status code, and lands the
-# accepted records in a compile-time-checked persistent store. Errors are
-# values: a malformed line is tallied, never fatal.
 
 err ParseError
     Empty
@@ -39,8 +33,6 @@ store hits
     status as i64
     bytes as i64
 
-# Parse a non-negative decimal. No surface `parse` exists, so we fold the bytes
-# ourselves — and make the failure a value, not a panic.
 *to_int(s as String) returns i64 ! ParseError
     s.is_empty() ? err BadBytes(s)
     n is 0
@@ -53,12 +45,9 @@ store hits
 *severity(status as i64) returns Severity
     status >= 500 ? Error ! status >= 400 ? Warn ! Info
 
-# Bytes field is either '-' (no body) or a decimal count. Normalise the empty
-# marker to a zero, then fold a single fallible parse.
 *bytes_of(field as String) returns i64 ! ParseError
     to_int(field equals '-' ? '0' ! field)
 
-# Pull the request path out of the quoted "METHOD path PROTO" field.
 *path_of(line as String) returns String ! ParseError
     q is line.split('"')
     q.len() < 2 ? err BadLine(line)
@@ -66,7 +55,6 @@ store hits
     parts.len() < 2 ? err BadLine(line)
     parts.get(1)
 
-# Common Log Format: ip ident user [time] "req" status bytes
 *parse(line as String) returns Hit ! ParseError
     line.trim().is_empty() ? err Empty
     f is line.split(' ')
@@ -84,8 +72,6 @@ type Report
     rejected as i64
     bytes as i64
 
-# Parse + persist one line. Returns the accepted byte count, or an error that
-# the caller tallies — a malformed line never aborts the run.
 *absorb(line as String) returns i64 ! IngestError
     h is parse(line)
     land(h)

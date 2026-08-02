@@ -1,4 +1,3 @@
-# Histogram of digits (0..9) over a vec of integers.
 *main
     xs is vec()
     xs.push(112)

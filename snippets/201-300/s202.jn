@@ -1,4 +1,3 @@
-# HFT: aggregate book depth by summing top-N quantities.
 *depth(qs as Vec of i64, n as i64) returns i64
     s is 0
     i is 0

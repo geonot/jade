@@ -1,6 +1,3 @@
-# libjn.float — drop-in for C <float.h>
-#
-# IEEE-754 binary32 / binary64 / binary128 limits.
 
 FLT_RADIX is 2
 FLT_MANT_DIG is 24

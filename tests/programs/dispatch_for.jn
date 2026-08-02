@@ -1,4 +1,3 @@
-# Dispatch for-in test — iterate over a generator with for loop
 *main
     gen is dispatch
         for i in 5

@@ -1,13 +1,4 @@
-# std.bigint — Arbitrary-precision integer arithmetic
-#
-# Usage:
-#   a is bigint.from_str("123456789012345678901234567890")
-#   b is bigint.from_int(42)
-#   c is bigint.add(a, b)
-#   log(bigint.to_string(c))
 
-# Stores digits as Vec of i64 in base 10^9. Least significant chunk first.
-# sign: 1 for positive/zero, -1 for negative
 
 BASE is 1000000000
 
@@ -39,7 +30,6 @@ type BigInt
     if s.char_at(0) equals 45
         sign is -1
         start is 1
-    # Parse from right to left in groups of 9
     chunks is vec()
     i is s.length
     while i > start
@@ -49,7 +39,6 @@ type BigInt
         chunk is __parse_chunk(s, lo, i)
         chunks.push(chunk)
         i is lo
-    # Remove leading zero chunks
     while chunks.length > 1 and chunks.get(chunks.length - 1) equals 0
         chunks.pop()
     if chunks.length equals 1 and chunks.get(0) equals 0
@@ -83,7 +72,6 @@ type BigInt
 *absolute(a as BigInt)
     BigInt(chunks is a.chunks, sign is 1)
 
-# Compare magnitudes: returns -1, 0, or 1
 *__cmp_mag(a as BigInt, b as BigInt) returns i64
     if a.chunks.length neq b.chunks.length
         if a.chunks.length > b.chunks.length
@@ -121,7 +109,6 @@ type BigInt
     result
 
 *__sub_mag(a as BigInt, b as BigInt) returns Vec of i64
-    # Assumes |a| >= |b|
     result is vec()
     borrow is 0
     i is 0
@@ -138,7 +125,6 @@ type BigInt
             borrow is 0
         result.push(diff)
         i is i + 1
-    # Strip leading zeros
     while result.length > 1 and result.get(result.length - 1) equals 0
         result.pop()
     result
@@ -178,7 +164,6 @@ type BigInt
         if carry > 0
             result.set(i + b.chunks.length, result.get(i + b.chunks.length) + carry)
         i is i + 1
-    # Strip leading zeros
     while result.length > 1 and result.get(result.length - 1) equals 0
         result.pop()
     s is a.sign * b.sign
@@ -202,7 +187,6 @@ type BigInt
     if is_zero(a)
         return '0'
     result is ''
-    # Most significant chunk first (no zero-padding)
     i is a.chunks.length - 1
     first is true
     while i >= 0
@@ -211,7 +195,6 @@ type BigInt
             result is result + '{chunk}'
             first is false
         else
-            # Pad to 9 digits
             s is '{chunk}'
             pad is 9 - s.length
             for j in 0 to pad
@@ -230,8 +213,6 @@ type BigInt
         i is i - 1
     result * a.sign
 
-# Division: returns DivResult with quotient and remainder.
-# Uses schoolbook long division on chunks.
 
 type DivResult
     quot as BigInt
@@ -245,7 +226,6 @@ type DivResult
         return DivResult(quot is zero(), rem is absolute(a))
     if cmp equals 0
         return DivResult(quot is one(), rem is zero())
-    # Single-chunk divisor: use simple loop
     if b.chunks.length equals 1
         d is b.chunks.get(0)
         q is vec()
@@ -256,24 +236,20 @@ type DivResult
             q.push(cur / d)
             rv is cur mod d
             i is i - 1
-        # Reverse q (it was built most-significant first)
         qr is vec()
         j is q.length - 1
         while j >= 0
             qr.push(q.get(j))
             j is j - 1
-        # Strip leading zeros
         while qr.length > 1 and qr.get(qr.length - 1) equals 0
             qr.pop()
         rc is vec()
         rc.push(rv)
         return DivResult(quot is BigInt(chunks is qr, sign is 1), rem is BigInt(chunks is rc, sign is 1))
-    # Multi-chunk divisor: subtract-and-shift approach
     remainder is absolute(a)
     quotient_chunks is vec()
     shift is a.chunks.length - b.chunks.length
     while shift >= 0
-        # Find how many times b * BASE^shift fits into remainder
         count is 0
         loop
             shifted is __shift_left(absolute(b), shift)
@@ -284,7 +260,6 @@ type DivResult
             count is count + 1
         quotient_chunks.push(count)
         shift is shift - 1
-    # Reverse to get least-significant first
     qr2 is vec()
     k is quotient_chunks.length - 1
     while k >= 0
@@ -317,7 +292,6 @@ type DivResult
     dr is __divmod(a, b)
     dr.rem
 
-# ── Exponentiation ──────────────────────────────────────────
 
 *power(base as BigInt, exp as i64) returns BigInt
     if exp equals 0
@@ -342,12 +316,10 @@ type DivResult
     e is absolute(exp)
     two is from_int(2)
     while not is_zero(e)
-        # Check if least significant digit is odd
         lsb is e.chunks.get(0)
         if lsb mod 2 equals 1
             result is modulo(mul(result, b), m)
         b is modulo(mul(b, b), m)
-        # Divide exp by 2
         e is div(e, two)
     result
 

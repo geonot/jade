@@ -1,11 +1,3 @@
-//! Task 8-23 — WAL replay on recovery. Before this task the WAL was
-//! write-only: deleting the `.store` and keeping the `.wal` yielded zero
-//! rows, and corrupting the WAL changed nothing anywhere. Store open now
-//! performs recovery: replay committed WAL records missing from the data
-//! file (upsert by `sid`), rewrite atomically, invalidate `.idx`
-//! sidecars, then checkpoint — a WAL prefix is discardable only once its
-//! effects are durably in the data file.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -49,8 +41,6 @@ const WRITER: &str = "store items\n    name as String\n    qty as i64\n\n*main\n
 const READER: &str =
     "store items\n    name as String\n    qty as i64\n\n*main\n    log(count items)\n";
 
-/// Probe: delete the `.store`, keep the `.wal` — every committed record
-/// is restored from the log (this yielded 0 rows before 8-23).
 #[test]
 fn recovery_restores_store_from_wal_alone() {
     let dir = tempfile::tempdir().unwrap();
@@ -77,7 +67,6 @@ fn recovery_restores_store_from_wal_alone() {
     );
 }
 
-/// Probe: delete the `.wal`, keep the `.store` — unchanged rows.
 #[test]
 fn store_without_wal_is_unaffected() {
     let dir = tempfile::tempdir().unwrap();
@@ -90,8 +79,6 @@ fn store_without_wal_is_unaffected() {
     assert_eq!(stdout_lines(&r), vec!["20"]);
 }
 
-/// Probe: a stale data file (rolled back to an earlier state) is healed
-/// forward from the WAL.
 #[test]
 fn stale_data_file_is_healed_from_wal() {
     let dir = tempfile::tempdir().unwrap();
@@ -102,7 +89,7 @@ fn stale_data_file_is_healed_from_wal() {
     );
     let r = run(dir.path(), &w1);
     assert_eq!(stdout_lines(&r), vec!["5"]);
-    // Snapshot the 5-row data file, then write 15 more rows.
+
     let stale = std::fs::read(dir.path().join("items.store")).unwrap();
     let w2 = compile_in(
         dir.path(),
@@ -111,8 +98,7 @@ fn stale_data_file_is_healed_from_wal() {
     );
     let r = run(dir.path(), &w2);
     assert_eq!(stdout_lines(&r), vec!["20"]);
-    // Roll the data file back to the stale 5-row snapshot; the WAL still
-    // holds w2's 15 inserts (w2's open checkpointed w1's entries away).
+
     std::fs::write(dir.path().join("items.store"), &stale).unwrap();
 
     let rd = compile_in(dir.path(), "r", READER);
@@ -126,9 +112,6 @@ fn stale_data_file_is_healed_from_wal() {
     );
 }
 
-/// Probe: corrupting WAL bytes is DETECTED and reported (it used to be
-/// invisible — identical results to the uncorrupted control), and the
-/// valid prefix is still usable.
 #[test]
 fn wal_corruption_is_detected_and_prefix_recovered() {
     let dir = tempfile::tempdir().unwrap();
@@ -145,7 +128,7 @@ fn wal_corruption_is_detected_and_prefix_recovered() {
         *b ^= 0xA5;
     }
     std::fs::write(&wal_path, &wal).unwrap();
-    // Remove the store so recovery MUST lean on the (damaged) WAL.
+
     std::fs::remove_file(dir.path().join("items.store")).unwrap();
 
     let rd = compile_in(dir.path(), "r", READER);
@@ -164,9 +147,6 @@ fn wal_corruption_is_detected_and_prefix_recovered() {
     );
 }
 
-/// Probe: kill -9 mid-insert — the next open recovers to a consistent
-/// state (runs clean; count equals whatever prefix of inserts became
-/// durable, and a WAL-ahead record is replayed in rather than lost).
 #[test]
 fn kill_nine_mid_insert_recovers_consistently() {
     use std::os::unix::process::ExitStatusExt;
@@ -198,16 +178,12 @@ fn kill_nine_mid_insert_recovers_consistently() {
     );
     let n: i64 = stdout_lines(&r)[0].parse().unwrap();
     assert!(n > 0, "some inserts must have survived");
-    // A second open agrees with the first (recovery is idempotent and
-    // checkpointing made the state stable).
+
     let r2 = run(dir.path(), &rd);
     let n2: i64 = stdout_lines(&r2)[0].parse().unwrap();
     assert_eq!(n, n2, "recovered state must be stable across opens");
 }
 
-/// Task 8-25 (first half) — `all <store>` is a first-class row set:
-/// iterate empty, iterate many, bind, `.length`, pass to a function,
-/// and tombstoned rows are excluded.
 #[test]
 fn all_store_first_class_rows() {
     let dir = tempfile::tempdir().unwrap();

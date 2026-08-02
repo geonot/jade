@@ -10,18 +10,11 @@ pub struct ScopePath(u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PkgId(u32);
 
-/// A package's self-declared visibility ceiling (scope.md §4). Declared in the
-/// package's *own* manifest; the resolver reads it on the target of a path
-/// import, never on the consumer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Visibility {
-    /// Reachable by any consumer via path import (the default — reach-in is
-    /// open unless the target opts into a tighter ceiling).
     #[default]
     Public,
-    /// Reachable only within the package's own owner-scope subtree: its parent
-    /// scope and that scope's descendants. A reach-in from a grandparent,
-    /// sibling, or external package is a hard error.
+
     Internal,
 }
 
@@ -107,10 +100,6 @@ impl ScopePath {
         self.0 == 0
     }
 
-    /// True when `self` is an ancestor-or-equal of `other`: every segment of
-    /// `self`, in order, is a prefix of `other`'s segments. The root scope is a
-    /// prefix of everything. Used for the visibility-ceiling subtree test
-    /// (scope.md §4.1).
     pub fn is_prefix_of(self, other: ScopePath) -> bool {
         if self == other {
             return true;
@@ -205,43 +194,21 @@ impl std::fmt::Display for PkgId {
     }
 }
 
-/// Compute the `semantic_hash` for a package.
-///
-/// Inputs:
-///   - `name`: the package's own name
-///   - `scope`: the owner scope (dotted path)
-///   - `version`: the resolved version
-///   - `source_bytes`: concatenated sorted source file contents for this package
-///   - `dep_hashes`: semantic hashes of direct dependencies, **sorted ascending**
-///     before passing in (caller responsibility — determinism requires a stable order)
-///
-/// The hash is a Blake3 Merkle step: Hash(domain_sep ++ name ++ version ++ scope
-/// ++ source_bytes ++ sorted(dep_hash)*).  Changing any input flips the hash;
-/// equal inputs always yield the same hash.
-/// For each package A with a `use B` in its manifest, record the scoped PkgId
-/// that `B` resolves to from A's perspective.
-///
-/// Key: `(consumer_pkg_id, dep_name_symbol)`
-/// Value: the dep's `PkgId` as seen by the consumer (path-scoped under the
-///        consumer's owner scope, per scope.md §2.1).
 pub type ScopedUseMap = HashMap<(PkgId, Symbol), PkgId>;
 
-/// Failure of a path-scoped `use` resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UseResolveError {
-    /// `use <name>` had no matching `requires` entry in the consumer's manifest.
-    /// Carries the consumer's fully-qualified path and the unresolved name so
-    /// the diagnostic can point at the right `project.jn`.
-    Unresolved { consumer: String, name: Symbol },
-    /// A path import `use a/b/...` could not resolve one hop: `via` (the
-    /// intermediary's fully-qualified path) does not declare `requires next`.
+    Unresolved {
+        consumer: String,
+        name: Symbol,
+    },
+
     UnresolvedHop {
         consumer: String,
         via: String,
         next: Symbol,
     },
-    /// A path import reached a target declared `visibility internal` from
-    /// outside the target's owner-scope subtree (scope.md §4.1).
+
     VisibilityCeiling {
         consumer: String,
         target: String,
@@ -281,13 +248,6 @@ impl std::fmt::Display for UseResolveError {
     }
 }
 
-/// Resolve a plain `use <name>` against the consumer's own manifest, per
-/// scope.md §2.1 ("local, deterministic, no global arbitration").
-///
-/// The lookup is keyed strictly by `(consumer, name)`: the same `name` resolves
-/// to a *different* `PkgId` for a different consumer, and there is **no global
-/// fallback** — a name absent from the consumer's `requires` is a hard error,
-/// never silently borrowed from another scope.
 pub fn resolve_use(
     map: &ScopedUseMap,
     consumer: PkgId,
@@ -301,17 +261,6 @@ pub fn resolve_use(
         })
 }
 
-/// Resolve a path import `use seg0/seg1/.../segN` from `consumer`, hop by hop,
-/// then enforce the final target's visibility ceiling (scope.md §4).
-///
-/// Each hop resolves `seg_{i+1}` against the *current* intermediary's manifest
-/// (keyed `(current_pkg_id, seg_{i+1})` in the scoped map), so the parent-scoped
-/// nesting of scope.md §2.1 is preserved at every step. A single-segment path
-/// degrades to `resolve_use`.
-///
-/// The ceiling check (§4.1) applies only to the final target: the import is
-/// legal iff the target is `Public` or the consumer's owner scope is within the
-/// target's owner-scope subtree.
 pub fn resolve_path_use(
     map: &ScopedUseMap,
     consumer: PkgId,
@@ -339,7 +288,6 @@ pub fn resolve_path_use(
     }
 
     if matches!(current.visibility(), Visibility::Internal) {
-        // The consumer's own home scope is its owner_scope extended by its name.
         let consumer_scope = consumer.owner_scope().child(consumer.name());
         let target_scope = current.owner_scope();
         if !target_scope.is_prefix_of(consumer_scope) {
@@ -354,17 +302,6 @@ pub fn resolve_path_use(
     Ok(current)
 }
 
-/// Build the exact per-item owning-`PkgId` map (scope.md §1.1) that replaces the
-/// legacy `prefix_module` string-identity model.
-///
-/// Module flattening renames a dependency module `m`'s items to `m_<name>`.
-/// Given `dep_pkgs` (module symbol → its `PkgId`) and the flattened top-level
-/// `item_names`, this attributes each item to the dependency whose module prefix
-/// it carries — **once, here** — so downstream queries are an exact lookup rather
-/// than a per-call prefix scan. Items matching no dependency prefix are omitted
-/// (they belong to the root package and fall through to it). When two module
-/// prefixes are both prefixes of a name (e.g. `a` and `a_b`), the longest match
-/// wins, so `a_b`'s items attribute to `a_b`, not `a`.
 pub fn build_item_pkgs<'a>(
     dep_pkgs: &HashMap<Symbol, PkgId>,
     item_names: impl Iterator<Item = &'a Symbol>,
@@ -622,7 +559,6 @@ mod tests {
 
     #[test]
     fn path_use_resolves_two_hops() {
-        // foo (root) -> baz ; baz -> bar.  foo's `use baz/bar` resolves to foo:baz:bar.
         let foo = PkgId::root(sym("foo"));
         let baz = scoped("baz", &[sym("foo")]);
         let bar = scoped("bar", &[sym("foo"), sym("baz")]);
@@ -640,7 +576,7 @@ mod tests {
         let baz = scoped("baz", &[sym("foo")]);
         let mut map = ScopedUseMap::new();
         map.insert((foo, sym("baz")), baz);
-        // baz never declares `requires qux`.
+
         let err = resolve_path_use(&map, foo, &[sym("baz"), sym("qux")]).unwrap_err();
         match err {
             UseResolveError::UnresolvedHop { via, next, .. } => {
@@ -653,7 +589,6 @@ mod tests {
 
     #[test]
     fn public_reach_in_allowed_from_grandparent() {
-        // bar is public (default): foo (the grandparent) may reach foo:baz:bar.
         let foo = PkgId::root(sym("foo"));
         let baz = scoped("baz", &[sym("foo")]);
         let bar = scoped_vis("bar", &[sym("foo"), sym("baz")], Visibility::Public);
@@ -665,7 +600,6 @@ mod tests {
 
     #[test]
     fn internal_reach_in_rejected_from_grandparent() {
-        // bar is internal to foo:baz: foo (grandparent, scope `foo`) is outside.
         let foo = PkgId::root(sym("foo"));
         let baz = scoped("baz", &[sym("foo")]);
         let bar = scoped_vis("bar", &[sym("foo"), sym("baz")], Visibility::Internal);
@@ -689,19 +623,17 @@ mod tests {
 
     #[test]
     fn internal_reach_in_allowed_from_within_subtree() {
-        // baz (scope `foo:baz` — bar's own parent) may import its own internal bar.
         let baz = scoped("baz", &[sym("foo")]);
         let bar = scoped_vis("bar", &[sym("foo"), sym("baz")], Visibility::Internal);
         let mut map = ScopedUseMap::new();
         map.insert((baz, sym("bar")), bar);
-        // baz's home scope is foo:baz; bar's owner_scope is foo:baz => prefix holds.
+
         let got = resolve_path_use(&map, baz, &[sym("bar")]).unwrap();
         assert_eq!(got, bar);
     }
 
     #[test]
     fn use_resolves_locally_no_global_arbitration() {
-        // foo (root) -> baz ; baz -> bar.  baz's `use bar` resolves to foo:baz:bar.
         let foo = PkgId::root(sym("foo"));
         let baz = scoped("baz", &[sym("foo")]);
         let bar_under_baz = scoped("bar", &[sym("foo"), sym("baz")]);
@@ -710,13 +642,12 @@ mod tests {
         let got = resolve_use(&map, baz, sym("bar")).unwrap();
         assert_eq!(got, bar_under_baz);
         assert_eq!(got.fully_qualified(), "foo:baz:bar");
-        // foo never declared `use bar`: no global fallback to baz's bar.
+
         assert!(resolve_use(&map, foo, sym("bar")).is_err());
     }
 
     #[test]
     fn same_name_distinct_per_consumer() {
-        // Both foo and baz `use bar`, but they bind DIFFERENT scoped identities.
         let foo = PkgId::root(sym("foo"));
         let baz = scoped("baz", &[sym("foo")]);
         let bar_under_foo = scoped("bar", &[sym("foo")]);
@@ -759,7 +690,7 @@ mod tests {
         deps.insert(sym("helper"), dep);
         let names = [sym("main"), sym("helper_doit"), sym("helper_aux")];
         let out = build_item_pkgs(&deps, names.iter());
-        // Dependency items are attributed; root items are omitted (fall to root).
+
         assert_eq!(out.get(&sym("helper_doit")), Some(&dep));
         assert_eq!(out.get(&sym("helper_aux")), Some(&dep));
         assert_eq!(out.get(&sym("main")), None);
@@ -768,8 +699,6 @@ mod tests {
 
     #[test]
     fn build_item_pkgs_longest_prefix_wins() {
-        // Modules `a` and `a_b` both prefix `a_b_thing`; the longer must win so
-        // `a_b`'s items never get mis-attributed to `a`.
         let a = scoped("a", &[]);
         let ab = scoped("a_b", &[]);
         assert_ne!(a, ab);

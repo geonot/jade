@@ -1,4 +1,3 @@
-# Training loop on the XOR dataset using vanilla SGD.
 
 use fix
 use tape
@@ -58,7 +57,7 @@ use mlp
     net.b2    is net.b2    - fix.mul(lr, g.get(px.b2))
 
 *step(net as Mlp)
-    lr is fix.from_milli(50)            # 0.05
+    lr is fix.from_milli(50)
     loop(0, $ < 4, $ + 1)
         b is mlp.build_loss(net, x0($), x1($), target($))
         tape.backward(b.t, b.loss_ix)

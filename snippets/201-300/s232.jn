@@ -1,4 +1,3 @@
-# Block validation pipeline: header+body+sig as gating function.
 *validate(header_ok as i64, body_ok as i64, sig_ok as i64) returns i64
     if header_ok equals 0
         return 1

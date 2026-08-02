@@ -184,9 +184,7 @@ impl Typer {
             "__string_from_ptr" if args.len() == 1 && !self.fns.contains_key(name) => Some(
                 self.lower_simple_builtin(args, hir::BuiltinFn::StringFromPtr, Type::String, span),
             ),
-            // `chr(code)` builds a one-byte string from an integer character code
-            // (the inverse of `String.char_at`). Fundamental enough to be a
-            // builtin rather than living in a single stdlib module.
+
             "chr" if args.len() == 1 && !self.fns.contains_key(name) => {
                 Some(self.lower_simple_builtin(args, hir::BuiltinFn::Chr, Type::String, span))
             }

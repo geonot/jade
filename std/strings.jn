@@ -1,28 +1,8 @@
-# std.strings — String construction, transformation, and analysis
-#
-# Most basic operations live as methods on `String` itself
-# (`s.length`, `s.slice`, `s.split`, `s.find`, `s.starts_with`, …).
-# This module adds higher-level helpers and a `StringBuilder` for
-# efficient incremental construction.
-#
-# Usage:
-#   sb is strings.builder()
-#   sb.write("hello")
-#   sb.write(", world")
-#   greet is sb.to_string()
-#
-#   strings.trim("  hi  ")               # "hi"
-#   strings.split_lines("a\nb\nc")       # vec_of("a","b","c")
-#   strings.replace("foo bar", "bar", "baz")
-#   strings.indent(text, "  ")
-#   strings.snake_to_camel("my_var")     # "myVar"
 
 extern *malloc(size as i64) returns %i8
 extern *memcpy(dst as %i8, src as %i8, n as i64) returns %i8
 
-# ── StringBuilder ────────────────────────────────────────────
 
-# Accumulates parts and joins once; O(n) total instead of O(n²) concat.
 type StringBuilder
     parts as Vec of String
     total as i64
@@ -63,11 +43,9 @@ type StringBuilder
 *builder returns StringBuilder
     StringBuilder(parts is vec(), total is 0)
 
-# Backwards-compat alias.
 *string_builder returns StringBuilder
     builder()
 
-# ── Trimming ─────────────────────────────────────────────────
 
 *is_space(c as i64) returns bool
     c equals 32 or c equals 9 or c equals 10 or c equals 13 or c equals 11 or c equals 12
@@ -93,7 +71,6 @@ type StringBuilder
         hi is hi - 1
     s.slice(0, hi)
 
-# Trim any character that appears in `chars`.
 *trim_chars(s as String, chars as String) returns String
     lo is 0
     while lo < s.length and __contains_byte(chars, s.char_at(lo))
@@ -103,9 +80,7 @@ type StringBuilder
         hi is hi - 1
     s.slice(lo, hi)
 
-# ── Replacement ──────────────────────────────────────────────
 
-# Replace every occurrence of `from` with `to`. Linear time.
 *replace(s as String, from as String, to as String) returns String
     if from.length equals 0
         return s
@@ -120,7 +95,6 @@ type StringBuilder
             i is i + 1
     out
 
-# Replace only the first occurrence.
 *replace_first(s as String, from as String, to as String) returns String
     if from.length equals 0
         return s
@@ -129,7 +103,6 @@ type StringBuilder
         return s
     s.slice(0, pos) + to + s.slice(pos + from.length, s.length)
 
-# ── Splitting ────────────────────────────────────────────────
 
 *split_lines(s as String) returns Vec of String
     out is vec()
@@ -141,7 +114,6 @@ type StringBuilder
             out.push(cur)
             cur is ""
         elif c equals 13
-            # \r or \r\n
             out.push(cur)
             cur is ""
             if i + 1 < s.length and s.char_at(i + 1) equals 10
@@ -153,7 +125,6 @@ type StringBuilder
         out.push(cur)
     out
 
-# Split on whitespace runs; ignores leading/trailing whitespace.
 *split_whitespace(s as String) returns Vec of String
     out is vec()
     cur is ""
@@ -171,7 +142,6 @@ type StringBuilder
         out.push(cur)
     out
 
-# ── Case (ASCII only) ────────────────────────────────────────
 
 *to_lower(s as String) returns String
     out is ""
@@ -224,7 +194,6 @@ type StringBuilder
         i is i + 1
     out
 
-# ── Indentation ──────────────────────────────────────────────
 
 *indent(s as String, prefix as String) returns String
     lines is split_lines(s)
@@ -237,7 +206,6 @@ type StringBuilder
 
 *dedent(s as String) returns String
     lines is split_lines(s)
-    # Find min indent across non-blank lines.
     min_i is -1
     loop lines
         if $.length equals 0
@@ -261,7 +229,6 @@ type StringBuilder
             out is out + $
     out
 
-# ── Case-style conversions ───────────────────────────────────
 
 *snake_to_camel(s as String) returns String
     out is ""
@@ -294,7 +261,6 @@ type StringBuilder
         i is i + 1
     out
 
-# ── Predicates ───────────────────────────────────────────────
 
 *contains(s as String, sub as String) returns bool
     s.find(sub) >= 0
@@ -329,7 +295,6 @@ type StringBuilder
         i is i + 1
     true
 
-# ── Reverse & count ──────────────────────────────────────────
 
 *reverse(s as String) returns String
     out is ""
@@ -352,7 +317,6 @@ type StringBuilder
             i is i + 1
     n
 
-# ── Internal ─────────────────────────────────────────────────
 
 *__region_eq(s as String, off as i64, needle as String) returns bool
     i is 0

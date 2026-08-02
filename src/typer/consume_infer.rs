@@ -1,42 +1,9 @@
-//! Inferred consuming parameters (task 8-6, memory-model.md rule M6).
-//!
-//! A function whose body lets a parameter's buffer *leave* the function —
-//! returned (directly or through an alias chain / aggregate literal),
-//! pushed into a container, sent on a channel or to an actor, or passed on
-//! to another consuming parameter — must own that parameter: the caller's
-//! argument moves into the call exactly as an explicit `take` would.
-//! Without this, the caller and its own result binding both believe they
-//! own one buffer and the scope-exit drops double-free it (review §3.1).
-//!
-//! The analysis runs on the AST, after every signature has populated
-//! `fn_param_access` and before any body is lowered, so call sites and
-//! callees see one consistent answer regardless of lowering order. It is a
-//! whole-program fixpoint: marking `f`'s parameter consuming can make a
-//! caller `g` that forwards its own parameter to `f` consuming too.
-//!
-//! Deliberately conservative in both directions and documented as such:
-//!
-//! - flow-insensitive over-approximation (an escape on any path marks the
-//!   parameter), which can turn a caller's later use into a use-after-move
-//!   error — the D1-correct outcome;
-//! - structural under-approximation (escapes through lambda bodies, block
-//!   expressions, or named-argument calls are not tracked), which leaves
-//!   those double-frees to task 8-7's single flow-sensitive analysis.
-//!
-//! Parameters with an explicit access modifier are never touched, and
-//! parameters explicitly annotated as scalars or `String` are skipped:
-//! scalars cannot double-free, and `String` is a value type (deep copy)
-//! per memory-model.md §1.
-
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{self, Expr, Stmt};
 use crate::intern::Symbol;
 use crate::types::Type;
 
-/// Method names that transfer ownership of their arguments into the
-/// receiver. Mirrors the list in `typer/lower/block.rs`
-/// (`collect_consumed_in_expr`).
 const CONSUMING_METHODS: &[&str] = &[
     "push",
     "push_back",
@@ -73,14 +40,9 @@ fn annotated_non_consumable(ty: &Option<Type>) -> bool {
     }
 }
 
-/// Alias state for one function body: local name → set of parameter
-/// indices whose buffer the name may hold. Union-only (never narrowed by a
-/// rebind), which keeps the analysis a sound over-approximation across
-/// branches without flow tracking.
 type AliasMap = HashMap<Symbol, HashSet<usize>>;
 
 impl crate::typer::Typer {
-    /// Entry point, called from `lower_program` before function lowering.
     pub(crate) fn infer_consuming_params(&mut self, fns: &[&ast::Fn]) {
         loop {
             let mut changed = false;
@@ -155,9 +117,7 @@ impl crate::typer::Typer {
                             alias.entry(*n).or_default().extend(set);
                         }
                     }
-                    // Storing into a field/index/deref of anything: the
-                    // buffer now lives inside another value; treat as an
-                    // escape (its new home may outlive the call frame).
+
                     _ => {
                         escaping.extend(Self::expr_alias(value, alias));
                     }
@@ -229,7 +189,6 @@ impl crate::typer::Typer {
         }
     }
 
-    /// Parameter indices whose buffer the expression's *value* may hold.
     fn expr_alias(e: &Expr, alias: &AliasMap) -> HashSet<usize> {
         match e {
             Expr::Ident(n, _) => alias.get(n).cloned().unwrap_or_default(),
@@ -264,10 +223,6 @@ impl crate::typer::Typer {
         }
     }
 
-    /// Walk every subexpression, recording parameters that flow into a
-    /// consuming position: a `take` (explicit or already-inferred) call
-    /// argument, a container-push argument, a channel send, an actor send,
-    /// a spawn initializer, or a yield.
     fn scan_expr_sinks(&self, e: &Expr, alias: &AliasMap, escaping: &mut HashSet<usize>) {
         match e {
             Expr::Call(callee, args, _) => {
@@ -303,8 +258,6 @@ impl crate::typer::Typer {
                 }
             }
             Expr::Pipe(lhs, target, rest, _) => {
-                // `v ~ f` is `f(v, ...)`; treat the piped value like the
-                // first positional argument of the target.
                 if let Expr::Ident(fname, _) = &**target
                     && let Some(access) = self.fn_param_access.get(fname)
                     && matches!(access.first(), Some(Some(ast::AccessMod::Take)))
@@ -339,7 +292,6 @@ impl crate::typer::Typer {
                 self.scan_expr_sinks(v, alias, escaping);
             }
 
-            // Pure structural recursion.
             Expr::BinOp(l, _, r, _) | Expr::Index(l, r, _) | Expr::OfCall(l, r, _) => {
                 self.scan_expr_sinks(l, alias, escaping);
                 self.scan_expr_sinks(r, alias, escaping);
@@ -385,15 +337,12 @@ impl crate::typer::Typer {
                 self.scan_expr_sinks(b, alias, escaping);
                 self.scan_expr_sinks(c, alias, escaping);
             }
-            // Lambda bodies and block expressions are not tracked (see
-            // module docs); their escapes are 8-7's to catch.
+
             _ => {}
         }
     }
 }
 
 fn ret_is_inferred(f: &ast::Fn) -> bool {
-    // A function with no `returns` clause may still return a value via a
-    // tail expression; treat its tail as returning unless it is `main`.
     f.name.as_str() != "main"
 }

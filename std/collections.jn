@@ -1,15 +1,4 @@
-# std.collections — Data structures beyond Vec and Map
-#
-# Provides:
-#   * `Stack`        — LIFO
-#   * `Queue`        — FIFO with amortized O(1) dequeue
-#   * `RingBuffer`   — fixed-capacity circular buffer
-#   * `Deque`        — double-ended queue (built on Vec)
-#   * `PriorityQueue`— binary min-heap with priority comparator
-#   * `Heap`         — generic min-heap (i64 keys)
-#   * `LruCache`     — bounded LRU map (insertion-order eviction)
 
-# ── Stack (LIFO) ─────────────────────────────────────────────
 
 type Stack
     items as Vec of i64
@@ -35,7 +24,6 @@ type Stack
 *new_stack returns Stack
     Stack(items is vec())
 
-# ── Queue (FIFO) ─────────────────────────────────────────────
 
 type Queue
     items as Vec of i64
@@ -75,7 +63,6 @@ type Queue
 *new_queue returns Queue
     Queue(items is vec(), head is 0)
 
-# ── Ring Buffer ──────────────────────────────────────────────
 
 type RingBuffer
     data as Vec of i64
@@ -120,12 +107,9 @@ type RingBuffer
         data.push(0)
     RingBuffer(data is data, capacity is cap, head is 0, tail is 0, count is 0)
 
-# ── Deque (double-ended queue) ───────────────────────────────
-#
-# Backed by two stacks for amortized O(1) push/pop on both ends.
 
 type Deque
-    front as Vec of i64        # popped/pushed from the *back*; reversed view of front
+    front as Vec of i64
     back as Vec of i64
 
     *push_back(val)
@@ -139,7 +123,6 @@ type Deque
             return self.back.pop()
         if self.front.length equals 0
             return 0
-        # Move all front to back, then pop.
         while self.front.length > 0
             self.back.push(self.front.pop())
         self.back.pop()
@@ -162,7 +145,6 @@ type Deque
 *new_deque returns Deque
     Deque(front is vec(), back is vec())
 
-# ── Min-heap (binary heap) ───────────────────────────────────
 
 type Heap
     data as Vec of i64
@@ -223,7 +205,6 @@ type Heap
         d.set(smallest, tmp)
         i is smallest
 
-# ── Priority Queue (with separate priority + payload) ────────
 
 type PqEntry
     priority as i64
@@ -283,15 +264,11 @@ type PriorityQueue
         d.set(smallest, tmp)
         i is smallest
 
-# ── LRU Cache (bounded; insertion-order proxy via touch) ─────
-#
-# Map-backed; tracks usage order in a parallel vec. Eviction removes
-# the least-recently-touched key when capacity is exceeded.
 
 type LruCache
     capacity as i64
     map as Map of String
-    order as Vec of String     # most-recent at the back
+    order as Vec of String
 
     *get(key as String) returns String
         if not self.map.has(key)

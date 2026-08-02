@@ -1,4 +1,3 @@
-# Multiset count: count occurrences of each value (0..9) in a vec.
 *main
     xs is vec()
     xs.push(0)

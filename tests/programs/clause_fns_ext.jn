@@ -1,10 +1,7 @@
-# Extended clause function tests
 
-# Paren-free inline body
 *triple x is x * 3
 *negate x is 0 - x
 
-# Multi-param clauses
 *gcd(0, b) is b
 *gcd(a, 0) is a
 *gcd(a, b)
@@ -12,7 +9,6 @@
         return gcd(a - b, b)
     gcd(a, b - a)
 
-# Chain: inline single-clause + paren-free
 *add a, b is a + b
 
 *main

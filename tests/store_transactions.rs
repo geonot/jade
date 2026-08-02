@@ -1,19 +1,3 @@
-//! Conformance for real WAL-backed store transactions (store-improvement.md
-//! item 1, task 2-31-1). Pins the documented semantics from jinn.md:
-//!
-//!   * a `transaction` block that completes normally commits its writes as
-//!     one durable batch (group commit);
-//!   * an error escaping the block (`err` propagation) rolls back every
-//!     store mutation made inside it — inserts, sets, deletes, and index
-//!     updates alike;
-//!   * `return` leaving the block commits work done so far;
-//!   * a runtime trap inside the block rolls back before aborting, so a
-//!     restarted process observes the pre-transaction state;
-//!   * nested `transaction` blocks join the outermost one: inner commits
-//!     are deferred and any rollback aborts the whole nest;
-//!   * rollback restores data files byte-exactly, so sids and indexes
-//!     assigned inside the aborted transaction are reused afterwards.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -185,19 +169,12 @@ fn rollback_then_retry_succeeds_cleanly() {
     );
 }
 
-/// Task 8-24 — transaction state is per-coroutine: two concurrent tasks
-/// each in their own `transaction` (on their own stores) commit
-/// independently; neither corrupts the other's tracking and neither
-/// disables the other's durability. Before 8-24 the depth/list were
-/// process-global with no lock.
 #[test]
 fn concurrent_transactions_commit_independently() {
     let src = "store alpha\n    v as i64\n\nstore beta\n    v as i64\n\n*fill_alpha()\n    transaction\n        for i in 0 to 50\n            insert alpha i\n\n*fill_beta()\n    transaction\n        for i in 0 to 80\n            insert beta i\n\n*main\n    together\n        dispatch\n            fill_alpha()\n        dispatch\n            fill_beta()\n    log(count alpha)\n    log(count beta)\n";
     expect(src, "50\n80");
 }
 
-/// Task 8-24 — one task's rollback cannot touch another task's
-/// committed store.
 #[test]
 fn rollback_in_one_task_leaves_other_store_committed() {
     let src = "err OpErr\n    Boom\n    S(StoreError)\n\nimpl From of StoreError for OpErr\n    *from(e as StoreError) returns OpErr is S(e)\n\nstore good\n    v as i64\n\nstore bad\n    v as i64\n\n*fill_good()\n    transaction\n        for i in 0 to 30\n            insert good i\n\n*fill_bad() returns Result of i64, OpErr\n    transaction\n        for i in 0 to 30\n            insert bad i\n        err Boom\n    Ok(0)\n\n*main\n    together\n        dispatch\n            fill_good()\n        dispatch\n            match fill_bad()\n                Ok(v) ? log(v)\n                Err(e) ? log(0 - 1)\n    log(count good)\n    log(count bad)\n";

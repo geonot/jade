@@ -1,5 +1,3 @@
-# xoshiro256** generator carried in an actor-free record.
-# Pure-functional step: each call returns (next_state, output_byte).
 
 type Prng
     s0 as i64
@@ -8,7 +6,6 @@ type Prng
     s3 as i64
 
 *seed(k as i64) returns Prng
-    # SplitMix64 to expand a single 64-bit key into 4 lanes.
     a is splitmix(k)
     b is splitmix(a)
     c is splitmix(b)

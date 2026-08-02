@@ -1,20 +1,3 @@
-/*
- * Crash-injection harness for the atomic durable write discipline
- * (task 8-21). Compiled and run by tests/crash_safety.rs.
- *
- * Three probes:
- *   1. fill-crash: a child dies at N points inside the fill callback of
- *      jinn_atomic_rewrite; the target file must always hold the
- *      complete OLD image afterward (never a mixture, never truncated).
- *   2. kv-churn: children mutate a JinnKV in a loop and are SIGKILLed at
- *      random times; after every kill the file must be a complete,
- *      self-consistent image (magic + header count == entries on disk ==
- *      count reported after reload).
- *   3. lock: a second writer on the same path must be refused while the
- *      first holds the store open, and admitted after it closes.
- *
- * Exit 0 on success; nonzero with a message on the first violation.
- */
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
@@ -25,19 +8,15 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include "jinn_rt.h"
-
 #define DIE(...) do { fprintf(stderr, __VA_ARGS__); exit(1); } while (0)
-
 static const char OLD_IMG[] = "OLD-STATE-0123456789-OLD-STATE";
 static const char NEW_IMG[] = "NEW-STATE-abcdefghij-NEW-STATE-LONGER-THAN-OLD";
-
 static void write_file(const char *path, const void *data, size_t len) {
     FILE *f = fopen(path, "wb");
     if (!f) DIE("cannot create %s\n", path);
     fwrite(data, 1, len, f);
     fclose(f);
 }
-
 static long read_file(const char *path, char *buf, size_t cap) {
     FILE *f = fopen(path, "rb");
     if (!f) return -1;
@@ -46,19 +25,15 @@ static long read_file(const char *path, char *buf, size_t cap) {
     return n;
 }
 
-/* ── Probe 1: die mid-fill at every prefix length ─────────────────── */
-
 typedef struct {
-    int crash_after; /* bytes of NEW_IMG to write before _exit */
+    int crash_after;
 } FillCrash;
-
 static int crashing_fill(FILE *tmp, void *arg) {
     FillCrash *fc = (FillCrash *)arg;
     fwrite(NEW_IMG, 1, (size_t)fc->crash_after, tmp);
     fflush(tmp);
-    _exit(42); /* simulated crash mid-rewrite */
+    _exit(42);
 }
-
 static int full_fill(FILE *tmp, void *arg) {
     (void)arg;
     return fwrite(NEW_IMG, 1, sizeof(NEW_IMG), tmp) == sizeof(NEW_IMG) ? 0 : -1;
@@ -74,7 +49,7 @@ static void probe_fill_crash(const char *dir) {
         if (pid == 0) {
             FillCrash fc = { n };
             jinn_atomic_rewrite(path, crashing_fill, &fc);
-            _exit(0); /* unreachable */
+            _exit(0);
         }
         int st = 0;
         waitpid(pid, &st, 0);
@@ -85,8 +60,6 @@ static void probe_fill_crash(const char *dir) {
                 n, got);
         }
     }
-
-    /* And a completed rewrite must yield exactly the new image. */
     if (jinn_atomic_rewrite(path, full_fill, NULL) != 0) DIE("full rewrite failed\n");
     char buf[256];
     long got = read_file(path, buf, sizeof buf);
@@ -95,11 +68,7 @@ static void probe_fill_crash(const char *dir) {
     }
     printf("fill-crash: ok\n");
 }
-
-/* ── Probe 2: SIGKILL a kv-churning child, verify image coherence ── */
-
-#define KV_SLOT_BYTES 280 /* hash(8)+key(256)+value(8)+status(8) */
-
+#define KV_SLOT_BYTES 280
 static void kv_verify(const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) DIE("kv file missing after kill\n");
@@ -124,11 +93,9 @@ static void kv_verify(const char *path) {
     }
     jinn_kv_close(kv);
 }
-
 static void probe_kv_churn(const char *dir, int rounds) {
     char path[512];
     snprintf(path, sizeof path, "%s/churn.kv", dir);
-
     for (int r = 0; r < rounds; r++) {
         pid_t pid = fork();
         if (pid == 0) {
@@ -152,17 +119,11 @@ static void probe_kv_churn(const char *dir, int rounds) {
     }
     printf("kv-churn: ok (%d kills)\n", rounds);
 }
-
-/* ── Probe 3: single-writer lock ──────────────────────────────────── */
-
 static void probe_lock(const char *dir) {
     char path[512];
     snprintf(path, sizeof path, "%s/lock.kv", dir);
-
     JinnKV *a = jinn_kv_open(path);
     if (!a) DIE("lock: first open failed\n");
-    /* flock is per open-file-description, so a second open in this same
-     * process conflicts exactly as a second process would. */
     fprintf(stderr, "(expected contention diagnostic follows)\n");
     JinnKV *b = jinn_kv_open(path);
     if (b) DIE("lock: second concurrent writer was admitted\n");
@@ -172,7 +133,6 @@ static void probe_lock(const char *dir) {
     jinn_kv_close(c);
     printf("lock: ok\n");
 }
-
 int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : ".";
     int rounds = argc > 2 ? atoi(argv[2]) : 25;

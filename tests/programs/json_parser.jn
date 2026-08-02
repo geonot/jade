@@ -1,23 +1,18 @@
-# json_parser.jn — Recursive descent JSON parser
-# Complexity: Advanced
-# Demonstrates: enums, recursion, string ops, pattern matching, error handling
-# Note: some features (iterators, Vec) may require future stdlib
 
 enum Json
     JNull
     JBool(bool)
     JNum(f64)
     JStr(String)
-    JArray(Json, Json)     # Cons-style linked list of values
-    JEmpty                 # End of array/object
-    JObject(String, Json, Json)  # key, value, rest of object
+    JArray(Json, Json)
+    JEmpty
+    JObject(String, Json, Json)
 
 err ParseError
     UnexpectedChar(i64)
     UnexpectedEnd
     InvalidToken(String)
 
-# Skip whitespace, return new position
 *skip_ws(s as String, pos as i64)
     p is pos
     while p < s.length
@@ -28,17 +23,16 @@ err ParseError
             return p
     p
 
-# Parse a JSON number (integers only for simplicity)
 *parse_number(s as String, pos as i64)
     p is pos
     neg is false
-    if s.char_at(p) equals 45      # '-'
+    if s.char_at(p) equals 45
         neg is true
         p is p + 1
     n is 0
     while p < s.length
         ch is s.char_at(p)
-        if ch >= 48 and ch <= 57   # '0'-'9'
+        if ch >= 48 and ch <= 57
             n is n * 10 + (ch - 48)
             p is p + 1
         else
@@ -46,15 +40,13 @@ err ParseError
     val is neg ? 0 - n ! n
     (JNum(val as f64), p)
 
-# Parse a JSON string (assumes well-formed, no escape handling)
 *parse_string(s as String, pos as i64)
-    # skip opening quote
     p is pos + 1
     start is p
-    while p < s.length and s.char_at(p) neq 34   # '"'
+    while p < s.length and s.char_at(p) neq 34
         p is p + 1
     content is s.slice(start, p)
-    p is p + 1    # skip closing quote
+    p is p + 1
     (JStr(content), p)
 
 *describe(j as Json)
@@ -78,7 +70,6 @@ err ParseError
         JEmpty ? 0
 
 *main
-    # Build JSON values manually
     obj is JObject(
         'name', JStr('jinn'),
         JObject(
@@ -97,7 +88,6 @@ err ParseError
     describe(arr)
     log(count_nodes(arr))
 
-    # Parse a simple number
     result, pos is parse_number('42', 0)
     describe(result)
 

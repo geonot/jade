@@ -1,4 +1,3 @@
-# Lock-free style ring (single producer/consumer counter).
 actor Ring
     cnt as i64
     @push

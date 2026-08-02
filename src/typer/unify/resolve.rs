@@ -46,17 +46,13 @@ impl InferCtx {
             Type::Fn(params, ret) => {
                 params.iter().any(|t| self.occurs_in(v, t)) || self.occurs_in(v, ret)
             }
-            // D2 (task 8-16): parameterized nominal types carry vars too —
-            // `?v ~ Struct(n, [?v])` used to pass the occurs check.
+
             Type::Struct(_, args) => args.iter().any(|t| self.occurs_in(v, t)),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => self.occurs_in(v, inner),
             _ => false,
         }
     }
 
-    /// True if the type still CONTAINS an unresolved variable anywhere
-    /// (task 8-17: mismatch checks stay lax for such types — the
-    /// constraint/coercion machinery owns them until they're concrete).
     pub(crate) fn type_has_unresolved(&mut self, ty: &Type) -> bool {
         fn scan(t: &Type) -> bool {
             match t {
@@ -165,8 +161,6 @@ impl InferCtx {
                     _ => Type::I64,
                 };
                 if self.suppress_unsolved_reports {
-                    // Inferable-generic pre-pass: reporting is deferred to
-                    // per-call-site instantiation (D2).
                 } else if warn_only && !self.pedantic {
                     if let Some(origin) = &self.origins[root as usize] {
                         match constraint {
@@ -317,9 +311,7 @@ impl InferCtx {
                 Type::Generator(Box::new(self.resolve_core(inner, warn_only)))
             }
             Type::Channel(inner) => Type::Channel(Box::new(self.resolve_core(inner, warn_only))),
-            // D2 (task 8-16): resolve THROUGH parameterized nominal types;
-            // `Struct(n, [?v])` used to fall to the identity arm, so `?v`
-            // escaped resolution entirely.
+
             Type::Struct(n, args) => Type::Struct(
                 *n,
                 args.iter()

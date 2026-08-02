@@ -1,4 +1,3 @@
-# Two-pointer pair sum on sorted vec.
 *main
     a is vec(1, 2, 4, 7, 11, 15)
     target is 13

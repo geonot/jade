@@ -1,4 +1,3 @@
-# Pipeline: map-then-filter-then-fold via three HOFs.
 *map_i64(xs as Vec of i64, f as (i64) returns i64) returns Vec of i64
     out is vec()
     i is 0

@@ -81,10 +81,6 @@ fn drop_stats_line_is_emitted() {
 
 #[test]
 fn drop_fusion_coalesces_consecutive_scope_exit_drops() {
-    // Value-semantics drop-fusion probe (replaces the removed rc() variant).
-    // Three owned heap vectors are borrowed by a single call, so each one's
-    // last use is that call; their scope-exit drops land consecutively and
-    // fuse into one DropMany run.
     let src = "*sink3(a as Vec of i64, b as Vec of i64, c as Vec of i64) returns i64\n    a.len() + b.len() + c.len()\n\n*main() returns i32\n    x is [1, 2, 3]\n    y is [4, 5, 6]\n    z is [7, 8, 9]\n    log(sink3(x, y, z))\n    0\n";
     let (summary, stderr) = compile(src);
     let s = require(summary, &stderr);

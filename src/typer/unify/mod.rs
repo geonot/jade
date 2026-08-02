@@ -31,18 +31,12 @@ pub(crate) struct InferCtx {
     usage_sites: Vec<Vec<(Span, &'static str)>>,
     pub(crate) debug: bool,
     collect_default_warnings: bool,
-    /// D2 (task 8-16): while lowering an inferable-generic function's
-    /// body (the definition-site pre-pass whose HIR is discarded and
-    /// re-lowered per call site), unsolved-variable reports are
-    /// suppressed — definition-site typing is deferred to instantiation,
-    /// where the call-site's concrete arguments are known.
+
     pub(crate) suppress_unsolved_reports: bool,
     default_warnings: Vec<String>,
     strict_types: bool,
     strict_errors: Vec<String>,
-    /// Every `unify_at` failure lands here, regardless of what the call site
-    /// does with the returned `Result`. Drained at the end of lowering and
-    /// always fatal: a failed unification is a type error, never a hint.
+
     unify_errors: Vec<String>,
     pedantic: bool,
     quantified_vars: std::collections::HashSet<u32>,
@@ -311,11 +305,6 @@ impl InferCtx {
         }
     }
 
-    /// Unify with a rich, located diagnostic on failure. The failure is also
-    /// recorded in `unify_errors` (always fatal at the end of lowering), so a
-    /// call site that discards the `Result` cannot drop a type error. Sites
-    /// that consume the `Result` and apply their own policy (coercion
-    /// classification, custom diagnostics) use `unify_at_tolerant`.
     pub(crate) fn unify_at(
         &mut self,
         a: &Type,
@@ -326,9 +315,6 @@ impl InferCtx {
         self.unify_at_inner(a, b, span, reason, true)
     }
 
-    /// `unify_at` without auto-recording: the caller owns the failure and is
-    /// responsible for either tolerating it (an implicit-coercion pair the
-    /// coercion pass will lower) or reporting it fatally.
     pub(crate) fn unify_at_tolerant(
         &mut self,
         a: &Type,
@@ -404,11 +390,6 @@ impl InferCtx {
                     msg.push_str(&format!("\n  help: {s}"));
                 }
 
-                // Record so a call site that discards the Result cannot
-                // silently drop a type error. The definition-site pre-pass of
-                // inferable generics is exempt: its HIR is discarded and the
-                // body is re-checked at every instantiation with concrete
-                // types.
                 if record && !self.suppress_unsolved_reports {
                     self.unify_errors.push(msg.clone());
                 }
@@ -470,11 +451,6 @@ impl InferCtx {
         let a = self.shallow_resolve(&a);
         let b = self.shallow_resolve(&b);
 
-        // Canonicalize at the unification entry (P0-12). This collapses
-        // `Type::Struct("String", _)` ↔ `Type::String`, transparently
-        // unwraps `Type::Alias`, and recurses into composites. After this
-        // step the unifier sees a single canonical representation per
-        // semantic type.
         let a = a.canonical();
         let b = b.canonical();
 
@@ -620,20 +596,11 @@ impl InferCtx {
                 }
                 Ok(())
             }
-            // P0-12 compatibility shim: until every site that produces
-            // `Type::Enum(n)` is migrated to produce `Type::Struct(n, args)`,
-            // accept `Struct(n, _) ↔ Enum(n)` when names match. The enum
-            // side carries no arg info, so nothing can be unified against
-            // the struct's args — but silently DROPPING unsolved arg
-            // variables let `?v` escape resolution (task 8-16). Resolve
-            // what we can; only fully-opaque args are let through.
+
             (Type::Struct(na, args), Type::Enum(nb)) | (Type::Enum(nb), Type::Struct(na, args))
                 if na == nb =>
             {
                 for a in args {
-                    // Touching each arg records a usage site, so a var
-                    // that stays unsolved is reported at its origin
-                    // instead of silently defaulting through the shim.
                     let _ = self.shallow_resolve(a);
                 }
                 Ok(())

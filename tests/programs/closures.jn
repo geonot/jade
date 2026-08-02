@@ -1,6 +1,3 @@
-# closures.jn — Closure patterns and capturing
-# Complexity: Intermediate
-# Demonstrates: lambdas, closures capturing variables, HOFs, pipelines
 
 *make_adder(n as i64)
     |x as i64| x + n
@@ -17,47 +14,38 @@
         total is total + f(i)
     total
 
-# Build a pipeline of transformations
 *transform(x as i64)
     add5 is make_adder(5)
     dbl is make_multiplier(2)
 
-    # Manual composition
     result is dbl(add5(x))
     result
 
 *main
-    # Closure capturing
     add10 is make_adder(10)
-    log(add10(5))                    # 15
-    log(add10(100))                  # 110
+    log(add10(5))
+    log(add10(100))
 
     mul3 is make_multiplier(3)
-    log(mul3(7))                     # 21
+    log(mul3(7))
 
-    # Apply closures
-    log(apply(add10, 32))            # 42
+    log(apply(add10, 32))
 
-    # Sum the transformed range
     double is make_multiplier(2)
     total is apply_to_range(double, 1, 11)
-    log(total)                       # 2+4+6+8+10+12+14+16+18+20 = 110
+    log(total)
 
-    # Pipeline with closures
-    log(transform(10))               # (10+5)*2 = 30
-    log(transform(0))                # (0+5)*2 = 10
+    log(transform(10))
+    log(transform(0))
 
-    # Inline lambdas
     sq is |x as i64| x * x
-    log(sq(9))                       # 81
+    log(sq(9))
 
-    # Manual closure pipeline
     add3 is make_adder(3)
     mul2 is make_multiplier(2)
     result is mul2(add3(5))
-    log(result)                      # (5+3)*2 = 16
+    log(result)
 
-    # Nested closures
     outer is 100
     f is |x as i64| x + outer
-    log(f(42))                       # 142
+    log(f(42))

@@ -31,13 +31,9 @@ pub struct Lexer<'s> {
     file: Option<crate::intern::Symbol>,
 
     after_dot: bool,
-    /// Nesting depth of `(` / `[`. While > 0, newlines and indentation are
-    /// suppressed (implicit line-joining), so call arguments and list literals
-    /// may span multiple lines.
+
     bracket_depth: u32,
-    /// Spans of `#` comments (and a leading shebang) skipped during
-    /// tokenization. Comments are not tokens yet (see task 8-18); recording
-    /// where they were lets `jinn fmt` refuse to destroy them (task 8-2).
+
     comments: Vec<Span>,
 }
 
@@ -159,8 +155,6 @@ impl<'s> Lexer<'s> {
         }
     }
 
-    /// Spans of the comments the last `tokenize()` call skipped, in source
-    /// order. Empty until `tokenize()` runs.
     pub fn comments(&self) -> &[Span] {
         &self.comments
     }
@@ -218,9 +212,6 @@ impl<'s> Lexer<'s> {
                 }
                 b'\t' => return self.err("tabs are not allowed; use spaces"),
                 b'\n' => {
-                    // Implicit line-joining: inside `(`/`[` a newline is just
-                    // whitespace, so multi-line call argument lists and list
-                    // literals parse as a single logical line.
                     if self.bracket_depth > 0 {
                         self.advance();
                         self.line += 1;

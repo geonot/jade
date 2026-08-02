@@ -1,4 +1,3 @@
-# Sliding-window sum of width k over a Vec.
 *main
     a is vec()
     a.push(1)

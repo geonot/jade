@@ -1,4 +1,3 @@
-# Deque via Vec; push_front via shift-right.
 *push_front(v as Vec of i64, x as i64)
     n is v.length
     v.push(0)

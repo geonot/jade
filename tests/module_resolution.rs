@@ -1,9 +1,3 @@
-//! Task 8-15 (decision D4) — explicit module resolution. A compile sees
-//! exactly one entry file plus the transitive closure of its explicit
-//! `use` declarations. Directory-tree absorption and identifier-driven
-//! implicit import are gone: what a program means no longer depends on
-//! what else happens to be in the directory.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -31,9 +25,6 @@ fn run(dir: &Path) -> String {
 
 const ENTRY: &str = "*main\n    x is 41\n    log(x + 1)\n";
 
-/// A sibling file with a syntax error must leave the target compile
-/// unaffected (it used to surface as `warning:` lines, and its decls
-/// were silently merged).
 #[test]
 fn sibling_with_syntax_error_is_ignored() {
     let dir = tempfile::tempdir().unwrap();
@@ -53,8 +44,6 @@ fn sibling_with_syntax_error_is_ignored() {
     assert_eq!(run(dir.path()), "42");
 }
 
-/// A sibling declaring a colliding type must not change what the entry
-/// file's names mean.
 #[test]
 fn sibling_with_colliding_type_is_ignored() {
     let dir = tempfile::tempdir().unwrap();
@@ -74,8 +63,6 @@ fn sibling_with_colliding_type_is_ignored() {
     assert_eq!(run(dir.path()), "1.500000");
 }
 
-/// A sibling declaring a store must not create that store's files or
-/// affect the target compile.
 #[test]
 fn sibling_with_store_is_ignored() {
     let dir = tempfile::tempdir().unwrap();
@@ -94,8 +81,6 @@ fn sibling_with_store_is_ignored() {
     );
 }
 
-/// `use sibling` still resolves a module beside the entry file — the
-/// explicit path keeps working, including its diagnostics.
 #[test]
 fn explicit_use_of_sibling_still_resolves() {
     let dir = tempfile::tempdir().unwrap();
@@ -118,8 +103,6 @@ fn explicit_use_of_sibling_still_resolves() {
     assert_eq!(run(dir.path()), "42");
 }
 
-/// A qualified reference to an importable module without `use` is an
-/// error naming the fix — never a silent auto-import.
 #[test]
 fn unimported_sibling_module_is_an_error_naming_use() {
     let dir = tempfile::tempdir().unwrap();

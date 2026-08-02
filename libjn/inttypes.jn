@@ -1,4 +1,3 @@
-# libjn.inttypes — drop-in for C <inttypes.h>
 
 PRId8  is "d"
 PRId16 is "d"

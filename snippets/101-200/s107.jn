@@ -1,4 +1,3 @@
-# Merge sort on Vec of i64.
 *merge(left, right) returns Vec of i64
     out is vec()
     i is 0

@@ -1,4 +1,3 @@
-# Timer interrupt schedule: count callbacks fired in window.
 *ticks_in(period_us as i64, window_us as i64) returns i64
     window_us / period_us
 

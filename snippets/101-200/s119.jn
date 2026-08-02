@@ -1,4 +1,3 @@
-# Modular exponentiation.
 *modpow(base as i64, exp as i64, m as i64) returns i64
     r is 1
     base is base mod m

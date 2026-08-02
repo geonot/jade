@@ -1,4 +1,3 @@
-# libjn.wchar — drop-in for C <wchar.h>
 
 alias wchar_t   = i32
 alias wint_t    = i32

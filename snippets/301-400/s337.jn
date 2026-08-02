@@ -1,4 +1,3 @@
-# Format a HH:MM:SS time string.
 *pad2(n as i64) returns String
     if n < 10
         return '0{n}'

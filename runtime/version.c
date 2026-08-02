@@ -1,16 +1,3 @@
-/*
- * Jinn Version File Runtime
- *
- * Append-only version log for @versioned stores.
- *
- * File format: [8B magic "JINNVER\0"][entries...]
- * Entry:       [8B sid][8B version_num][8B timestamp][rec_size bytes of record data]
- *
- * Each entry is a snapshot of the record BEFORE mutation.
- * The current (latest) record lives in the main .store file.
- * Version numbers are per-record, starting at 1 on insert.
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,12 +5,9 @@
 #include <time.h>
 #include <unistd.h>
 #include "jinn_rt.h"
-
 static const char VER_MAGIC[8] = {'J','I','N','N','V','E','R','\0'};
-#define VER_HEADER 8   /* just the magic */
-#define VER_ENTRY_HDR 24  /* sid(8) + version(8) + timestamp(8) */
-
-/* ── Open / create a versions file ──────────────────────────────── */
+#define VER_HEADER 8
+#define VER_ENTRY_HDR 24
 FILE *jinn_ver_open(const char *path) {
     FILE *f = fopen(path, "r+b");
     if (f) {
@@ -34,21 +18,15 @@ FILE *jinn_ver_open(const char *path) {
         }
         return f;
     }
-    /* Create new */
     f = fopen(path, "w+b");
     if (!f) return NULL;
     fwrite(VER_MAGIC, 1, 8, f);
     fflush(f);
     return f;
 }
-
-/* ── Close a versions file ──────────────────────────────────────── */
 void jinn_ver_close(FILE *f) {
     if (f) fclose(f);
 }
-
-/* ── Append a version entry ─────────────────────────────────────── */
-/* Writes the old record data before mutation. */
 void jinn_ver_append(FILE *f, int64_t sid, int64_t version,
                      const void *record_data, int64_t rec_size) {
     if (!f) return;
@@ -60,24 +38,18 @@ void jinn_ver_append(FILE *f, int64_t sid, int64_t version,
     fwrite(record_data, (size_t)rec_size, 1, f);
     fflush(f);
 }
-
-/* ── Count versions for a given sid ─────────────────────────────── */
 int64_t jinn_ver_count(FILE *f, int64_t sid, int64_t rec_size) {
     if (!f) return 0;
     int64_t count = 0;
-    (void)rec_size; /* entry_size implied by skip in fseek below */
+    (void)rec_size;
     fseek(f, VER_HEADER, SEEK_SET);
     int64_t entry_sid;
     while (fread(&entry_sid, 8, 1, f) == 1) {
         if (entry_sid == sid) count++;
-        /* skip version(8) + timestamp(8) + record_data(rec_size) */
         fseek(f, 8 + 8 + rec_size, SEEK_CUR);
     }
     return count;
 }
-
-/* ── Retrieve a specific version of a record ────────────────────── */
-/* Returns 1 if found, 0 if not. Writes record data into out_buf. */
 int64_t jinn_ver_at(FILE *f, int64_t sid, int64_t version,
                     void *out_buf, int64_t rec_size) {
     if (!f) return 0;
@@ -85,7 +57,6 @@ int64_t jinn_ver_at(FILE *f, int64_t sid, int64_t version,
     int64_t entry_sid, entry_ver;
     while (fread(&entry_sid, 8, 1, f) == 1) {
         fread(&entry_ver, 8, 1, f);
-        /* skip timestamp */
         fseek(f, 8, SEEK_CUR);
         if (entry_sid == sid && entry_ver == version) {
             fread(out_buf, (size_t)rec_size, 1, f);
@@ -95,11 +66,6 @@ int64_t jinn_ver_at(FILE *f, int64_t sid, int64_t version,
     }
     return 0;
 }
-
-/* ── Retrieve all versions for a sid into a caller-allocated buffer ── */
-/* Returns the number of versions written.
- * out_buf must be large enough: max_versions * rec_size bytes.
- * Versions are returned in file order (oldest first). */
 int64_t jinn_ver_history(FILE *f, int64_t sid,
                          void *out_buf, int64_t rec_size,
                          int64_t max_versions) {
@@ -110,7 +76,7 @@ int64_t jinn_ver_history(FILE *f, int64_t sid,
     uint8_t *dst = (uint8_t *)out_buf;
     while (fread(&entry_sid, 8, 1, f) == 1 && written < max_versions) {
         fread(&entry_ver, 8, 1, f);
-        fseek(f, 8, SEEK_CUR); /* skip timestamp */
+        fseek(f, 8, SEEK_CUR);
         if (entry_sid == sid) {
             fread(dst + written * rec_size, (size_t)rec_size, 1, f);
             written++;
@@ -120,16 +86,12 @@ int64_t jinn_ver_history(FILE *f, int64_t sid,
     }
     return written;
 }
-
-/* ── Compact: keep only the latest N versions per record ────────── */
-/* Fill callback for the atomic rewrite (task 8-21). */
 typedef struct {
     const uint8_t *entries;
     const uint8_t *keep;
     int64_t        total;
     size_t         entry_size;
 } VerImage;
-
 static int ver_fill(FILE *tmp, void *arg) {
     VerImage *im = (VerImage *)arg;
     if (fwrite(VER_MAGIC, 1, 8, tmp) != 8) return -1;
@@ -141,12 +103,9 @@ static int ver_fill(FILE *tmp, void *arg) {
     }
     return 0;
 }
-
 void jinn_ver_compact(FILE **fpp, const char *path, int64_t rec_size, int64_t keep_n) {
     if (!fpp || !*fpp || !path || keep_n <= 0) return;
     FILE *f = *fpp;
-
-    /* First pass: count entries per sid */
     fseek(f, VER_HEADER, SEEK_SET);
     int64_t total = 0;
     {
@@ -158,18 +117,12 @@ void jinn_ver_compact(FILE **fpp, const char *path, int64_t rec_size, int64_t ke
     }
     if (total == 0) return;
 
-    /* Read all entries into memory */
     size_t entry_size = VER_ENTRY_HDR + (size_t)rec_size;
     uint8_t *entries = (uint8_t *)malloc((size_t)total * entry_size);
     if (!entries) return;
-
     fseek(f, VER_HEADER, SEEK_SET);
     fread(entries, entry_size, (size_t)total, f);
-
-    /* For each unique sid, count occurrences and mark old ones for deletion.
-     * Simple O(n²) — fine for compaction which is infrequent. */
     uint8_t *keep = (uint8_t *)calloc((size_t)total, 1);
-
     for (int64_t i = total - 1; i >= 0; i--) {
         int64_t sid_i;
         memcpy(&sid_i, entries + i * entry_size, 8);
@@ -181,12 +134,8 @@ void jinn_ver_compact(FILE **fpp, const char *path, int64_t rec_size, int64_t ke
         }
         if (kept < keep_n) keep[i] = 1;
     }
-
-    /* Atomic rewrite with only kept entries (the old in-place rewrite +
-     * ftruncate corrupted the log on a mid-compact crash). */
     VerImage im = { entries, keep, total, entry_size };
     (void)jinn_atomic_rewrite_reopen(path, ver_fill, &im, fpp);
-
     free(entries);
     free(keep);
 }

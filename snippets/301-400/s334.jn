@@ -1,4 +1,3 @@
-# Tag-line printer using interpolation in a loop.
 *main
     i is 0
     while i < 3

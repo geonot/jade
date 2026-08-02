@@ -1,4 +1,3 @@
-# Rotate vec by k positions.
 *rotate(v, k as i64) returns Vec of i64
     n is v.length
     if n equals 0

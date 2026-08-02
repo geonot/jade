@@ -187,8 +187,6 @@ pub(super) enum Cmd {
     Fmt {
         files: Vec<PathBuf>,
 
-        /// Rewrite files in place. Without this flag the formatted output
-        /// is printed to stdout and no file is modified.
         #[arg(long)]
         write: bool,
     },

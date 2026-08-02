@@ -1,4 +1,3 @@
-# Selection sort, in-place style on a fresh vec.
 *main
     a is vec()
     a.push(5)

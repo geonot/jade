@@ -1,4 +1,3 @@
-# Magnetometer bias calibration: subtract running min/max midpoint.
 *calib(samples as Vec of i64, n as i64) returns i64
     mn is samples.get(0)
     mx is samples.get(0)

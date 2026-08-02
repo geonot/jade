@@ -10,11 +10,6 @@ fn main() {
         "runtime/context_x86_64.S"
     };
 
-    // JINN_RT_DEBUG=1 builds the C runtime at -O0 with debug info, so gdb can
-    // show real frames and locals instead of optimized-away ones. Off by
-    // default; default builds are byte-for-byte unaffected. Note that -O0
-    // changes scheduler timing enough that races often stop reproducing — for
-    // those, debug the -O2 build (it already carries -g in the dev profile).
     let rt_debug = env::var("JINN_RT_DEBUG").is_ok();
     let rt_opt = if rt_debug { 0 } else { 2 };
     let mut rt_build = cc::Build::new();
@@ -148,9 +143,6 @@ fn main() {
         );
     }
 
-    // std/regex.jn binds PCRE2 directly (`pcre2_*` externs); the helper
-    // shims live in runtime/regex_helper.c (already part of jinn_rt). All
-    // the compiler needs at link time is -lpcre2-8, so only probe for it.
     let has_pcre2 = std::process::Command::new("pkg-config")
         .args(["--exists", "libpcre2-8"])
         .status()

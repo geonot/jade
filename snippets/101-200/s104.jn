@@ -1,4 +1,3 @@
-# Insertion sort on a vec of i64.
 *sort(v)
     i is 1
     while i < v.length

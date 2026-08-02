@@ -1,4 +1,3 @@
-# RTOS ready-queue priority pick (highest prio = lowest number).
 *pick(prios as Vec of i64, n as i64) returns i64
     idx is 0
     best is prios.get(0)

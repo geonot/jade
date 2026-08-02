@@ -1,20 +1,3 @@
-//! End-to-end conformance for path-scoped package/module identity (scope.md).
-//!
-//! These drive the real `jinnc` binary against on-disk multi-package projects,
-//! exercising the full resolution pipeline: `flatten_workspace` →
-//! `resolve_scoped_pkg_ids` → typer scoped-use resolution → codegen. They pin
-//! the four behaviours scope.md makes observable at the build boundary:
-//!
-//!   1. scoped resolution of a single-version dep builds and runs (§2.1/§2.2);
-//!   2. a public transitive dep is reachable via a path-import (§4);
-//!   3. an `internal` transitive dep reach-in is a hard error (§4.1);
-//!   4. two live majors of one package are hard-rejected (§5).
-//!
-//! Dependencies are resolved through the git cache (`src/cache.rs`), keyed by
-//! `(url, version)`. The suite is fully hermetic: it points `HOME` at a
-//! tempdir, pre-populates the cache with throwaway git repos (no network), and
-//! invokes `jinnc build` from the project root.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -22,7 +5,6 @@ fn jinnc() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jinnc"))
 }
 
-/// A throwaway multi-package workspace under a private `HOME`/cache.
 struct Workspace {
     _home: tempfile::TempDir,
     root: tempfile::TempDir,
@@ -41,9 +23,6 @@ impl Workspace {
         }
     }
 
-    /// Place a dependency package in the git cache at the path the resolver
-    /// derives from `https://example.com/<name>` and `version`, then commit it
-    /// so `git rev-parse HEAD` (cache.rs::read_commit) succeeds.
     fn dep(&self, name: &str, version: &str, manifest: &str) {
         let dir = self.cache.join("example.com").join(name).join(version);
         std::fs::create_dir_all(&dir).unwrap();
@@ -64,8 +43,6 @@ impl Workspace {
         std::fs::write(self.root.path().join("main.jn"), body).unwrap();
     }
 
-    /// `jinnc build` from the project root with a private HOME and the cache
-    /// pre-populated. Returns (success, combined stderr+stdout).
     fn build(&self) -> (bool, String) {
         let out = self.root.path().join("out");
         let result = Command::new(jinnc())
@@ -82,7 +59,6 @@ impl Workspace {
         (result.status.success(), combined)
     }
 
-    /// Run the produced binary, returning its trimmed stdout.
     fn run_output(&self) -> String {
         let out = self.root.path().join("out");
         let result = Command::new(&out)
@@ -112,8 +88,6 @@ fn git(dir: &Path, args: &[&str]) {
     );
 }
 
-// §2.1/§2.2: a single-version dep resolves under the consumer's scope and the
-// program builds + runs. Scoped identity must not perturb the ordinary build.
 #[test]
 fn single_version_dep_builds_and_runs() {
     let w = Workspace::new();
@@ -128,8 +102,6 @@ fn single_version_dep_builds_and_runs() {
     assert_eq!(w.run_output(), "42");
 }
 
-// §4: reach-in is open by default. A `public` transitive dep (foo -> baz ->
-// bar) is reachable from the root via the path-import `use baz/bar`.
 #[test]
 fn public_transitive_reach_in_builds() {
     let w = Workspace::new();
@@ -154,10 +126,6 @@ fn public_transitive_reach_in_builds() {
     assert_eq!(w.run_output(), "1");
 }
 
-// §4.1: an `internal` dep declares its own visibility ceiling. A reach-in from
-// outside its owner-scope subtree (here the root `foo`, which is bar's
-// grandparent) is a hard build error naming the target, its scope, the
-// offending consumer, and the remedy.
 #[test]
 fn internal_transitive_reach_in_is_hard_error() {
     let w = Workspace::new();
@@ -184,9 +152,6 @@ fn internal_transitive_reach_in_is_hard_error() {
     assert!(log.contains("main:baz"), "{log}");
 }
 
-// §5 / lamp.md §5.7.6: two live majors of one package (root needs foo@1.2.0
-// directly, a sibling dep needs foo@2.0.0 transitively) is deferred to
-// post-traits and hard-rejected now with the documented diagnostic.
 #[test]
 fn two_live_majors_rejected_with_documented_diagnostic() {
     let w = Workspace::new();
@@ -212,8 +177,6 @@ fn two_live_majors_rejected_with_documented_diagnostic() {
     assert!(log.contains("coherence/traits"), "{log}");
 }
 
-// Same package at differing minor/patch under one major is the ordinary
-// single-version resolution, not a coexistence hazard, and must be accepted.
 #[test]
 fn same_major_minor_diff_accepted() {
     let w = Workspace::new();

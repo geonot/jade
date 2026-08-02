@@ -27,16 +27,6 @@ use pipeline::compile_and_link;
 use project::ProjectConfig;
 use sources::{find_project_entry, load_packages, resolve_modules};
 
-/// Initialize the `tracing` subscriber based on CLI verbosity flags.
-///
-/// Filter levels:
-/// - default: WARN (silent)
-/// - `--verbose`: INFO
-/// - `--debug`: DEBUG for all `jinnc::*` targets
-/// - `--debug-types`: TRACE for `jinnc::type`
-/// - `--debug-drops`: TRACE for `jinnc::drops`
-///
-/// Output goes to stderr without timestamps to keep diagnostics terse.
 fn init_tracing(cli: &Cli) {
     use tracing_subscriber::EnvFilter;
 
@@ -252,9 +242,7 @@ pub fn run() {
                     .parse_program()
                     .unwrap_or_else(|e| die(&format!("{e}")));
                 let base_dir = entry.parent().unwrap_or(std::path::Path::new("."));
-                /* D4 (task 8-15): the compile sees exactly this file plus the
-                 * transitive closure of its explicit `use` declarations —
-                 * no directory absorption, no identifier-driven imports. */
+
                 let mut loaded: HashSet<Symbol> = HashSet::new();
                 if let Ok(canon) = entry.canonicalize() {
                     loaded.insert(Symbol::intern(&canon.to_string_lossy()));
@@ -263,11 +251,7 @@ pub fn run() {
                 resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
                 let mut typer = Typer::new();
                 typer.set_source_dir(base_dir.to_path_buf());
-                /* The typer's lowering is also the ownership analysis
-                 * (task 8-7), so `check` and `build` agree: a program
-                 * `check` passes cannot corrupt memory when built. Run
-                 * HIR validation too — `check` should be at least as
-                 * strict as any compiling pipeline. */
+
                 match typer.lower_program(&prog) {
                     Ok(mut hir_prog) => {
                         let hir_errors = crate::hir_validate::HirValidator::validate(&hir_prog);
@@ -347,9 +331,7 @@ pub fn run() {
     }
 
     let input = cli.input.unwrap_or_else(|| die("no input file provided"));
-    // P1-17: `jinnc PATH/` and `jinnc PATH/project.jn` should both
-    // resolve to the project's declared entry file rather than try
-    // to compile the directory or the manifest itself.
+
     let input = resolve_project_input(input);
     let src = fs::read_to_string(&input)
         .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", input.display())));
@@ -435,14 +417,6 @@ pub fn run() {
         Err(e) => die(&format!("hir: {e}")),
     };
 
-    /* D2 (task 8-16): a library exports its functions to call sites the
-     * compiler cannot see, so an unannotated generic has nothing to
-     * instantiate against — require the annotation now, loudly, instead
-     * of silently dropping the function from the artifact. */
-    /* Only when producing an actual artifact: with --emit-hir/--emit-llvm/
-     * --emit-interface nothing is dropped (modules distribute as source and
-     * instantiate at user call sites — the std model), so the frontend
-     * check passes; a real .o build would silently omit the function. */
     if cli.lib
         && !cli.emit_hir
         && !cli.emit_llvm
@@ -487,10 +461,6 @@ pub fn run() {
     }
 
     crate::comptime::fold_program(&mut hir_prog);
-
-    /* Ownership is enforced by the typer's single flow-sensitive analysis
-     * during lowering (task 8-7); the separate HIR OwnershipVerifier is
-     * deleted, not run here. */
 
     let mir_opt_level = match cli.opt {
         0 => crate::mir::opt::OptLevel::None,
@@ -709,9 +679,6 @@ pub fn run() {
     }
 }
 
-/// P1-17: resolve `jinnc PATH/` and `jinnc PATH/project.jn` to the
-/// project's declared entry file. A plain `.jn` source file is
-/// returned unchanged.
 fn resolve_project_input(input: PathBuf) -> PathBuf {
     let project_jinn = if input.is_dir() {
         input.join("project.jn")

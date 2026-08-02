@@ -1,4 +1,3 @@
-# Token kinds: 1=heading, 2=paragraph, 3=bullet, 4=blank, 5=code-fence
 type Token
     kind as i64
     level as i64

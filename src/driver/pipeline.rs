@@ -48,12 +48,6 @@ pub(super) fn compile_and_link(
     let base_dir = input.parent().unwrap_or(std::path::Path::new("."));
     let input_canon = input.canonicalize().unwrap_or_else(|_| input.to_path_buf());
 
-    /* D4 (task 8-15): the compile sees exactly the entry file plus the
-     * transitive closure of its explicit `use` declarations — the old
-     * merge_source_files absorbed every .jn under the entry directory
-     * (so a broken sibling file changed what this program means), and
-     * resolve_implicit_imports pulled in any file whose stem matched an
-     * undefined `x.y` identifier. Both are gone. */
     let mut loaded: HashSet<Symbol> = HashSet::new();
     loaded.insert(Symbol::intern(&input_canon.to_string_lossy()));
     let (packages, pkg_id_map) = load_packages_with_ids(base_dir);
@@ -124,9 +118,7 @@ pub(super) fn compile_and_link(
         };
         match flatten_workspace(pkg_name, base_dir, &root_deps, &packages) {
             Ok(dag) => resolve_scoped_pkg_ids(&dag),
-            // A multi-version coexistence violation (scope.md §5) is a hard,
-            // documented build error and must abort. Other resolution failures
-            // are tolerated here (partial/non-package builds resolve leniently).
+
             Err(e) if e.starts_with("multi-version coexistence of") => die(&e),
             Err(_) => Default::default(),
         }
@@ -140,8 +132,6 @@ pub(super) fn compile_and_link(
         Err(e) => die(&format!("hir: {e}")),
     };
 
-    /* HIR validation ran only on the `jinnc <file>` inline path before;
-     * `jinn build`/`run`/`test` skipped it (task 8-7 unification). */
     let hir_errors = crate::hir_validate::HirValidator::validate(&hir_prog);
     for e in &hir_errors {
         eprintln!("hir-validate: {e}");
@@ -151,10 +141,6 @@ pub(super) fn compile_and_link(
     }
 
     crate::comptime::fold_program(&mut hir_prog);
-
-    /* Ownership is enforced by the typer's single flow-sensitive analysis
-     * during lowering (task 8-7); the separate HIR OwnershipVerifier is
-     * deleted, not run here. */
 
     let mir_opt_level = match opt_level {
         0 => crate::mir::opt::OptLevel::None,

@@ -1,4 +1,3 @@
-# libjn.sys_stat — drop-in for POSIX <sys/stat.h>
 
 S_IFMT   is 0xF000
 S_IFSOCK is 0xC000

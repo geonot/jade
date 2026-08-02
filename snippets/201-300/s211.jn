@@ -1,4 +1,3 @@
-# HFT: bid-ask imbalance momentum signal.
 *imb(bid as i64, ask as i64) returns i64
     if bid + ask equals 0
         return 0

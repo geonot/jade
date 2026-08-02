@@ -1,14 +1,3 @@
-# Kernel actor that owns the syscall numbers and tallies traffic.
-# This is "ring 0": only the kernel actor mutates these counters.
-#
-# Syscall numbers (mirrored as named constants in shell/process):
-#   1  WRITE      (pid, vaddr, value)
-#   2  READ       (pid, vaddr)         -> echoed via log
-#   3  ALLOC      (pid, n_pages)
-#   4  FREE       (pid, frame)
-#   5  YIELD      (pid)
-#   6  EXIT       (pid, code)
-#   7  FORK       (pid)
 
 actor Kernel
     n_write as i64

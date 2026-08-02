@@ -1,4 +1,3 @@
-# 4-bit ripple-carry adder.
 *radd(a as i64, b as i64) returns i64
     carry is 0
     sum is 0

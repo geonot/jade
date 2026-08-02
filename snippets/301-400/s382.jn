@@ -1,4 +1,3 @@
-# Filter primes (1..100), then sum them.
 *is_prime(n as i64) returns bool
     if n < 2
         return false

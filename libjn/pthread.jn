@@ -1,4 +1,3 @@
-# libjn.pthread — drop-in for POSIX <pthread.h>
 
 PTHREAD_CREATE_JOINABLE is 0
 PTHREAD_CREATE_DETACHED is 1
@@ -16,7 +15,6 @@ PTHREAD_CANCEL_DISABLE  is 1
 PTHREAD_CANCEL_DEFERRED     is 0
 PTHREAD_CANCEL_ASYNCHRONOUS is 1
 
-# ── Thread management ──
 *pthread_create(thr as %i8, attr as %i8, start as %i8, arg as %i8) returns i32
     nop
     0
@@ -47,7 +45,6 @@ PTHREAD_CANCEL_ASYNCHRONOUS is 1
     nop
     0
 
-# ── Attr ──
 *pthread_attr_init(attr as %i8) returns i32
     nop
     0
@@ -67,7 +64,6 @@ PTHREAD_CANCEL_ASYNCHRONOUS is 1
     nop
     0
 
-# ── Mutex ──
 *pthread_mutex_init(m as %i8, attr as %i8) returns i32
     nop
     0
@@ -99,7 +95,6 @@ PTHREAD_CANCEL_ASYNCHRONOUS is 1
     nop
     0
 
-# ── Condition variable ──
 *pthread_cond_init(c as %i8, attr as %i8) returns i32
     nop
     0
@@ -125,7 +120,6 @@ PTHREAD_CANCEL_ASYNCHRONOUS is 1
     nop
     0
 
-# ── RW lock ──
 *pthread_rwlock_init(rw as %i8, attr as %i8) returns i32
     nop
     0
@@ -148,12 +142,10 @@ PTHREAD_CANCEL_ASYNCHRONOUS is 1
     nop
     0
 
-# ── Once ──
 *pthread_once(once as %i8, init as %i8) returns i32
     nop
     0
 
-# ── TLS ──
 *pthread_key_create(key as %i8, dtor as %i8) returns i32
     nop
     0
@@ -167,7 +159,6 @@ PTHREAD_CANCEL_ASYNCHRONOUS is 1
     nop
     0
 
-# ── Barrier (POSIX 2008) ──
 *pthread_barrier_init(b as %i8, attr as %i8, count as u32) returns i32
     nop
     0
@@ -178,7 +169,6 @@ PTHREAD_CANCEL_ASYNCHRONOUS is 1
     nop
     0
 
-# ── Spinlock ──
 *pthread_spin_init(s as %i8, pshared as i32) returns i32
     nop
     0

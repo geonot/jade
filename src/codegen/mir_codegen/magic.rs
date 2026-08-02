@@ -462,8 +462,6 @@ impl<'ctx> Compiler<'ctx> {
         let cap_vals: Vec<BasicValueEnum<'ctx>> =
             cap_args.iter().map(|vid| self.val(*vid)).collect();
 
-        // Generator struct carries the coroutine bookkeeping fields plus one
-        // 8-byte slot per captured value (same ABI as `emit_coro_create`).
         let total_size = Compiler::GEN_SIZE + (cap_vals.len() as u64) * 8;
         let malloc_fn = self.ensure_malloc();
         let gen_mem = b!(self.bld.build_call(
@@ -510,9 +508,6 @@ impl<'ctx> Compiler<'ctx> {
             self.gen_field_ptr(gen_mem, Compiler::GEN_CORO_PTR_OFF, "task.coro_ptr")?;
         b!(self.bld.build_store(coro_ptr_field, coro));
 
-        // Register as a non-daemon child of the scope, then enqueue it to run
-        // concurrently. `jinn_scope_register_child` reads the current scope and
-        // links the child so the scope join waits for it.
         let _ = scope_val;
         let register = crate::codegen::fn_or_die(&self.module, "jinn_scope_register_child");
         b!(self.bld.build_call(register, &[coro.into()], ""));
@@ -535,12 +530,6 @@ impl<'ctx> Compiler<'ctx> {
         let i32t = self.ctx.i32_type();
         let i64t = self.ctx.i64_type();
 
-        // The coroutine/generator body was lowered to a standalone MIR
-        // function `__coro_{name}` (declared by `declare_mir_fn` with the
-        // `void(ptr)` coroutine ABI). Here we only allocate and initialize the
-        // generator struct, store the captures (= call args) into it, and wire
-        // up the real coroutine via `jinn_coro_create`. The body reloads the
-        // captures from the struct in its own prologue.
         let coro_fn_name = format!("__coro_{name}");
         let coro_fn = self
             .module
@@ -599,9 +588,6 @@ impl<'ctx> Compiler<'ctx> {
             self.gen_field_ptr(gen_mem, Compiler::GEN_CORO_PTR_OFF, "gen.coro_ptr")?;
         b!(self.bld.build_store(coro_ptr_field, coro));
 
-        // Bind the coroutine's source name (e.g. `producer`) so a later
-        // `producer.next()` (lowered to `load producer` + `__coro_next`)
-        // resolves to this generator struct. Anonymous coroutines skip this.
         if name != "__anon" {
             let name_alloca = self.entry_alloca(ptr.into(), name);
             b!(self.bld.build_store(name_alloca, gen_mem));

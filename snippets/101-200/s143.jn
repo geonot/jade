@@ -1,4 +1,3 @@
-# Run-length encoding via count of repeats.
 *main
     s is "aaabbcdddde"
     i is 0

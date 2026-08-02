@@ -1,15 +1,3 @@
-# ml_autodiff — reverse-mode autodiff over a fixed-point tape.
-#
-# We don't have floats-on-actors yet so values live as i64 in the
-# Q24.40 fixed-point format (40 fractional bits).  Modules:
-#
-#   fix.jn   — Q24.40 arithmetic helpers
-#   tape.jn  — value graph + topological backward pass
-#   mlp.jn   — 2-2-1 MLP with tanh hidden activation
-#   train.jn — XOR dataset, momentum SGD
-#
-# `main` trains the network for 200 epochs and reports loss curve
-# end points + final predictions.
 
 use fix
 use tape

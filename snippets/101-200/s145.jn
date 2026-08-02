@@ -1,4 +1,3 @@
-# Prime test (trial division).
 *is_prime(n as i64) returns bool
     if n < 2
         return false

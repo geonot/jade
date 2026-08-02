@@ -1,4 +1,3 @@
-# Fizzbuzz 1..15 (no chained-and, no chained-or).
 *main
     i is 1
     while i <= 15

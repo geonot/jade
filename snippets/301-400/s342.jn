@@ -1,4 +1,3 @@
-# 3D vector dot product (positional fields).
 *mk3(x as i64, y as i64, z as i64) returns Vec of i64
     v is vec()
     v.push(x)

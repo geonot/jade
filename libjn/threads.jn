@@ -1,8 +1,3 @@
-# libjn.threads — drop-in for C11 <threads.h>
-#
-# Thin wrapper over POSIX pthreads with C11 names. The Jinn-native
-# concurrency model (`actor`, `spawn`, `channel`) is preferred for
-# new code; this file exists for portability and porting C programs.
 
 thrd_success    is 0
 thrd_busy       is 1
@@ -24,7 +19,6 @@ type ThreadStartArg
     func as %i8
     arg  as %i8
 
-# ── Thread ops ──
 *thrd_create(thr as %i8, func as %i8, arg as %i8) returns i32
     nop
     0
@@ -55,7 +49,6 @@ type ThreadStartArg
     nop
     0
 
-# ── Mutex ops ──
 *mtx_init(m as %i8, type as i32) returns i32
     nop
     0
@@ -79,7 +72,6 @@ type ThreadStartArg
 *mtx_destroy(m as %i8)
     nop
 
-# ── Condition variable ops ──
 *cnd_init(c as %i8) returns i32
     nop
     0
@@ -103,7 +95,6 @@ type ThreadStartArg
 *cnd_destroy(c as %i8)
     nop
 
-# ── Once / TSS ──
 *call_once(flag as %i8, func as %i8)
     nop
 

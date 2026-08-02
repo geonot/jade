@@ -1,4 +1,3 @@
-# Iterative integer power (fast doubling).
 *ipow(a as i64, e as i64) returns i64
     r is 1
     while e > 0

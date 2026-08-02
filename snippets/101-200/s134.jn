@@ -1,4 +1,3 @@
-# Sum & average via fold.
 *main
     a is vec(10.0, 20.0, 30.0, 40.0, 50.0)
     s is 0.0

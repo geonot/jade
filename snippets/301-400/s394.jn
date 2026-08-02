@@ -1,4 +1,3 @@
-# Priority queue (min) via linear scan + swap-pop.
 *main
     h is vec()
     h.push(7)
@@ -8,7 +7,6 @@
     h.push(1)
     h.push(6)
     while h.length > 0
-        # find min idx
         mi is 0
         i is 1
         while i < h.length

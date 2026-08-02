@@ -152,11 +152,7 @@ impl<'ctx> Compiler<'ctx> {
                                 byte_offset += 8;
                             } else {
                                 b!(self.bld.build_store(field_ptr, v));
-                                /* Target-data size: `.size_of()` is not a
-                                 * foldable constant for aggregates, so the
-                                 * old `unwrap_or(8)` counted a 24-byte
-                                 * String as 8 and every later field
-                                 * overlapped it (task 8-19). */
+
                                 let type_size = self.type_store_size(v.get_type());
                                 byte_offset += (type_size + 7) & !7;
                             }

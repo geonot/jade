@@ -38,10 +38,7 @@ impl Typer {
             Type::Generator(inner) => {
                 Type::Generator(Box::new(Self::substitute_type(inner, type_map)))
             }
-            // Generic applications such as `Tree of T` are carried as
-            // `Struct(name, args)` until the typer canonicalizes them; substitute
-            // through the arguments so a recursive variant field like
-            // `Branch(Tree of T, Tree of T)` becomes `Tree of i64` under the map.
+
             Type::Struct(name, args) => Type::Struct(
                 *name,
                 args.iter()
@@ -52,8 +49,6 @@ impl Typer {
         }
     }
 
-    /// True when `ty` contains no free type parameters or unresolved type
-    /// variables, i.e. it is fully concrete and safe to monomorphize.
     pub(crate) fn is_concrete_type(ty: &Type) -> bool {
         match ty {
             Type::Param(_) | Type::TypeVar(_) => false,
@@ -74,18 +69,6 @@ impl Typer {
         }
     }
 
-    /// Rewrite generic type applications written as annotations into their
-    /// concrete monomorphic representation.
-    ///
-    /// The parser cannot distinguish a generic enum from a generic struct, so it
-    /// emits `Type::Struct(name, args)` for any `Name of Args` annotation. This
-    /// pass resolves such applications once all declarations are known: a generic
-    /// enum application becomes `Type::Enum(mangled)` and a generic struct
-    /// application becomes `Type::Struct(mangled, [])`, registering the
-    /// corresponding monomorphic definition as a side effect so codegen can find
-    /// its layout. Applications that still contain type parameters or unresolved
-    /// type variables are left untouched; those are resolved later, per
-    /// instantiation, by generic-function monomorphization.
     pub(in crate::typer) fn monomorphize_named_annotation(&mut self, ty: &Type) -> Type {
         match ty {
             Type::Struct(name, args) => {
@@ -160,14 +143,6 @@ impl Typer {
         }
     }
 
-    /// Monomorphize a generic struct named by a type annotation, substituting
-    /// its declared field types through a type-parameter map built from the
-    /// supplied type arguments. Unlike [`Self::monomorphize_struct`] (whose
-    /// `arg_tys` are field *value* types from a construction site, in field
-    /// order), this resolves an annotation such as `Box of i64` where the
-    /// arguments correspond to the struct's type parameters in declaration
-    /// order. Returns the mangled name, registering the monomorphic definition
-    /// the first time it is seen so that codegen has a layout for it.
     pub(in crate::typer) fn monomorphize_generic_struct_annotation(
         &mut self,
         base_name: &str,
@@ -250,11 +225,6 @@ impl Typer {
         name
     }
 
-    /// Injective encoding of a type's display string for symbol mangling.
-    /// `U` is the escape character (`U`→`UU`, `_`→`UX`, ` `→`US`), so the
-    /// encoded form contains no bare `_` and decodes uniquely: distinct
-    /// instantiations can never collide (`A_B` vs `AUB` used to map to the
-    /// same symbol and silently fuse two monomorphizations).
     fn encode_type_for_mangle(s: &str) -> String {
         let mut out = String::with_capacity(s.len());
         for c in s.chars() {
@@ -488,8 +458,7 @@ impl Typer {
         self.pop_scope();
         let id = self.fresh_id();
         self.fns.insert(mangled, (id, ptys.clone(), ret.clone()));
-        // Call sites that refer to the mangled instantiation must see the
-        // same consuming-parameter answers as the base name (task 8-6).
+
         if let Some(access) = self.fn_param_access.get(&Symbol::from(name)).cloned() {
             self.fn_param_access.insert(mangled, access);
         }
@@ -582,11 +551,7 @@ impl Typer {
             .get(name)
             .ok_or_else(|| format!("no generic enum: {name}"))?
             .clone();
-        /* Resolve type args BEFORE mangling: minting an instance keyed by a
-         * still-unresolved var ("List__G_?0") bakes a stale name into the
-         * HIR — the var solves later, a sibling mint gets the real name,
-         * and codegen faults on the phantom enum (the linked_list ICE,
-         * task 8-19). */
+
         let type_map: HashMap<Symbol, Type> = {
             let was_strict = self.infer_ctx.is_strict();
             self.infer_ctx.set_strict(false);
@@ -602,11 +567,7 @@ impl Typer {
         if self.enums.contains_key(&mangled) {
             return Ok(mangled);
         }
-        // Reserve the mangled name before processing variant fields so that a
-        // recursive reference inside a field (e.g. `Branch(Tree of T, Tree of T)`
-        // in `Tree of i64`, or mutual recursion between two generic enums)
-        // resolves to this same instantiation instead of recursing forever. The
-        // placeholder is replaced with the real variants once they are built.
+
         self.enums.insert(mangled, Vec::new());
 
         let mut variants = Vec::new();
@@ -615,9 +576,6 @@ impl Typer {
             self.variant_tags.insert(v.name, (mangled, tag as u32));
             let mut ftys: Vec<Type> = Vec::with_capacity(v.fields.len());
             for f in &v.fields {
-                // Substitute the enum's type parameters, then canonicalize any
-                // nested generic application (including the recursive self
-                // reference) to its concrete monomorphic type.
                 let substituted = Self::substitute_type(&f.ty, type_map);
                 ftys.push(self.monomorphize_named_annotation(&substituted));
             }

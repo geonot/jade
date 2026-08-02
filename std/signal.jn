@@ -1,15 +1,4 @@
-# std.signal — POSIX signal handling
-#
-# Async-signal-safe handlers are difficult; in Jinn, the runtime
-# delivers signals via a coroutine-friendly callback after returning
-# from the kernel handler. Treat handlers as ordinary Jinn code.
-#
-# Usage:
-#   signal.handle(signal.SIGINT, fn() { log("ctrl-c") })
-#   signal.ignore(signal.SIGPIPE)
-#   signal.on_interrupt(fn() { shutdown() })
 
-# ── Signal numbers (Linux/macOS layout) ──────────────────────
 
 SIGHUP   is 1
 SIGINT   is 2
@@ -19,7 +8,7 @@ SIGTRAP  is 5
 SIGABRT  is 6
 SIGBUS   is 7
 SIGFPE   is 8
-SIGKILL  is 9          # uncatchable
+SIGKILL  is 9
 SIGUSR1  is 10
 SIGSEGV  is 11
 SIGUSR2  is 12
@@ -28,54 +17,42 @@ SIGALRM  is 14
 SIGTERM  is 15
 SIGCHLD  is 17
 SIGCONT  is 18
-SIGSTOP  is 19         # uncatchable
+SIGSTOP  is 19
 SIGTSTP  is 20
 SIGTTIN  is 21
 SIGTTOU  is 22
 SIGURG   is 23
 SIGWINCH is 28
 
-# ── Core API ─────────────────────────────────────────────────
 
-# Install a Jinn closure as the handler for `sig`.
 *handle(sig as i32, handler)
     __signal_handle(sig, handler)
 
-# Set the disposition to SIG_IGN — the kernel discards the signal.
 *ignore(sig as i32)
     __signal_ignore(sig)
 
-# Restore the kernel's default behavior for `sig`.
 *reset(sig as i32)
     __signal_default(sig)
 
-# Send a signal to the current process.
 *raise(sig as i32) returns i32
     __signal_raise(sig)
 
-# Send a signal to another process by PID.
 *kill(pid as i64, sig as i32) returns i32
     __signal_kill(pid as i32, sig)
 
-# ── Convenience handlers ─────────────────────────────────────
 
-# Run `handler` on Ctrl-C.
 *on_interrupt(handler)
     handle(SIGINT, handler)
 
-# Run `handler` on SIGTERM (graceful shutdown).
 *on_terminate(handler)
     handle(SIGTERM, handler)
 
-# Reload-style handler (typical for HUP).
 *on_hangup(handler)
     handle(SIGHUP, handler)
 
-# Window-resize callback for full-screen TUI apps.
 *on_resize(handler)
     handle(SIGWINCH, handler)
 
-# ── Names ────────────────────────────────────────────────────
 
 *name(sig as i32) returns String
     if sig equals SIGHUP

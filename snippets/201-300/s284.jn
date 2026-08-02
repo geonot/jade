@@ -1,4 +1,3 @@
-# UART RX ring buffer: enqueue/dequeue counters.
 *ring_after(n_push as i64, n_pop as i64, cap as i64) returns i64
     h is 0
     t is 0

@@ -1,15 +1,3 @@
-//! Conformance for tombstone reclamation
-//! (store-improvement.md item 6, task 2-31-10). Pins the documented semantics:
-//!
-//!   * `compact StoreName` rewrites the record file dropping every
-//!     soft-deleted (tombstoned) row, shrinking the on-disk file;
-//!   * live rows survive compaction with all field values intact and
-//!     queries continue to resolve;
-//!   * compaction preserves the schema fingerprint/version in the header so
-//!     a subsequent open does not trip the migration guard;
-//!   * the `@compact(threshold)` decorator auto-compacts once the number of
-//!     tombstones reaches the threshold after a delete.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

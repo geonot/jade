@@ -1,4 +1,3 @@
-# CSV row builder via repeated interpolation.
 *main
     name is 'alice'
     age  is 30

@@ -142,10 +142,6 @@ impl Typer {
         match expr {
             ast::Expr::Method(obj, method, args, span) => {
                 if let ast::Expr::Ident(ref name, _) = **obj {
-                    /* D4 (task 8-15): imports are explicit. A qualified call
-                     * on a name that is not in scope but names an importable
-                     * module (std or a sibling file) used to be silently
-                     * auto-imported; now it is an error naming the fix. */
                     if !self.modules.contains(name)
                         && self.find_var(&name.as_str()).is_none()
                         && !self.structs.contains_key(name)
@@ -380,10 +376,6 @@ impl Typer {
                     return self.lower_expr_expected(&call_expr, expected);
                 }
 
-                /* D3 (task 8-25): a query is `Result of <row>, StoreError`
-                 * — reading a field straight off it is the old fabricated-
-                 * zero-row bug wearing a new type. Refuse at compile time
-                 * with the two idiomatic forms. */
                 if let Type::Enum(ename) = &resolved_ty
                     && ename.as_str().starts_with("Result__G_Row<")
                 {

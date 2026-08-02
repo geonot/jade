@@ -1,4 +1,3 @@
-# Pre-grow Vec via a single push loop (warms allocator).
 *main
     xs is vec()
     i is 0

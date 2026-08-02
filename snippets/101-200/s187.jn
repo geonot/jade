@@ -1,4 +1,3 @@
-# Find max value & index in a vec.
 *main
     a is vec(7, 1, 9, 3, 11, 5, 8)
     bi is 0

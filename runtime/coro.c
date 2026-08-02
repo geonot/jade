@@ -1,14 +1,9 @@
-/*
- * Jinn Runtime — Coroutine create/destroy/trampoline.
- */
 #include "jinn_rt.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
-
 static _Atomic(uint32_t) g_coro_id_counter = 0;
 
-/* ── Stack cache (avoids repeated mmap/munmap) ───────────────────── */
 
 #define STACK_CACHE_MAX 64
 
@@ -16,11 +11,9 @@ typedef struct {
     void   *base;
     size_t  size;
 } cached_stack_t;
-
 static cached_stack_t g_stack_cache[STACK_CACHE_MAX];
 static _Atomic(int32_t) g_stack_cache_count = 0;
 static _Atomic(int32_t) g_stack_cache_lock = 0;
-
 static inline void stack_cache_acquire(void) {
     while (atomic_exchange_explicit(&g_stack_cache_lock, 1, memory_order_acquire) != 0) {
 #if defined(__x86_64__)
@@ -30,18 +23,15 @@ static inline void stack_cache_acquire(void) {
 #endif
     }
 }
-
 static inline void stack_cache_release(void) {
     atomic_store_explicit(&g_stack_cache_lock, 0, memory_order_release);
 }
-
 static void *stack_cache_pop(size_t size) {
     stack_cache_acquire();
     int count = atomic_load_explicit(&g_stack_cache_count, memory_order_relaxed);
     for (int i = count - 1; i >= 0; i--) {
         if (g_stack_cache[i].size == size) {
             void *base = g_stack_cache[i].base;
-            /* Swap with last element */
             g_stack_cache[i] = g_stack_cache[count - 1];
             atomic_store_explicit(&g_stack_cache_count, count - 1, memory_order_relaxed);
             stack_cache_release();
@@ -51,13 +41,12 @@ static void *stack_cache_pop(size_t size) {
     stack_cache_release();
     return NULL;
 }
-
 static int stack_cache_push(void *base, size_t size) {
     stack_cache_acquire();
     int count = atomic_load_explicit(&g_stack_cache_count, memory_order_relaxed);
     if (count >= STACK_CACHE_MAX) {
         stack_cache_release();
-        return 0; /* cache full */
+        return 0;
     }
     g_stack_cache[count].base = base;
     g_stack_cache[count].size = size;
@@ -65,31 +54,23 @@ static int stack_cache_push(void *base, size_t size) {
     stack_cache_release();
     return 1;
 }
-
-/* Forward declarations */
 static void jinn_coro_trampoline(void);
 static void jinn_coro_exit(void);
-
 jinn_coro_t *jinn_coro_create(void (*entry)(void*), void *arg) {
     jinn_coro_t *c = (jinn_coro_t *)calloc(1, sizeof(jinn_coro_t));
     if (!c) return NULL;
-
     size_t total = JINN_STACK_SIZE;
 
-    /* Try to reuse a cached stack */
     void *base = stack_cache_pop(total);
     if (!base) {
-        /* Allocate stack with mmap for guard page support */
         base = mmap(NULL, total, PROT_READ | PROT_WRITE,
                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (base == MAP_FAILED) {
             free(c);
             return NULL;
         }
-        /* Guard page at the bottom (stack grows down) */
         mprotect(base, JINN_GUARD_SIZE, PROT_NONE);
     }
-
     c->stack_base  = base;
     c->stack_size  = (uint32_t)total;
     c->entry       = entry;
@@ -104,33 +85,17 @@ jinn_coro_t *jinn_coro_create(void (*entry)(void*), void *arg) {
     c->scope       = NULL;
     c->txn_state   = NULL;
     atomic_store(&c->cancelled, 0);
-
-    /*
-     * Set up the initial stack so that jinn_context_swap's `ret`
-     * jumps to jinn_coro_trampoline.
-     *
-     * Stack grows down. We set up:
-     *   [top - 8]  = &jinn_coro_exit  (fake return address for trampoline)
-     *   [top - 16] = &jinn_coro_trampoline (the "return address" for context_swap)
-     *
-     * We stash entry in r12 and arg in r13 (callee-saved, preserved across swap).
-     */
     uintptr_t stack_top = (uintptr_t)base + total;
-    /* Align to 16 bytes (ABI) */
     stack_top &= ~(uintptr_t)15;
-    /* Push fake return for trampoline -> jinn_coro_exit */
     stack_top -= 8;
     *(void **)stack_top = (void *)jinn_coro_exit;
-    /* Push trampoline as the address context_swap's `ret` will go to */
     stack_top -= 8;
     *(void **)stack_top = (void *)jinn_coro_trampoline;
-
-    /* Set up context */
 #if defined(__x86_64__) || defined(_M_X64)
     c->ctx.rsp = (void *)stack_top;
     c->ctx.rbp = (void *)stack_top;
-    c->ctx.r12 = (void *)entry;  /* stash entry */
-    c->ctx.r13 = arg;             /* stash arg */
+    c->ctx.r12 = (void *)entry;
+    c->ctx.r13 = arg;
 #elif defined(__aarch64__) || defined(_M_ARM64)
     c->ctx.sp  = (void *)stack_top;
     c->ctx.fp  = (void *)stack_top;
@@ -138,17 +103,13 @@ jinn_coro_t *jinn_coro_create(void (*entry)(void*), void *arg) {
     c->ctx.x19_x28[0] = (void *)entry;
     c->ctx.x19_x28[1] = arg;
 #else
-    /* Portable fallback: can't pre-set context, will use setjmp in trampoline */
     (void)stack_top;
 #endif
-
     return c;
 }
-
 void jinn_coro_destroy(jinn_coro_t *c) {
     if (!c) return;
     if (c->stack_base) {
-        /* Try to cache the stack for reuse */
         if (!stack_cache_push(c->stack_base, c->stack_size)) {
             munmap(c->stack_base, c->stack_size);
         }
@@ -156,46 +117,27 @@ void jinn_coro_destroy(jinn_coro_t *c) {
     free(c);
 }
 
-/*
- * Thread-local for generator coroutine (direct context-swap, no scheduler).
- * Set by jinn_gen_resume before swapping to the generator.
- */
 _Thread_local jinn_coro_t *tl_gen_coro = NULL;
-
-/*
- * Trampoline: first function called when a coroutine starts.
- * Reads entry and arg from callee-saved registers set during create.
- */
 static void jinn_coro_trampoline(void) {
     jinn_coro_t *self;
     jinn_coro_t *gen = tl_gen_coro;
     if (gen) {
-        /* Generator coroutine — runs via direct context swap, no scheduler */
         tl_gen_coro = NULL;
         self = gen;
         self->entry(self->arg);
-        /* Generator entry should not return (codegen emits jinn_gen_suspend + unreachable).
-         * If it somehow does, just spin forever to avoid stack corruption. */
         for (;;) {}
     }
 
-    /* Scheduler-spawned coroutine */
     jinn_worker_t *w = tl_worker;
     self = w ? w->current : NULL;
     if (!self) return;
-
-    /* Call the actual coroutine entry function */
     self->entry(self->arg);
-
-    /* Entry returned — mark done and yield back to scheduler */
     jinn_coro_exit();
 }
-
 static void jinn_coro_exit(void) {
     jinn_worker_t *w = tl_worker;
     if (!w || !w->current) return;
     jinn_coro_t *self = w->current;
-    /* Fire on-exit callback (e.g. supervisor notification) */
     if (self->on_exit_cb) {
         void (*cb)(void *) = self->on_exit_cb;
         void *arg = self->on_exit_arg;
@@ -205,16 +147,9 @@ static void jinn_coro_exit(void) {
     self->state = JINN_CORO_DONE;
     w->held_lock = NULL;
     w->last_action = SCHED_ACTION_DESTROY;
-    /* Swap back to the scheduler; this coroutine is never resumed */
     jinn_context_swap(&self->ctx, &w->sched_ctx);
-    /* unreachable */
     __builtin_unreachable();
 }
-
-/*
- * jinn_coro_yield: voluntary yield back to the scheduler.
- * The scheduler will re-enqueue this coroutine.
- */
 void jinn_coro_yield(void) {
     jinn_worker_t *w = tl_worker;
     if (!w || !w->current) return;
@@ -223,89 +158,43 @@ void jinn_coro_yield(void) {
     w->held_lock = NULL;
     w->last_action = SCHED_ACTION_REQUEUE;
     jinn_context_swap(&c->ctx, &w->sched_ctx);
-    /* Resumed here when re-scheduled */
 }
-
 jinn_coro_t *jinn_current_coro(void) {
     jinn_worker_t *w = tl_worker;
     return w ? w->current : NULL;
 }
-
 jinn_worker_t *jinn_current_worker(void) {
     return tl_worker;
 }
-
 void jinn_coro_set_daemon(jinn_coro_t *c) {
     if (c) c->daemon = 1;
 }
-
 void jinn_coro_set_on_exit(jinn_coro_t *c, void (*cb)(void *), void *arg) {
     if (!c) return;
     c->on_exit_cb = cb;
     c->on_exit_arg = arg;
 }
 
-/* ── Generator direct context-swap API ─────────────────────────── */
-
-/*
- * Generator control block layout (32 bytes):
- *   offset  0: coro_ptr       (*jinn_coro_t)        — 8 bytes
- *   offset  8: value          (i64)                  — 8 bytes
- *   offset 16: has_value      (u8)                   — 1 byte
- *   offset 17: done           (u8)                   — 1 byte
- *   offset 24: caller_ctx_ptr (*jinn_context_t)      — 8 bytes
- */
 #define GEN_CORO_OFF       0
 #define GEN_CALLER_CTX_OFF 24
 #define GEN_DONE_OFF       17
 
-/*
- * jinn_gen_resume: Direct context swap from caller to generator.
- * Saves caller context on caller's stack, stores its pointer in the gen block,
- * and swaps to the generator coroutine.  Returns when the generator yields
- * or finishes.
- */
 void jinn_gen_resume(void *gen_blk) {
-    /* Don't resume a finished generator */
     uint8_t done = *((uint8_t *)gen_blk + GEN_DONE_OFF);
     if (done) return;
-
     jinn_coro_t *c = *(jinn_coro_t **)((char *)gen_blk + GEN_CORO_OFF);
     jinn_context_t caller_ctx;
-    /* Store pointer to our stack-local context into the gen block */
     *(jinn_context_t **)((char *)gen_blk + GEN_CALLER_CTX_OFF) = &caller_ctx;
     tl_gen_coro = c;
     jinn_context_swap(&caller_ctx, &c->ctx);
-    /* Returned here: generator has yielded or finished.
-     *
-     * The flag exists only so the trampoline's FIRST entry can tell "started
-     * by gen_resume" from "started by the scheduler". The trampoline clears
-     * it on that first entry, but resumes 2..n swap into the middle of
-     * jinn_gen_suspend and never reach the trampoline — without clearing
-     * here, the thread's value stayed poisoned forever and the next NEW
-     * scheduler coroutine whose first run landed on this thread executed the
-     * generator's entry with the generator's argument instead of its own
-     * (task 8-13; reproduced as a SIGSEGV by
-     * tests/runtime_concurrency.rs::generator_resume_does_not_poison_worker_tls).
-     * A direct swap resumes on the same thread it left, so clearing after
-     * the swap covers every path back. */
     tl_gen_coro = NULL;
 }
 
-/*
- * jinn_gen_suspend: Direct context swap from generator back to caller.
- * Reads the caller_ctx_ptr from the gen block and swaps back.
- */
 void jinn_gen_suspend(void *gen_blk) {
     jinn_coro_t *c = *(jinn_coro_t **)((char *)gen_blk + GEN_CORO_OFF);
     jinn_context_t *caller_ctx = *(jinn_context_t **)((char *)gen_blk + GEN_CALLER_CTX_OFF);
     jinn_context_swap(&c->ctx, caller_ctx);
-    /* Returned here: caller called .next() again (jinn_gen_resume) */
 }
-
-/*
- * jinn_gen_destroy: Free a generator's coroutine and control block.
- */
 void jinn_gen_destroy(void *gen_blk) {
     jinn_coro_t *c = *(jinn_coro_t **)((char *)gen_blk + GEN_CORO_OFF);
     if (c) jinn_coro_destroy(c);

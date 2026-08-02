@@ -1,18 +1,9 @@
-# std.http — HTTP/1.1 client (HTTP and HTTPS)
-#
-# Usage:
-#   resp is http.fetch("https://example.com/api/data")
-#   log(resp.status)
-#   log(resp.body)
-#
-#   resp is http.post_json("https://example.com/api", '...')
 
 use net
 use tls
 use strings
 use convert
 
-# ── Types ────────────────────────────────────────────────────
 
 type HttpResponse
     status as i64
@@ -23,7 +14,6 @@ type HttpHeader
     name as String
     value as String
 
-# ── URL parsing ──────────────────────────────────────────────
 
 type ParsedUrl
     scheme as String
@@ -55,12 +45,10 @@ type ParsedUrl
         the_port is convert.parse_int(host_part.slice(colon_pos + 1, host_part.length))
     ParsedUrl(scheme is scheme, host is the_host, port is the_port, path is the_path)
 
-# ── Core request ─────────────────────────────────────────────
 
 *request(method as String, url as String, body as String, extra_headers as Vec of HttpHeader) returns HttpResponse
     parsed is parse_url(url)
-    
-    # Build the HTTP request
+
     sb is strings.string_builder()
     sb.write(method + " " + parsed.path + " HTTP/1.1\r\n")
     sb.write("Host: " + parsed.host + "\r\n")
@@ -83,7 +71,7 @@ type ParsedUrl
     conn is tls.connect(parsed.host, parsed.port)
     if tls.is_valid(conn) is false
         return HttpResponse(status is 0, headers is vec(), body is "TLS connection failed")
-    
+
     conn.write_all(req_str)
     response is conn.read_all()
     conn.shut()
@@ -100,7 +88,6 @@ type ParsedUrl
         return HttpResponse(status is 0, headers is vec(), body is "connection failed")
     extern.free(addr)
 
-    # Send request
     sent is 0
     while sent < req_str.length
         remaining is req_str.slice(sent, req_str.length)
@@ -109,7 +96,6 @@ type ParsedUrl
             break
         sent is sent + n
 
-    # Read response
     response is ""
     loop
         buf is extern.malloc(8193)
@@ -155,7 +141,6 @@ type ParsedUrl
 
     HttpResponse(status is status_code, headers is headers, body is resp_body)
 
-# ── Convenience methods ──────────────────────────────────────
 
 *fetch(url as String) returns HttpResponse
     request("GET", url, "", vec())
@@ -179,7 +164,6 @@ type ParsedUrl
             return $.value
     ""
 
-# ── Connection Pool ──────────────────────────────────────────
 
 type PoolEntry
     host as String
@@ -194,7 +178,6 @@ type ConnectionPool
     *request(method as String, url as String, body as String, extra_headers as Vec of HttpHeader) returns HttpResponse
         parsed is parse_url(url)
 
-        # Build request with keep-alive
         sb is strings.string_builder()
         sb.write(method + " " + parsed.path + " HTTP/1.1\r\n")
         sb.write("Host: " + parsed.host + "\r\n")
@@ -224,7 +207,6 @@ type ConnectionPool
     ConnectionPool(entries is vec(), max_size is max)
 
 *__pool_request_plain(p as ConnectionPool, parsed as ParsedUrl, req_str as String) returns HttpResponse
-    # Try to find an existing connection
     idx is -1
     loop p.entries
         if $.host equals parsed.host and $.port equals parsed.port and $.is_tls is false
@@ -247,7 +229,6 @@ type ConnectionPool
             old is p.entries.get(0)
             extern.shutdown(old.fd, 2)
             extern.jinn_close(old.fd)
-            # Remove first entry by rebuilding
             new_entries is vec()
             loop p.entries
                 if $$ > 0
@@ -255,7 +236,6 @@ type ConnectionPool
             p.entries is new_entries
         p.entries.push(PoolEntry(host is parsed.host, port is parsed.port, fd is fd, is_tls is false))
 
-    # Send request
     sent is 0
     while sent < req_str.length
         remaining is req_str.slice(sent, req_str.length)
@@ -264,7 +244,6 @@ type ConnectionPool
             break
         sent is sent + n
 
-    # Read response
     response is ""
     loop
         buf is extern.malloc(8193)
@@ -274,14 +253,12 @@ type ConnectionPool
             break
         chunk is __string_from_raw(buf, n, 8193)
         response is response + chunk
-        # Check if we got the full response (Content-Length or end of chunked)
         if response.find("\r\n\r\n") >= 0
             break
 
     parse_response(response)
 
 *__pool_request_tls(parsed as ParsedUrl, req_str as String) returns HttpResponse
-    # TLS connections are not pooled (managed by TLS layer)
     conn is tls.connect(parsed.host, parsed.port)
     if tls.is_valid(conn) is false
         return HttpResponse(status is 0, headers is vec(), body is "TLS connection failed")

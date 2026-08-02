@@ -1,19 +1,11 @@
-/* runtime/terminal.c — Terminal raw mode + size detection (POSIX).
- *
- * Used by std.terminal. On non-POSIX platforms, the raw-mode functions
- * return -1 so callers can fall back gracefully.
- */
 #include <stdint.h>
 #include "jinn_rt.h"
-
 #if defined(__unix__) || defined(__APPLE__)
 #include <termios.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
-
 static struct termios saved_termios;
 static int            saved_termios_valid = 0;
-
 int jinn_terminal_enable_raw(int fd) {
     struct termios raw;
     if (tcgetattr(fd, &saved_termios) != 0) return -1;
@@ -27,12 +19,10 @@ int jinn_terminal_enable_raw(int fd) {
     raw.c_cc[VTIME] = 0;
     return tcsetattr(fd, TCSAFLUSH, &raw);
 }
-
 int jinn_terminal_disable_raw(int fd) {
     if (!saved_termios_valid) return -1;
     return tcsetattr(fd, TCSAFLUSH, &saved_termios);
 }
-
 int jinn_terminal_size(int32_t *out_cols, int32_t *out_rows) {
     struct winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != 0) {

@@ -1,4 +1,3 @@
-# Zip-with: combine two vecs of equal length via a binary op.
 *zip_with(xs as Vec of i64, ys as Vec of i64, f as (i64, i64) returns i64) returns Vec of i64
     out is vec()
     n is xs.length

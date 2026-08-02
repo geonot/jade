@@ -1,13 +1,3 @@
-# std.rational — Exact rational arithmetic (always reduced)
-#
-# Internally always stored in lowest terms with positive denominator,
-# so equality is structural. No precision loss across +, −, ×, ÷.
-#
-# Usage:
-#   a is rational.new(1, 3)        # 1/3
-#   b is rational.new(2, 5)        # 2/5
-#   rational.add(a, b).to_string() # "11/15"
-#   rational.compare(a, b)         # -1, 0, or 1
 
 type Rational
     num as i64
@@ -41,7 +31,6 @@ type Rational
     *is_integer returns bool
         self.den equals 1
 
-# ── Constructors ─────────────────────────────────────────────
 
 *new(num as i64, den as i64) returns Rational
     __reduce(num, den)
@@ -49,8 +38,6 @@ type Rational
 *from_int(n as i64) returns Rational
     Rational(num is n, den is 1)
 
-# Convert a finite f64 to its exact rational using continued fractions.
-# Caps denominator at `max_den` for usability.
 *from_f64(x as f64, max_den as i64) returns Rational
     if x equals 0.0
         return Rational(num is 0, den is 1)
@@ -77,14 +64,12 @@ type Rational
         a is val as i64
     Rational(num is sign * h1, den is k1)
 
-# Parse "3/4" or "5".
 *parse(s as String) returns Rational
     slash is s.find("/")
     if slash < 0
         return Rational(num is __atoi(s), den is 1)
     __reduce(__atoi(s.slice(0, slash)), __atoi(s.slice(slash + 1, s.length)))
 
-# ── Constants ────────────────────────────────────────────────
 
 *zero returns Rational
     Rational(num is 0, den is 1)
@@ -92,7 +77,6 @@ type Rational
 *one returns Rational
     Rational(num is 1, den is 1)
 
-# ── Arithmetic ───────────────────────────────────────────────
 
 *add(a as Rational, b as Rational) returns Rational
     __reduce(a.num * b.den + b.num * a.den, a.den * b.den)
@@ -106,7 +90,6 @@ type Rational
 *div(a as Rational, b as Rational) returns Rational
     __reduce(a.num * b.den, a.den * b.num)
 
-# Integer power (negative exponents allowed).
 *ipow(r as Rational, n as i64) returns Rational
     if n equals 0
         return one()
@@ -122,13 +105,10 @@ type Rational
         e is e / 2
     result
 
-# Stern-Brocot mediant — useful for best-rational-approximation searches.
 *mediant(a as Rational, b as Rational) returns Rational
     __reduce(a.num + b.num, a.den + b.den)
 
-# ── Comparison ───────────────────────────────────────────────
 
-# Returns -1, 0, or 1.
 *compare(a as Rational, b as Rational) returns i64
     lhs is a.num * b.den
     rhs is b.num * a.den
@@ -153,7 +133,6 @@ type Rational
 *max(a as Rational, b as Rational) returns Rational
     greater_than(a, b) ? a ! b
 
-# ── Internal ─────────────────────────────────────────────────
 
 *__gcd(a as i64, b as i64) returns i64
     x is a < 0 ? 0 - a ! a

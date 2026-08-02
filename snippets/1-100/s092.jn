@@ -1,4 +1,3 @@
-# Find first run of digits in a string (manual, no regex).
 *find_digits(s as String) returns String
     a is 0
     while a < s.length

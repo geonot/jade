@@ -1,16 +1,3 @@
-# std.process — Subprocess spawning and command execution
-#
-# Usage:
-#   result is process.run("ls -la")          # shell mode (requires JINN_ALLOW_SHELL=1)
-#   log(result.output)
-#   log(result.exit_code)
-#
-#   code is process.exec("make build")       # shell mode (requires JINN_ALLOW_SHELL=1)
-#   lines is process.lines("find . -name '*.jn'")  # shell mode
-#
-#   # Safe argv-based execution (no shell, no JINN_ALLOW_SHELL needed):
-#   result is process.run_argv("ls", vec("-la", "/tmp"))
-#   code is process.spawn_exec("git", vec("status"))
 
 extern *jinn_popen_read(cmd as %i8, buf as %i8, buf_size as i64, exit_code as %i32) returns i64
 extern *jinn_system(cmd as %i8) returns i32
@@ -30,8 +17,6 @@ type ProcessResult
     *lines returns Vec of String
         self.output.split("\n")
 
-# Run a shell command and capture its stdout.
-# Returns a ProcessResult with output and exit code.
 *run(cmd as String) returns ProcessResult
     buf_size is 65536
     buf is extern.malloc(buf_size)
@@ -46,12 +31,9 @@ type ProcessResult
     out is __string_from_raw(buf, n, buf_size)
     ProcessResult(output is out, exit_code is exit_code)
 
-# Run a shell command and return just its exit code.
-# Stdout/stderr go to the parent process's terminal.
 *exec(cmd as String) returns i32
     extern.jinn_system(%cmd)
 
-# Run a command and return its stdout as a string (trimmed).
 *capture(cmd as String) returns String
     result is run(cmd)
     out is result.output
@@ -59,7 +41,6 @@ type ProcessResult
         return out.slice(0, out.length - 1)
     out
 
-# Run a command and return its stdout lines as a vector.
 *lines(cmd as String) returns Vec of String
     result is run(cmd)
     if result.exit_code neq 0
@@ -69,18 +50,15 @@ type ProcessResult
         out is out.slice(0, out.length - 1)
     out.split("\n")
 
-# Check if a command succeeds (exit code 0).
 *succeeds(cmd as String) returns bool
     extern.jinn_system(%cmd) equals 0
 
-# Run a command, return output on success or empty string on failure.
 *try_run(cmd as String) returns String
     result is run(cmd)
     if result.exit_code neq 0
         return ""
     result.output
 
-# Build a command string from parts (shell-safe joining).
 *cmd(parts as Vec of String) returns String
     result is ""
     loop parts
@@ -92,7 +70,6 @@ type ProcessResult
             result is result + $
     result
 
-# Run a pipeline of commands (cmd1 | cmd2 | cmd3).
 *pipe(commands as Vec of String) returns ProcessResult
     joined is ""
     loop commands
@@ -101,21 +78,14 @@ type ProcessResult
         joined is joined + $
     run(joined)
 
-# Run a command with environment variable set.
 *with_env(name as String, value as String, command as String) returns ProcessResult
     run(name + "=" + value + " " + command)
 
-# ── Safe argv-based execution (no shell, no JINN_ALLOW_SHELL needed) ─────────
 
-# Spawn a program with explicit argument list and capture its stdout.
-# Does NOT invoke a shell — arguments are passed verbatim, preventing injection.
-# Returns a ProcessResult with output and exit code.
-# (Named `run_argv` because `spawn` is a reserved keyword for actors.)
 *run_argv(prog as String, args as Vec of String) returns ProcessResult
     buf_size is 65536
     buf is extern.malloc(buf_size)
     exit_code is 0
-    # Build a single Vec with prog prepended to args for the C ABI
     argv is [prog]
     loop args
         argv.push($)
@@ -129,8 +99,6 @@ type ProcessResult
     out is __string_from_raw(buf, n, buf_size)
     ProcessResult(output is out, exit_code is exit_code)
 
-# Spawn a program with explicit argument list; stdout/stderr go to terminal.
-# Returns the exit code. Does NOT invoke a shell.
 *spawn_exec(prog as String, args as Vec of String) returns i32
     exit_code is 0
     argv is [prog]
@@ -139,7 +107,6 @@ type ProcessResult
     extern.jinn_spawn_exec(%argv, %exit_code as %i32)
     exit_code
 
-# Spawn a program and return its stdout lines as a vector.
 *spawn_lines(prog as String, args as Vec of String) returns Vec of String
     result is run_argv(prog, args)
     if result.exit_code neq 0
@@ -149,7 +116,6 @@ type ProcessResult
         out is out.slice(0, out.length - 1)
     out.split("\n")
 
-# Spawn a program and return true if it exits with code 0.
 *spawn_succeeds(prog as String, args as Vec of String) returns bool
     result is run_argv(prog, args)
     result.exit_code equals 0

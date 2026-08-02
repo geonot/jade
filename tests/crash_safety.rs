@@ -1,27 +1,3 @@
-//! Crash-safety conformance suite: runtime traps, aborts, invalid access,
-//! overwrite semantics, and unsafe-code edge cases.
-//!
-//! Pins the documented failure modes of compiled Jinn programs:
-//!
-//!   * arithmetic UB (div/rem by zero, INT_MIN / -1) traps with exit 134 and
-//!     a specific stderr diagnostic, never silent garbage;
-//!   * every Vec access path (read, write, remove, nested, empty) is
-//!     bounds-checked and traps on out-of-bounds;
-//!   * negative indices wrap once from the end; past -len they trap;
-//!   * `as strict` narrowing traps when information is lost and passes
-//!     when the value fits;
-//!   * `unwrap` on Nothing and failed `assert` abort instead of continuing;
-//!   * invalid access (use-after-take, non-exhaustive match, literal
-//!     division by zero) is rejected at compile time with a diagnostic;
-//!   * overwrite semantics: rebinding, aliased heap writes, and `take`
-//!     tombstone clearing behave per docs/access-semantics.md;
-//!   * IEEE float edge cases (1/0, 0/0) produce inf/nan, never a trap;
-//!   * unsigned and signed integer arithmetic wraps two's-complement
-//!     (current documented behavior — no overflow trap).
-//!
-//! `#[ignore]`d tests at the bottom document desired behavior for known
-//! soundness bugs discovered during this audit; un-ignore them as fixed.
-
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -133,8 +109,6 @@ fn expect_compile_fail(src: &str, needles: &[&str]) {
     }
 }
 
-// ── Arithmetic traps ─────────────────────────────────────────────────────
-
 #[test]
 fn signed_remainder_by_zero_traps() {
     expect_trap(
@@ -171,8 +145,6 @@ fn div_by_zero_traps_inside_callee() {
 fn literal_division_by_zero_rejected_at_compile_time() {
     expect_compile_fail("*main\n    log(10 / 0)\n", &["division by zero"]);
 }
-
-// ── Vec bounds checking on every access path ─────────────────────────────
 
 #[test]
 fn vec_read_past_end_traps() {
@@ -222,8 +194,6 @@ fn vec_oob_via_runtime_index_traps() {
     );
 }
 
-// ── Negative indices: wrap once from the end, trap past -len ─────────────
-
 #[test]
 fn negative_index_wraps_from_end() {
     expect(
@@ -239,8 +209,6 @@ fn negative_index_past_front_traps() {
         "vec index out of bounds",
     );
 }
-
-// ── strict casts: trap on lost information, pass when value fits ─────────
 
 #[test]
 fn strict_narrowing_overflow_traps() {
@@ -265,8 +233,6 @@ fn strict_cast_in_range_passes() {
         "100\n255",
     );
 }
-
-// ── Aborting builtins: unwrap on Nothing, failed assert ──────────────────
 
 #[test]
 fn unwrap_on_nothing_aborts() {
@@ -294,8 +260,6 @@ fn passing_assert_continues() {
     );
 }
 
-// ── Invalid access rejected at compile time ───────────────────────────────
-
 #[test]
 fn use_after_take_is_compile_error() {
     expect_compile_fail(
@@ -319,8 +283,6 @@ fn non_exhaustive_match_is_compile_error() {
         &["non-exhaustive", "Blue"],
     );
 }
-
-// ── Overwrite semantics ───────────────────────────────────────────────────
 
 #[test]
 fn rebinding_overwrites_value() {
@@ -359,8 +321,6 @@ fn vec_element_overwrite_in_place() {
     );
 }
 
-// ── Defined numeric edge cases (no trap) ──────────────────────────────────
-
 #[test]
 fn float_division_by_zero_is_ieee_inf() {
     expect("*main\n    a is 1.0\n    b is 0.0\n    log(a / b)\n", "inf");
@@ -386,8 +346,6 @@ fn signed_addition_wraps_twos_complement() {
         "-9223372036854775808",
     );
 }
-
-// ── Known soundness bugs: desired behavior, ignored until fixed ──────────
 
 #[test]
 fn take_inside_loop_is_compile_error() {

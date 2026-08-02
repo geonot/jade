@@ -143,12 +143,7 @@ pub(in crate::driver) fn resolve_modules(
         let mut mod_prog = Parser::new(tokens)
             .parse_program()
             .unwrap_or_else(|e| die(&format!("{}: {e}", candidate.display())));
-        // Decls parsed from this module file are its *own* decls; the recursive
-        // `resolve_modules` call below appends transitively-imported decls that
-        // have ALREADY been prefixed with their own module name. We must not
-        // re-prefix those (doing so turns `queue_pick_next` into
-        // `dispatcher_queue_pick_next`, which no call site references). Snapshot
-        // the boundary so own and transitive decls are handled separately.
+
         let own_decl_count = mod_prog.decls.len();
         resolve_modules(
             &mut mod_prog,
@@ -162,20 +157,11 @@ pub(in crate::driver) fn resolve_modules(
         let mut transitive: Vec<Decl> = Vec::new();
         for (i, d) in all_decls.into_iter().enumerate() {
             if matches!(d, Decl::Use(_)) {
-                /* Keep the submodule's `use` decls in the flattened
-                 * program: the typer's module-name registry is built from
-                 * them, and without it a qualified call inside the
-                 * submodule (`convert.parse_float(...)` in std/json.jn)
-                 * would not rewrite (task 8-15 — previously the implicit
-                 * importer papered over this). */
                 transitive.push(d);
                 continue;
             }
 
             if i >= own_decl_count {
-                // Transitively-imported, already-prefixed decl. Re-export it
-                // verbatim (it is an internal dependency of this module and must
-                // be available regardless of a selective import list).
                 transitive.push(d);
                 continue;
             }

@@ -65,18 +65,11 @@ impl Typer {
                         let r =
                             self.infer_ctx
                                 .unify_at_tolerant(pt, &ha.ty, span, "function argument");
-                        /* Hard error (task 8-17): a swallowed mismatch here
-                         * reached codegen and printed raw LLVM verifier IR
-                         * at the user. */
+
                         if let Err(e) = r {
-                            /* Numeric pairs coerce downstream (i64 -> f64,
-                             * widening); everything else is a hard error. */
                             let pl = self.infer_ctx.shallow_resolve(pt);
                             let al = self.infer_ctx.shallow_resolve(&ha.ty);
-                            /* Hard-error only on concrete/concrete non-numeric
-                             * mismatches; unresolved vars, pointers (auto
-                             * deref/reinterpret), and numeric pairs are the
-                             * coercion pass's business. */
+
                             let lax = |this: &mut Self, t: &Type| {
                                 matches!(t, Type::Ptr(_) | Type::Param(_))
                                     || this.infer_ctx.type_has_unresolved(t)
@@ -182,14 +175,9 @@ impl Typer {
                             self.infer_ctx
                                 .unify_at_tolerant(pt, &ha.ty, span, "function argument");
                         if let Err(e) = r {
-                            /* Numeric pairs coerce downstream (i64 -> f64,
-                             * widening); everything else is a hard error. */
                             let pl = self.infer_ctx.shallow_resolve(pt);
                             let al = self.infer_ctx.shallow_resolve(&ha.ty);
-                            /* Hard-error only on concrete/concrete non-numeric
-                             * mismatches; unresolved vars, pointers (auto
-                             * deref/reinterpret), and numeric pairs are the
-                             * coercion pass's business. */
+
                             let lax = |this: &mut Self, t: &Type| {
                                 matches!(t, Type::Ptr(_) | Type::Param(_))
                                     || this.infer_ctx.type_has_unresolved(t)

@@ -1,4 +1,3 @@
-# Binary search on a sorted Vec.
 *bsearch(xs as Vec of i64, target as i64) returns i64
     lo is 0
     hi is xs.length - 1

@@ -1,8 +1,3 @@
-# std.glob — Glob pattern matching
-#
-# Usage:
-#   if glob.matches("*.jn", "main.jn")   # true
-#   files is glob.find("src/**/*.jn")
 
 extern *c_opendir(path as %i8) returns %i8
 extern *c_readdir_name(d as %i8) returns %i8
@@ -16,8 +11,6 @@ extern *closedir(dir as %i8) returns i32
 extern *readdir(dir as %i8) returns %i8
 extern *jinn_dirent_name(ent as %i8) returns %i8
 
-# Match a glob pattern against a string.
-# Supports: * (any chars), ? (single char), ** (recursive), [abc] char classes.
 *matches(pattern as String, text as String) returns bool
     __glob_match(pattern, 0, text, 0)
 
@@ -25,20 +18,16 @@ extern *jinn_dirent_name(ent as %i8) returns %i8
     while pi < pattern.length and ti < text.length
         pc is pattern.char_at(pi)
         if pc equals 42
-            # Check for **
             if pi + 1 < pattern.length and pattern.char_at(pi + 1) equals 42
                 pi is pi + 2
-                # Skip path separator after **
                 if pi < pattern.length and pattern.char_at(pi) equals 47
                     pi is pi + 1
-                # ** matches everything including path separators
                 t is ti
                 while t <= text.length
                     if __glob_match(pattern, pi, text, t)
                         return true
                     t is t + 1
                 return false
-            # Single * matches any chars except /
             pi is pi + 1
             t is ti
             while t <= text.length
@@ -49,13 +38,11 @@ extern *jinn_dirent_name(ent as %i8) returns %i8
                 t is t + 1
             return false
         elif pc equals 63
-            # ? matches any single char except /
             if text.char_at(ti) equals 47
                 return false
             pi is pi + 1
             ti is ti + 1
         elif pc equals 91
-            # Character class [abc] or [a-z]
             pi is pi + 1
             negate is false
             if pi < pattern.length and pattern.char_at(pi) equals 33
@@ -82,21 +69,17 @@ extern *jinn_dirent_name(ent as %i8) returns %i8
                 return false
             ti is ti + 1
         else
-            # Literal character
             if text.char_at(ti) neq pc
                 return false
             pi is pi + 1
             ti is ti + 1
-    # Consume trailing *s
     while pi < pattern.length and pattern.char_at(pi) equals 42
         pi is pi + 1
     pi >= pattern.length and ti >= text.length
 
-# Find all files matching a glob pattern under a directory.
 *find(pattern as String) returns Vec of String
     find_in(".", pattern)
 
-# Find all files matching a glob pattern under a given root directory.
 *find_in(root as String, pattern as String) returns Vec of String
     all_files is vec()
     __walk(root, all_files)

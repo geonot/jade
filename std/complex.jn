@@ -1,16 +1,3 @@
-# std.complex — Complex number arithmetic and elementary functions
-#
-# Standards-aligned with Annex G of C99 / C++ <complex>:
-#   * Cartesian and polar constructors.
-#   * Field operations (+ − × ÷, conjugate, reciprocal, scaling).
-#   * Norm, magnitude, phase.
-#   * Transcendental: exp, log, pow, sqrt, sin, cos, tan, sinh, cosh.
-#
-# Usage:
-#   z is complex.new(3.0, 4.0)
-#   complex.magnitude(z)        # 5.0
-#   complex.phase(z)            # ≈ 0.927
-#   w is complex.exp(complex.mul(z, complex.i()))
 
 extern *sqrt(x as f64) returns f64
 extern *exp(x as f64) returns f64
@@ -32,7 +19,6 @@ type Complex
     re as f64
     im as f64
 
-# ── Constructors ─────────────────────────────────────────────
 
 *new(re as f64, im as f64) returns Complex
     Complex(re is re, im is im)
@@ -52,7 +38,6 @@ type Complex
 *i returns Complex
     Complex(re is 0.0, im is 1.0)
 
-# ── Field ────────────────────────────────────────────────────
 
 *add(a as Complex, b as Complex) returns Complex
     Complex(re is a.re + b.re, im is a.im + b.im)
@@ -80,12 +65,10 @@ type Complex
     d is z.re * z.re + z.im * z.im
     Complex(re is z.re / d, im is (0.0 - z.im) / d)
 
-# ── Norms ────────────────────────────────────────────────────
 
 *norm_sq(z as Complex) returns f64
     z.re * z.re + z.im * z.im
 
-# Hypot-based magnitude avoids overflow for very large components.
 *magnitude(z as Complex) returns f64
     extern.hypot(z.re, z.im)
 
@@ -95,7 +78,6 @@ type Complex
 *phase(z as Complex) returns f64
     extern.atan2(z.im, z.re)
 
-# ── Comparison ───────────────────────────────────────────────
 
 *is_equal(a as Complex, b as Complex) returns bool
     extern.fabs(a.re - b.re) < 1e-12 and extern.fabs(a.im - b.im) < 1e-12
@@ -103,31 +85,22 @@ type Complex
 *is_zero(z as Complex) returns bool
     extern.fabs(z.re) < 1e-15 and extern.fabs(z.im) < 1e-15
 
-# ── Transcendental functions ─────────────────────────────────
 
-# exp(z) = e^x · (cos y + i sin y)
 *exp(z as Complex) returns Complex
     e_re is extern.exp(z.re)
     Complex(re is e_re * extern.cos(z.im), im is e_re * extern.sin(z.im))
 
-# log(z) = log|z| + i·arg(z) (principal branch). The implementation is
-# named `ln` because an unqualified in-module `log(...)` call resolves to
-# the builtin print-log — `pow` was passing void into `mul` (caught when
-# task 8-17 made argument mismatches hard errors). Qualified external
-# calls (`complex.log(z)`) are unaffected.
 *ln(z as Complex) returns Complex
     Complex(re is extern.log(magnitude(z)), im is extern.atan2(z.im, z.re))
 
 *log(z as Complex) returns Complex
     ln(z)
 
-# z^w = exp(w · log z)
 *pow(z as Complex, w as Complex) returns Complex
     if is_zero(z)
         return zero()
     exp(mul(w, ln(z)))
 
-# Principal square root.
 *sqrt(z as Complex) returns Complex
     r is magnitude(z)
     if r equals 0.0
@@ -152,7 +125,6 @@ type Complex
 *cosh(z as Complex) returns Complex
     Complex(re is extern.cosh(z.re) * extern.cos(z.im), im is extern.sinh(z.re) * extern.sin(z.im))
 
-# ── Formatting ───────────────────────────────────────────────
 
 *to_string(z as Complex) returns String
     re_s is __fmt_float(z.re, 6)

@@ -1,4 +1,3 @@
-# Higher-order function: pass a lambda as parameter.
 *twice(f as (i64) returns i64, x as i64) returns i64
     f(f(x))
 

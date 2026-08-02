@@ -1,4 +1,3 @@
-# HFT: limit order book match step (single price level).
 *match_qty(book_bid as i64, book_ask as i64, incoming as i64, side as i64) returns i64
     if side equals 1
         if incoming <= book_ask

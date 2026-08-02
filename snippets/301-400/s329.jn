@@ -1,4 +1,3 @@
-# Transpose a 3x2 matrix into a 2x3.
 *main
     m is vec()
     r is 0

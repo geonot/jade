@@ -1,4 +1,3 @@
-# Sorted-set difference (a - b).
 *main
     a is vec()
     a.push(1)

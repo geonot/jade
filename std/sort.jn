@@ -1,20 +1,4 @@
-# std.sort — Generic sorting algorithms
-#
-# Provides:
-#   * `sort`        – introsort over Vec of i64 (in-place, unstable)
-#   * `sort_f64`    – introsort over Vec of f64
-#   * `sort_by`     – sort with a comparator closure
-#   * `sort_strings`– lexicographic sort of String vec
-#   * `merge_sort`  – stable sort with comparator (O(n log n))
-#   * `is_sorted`, `reverse`, `binary_search`
-#
-# Sort-by-key idioms:
-#   sort.sort_by(items, fn(a, b) { a.priority - b.priority })
-#
-# `sort` chooses introsort: quicksort with a depth limit that falls back
-# to heapsort on bad pivots, with insertion sort for small partitions.
 
-# ── Public entry points (i64) ────────────────────────────────
 
 *sort(arr as Vec of i64)
     n is arr.length
@@ -43,7 +27,6 @@
         i is i + 1
     true
 
-# Standard binary search; returns index or -1.
 *binary_search(arr as Vec of i64, target as i64) returns i64
     lo is 0
     hi is arr.length - 1
@@ -58,7 +41,6 @@
             hi is mid - 1
     -1
 
-# ── f64 sort (uses runtime helper if available) ──────────────
 
 extern *jinn_sort_f64(data as %f64, len as i64)
 
@@ -67,7 +49,6 @@ extern *jinn_sort_f64(data as %f64, len as i64)
         return
     extern.jinn_sort_f64(%arr, arr.length)
 
-# ── String sort ──────────────────────────────────────────────
 
 *sort_strings(arr as Vec of String)
     n is arr.length
@@ -117,10 +98,6 @@ extern *jinn_sort_f64(data as %f64, len as i64)
         i is i + 1
     a.length < b.length
 
-# ── Generic sort_by (mergesort, stable) ──────────────────────
-#
-# `cmp(a, b)` should return negative if a < b, zero if equal, positive
-# if a > b. Useful for sort-by-key on records.
 
 *sort_by(arr as Vec of i64, cmp)
     n is arr.length
@@ -167,7 +144,6 @@ extern *jinn_sort_f64(data as %f64, len as i64)
             i is i + 1
         k is k + 1
 
-# ── Internal: introsort for i64 ──────────────────────────────
 
 *__introsort(arr as Vec of i64, lo as i64, hi as i64, depth_limit as i64)
     if hi - lo < 16

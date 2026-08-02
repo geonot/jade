@@ -1,4 +1,3 @@
-# Lazy-ish counter: build a vec then sum.
 *counts(limit as i64) returns Vec of i64
     v is vec()
     n is 0

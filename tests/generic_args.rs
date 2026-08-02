@@ -1,8 +1,3 @@
-//! Task 8-16 (decision D2) — call-site generic arguments reach
-//! implicit-generic bodies. The D2 table's failing rows compile with
-//! zero annotations and run CORRECTLY (not "compile via a silent i64
-//! default"): a String element stays a String.
-
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -63,8 +58,6 @@ fn assert_clean_run(src: &str, expect: &str) {
     assert_eq!(c.run_stdout(), expect);
 }
 
-/// D2 row: `*peek(v)` — nothing local pins the element type; the call
-/// site's `Vec of i64` must reach the body.
 #[test]
 fn d2_peek_unannotated() {
     assert_clean_run(
@@ -73,8 +66,6 @@ fn d2_peek_unannotated() {
     );
 }
 
-/// The same body with a String vec must yield the String — under the old
-/// i64 default this class of program was silently wrong or rejected.
 #[test]
 fn d2_peek_string_element_stays_string() {
     assert_clean_run(
@@ -83,8 +74,6 @@ fn d2_peek_string_element_stays_string() {
     );
 }
 
-/// One generic used at two element types in one program: both
-/// instantiations must be correct simultaneously.
 #[test]
 fn d2_mixed_instantiations() {
     assert_clean_run(
@@ -93,7 +82,6 @@ fn d2_mixed_instantiations() {
     );
 }
 
-/// D2's motivating example: `*bsort(v)` works with zero annotations.
 #[test]
 fn d2_bsort_unannotated() {
     assert_clean_run(
@@ -102,8 +90,6 @@ fn d2_bsort_unannotated() {
     );
 }
 
-/// An exported library function with NO call site cannot be instantiated;
-/// a real artifact build must say so rather than silently dropping it.
 #[test]
 fn d2_lib_artifact_requires_annotation_for_uncalled_generic() {
     let c = compile_args("*peek(v)\n    t is v.get(0)\n    log(t)\n", &["--lib"]);
@@ -117,11 +103,8 @@ fn d2_lib_artifact_requires_annotation_for_uncalled_generic() {
     );
 }
 
-/// Any surviving fix-it must be valid Jinn: annotations use `as`, never
-/// the `: i64` form the parser rejects.
 #[test]
 fn d2_fixit_text_is_valid_jinn() {
-    // A genuinely ambiguous NON-generic body still warns — with `as`.
     let c = compile("*main\n    v is vec()\n    log(v.length)\n");
     assert!(c.ok(), "{}", c.stderr());
     let stderr = c.stderr();

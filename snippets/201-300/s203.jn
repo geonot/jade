@@ -1,4 +1,3 @@
-# HFT: rolling VWAP over price/qty stream.
 *vwap(prices as Vec of i64, qtys as Vec of i64, n as i64) returns i64
     pq is 0
     q is 0

@@ -1,5 +1,3 @@
-# Client actor: fires commands at the (purported) leader and tracks
-# the count of acknowledgements.
 
 actor Client
     submitted as i64

@@ -1,4 +1,3 @@
-# Final cap: an actor that counts ticks.
 actor Counter
     n as i64
     @tick

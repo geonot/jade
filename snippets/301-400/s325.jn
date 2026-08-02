@@ -1,4 +1,3 @@
-# Insertion sort: classic O(n^2), good for small n.
 *main
     a is vec()
     a.push(4)

@@ -1,15 +1,8 @@
-# Bytecode lowering.  Instruction layout (3 i64 lanes):
-#   op   arg0   arg1
-# Ops:
-#   1 CHAR  c   --
-#   2 MATCH --  --
-#   3 JMP   tgt --
-#   4 SPLIT tgt1 tgt2
 
 use ast
 
 type Prog
-    code as Vec of i64           # flat 3-lane stream
+    code as Vec of i64
 
 *emit(p as Prog, op as i64, a as i64, b as i64)
     p.code.push(op)
@@ -30,7 +23,6 @@ type Prog
         compile_node(p, nodes, n.left)
         compile_node(p, nodes, n.right)
     if n.tag equals 3
-        # SPLIT L1 L2 ; L1: left ; JMP END ; L2: right ; END:
         split_ip is pc(p)
         emit(p, 4, 0, 0)
         l1 is pc(p)
@@ -44,7 +36,6 @@ type Prog
         patch(p, split_ip, 2, l2)
         patch(p, jmp_ip,   1, end_ip)
     if n.tag equals 4
-        # L1: SPLIT L2 L3 ; L2: child ; JMP L1 ; L3:
         l1 is pc(p)
         emit(p, 4, 0, 0)
         l2 is pc(p)
@@ -54,7 +45,6 @@ type Prog
         patch(p, l1, 1, l2)
         patch(p, l1, 2, l3)
     if n.tag equals 5
-        # Plus: L1: child ; SPLIT L1 L2 ; L2:
         l1 is pc(p)
         compile_node(p, nodes, n.left)
         split_ip is pc(p)

@@ -1,4 +1,3 @@
-# Running max emitted at each step.
 *main
     a is vec()
     a.push(3)

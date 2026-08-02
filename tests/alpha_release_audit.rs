@@ -113,78 +113,41 @@ fn alpha_audit_store_channels_actors() {
 
 #[test]
 fn alpha_audit_generic_empty_enum() {
-    // Regression: a generic enum with an empty variant, used through a function
-    // whose parameter is annotated with a concrete instantiation (`Maybe of
-    // i64`). Previously failed codegen with `FieldGet on pointer to unknown
-    // struct type for field __tag` because the annotation was never
-    // monomorphized to the concrete enum type. See AUDIT P0-5 / CRITICAL-1.
     expect_fixture("generic_empty_enum.jn", "9\n7");
 }
 
 #[test]
 fn alpha_audit_generic_struct_param() {
-    // Regression sibling of `alpha_audit_generic_empty_enum`: a generic struct
-    // named in a concrete function-parameter annotation (`Box of i64`) must be
-    // monomorphized to a struct with resolved field types so field access
-    // (`b.value`) compiles. See AUDIT P0-5 / CRITICAL-1.
     expect_fixture("generic_struct_param.jn", "42");
 }
 
 #[test]
 fn alpha_audit_recursive_generic_enum() {
-    // Regression: a recursive generic enum (`Tree of T` with a
-    // `Branch(Tree of T, Tree of T)` variant). The variant field must parse as a
-    // full type rather than a bare identifier (parser previously emitted
-    // `expected ,, got of`), and monomorphizing `Tree of i64` must canonicalize
-    // the recursive self-reference to the same instantiation without recursing
-    // forever. See AUDIT recursive-generic-enum parser/monomorphization fix.
     expect_fixture("recursive_generic_enum.jn", "15\n4");
 }
 
 #[test]
 fn alpha_audit_soft_keyword_idents() {
-    // Regression (MAJOR-1): reserved-but-contextual keywords (`from`, `to`, `by`,
-    // `at`) used as parameter names and as plain variables in expression position.
-    // They lex as keywords for range/slice/index syntax but must parse as
-    // identifiers everywhere an identifier is expected. window(0,10,2) sums
-    // 0+2+4+6+8 = 20; at_index(5) = 105.
     expect_fixture("soft_keyword_idents.jn", "20\n105");
 }
 
 #[test]
 fn alpha_audit_bracket_list_type() {
-    // Regression (MAJOR-2): `[T]` list-type syntax, the symmetric counterpart of
-    // the `[...]` list literal, must parse as a type in struct fields, params,
-    // return types, and `as` casts. Equivalent to `Vec of T`. Bag([10,20,30])
-    // totals 60; first_two([7,8,9]) sums 7+8 = 15.
     expect_fixture("bracket_list_type.jn", "60\n15");
 }
 
 #[test]
 fn alpha_audit_chr_builtin() {
-    // Regression: the `chr(code)` builtin builds a one-byte string from an
-    // integer character code (inverse of `String.char_at`). Used throughout
-    // libjn/strings. "ABC" then "7".
     expect_fixture("chr_builtin.jn", "ABC\n7");
 }
 
 #[test]
 fn alpha_audit_soft_keyword_nouns() {
-    // Regression: contextual-noun soft keywords (`default`, `end`, `query`,
-    // `view`) used as parameter names, struct field names in a field-init
-    // construction, field access, and bare expression-atom variables. c.query +
-    // c.view = 7; span(2, 10) = 8.
     expect_fixture("soft_keyword_nouns.jn", "7\n8");
 }
 
 #[test]
 fn alpha_audit_word_operator_idents() {
-    // Regression: the intentional word-operator aliases (`eq`/`equals`, `neq`,
-    // `lt`/`gt`/`lte`/`gte`, `pow`) must double as ordinary identifiers — as
-    // function names (`*equals`, `*pow`) and as bare variables in
-    // expression-atom position (`if eq < 0`, `total + neq`). Their operator
-    // role only fires infix. total = 5 (eq) + 3 (neq) + 100 (equals(eq,5)) +
-    // 8 (pow(2,3)) = 116.
     expect_fixture("word_operator_idents.jn", "116");
 }
 
@@ -223,9 +186,6 @@ fn alpha_audit_runtime_bounds_case() {
     expect_runtime_fail("runtime_bounds_fail.jn");
 }
 
-/// `eprint` writes to stderr (with a trailing newline) while `print`/`log`
-/// write to stdout. Verifies the two streams stay separate and that both
-/// `String` and scalar arguments are supported.
 #[test]
 fn alpha_audit_eprint_to_stderr() {
     let src = "*main\n    \
@@ -250,12 +210,6 @@ fn alpha_audit_eprint_to_stderr() {
     );
 }
 
-/// A native (main-thread) stack overflow from unbounded recursion produces a
-/// *specific* "stack overflow (native thread)" diagnostic and exits 134,
-/// rather than a bare SIGSEGV. Compiled at `--opt 0` so LLVM cannot linearise
-/// the non-tail recursion into a loop. The bound keeps the recursion from
-/// being provably infinite (which LLVM may legally replace with a spin),
-/// while the stack is exhausted long before the bound is reached.
 #[test]
 fn alpha_audit_native_stack_overflow_diagnostic() {
     let src = r#"*blow(n)
@@ -313,8 +267,6 @@ fn run_expect_trap(src: &str, needle: &str) {
     );
 }
 
-/// P0-1: integer division and remainder by zero must trap with a clean
-/// diagnostic, never produce uninitialized values or UB.
 #[test]
 fn alpha_audit_div_by_zero_traps() {
     run_expect_trap(
@@ -331,8 +283,6 @@ fn alpha_audit_div_by_zero_traps() {
     );
 }
 
-/// P0-1 (second UB case): INT_MIN / -1 overflows signed division and must
-/// trap with a specific diagnostic.
 #[test]
 fn alpha_audit_int_min_div_neg_one_traps() {
     run_expect_trap(
@@ -341,9 +291,6 @@ fn alpha_audit_int_min_div_neg_one_traps() {
     );
 }
 
-/// P0-2: vec out-of-bounds access traps with a diagnostic instead of
-/// SIGSEGV-ing. Strengthens `alpha_audit_runtime_bounds_case` by pinning
-/// the exit code and message.
 #[test]
 fn alpha_audit_vec_oob_diagnostic() {
     run_expect_trap(
@@ -352,8 +299,6 @@ fn alpha_audit_vec_oob_diagnostic() {
     );
 }
 
-/// P0-3: generator (`yield`) lowering produces valid LLVM IR; the probe
-/// compiles, runs, and yields the full sequence.
 #[test]
 fn alpha_audit_generator_compiles_and_runs() {
     let src = "*counts(n as i64)\n    \
@@ -379,8 +324,6 @@ fn alpha_audit_generator_compiles_and_runs() {
     );
 }
 
-/// P0-5: `take` parses in function-call argument position and transfers
-/// ownership.
 #[test]
 fn alpha_audit_take_in_argument_position() {
     let src = "*consume(v as [i64])\n    \
@@ -401,8 +344,6 @@ fn alpha_audit_take_in_argument_position() {
     assert_eq!(String::from_utf8_lossy(&output.stdout), "7\n");
 }
 
-/// P0-8: a bare top-level expression is rejected with a specific
-/// diagnostic instead of silently compiling to that exit code.
 #[test]
 fn alpha_audit_bare_toplevel_expression_rejected() {
     let dir = tempfile::tempdir().unwrap();
@@ -422,8 +363,6 @@ fn alpha_audit_bare_toplevel_expression_rejected() {
     );
 }
 
-/// P0-9: a program with no `*main` fails before linking with a clear
-/// compiler diagnostic, not an `ld` error.
 #[test]
 fn alpha_audit_missing_main_diagnostic() {
     let dir = tempfile::tempdir().unwrap();
@@ -447,9 +386,6 @@ fn alpha_audit_missing_main_diagnostic() {
     );
 }
 
-/// P0-10: keywords are contextual after `.` — `.send()` works as a channel
-/// method, and `.close()` gets a targeted redirect to the `close {ch}`
-/// statement rather than a generic parse error.
 #[test]
 fn alpha_audit_keyword_method_names_after_dot() {
     let src = "*main\n    \

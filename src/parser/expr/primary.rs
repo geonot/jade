@@ -134,9 +134,6 @@ impl Parser {
             && matches!(self.tok[self.pos + 1].token, Token::Is)
     }
 
-    /// True for tokens that may stand in for an identifier: a real identifier or
-    /// a soft keyword (one that lexes specially but is accepted as a name in
-    /// identifier position, e.g. `query`, `default`, `end`).
     pub(in crate::parser) fn is_ident_like(&self, tok: &Token) -> bool {
         matches!(tok, Token::Ident(_)) || Self::soft_keyword_ident(tok).is_some()
     }
@@ -236,10 +233,7 @@ impl Parser {
                     _ => Type::Tuple(params),
                 })
             }
-            // `[T]` is list-type sugar, the symmetric counterpart of the `[...]`
-            // list literal. It is exactly equivalent to `Vec of T`. In type
-            // position a leading `[` is otherwise always an error, so this arm is
-            // unambiguous.
+
             Token::LBracket => {
                 self.advance();
                 let inner = self.parse_type()?;

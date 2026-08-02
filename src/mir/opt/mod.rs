@@ -19,18 +19,7 @@ pub enum OptLevel {
     Full,
 }
 
-/// MIR optimization pipeline.
-///
-/// Per `/memories/jinn_arch.md`, MIR opt only contains passes that LLVM does
-/// NOT already perform. The remaining passes are structural cleanup of
-/// artifacts produced by our own lowering, plus what `--emit-mir` readability
-/// requires. Scalar opts (constant folding, GVN, LICM, strength reduction,
-/// jump threading, DSE, copy propagation, etc.) are LLVM's job.
 pub fn optimize(func: &mut Function, level: OptLevel) {
-    // Cooperative-preemption yield injection is a correctness pass, not an
-    // optimization: a tight loop in a coroutine/actor context must yield at its
-    // back-edges or it starves sibling coroutines on its worker. It therefore
-    // runs at every opt level, including `None`. Opt-out via `@no_yield`.
     inject_yields(func);
 
     if level == OptLevel::None {

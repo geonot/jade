@@ -1,4 +1,3 @@
-# Bubble sort with early exit via "swapped" flag.
 *main
     a is vec()
     a.push(9)

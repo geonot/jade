@@ -1,4 +1,3 @@
-# Gossip dissemination: rounds to reach n nodes (log fanout).
 *rounds(n as i64, fanout as i64) returns i64
     cur is 1
     r is 0

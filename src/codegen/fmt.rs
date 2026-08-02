@@ -46,10 +46,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_int_nsw_add(sec_ns, nsec, "mono")).into())
     }
 
-    /// Emit a `nanosleep` of `ms` milliseconds given an already-computed i64
-    /// value. The pure-LLVM nanosleep mechanics, factored out of
-    /// `compile_sleep_ms` so MIR-driven actor loops can sleep without going
-    /// through the HIR walker.
     pub(crate) fn emit_sleep_ms_val(
         &mut self,
         ms: inkwell::values::IntValue<'ctx>,

@@ -1,4 +1,3 @@
-# Safe divide returning -1 on division by zero.
 *sdiv(a as i64, b as i64) returns i64
     if b equals 0
         return -1

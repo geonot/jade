@@ -1,4 +1,3 @@
-# Simple JSON-like value extractor.
 *find_value(s as String, key as String) returns String
     needle is '"' + key + '":'
     pos is s.find(needle)

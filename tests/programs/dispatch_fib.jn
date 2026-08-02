@@ -1,4 +1,3 @@
-# Dispatch yield computation — generator computing fibonacci numbers
 *main
     gen is dispatch
         a is 0

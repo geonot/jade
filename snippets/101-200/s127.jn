@@ -1,4 +1,3 @@
-# Queue via two stacks.
 *main
     inq is vec()
     outq is vec()

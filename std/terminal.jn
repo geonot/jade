@@ -1,18 +1,3 @@
-# std.terminal — ANSI terminal control: colors, cursor, raw mode
-#
-# A self-contained ANSI escape-sequence helper. No tput / terminfo
-# dependency — assumes a VT100/xterm-compatible terminal (every
-# mainstream emulator since 1990).
-#
-# Usage:
-#   print(terminal.bold(terminal.red("Error: ")) + msg)
-#   terminal.clear()
-#   terminal.move_to(1, 1)
-#   if terminal.is_tty()
-#       terminal.hide_cursor()
-#
-# For raw-mode line editing or full-screen UIs, use `enable_raw()` /
-# `disable_raw()` and read with `std.io.read_byte`.
 
 extern *isatty(fd as i32) returns i32
 extern *jinn_terminal_enable_raw(fd as i32) returns i32
@@ -26,7 +11,6 @@ extern *jinn_getenv_or_empty(name as %i8) returns %i8
 ESC is "\x1b"
 CSI is "\x1b["
 
-# ── ANSI 8-color foreground ──────────────────────────────────
 
 *black(s as String) returns String
     CSI + "30m" + s + CSI + "0m"
@@ -52,7 +36,6 @@ CSI is "\x1b["
 *white(s as String) returns String
     CSI + "37m" + s + CSI + "0m"
 
-# ── Bright foreground variants ───────────────────────────────
 
 *bright_red(s as String) returns String
     CSI + "91m" + s + CSI + "0m"
@@ -66,7 +49,6 @@ CSI is "\x1b["
 *bright_blue(s as String) returns String
     CSI + "94m" + s + CSI + "0m"
 
-# ── 24-bit truecolor ─────────────────────────────────────────
 
 *rgb(r as i64, g as i64, b as i64, s as String) returns String
     CSI + "38;2;{r};{g};{b}m" + s + CSI + "0m"
@@ -74,7 +56,6 @@ CSI is "\x1b["
 *bg_rgb(r as i64, g as i64, b as i64, s as String) returns String
     CSI + "48;2;{r};{g};{b}m" + s + CSI + "0m"
 
-# ── Text attributes ──────────────────────────────────────────
 
 *bold(s as String) returns String
     CSI + "1m" + s + CSI + "22m"
@@ -100,7 +81,6 @@ CSI is "\x1b["
 *__env(name as String) returns String
     __string_from_ptr(extern.jinn_getenv_or_empty(%name))
 
-# ── Screen control ───────────────────────────────────────────
 
 *clear
     print(CSI + "2J" + CSI + "H")
@@ -111,7 +91,6 @@ CSI is "\x1b["
 *clear_to_end
     print(CSI + "0J")
 
-# Move cursor to absolute (row, col). 1-indexed (top-left = 1,1).
 *move_to(row as i64, col as i64)
     print(CSI + "{row};{col}H")
 
@@ -139,14 +118,12 @@ CSI is "\x1b["
 *show_cursor
     print(CSI + "?25h")
 
-# Alt screen buffer (for full-screen apps).
 *enter_alt_screen
     print(CSI + "?1049h")
 
 *leave_alt_screen
     print(CSI + "?1049l")
 
-# ── Terminal state ───────────────────────────────────────────
 
 *is_tty returns bool
     extern.isatty(1) equals 1
@@ -154,15 +131,12 @@ CSI is "\x1b["
 *is_stderr_tty returns bool
     extern.isatty(2) equals 1
 
-# Enable raw mode on stdin (no echo, no canonical line buffering).
-# Returns true on success. Pair with `disable_raw()`.
 *enable_raw returns bool
     extern.jinn_terminal_enable_raw(0) equals 0
 
 *disable_raw returns bool
     extern.jinn_terminal_disable_raw(0) equals 0
 
-# ── Size detection ───────────────────────────────────────────
 
 type Size
     cols as i32
@@ -182,9 +156,7 @@ type Size
     extern.free(rows_buf)
     Size(cols is cols, rows is rows)
 
-# ── Strip ANSI for length / non-tty output ──────────────────
 
-# Remove all ANSI escape sequences from `s`.
 *strip(s as String) returns String
     out is ""
     i is 0
@@ -195,7 +167,6 @@ type Size
                 if s.char_at(i + 1) equals 91
                     is_csi is true
         if is_csi
-            # CSI: skip until letter
             i is i + 2
             while i < s.length
                 c is s.char_at(i)
@@ -208,13 +179,9 @@ type Size
             i is i + 1
     out
 
-# Visible width (count of code points after stripping ANSI).
 *visible_width(s as String) returns i64
     strip(s).length
 
-# ── Conditional coloring (respects NO_COLOR / non-tty) ──────
-#
-# NO_COLOR convention: https://no-color.org
 
 *color_enabled returns bool
     if not is_tty()
@@ -223,7 +190,6 @@ type Size
         return false
     true
 
-# Apply a color function only when output is a TTY and NO_COLOR unset.
 *colorize(s as String, color_name as String) returns String
     if not color_enabled()
         return s

@@ -1,10 +1,3 @@
-//! LSP smoke test driver — covers the matrix documented in `docs/lsp.md`:
-//! initialize, didOpen, hover, definition, document symbols, completion,
-//! references, rename, semantic tokens, signature help, didClose.
-//!
-//! Drives `crate::lsp::handlers` directly with constructed JSON params so
-//! no stdio process is needed.
-
 use jinnc::lsp::handlers::{
     ServerState, handle_completion, handle_definition, handle_did_change, handle_did_close,
     handle_did_open, handle_document_symbols, handle_hover, handle_initialize, handle_references,
@@ -67,7 +60,7 @@ fn lsp_did_open_publishes_diagnostics_array() {
     });
     let (uri, diags) = handle_did_open(&mut state, params).expect("didOpen result");
     assert_eq!(uri, URI);
-    // Diags may be empty for a well-formed file; the contract is "returns a vec".
+
     let _ = diags.len();
 }
 
@@ -113,10 +106,9 @@ fn lsp_completion_includes_workspace_symbols_and_keywords() {
 fn lsp_hover_returns_value_for_known_ident() {
     let mut state = ServerState::new();
     open(&mut state, SRC);
-    // Position over `greet` call in `x is greet(...)` on line 5, col ~7 (0-based line 4, char 7).
+
     let v = handle_hover(&state, pos(4, 7));
-    // Hover may legitimately return null if the position-to-ident map misses;
-    // either way the handler must not panic and must return valid JSON.
+
     assert!(v.is_object() || v.is_null(), "{v}");
 }
 
@@ -124,7 +116,7 @@ fn lsp_hover_returns_value_for_known_ident() {
 fn lsp_definition_resolves_within_file() {
     let mut state = ServerState::new();
     open(&mut state, SRC);
-    // Click on `greet` call on line 5 (0-based 4), char 7.
+
     let v = handle_definition(&state, pos(4, 7));
     assert!(v.is_object() || v.is_null(), "{v}");
     if let Some(uri) = v.get("uri") {
@@ -159,7 +151,7 @@ fn lsp_rename_returns_workspace_edit() {
             "newName": "salute",
         }),
     );
-    // Either a WorkspaceEdit or Null if no identifier is at position.
+
     assert!(v.is_object() || v.is_null(), "{v}");
 }
 
@@ -176,7 +168,7 @@ fn lsp_semantic_tokens_returns_data_array() {
 fn lsp_signature_help_handles_no_active_call_gracefully() {
     let mut state = ServerState::new();
     open(&mut state, SRC);
-    // Position at end of `log(x` on line 6 — inside a call.
+
     let v = handle_signature_help(&state, pos(5, 5));
     assert!(v.is_object() || v.is_null(), "{v}");
 }
@@ -186,7 +178,7 @@ fn lsp_did_close_drops_state() {
     let mut state = ServerState::new();
     open(&mut state, SRC);
     handle_did_close(&mut state, json!({ "textDocument": { "uri": URI } }));
-    // After close, document symbols for the URI must be empty.
+
     let syms = handle_document_symbols(&state, json!({ "textDocument": { "uri": URI } }));
     let arr = syms.as_array().expect("symbols array");
     assert!(

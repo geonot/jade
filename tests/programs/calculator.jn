@@ -1,6 +1,3 @@
-# calculator.jn — Simple expression evaluator with enums
-# Complexity: Intermediate
-# Demonstrates: enums with data, recursive pattern matching, structs
 
 enum Expr
     Num(f64)
@@ -32,19 +29,15 @@ enum Expr
     a > b ? a ! b
 
 *main
-    # (3 + 4) * 2 = 14
     e1 is Mul(Add(Num(3.0), Num(4.0)), Num(2.0))
     log(eval(e1))
 
-    # 10 / (5 - 3) = 5
     e2 is Div(Num(10.0), Sub(Num(5.0), Num(3.0)))
     log(eval(e2))
 
-    # -(2 + 3) = -5
     e3 is Neg(Add(Num(2.0), Num(3.0)))
     log(eval(e3))
 
-    # Nested: ((1 + 2) * (3 + 4)) - 5 = 16
     e4 is Sub(
         Mul(
             Add(Num(1.0), Num(2.0)),
@@ -53,4 +46,4 @@ enum Expr
         Num(5.0)
     )
     log(eval(e4))
-    log(depth(e4))                  # 3
+    log(depth(e4))

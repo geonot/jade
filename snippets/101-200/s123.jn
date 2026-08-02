@@ -1,4 +1,3 @@
-# Reverse a vec in place.
 *rev(v)
     i is 0
     j is v.length - 1

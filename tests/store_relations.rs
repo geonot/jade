@@ -1,19 +1,3 @@
-//! Conformance for store relations (store-improvement.md item 4, task 2-31-5).
-//! Pins the documented semantics:
-//!
-//!   * a belongs-to relation `&owner as Owner` is a real, stored I64 column
-//!     holding the target row's sid, supplied at insert time alongside the
-//!     other fields;
-//!   * traversing the relation (`row.owner`) resolves that sid against the
-//!     target store's primary (sid) index and yields a `Row Owner`, whose
-//!     fields can be read directly (`row.owner.name`);
-//!   * relations require sid-bearing (non-`@simple`) stores on both ends;
-//!   * a has-many relation `&items as [Item]` is not directly traversable and
-//!     produces a precise diagnostic steering the programmer to an explicit
-//!     query rather than silently doing the wrong thing;
-//!   * `@cascade` parses and compiles (delete semantics are not yet wired and
-//!     are a documented no-op).
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

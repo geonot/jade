@@ -1,21 +1,9 @@
-# std.convert — String/number type conversions
-#
-# Robust parsers and formatters that complement the language built-ins.
-#
-# Usage:
-#   convert.parse_int("42")           # 42
-#   convert.parse_int_radix("ff", 16) # 255
-#   convert.parse_float("3.14")       # 3.14
-#   convert.parse_bool("true")        # true
-#   convert.format_int(42, 16)        # "2a"
-#   convert.try_parse_int("xyz")      # ParseResult{ok:false, value:0}
 
 extern *atof(s as %i8) returns f64
 
 DIGITS_LOWER is "0123456789abcdefghijklmnopqrstuvwxyz"
 DIGITS_UPPER is "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-# Result of a fallible parse.
 type ParseResult
     ok as bool
     value as i64
@@ -24,15 +12,12 @@ type ParseFloatResult
     ok as bool
     value as f64
 
-# ── Floats ───────────────────────────────────────────────────
 
 extern *atof(s as String) returns f64
 
-# Parse a string into f64. Returns 0.0 on invalid input (silent).
 *parse_float(s as String) returns f64
     atof(s)
 
-# Parse with success indicator.
 *try_parse_float(s as String) returns ParseFloatResult
     if s.length equals 0
         return ParseFloatResult(ok is false, value is 0.0)
@@ -55,14 +40,10 @@ extern *atof(s as String) returns f64
         return ParseFloatResult(ok is false, value is 0.0)
     ParseFloatResult(ok is true, value is atof(s))
 
-# ── Integers ─────────────────────────────────────────────────
 
-# Parse base-10 integer (silent: 0 on failure).
 *parse_int(s as String) returns i64
     parse_int_radix(s, 10)
 
-# Parse with explicit base (2..36). Accepts optional 0x/0X (16),
-# 0b/0B (2), 0o/0O (8) prefixes when `base` matches.
 *parse_int_radix(s as String, base as i64) returns i64
     if s.length equals 0
         return 0
@@ -91,7 +72,6 @@ extern *atof(s as String) returns f64
         i is i + 1
     neg ? 0 - n ! n
 
-# Strict parser; returns ok=false on any non-digit character.
 *try_parse_int(s as String) returns ParseResult
     try_parse_int_radix(s, 10)
 
@@ -126,9 +106,7 @@ extern *atof(s as String) returns f64
 *parse_binary(s as String) returns i64
     parse_int_radix(s, 2)
 
-# ── Booleans ─────────────────────────────────────────────────
 
-# Recognises true/false, yes/no, 1/0, on/off (case-insensitive).
 *parse_bool(s as String) returns bool
     if s equals "true" or s equals "True" or s equals "TRUE"
         return true
@@ -147,7 +125,6 @@ extern *atof(s as String) returns f64
         return ParseResult(ok is true, value is 0)
     ParseResult(ok is false, value is 0)
 
-# ── Formatting ───────────────────────────────────────────────
 
 *format_int(n as i64, base as i64) returns String
     if n equals 0
@@ -174,7 +151,6 @@ extern *atof(s as String) returns f64
 *format_bool(b as bool) returns String
     b ? "true" ! "false"
 
-# ── Internal ─────────────────────────────────────────────────
 
 *__digit_value(ch as i64) returns i64
     if ch >= 48 and ch <= 57

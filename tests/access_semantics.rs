@@ -1,21 +1,3 @@
-//! End-to-end tests for Jinn's access semantics (value-semantics contract).
-//!
-//! These compile and run real `.jn` programs through `jinnc`, demonstrating —
-//! per non-trivial heap type — the rules documented in
-//! `docs/access-semantics.md`:
-//!
-//!   * heap parameters borrow by default and mutate the caller's value in
-//!     place (no copy, no refcount);
-//!   * `copy` produces an independent deep clone at the boundary, so mutating
-//!     the copy never touches the original (even for nested heap fields);
-//!   * `take` moves ownership and the source dies (use-after-move is a
-//!     compile error);
-//!   * `@resource` types are linear: `copy` is rejected and `*drop` runs
-//!     exactly once, deterministically, at scope exit.
-//!
-//! Every assertion here is referenced from the "Testing" section of
-//! docs/access-semantics.md.
-
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -53,7 +35,6 @@ fn expect(src: &str, expected: &str) {
     assert_eq!(got.trim(), expected.trim(), "source:\n{src}");
 }
 
-/// Compile `src` expecting failure; return stderr for diagnostic assertions.
 fn expect_compile_fail(src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
     let jinn = dir.path().join("test.jn");
@@ -72,10 +53,6 @@ fn expect_compile_fail(src: &str) -> String {
     String::from_utf8_lossy(&output.stderr).to_string()
 }
 
-// ── Vec<T> ──────────────────────────────────────────────────────────────
-
-/// Default borrow: a heap parameter mutates the caller's vector in place.
-/// (docs/access-semantics.md §6.1)
 #[test]
 fn vec_param_borrows_and_mutates_in_place() {
     expect(
@@ -92,8 +69,6 @@ fn vec_param_borrows_and_mutates_in_place() {
     );
 }
 
-/// `copy` parameter is an independent value: mutations inside the callee do
-/// not reach the caller's vector.
 #[test]
 fn vec_copy_param_is_independent() {
     expect(
@@ -111,10 +86,6 @@ fn vec_copy_param_is_independent() {
     );
 }
 
-// ── String ──────────────────────────────────────────────────────────────
-
-/// Passing a String to a borrow parameter leaves the caller owning it: both
-/// the callee and the caller can read it.
 #[test]
 fn string_param_borrows_caller_retains() {
     expect(
@@ -131,8 +102,6 @@ fn string_param_borrows_caller_retains() {
     );
 }
 
-/// `take` moves the String out of the caller; reading it afterwards is a
-/// compile error.
 #[test]
 fn string_take_moves_use_after_is_error() {
     let err = expect_compile_fail(
@@ -152,10 +121,6 @@ fn string_take_moves_use_after_is_error() {
     );
 }
 
-// ── User struct (with nested heap field) ────────────────────────────────
-
-/// `copy` of a struct deep-clones its nested Vec: pushing onto the copy's
-/// inner vector leaves the original's length untouched.
 #[test]
 fn struct_copy_is_deep_independent() {
     expect(
@@ -175,8 +140,6 @@ type Bag
     );
 }
 
-/// `take` of one field leaves sibling fields intact (partial move).
-/// (docs/access-semantics.md §4.2)
 #[test]
 fn struct_field_take_preserves_siblings() {
     expect(
@@ -195,10 +158,6 @@ type Pair
     );
 }
 
-// ── Enum ────────────────────────────────────────────────────────────────
-
-/// Enum payloads carry value semantics: constructing and matching an enum
-/// yields the original payload unchanged.
 #[test]
 fn enum_payload_value_semantics() {
     expect(
@@ -220,9 +179,6 @@ enum Shape
     );
 }
 
-// ── @resource (linear types) ────────────────────────────────────────────
-
-/// A `@resource` value may not be `copy`d — it is linear. (docs §3)
 #[test]
 fn resource_copy_is_compile_error() {
     let err = expect_compile_fail(
@@ -242,8 +198,6 @@ type Handle @resource
     );
 }
 
-/// A `@resource`'s `*drop` runs exactly once, deterministically, at scope
-/// exit — after the body's own output. (docs §4.2, §6.2)
 #[test]
 fn resource_drop_runs_once_at_scope_exit() {
     expect(
@@ -262,8 +216,6 @@ type Guard @resource
     );
 }
 
-/// Reassigning a moved-out variable clears its tombstone: reading it after
-/// the reassignment is legal again. (docs/access-semantics.md §4.2)
 #[test]
 fn take_then_reassign_is_ok() {
     expect(
@@ -281,9 +233,6 @@ fn take_then_reassign_is_ok() {
     );
 }
 
-/// Reading a struct field after it has been moved out by `take` is a compile
-/// error, while sibling fields and a reassigned field stay usable.
-/// (docs/access-semantics.md §4.2, §6.3)
 #[test]
 fn field_take_use_after_is_error() {
     let err = expect_compile_fail(

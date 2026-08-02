@@ -116,17 +116,9 @@ impl Lowerer {
             }
 
             ExprKind::CoroutineCreate(name, body) => {
-                // A bare anonymous `dispatch` inside a `together` scope is a
-                // structured concurrent task: spawn it on the scheduler and
-                // register it as a child of the innermost scope. A named
-                // `dispatch` remains a lazy generator driven by `.next()`.
                 if name.as_str().starts_with("__anon")
                     && let Some(&scope_val) = self.scope_stack.last()
                 {
-                    // Capture enclosing locals referenced by the task body, by
-                    // value, into the task's coroutine struct (same ABI as a
-                    // generator's captures). Free vars that are not enclosing
-                    // locals (globals, functions) are left to normal lookup.
                     let mut refs = std::collections::HashSet::new();
                     super::closures::collect_var_refs_block(body, &mut refs);
                     let mut captures: Vec<(Symbol, Type)> = refs

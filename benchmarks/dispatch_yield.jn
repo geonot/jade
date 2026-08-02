@@ -1,5 +1,3 @@
-# Dispatch yield benchmark
-# Single generator yields 1M values, consumer sums them
 
 *main
     gen is dispatch

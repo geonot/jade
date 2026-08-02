@@ -1,4 +1,3 @@
-# Aggregate signature mock: xor of "signatures".
 *agg(sigs as Vec of i64, n as i64) returns i64
     a is 0
     i is 0

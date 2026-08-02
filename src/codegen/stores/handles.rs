@@ -357,10 +357,6 @@ impl<'ctx> Compiler<'ctx> {
         let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
         b!(self.bld.build_call(fflush_fn, &[new_fp.into()], ""));
 
-        /* A fresh data file next to an existing WAL is exactly the
-         * "deleted the .store, kept the .wal" recovery case (task 8-23):
-         * replay restores every committed record. @transient stores
-         * never reach init_bb with a WAL on disk. */
         if !is_transient {
             self.emit_store_recover_call(sd, global.as_pointer_value())?;
         }
@@ -378,10 +374,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(fv)
     }
 
-    /// Emit the recovery-at-open call (task 8-23): replay committed WAL
-    /// records into the data file by `sid`, then checkpoint. Emitted at
-    /// the current builder position; the store fp global is passed by
-    /// address so recovery's atomic rewrite can swap the handle.
     fn emit_store_recover_call(
         &mut self,
         sd: &hir::StoreDef,
@@ -393,7 +385,7 @@ impl<'ctx> Compiler<'ctx> {
         let sid_off = self
             .store_field_offset(sd, "sid")
             .map(|o| o as i64)
-            .unwrap_or(-1); // @simple: no sid → recovery skipped in C
+            .unwrap_or(-1);
         let del_off = self
             .store_field_offset(sd, "deleted")
             .map(|o| o as i64)
@@ -537,7 +529,7 @@ impl<'ctx> Compiler<'ctx> {
         store_name: &str,
         fp: PointerValue<'ctx>,
     ) -> Result<(), String> {
-        let _ = fp; // tracking is by global address now (survives atomic reopen)
+        let _ = fp;
         let wal = self.load_store_wal(store_name)?;
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let f = self

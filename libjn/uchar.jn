@@ -1,4 +1,3 @@
-# libjn.uchar — drop-in for C11 <uchar.h>
 
 alias char16_t = u16
 alias char32_t = u32

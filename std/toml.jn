@@ -1,19 +1,10 @@
-# std.toml — TOML parser (subset: strings, ints, floats, bools, tables, arrays)
-#
-# Usage:
-#   data is toml.parse(text)
-#   val is toml.get(data, "server.port")
 
-# ── Types ────────────────────────────────────────────────────
 
 type TomlTable
     keys as Vec of String
     vals as Vec of String
 
-# We store all values as strings and provide typed accessors.
-# Nested tables use dotted keys: "server.port" etc.
 
-# ── Parser state ─────────────────────────────────────────────
 
 type TomlParser
     src as String
@@ -74,7 +65,6 @@ type TomlParser
             return self.__parse_string()
         if ch equals 91
             return self.__parse_inline_array()
-        # bare value (number, bool, etc)
         start is self.pos
         while self.pos < self.src.length
             c is self.src.char_at(self.pos)
@@ -88,7 +78,7 @@ type TomlParser
         self.src.slice(start, self.pos).trim()
 
     *__parse_string returns String
-        self.advance()  # skip opening "
+        self.advance()
         result is ""
         while self.pos < self.src.length
             ch is self.advance()
@@ -111,7 +101,6 @@ type TomlParser
         result
 
     *__parse_inline_array returns String
-        # Return the raw text including brackets
         start is self.pos
         depth is 0
         while self.pos < self.src.length
@@ -143,7 +132,6 @@ type TomlParser
             self.prefix is name + "."
             self.skip_line()
             return
-        # Key = value
         key is self.parse_key()
         self.skip_ws()
         if self.peek() equals 61
@@ -155,7 +143,6 @@ type TomlParser
         if self.pos < self.src.length and self.peek() equals 10
             self.pos is self.pos + 1
 
-# ── Public API ───────────────────────────────────────────────
 
 *parse(text as String) returns TomlTable
     p is TomlParser(src is text, pos is 0, prefix is "", keys is vec(), vals is vec())
@@ -185,7 +172,6 @@ type TomlParser
     __toml_parse_float(val)
 
 *__toml_parse_float(s as String) returns f64
-    # Simple float parser: integer.fractional
     neg is false
     i is 0
     if s.length > 0 and s.char_at(0) equals 45
@@ -247,29 +233,24 @@ type TomlParser
 *size(table as TomlTable)
     table.keys.length
 
-# ── Stringify ────────────────────────────────────────────────
 
 *stringify(table as TomlTable) returns String
     result is ""
-    # Collect unique section names
     section_names is vec()
     loop table.keys
         key is $
         dot_pos is __find_last_dot(key)
         if dot_pos < 0
-            # Top-level key
             val is table.vals.get($$)
             result is result + key + ' = ' + __format_toml_value(val) + '\n'
         else
             section is key.slice(0, dot_pos)
-            # Check if section already listed
             found is false
             loop section_names
                 if $ equals section
                     found is true
             if found equals false
                 section_names.push(section)
-    # Output each section
     loop section_names
         section is $
         result is result + '\n[' + section + ']\n'
@@ -298,15 +279,12 @@ type TomlParser
         return val
     if val equals "false"
         return val
-    # Check if it's a number
     if val.length > 0
         ch is val.char_at(0)
         if ch >= 48 and ch <= 57
             return val
         if ch equals 45
             return val
-    # Check if it starts with [ (inline array)
     if val.length > 0 and val.char_at(0) equals 91
         return val
-    # Default: quote as string
     '"' + val + '"'

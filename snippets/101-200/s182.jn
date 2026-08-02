@@ -1,4 +1,3 @@
-# Parse a small base-10 integer from a string.
 *parse(s as String) returns i64
     n is 0
     i is 0

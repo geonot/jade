@@ -1,4 +1,3 @@
-# libjn.wctype — drop-in for C <wctype.h>
 
 alias wctype_t = u64
 alias wctrans_t = u64

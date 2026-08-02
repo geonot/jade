@@ -1,23 +1,5 @@
-# std.args — Command-line argument parser
 use convert
-#
-# A small, declarative parser for POSIX-style options. Supports long
-# (`--name`, `--name=value`), short (`-n`, `-n value`), bundled short flags
-# (`-vxf`), repeated values, sub-commands, required options, defaults, and
-# auto-generated help/usage text.
-#
-# Usage:
-#   parser is args.new("myapp", "A tool that does things")
-#   parser.flag("verbose", "v", "Enable verbose output")
-#   parser.option("output", "o", "Output file path")
-#   parser.option_default("level", "l", "Log level", "info")
-#   parser.required("output")
-#   parsed is parser.parse()
-#   if parsed.is_set("verbose") ...
-#   out_file is parsed.get("output")
-#   files is parsed.args()
 
-# ── Parsed result ────────────────────────────────────────────
 
 type ParsedArgs
     flags as Map of i64
@@ -67,7 +49,6 @@ type ParsedArgs
     *ok returns bool
         self.errors.length equals 0
 
-# ── Parser definition ────────────────────────────────────────
 
 type ArgParser
     name as String
@@ -99,7 +80,6 @@ type ArgParser
             if $ equals name
                 self.def_required.set($$, 1)
                 return
-        # nothing to mark; silently ignore
 
     *subcommand(name as String, desc as String)
         self.subcommands.push(name)
@@ -118,7 +98,6 @@ type ArgParser
         raw is __get_args()
         self.parse_argv(raw)
 
-    # Parse a pre-tokenised argv vector. Element 0 is the program name.
     *parse_argv(raw as Vec of String) returns ParsedArgs
         flags is map()
         options is map()
@@ -127,11 +106,9 @@ type ArgParser
         errors is vec()
         program is raw.length > 0 ? raw.get(0) ! self.name
         subcommand is ""
-        # Apply defaults
         loop self.def_names
             if self.def_defaults.get($$).length > 0
                 options.set($, self.def_defaults.get($$))
-        # Detect subcommand (first non-flag arg before any flag)
         sub_idx is 0
         if self.subcommands.length > 0 and raw.length > 1
             cand is raw.get(1)
@@ -146,7 +123,6 @@ type ArgParser
         while i < raw.length
             arg is raw.get(i)
             if arg equals "--"
-                # Everything after `--` is positional
                 i is i + 1
                 while i < raw.length
                     positional.push(raw.get(i))
@@ -178,7 +154,6 @@ type ArgParser
                         flags.set(found_name, 1)
                         j is j + 1
                     elif j + 1 < arg.length
-                        # remainder of token is the value: -oVALUE
                         self.__store(options, multi, found_name, arg.slice(j + 1, arg.length))
                         j is arg.length
                     elif i + 1 < raw.length
@@ -191,7 +166,6 @@ type ArgParser
             else
                 positional.push(arg)
             i is i + 1
-        # Required check
         loop self.def_names
             if self.def_required.get($$) equals 1
                 if not options.has($) and self.def_is_flag.get($$) equals 0
@@ -225,7 +199,6 @@ type ArgParser
                 return self.def_names.get($$)
         ""
 
-    # ── Help / usage ─────────────────────────────────────────
 
     *usage returns String
         line is "Usage: " + self.name + " [OPTIONS]"
@@ -257,7 +230,6 @@ type ArgParser
                 result is result + "  " + $ + "    " + self.sub_descs.get($$) + "\n"
         result
 
-# ── Constructors ─────────────────────────────────────────────
 
 *new(name as String, desc as String) returns ArgParser
     ArgParser(
@@ -274,10 +246,8 @@ type ArgParser
         sub_descs is vec(),
     )
 
-# Backwards-compatible alias.
 *new_parser(name as String, desc as String) returns ArgParser
     new(name, desc)
 
-# Direct access to the program's argv (read-only).
 *argv returns Vec of String
     __get_args()

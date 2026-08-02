@@ -1,4 +1,3 @@
-# GPIO debounce: stable count must reach threshold before flipping.
 *debounce(samples as Vec of i64, n as i64, thresh as i64) returns i64
     state is samples.get(0)
     cnt is 0

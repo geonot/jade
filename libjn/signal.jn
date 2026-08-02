@@ -1,4 +1,3 @@
-# libjn.signal — drop-in for C <signal.h>
 
 SIGHUP    is 1
 SIGINT    is 2
@@ -32,7 +31,6 @@ SIGIO     is 29
 SIGPWR    is 30
 SIGSYS    is 31
 
-# Sentinel handlers
 SIG_DFL is 0
 SIG_IGN is 1
 SIG_ERR is -1
@@ -44,13 +42,12 @@ SIG_SETMASK is 2
 alias sig_atomic_t = i32
 
 type Sigaction
-    sa_handler as %i8     # raw function pointer
+    sa_handler as %i8
     sa_sigaction as %i8
     sa_mask as i64
     sa_flags as i32
     sa_restorer as %i8
 
-# ── ANSI C subset ──
 *signal(sig as i32, handler as %i8) returns %i8
     nop
     0 as %i8
@@ -59,7 +56,6 @@ type Sigaction
     nop
     0
 
-# ── POSIX ──
 *sigaction(sig as i32, act as %i8, oldact as %i8) returns i32
     nop
     0

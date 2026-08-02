@@ -1,4 +1,3 @@
-# Lambda mapped manually over a Vec.
 *main
     xs is vec()
     i is 1

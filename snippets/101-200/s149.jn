@@ -1,4 +1,3 @@
-# Triangle area via Heron's formula.
 *sqrt(x as f64) returns f64
     if x <= 0.0
         return 0.0

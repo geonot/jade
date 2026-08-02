@@ -61,7 +61,6 @@ test 'ingest_build_metric'
 *main
     t0 is time.monotonic()
 
-    # Reset persisted data so each run demonstrates deterministic behavior.
     delete metrics where id >= 0
     delete metric_windows where window_id >= 0
 

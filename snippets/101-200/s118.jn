@@ -1,4 +1,3 @@
-# Power via repeated squaring.
 *ipow(base as i64, exp as i64) returns i64
     r is 1
     while exp > 0

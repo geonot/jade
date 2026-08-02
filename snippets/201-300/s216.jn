@@ -1,4 +1,3 @@
-# Banking: double-entry ledger sum of debits = credits sanity.
 *bal(amounts as Vec of i64, sides as Vec of i64, n as i64) returns i64
     d is 0
     c is 0

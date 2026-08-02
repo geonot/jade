@@ -1,4 +1,3 @@
-# Dijkstra on dense graph (4 nodes).
 *main
     INF is 1000000000
     g is vec(vec(0, 4, 1, INF), vec(4, 0, 2, 5), vec(1, 2, 0, 8), vec(INF, 5, 8, 0))

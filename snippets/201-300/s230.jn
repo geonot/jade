@@ -1,4 +1,3 @@
-# Patricia-trie-ish prefix match length over bit positions.
 *plen(a as i64, b as i64) returns i64
     n is 0
     bit is 31

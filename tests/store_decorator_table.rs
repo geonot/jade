@@ -1,8 +1,3 @@
-//! Conformance for the declarative store decorator table (task 2-31-12).
-//! One table (in src/store_decorators.rs) drives parser, typer validation, and
-//! docs. These tests pin the documented rejection diagnostics for nonsensical
-//! decorator combinations and type-constrained field decorators.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

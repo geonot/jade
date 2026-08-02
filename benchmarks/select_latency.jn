@@ -1,5 +1,3 @@
-# Select latency benchmark
-# Select over 2 channels in tight loop
 
 *main
     ch1 is channel of i64(16)

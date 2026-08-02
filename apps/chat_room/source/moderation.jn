@@ -2,7 +2,6 @@ use models/message
 use models/user
 
 *classify(text_id as i64) returns i64
-    # 1=normal, 2=spam, 3=question
     if text_id % 13 equals 0
         2
     else

@@ -1,6 +1,3 @@
-# Sequential-impulse contact solver.  `iter` passes over the contact
-# list applying restitution-free normal impulses.  Returns total
-# impulse count for telemetry.
 
 *solve(world as Vec of Body, contacts as Vec of Contact, iter as i64) returns i64
     n is 0
@@ -18,7 +15,6 @@
                 ba.vy is ba.vy - jmag * c.ny / 100
                 bb.vx is bb.vx + jmag * c.nx / 100
                 bb.vy is bb.vy + jmag * c.ny / 100
-                # Positional correction (Baumgarte, slop = 0).
                 slop is c.depth / 4
                 ba.x is ba.x - slop * c.nx / 100
                 ba.y is ba.y - slop * c.ny / 100

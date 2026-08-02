@@ -1,5 +1,3 @@
-# Sweep-and-prune broadphase on the x axis.
-# Returns a vector packed as [a, b, a, b, ...] indices into `world`.
 
 *sap(world as Vec of Body) returns Vec of i64
     pairs is vec()

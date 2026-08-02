@@ -1,4 +1,3 @@
-# PoW: find nonce where mix(seed+nonce) % 2^k == 0.
 *mix(x as i64) returns i64
     y is (x * 2654435761) % 4294967296
     (y * 1664525 + 1013904223) % 4294967296

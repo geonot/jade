@@ -17,17 +17,12 @@ impl Typer {
                 let rl0 = self.infer_ctx.shallow_resolve(&hl.ty);
                 let rr0 = self.infer_ctx.shallow_resolve(&hr.ty);
 
-                // Pointer arithmetic: `ptr + int`, `ptr - int`, `int + ptr`
-                // type as the pointer's type. The operands deliberately do
-                // NOT unify — unifying would bind the integer side's
-                // inference variable to the pointer type and poison every
-                // later use of that variable.
                 let int_like = |t: &Type| t.is_int() || matches!(t, Type::TypeVar(_));
                 let ptr_l = matches!(rl0, Type::Ptr(_));
                 let ptr_r = matches!(rr0, Type::Ptr(_));
                 let ptr_arith_op = match op {
-                    BinOp::Add => true,  // ptr + int, int + ptr
-                    BinOp::Sub => ptr_l, // ptr - int only
+                    BinOp::Add => true,
+                    BinOp::Sub => ptr_l,
                     _ => false,
                 };
                 let is_ptr_arith =
@@ -48,10 +43,6 @@ impl Typer {
                     });
                 }
 
-                // Operand unification both drives inference and, since it is
-                // recorded inside `unify_at`, rejects ill-typed operand pairs
-                // (`'abc' equals 5`, `'n=' + 5`) instead of letting them
-                // reach codegen.
                 let r = self
                     .infer_ctx
                     .unify_at(&hl.ty, &hr.ty, *span, "binary operands");

@@ -1,6 +1,3 @@
-# error_handling.jn — Comprehensive error handling patterns
-# Complexity: Intermediate
-# Demonstrates: err definitions, ! return operator, match on errors, enums
 
 err MathError
     DivisionByZero
@@ -37,7 +34,7 @@ err IoError
         err FileNotFound('empty path')
     if path equals '/root/secret'
         err PermissionDenied('/root/secret')
-    42   # file descriptor
+    42
 
 *read_with_timeout(fd as i64, timeout_ms as i64) returns i64 ! IoError
     if timeout_ms <= 0
@@ -47,7 +44,6 @@ err IoError
     'data'
 
 *main
-    # Safe division
     match safe_divide(10, 3)
         Ok(v) ? log('ok')
         Err(e) ? log('div by zero')
@@ -56,7 +52,6 @@ err IoError
         Ok(v) ? log('ok')
         Err(e) ? log('caught division by zero')
 
-    # Safe sqrt
     match safe_sqrt(16.0)
         Ok(v) ? log('sqrt ok')
         Err(e) ? log('negative')
@@ -65,7 +60,6 @@ err IoError
         Ok(v) ? log('ok')
         Err(e) ? log('caught negative root')
 
-    # Checked factorial
     match checked_factorial(10)
         Ok(v) ? log('factorial ok')
         Err(e) ? log('overflow')
@@ -74,7 +68,6 @@ err IoError
         Ok(v) ? log('ok')
         Err(e) ? log('caught overflow')
 
-    # IO errors: match the error payload to branch per variant
     match open_file('test.txt')
         Ok(fd) ? log('file opened')
         Err(e) ? match e
@@ -94,7 +87,6 @@ err IoError
             PermissionDenied(msg) ? log(msg)
             _ ? log('other')
 
-    # Chained operations
     match read_with_timeout(42, 1000)
         Ok(v) ? log('read ok')
         Err(e) ? match e

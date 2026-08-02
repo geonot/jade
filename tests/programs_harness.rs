@@ -1,16 +1,3 @@
-//! Task 8-19 — every program in tests/programs/ is wired: it compiles,
-//! runs in a clean directory, and matches its expected-output snapshot
-//! (tests/programs/expected/<name>.out). The enumerator fails on any
-//! program without a snapshot, so corpus rot cannot recur — a new
-//! program must ship with its expected output (or a documented pin).
-//!
-//! Deleted with reasons (task 8-19):
-//!   - syntax.jn: 1084 lines of pre-current syntax (paren-less function
-//!     definitions, removed forms); superseded by snippets/guide_tour.jn.
-//!   - data_structures.jn: functional-update structs sharing one Vec —
-//!     the design predates the D1 move semantics and cannot express its
-//!     intent without a rewrite; superseded by memory_model conformance.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -22,15 +9,7 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Programs pinned as known-broken with a reason; they are still
-/// enumerated so they cannot silently rot further.
-const KNOWN_ICE: &[&str] = &[
-    // Mixed-arm phi type mismatch (i64 vs (Ast, i64) tuple) in mutually
-    // recursive tuple-returning parse functions. Reproduces as:
-    // "ICE: phi node type mismatch" — a real mid-end bug to fix; the
-    // program itself is valid-looking source.
-    "compiler_pipeline",
-];
+const KNOWN_ICE: &[&str] = &["compiler_pipeline"];
 
 fn run_program(src: &Path) -> Result<String, String> {
     let dir = tempfile::tempdir().unwrap();
@@ -95,8 +74,7 @@ fn every_program_is_wired_and_matches_its_snapshot() {
             ));
             continue;
         };
-        // Addresses are nondeterministic (pointy.jn prints pointers);
-        // scrub them before comparing.
+
         let scrub = |s: &str| -> String {
             let mut out = String::with_capacity(s.len());
             let mut chars = s.chars().peekable();
@@ -123,7 +101,6 @@ fn every_program_is_wired_and_matches_its_snapshot() {
         }
     }
 
-    // Snapshots must not outlive their programs either.
     for e in std::fs::read_dir(&expected_dir).unwrap().flatten() {
         let stem = e.path().file_stem().unwrap().to_string_lossy().into_owned();
         if !names.contains(&stem) {
@@ -143,8 +120,6 @@ fn every_program_is_wired_and_matches_its_snapshot() {
     );
 }
 
-/// The known ICE stays reproducible; when it starts compiling, promote
-/// it into the snapshot corpus and drop it from KNOWN_ICE.
 #[test]
 fn known_ice_still_reproduces() {
     for name in KNOWN_ICE {

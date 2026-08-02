@@ -1,4 +1,3 @@
-# Recursive fibonacci with memo via a vec.
 *fib(n as i64) returns i64
     if n < 2
         return n

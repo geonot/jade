@@ -43,10 +43,7 @@ impl Typer {
             .collect();
 
         let mut hir_handlers = Vec::new();
-        // Allocate ONE canonical DefId per field, reused in every handler
-        // scope below. Without this, each handler would re-define fields with
-        // a fresh id, making a field's `Var` def_id non-correlatable across
-        // handlers (and impossible to map back to the field for MIR lowering).
+
         let field_def_ids: Vec<crate::hir::DefId> =
             fields.iter().map(|_| self.fresh_id()).collect();
         for (i, h) in ad.handlers.iter().enumerate() {
@@ -282,12 +279,6 @@ impl Typer {
     }
 
     pub(in crate::typer) fn lower_fn(&mut self, f: &ast::Fn) -> Result<hir::Fn, String> {
-        /* D2 (task 8-16): an inferable-generic function's definition-site
-         * lowering is a pre-pass — its HIR is discarded when the scheme
-         * generalizes and the body is re-lowered per call site with the
-         * call's concrete type arguments. Unsolved-variable reports from
-         * the pre-pass are noise (the review's `*peek(v)` strict failure);
-         * real ambiguity resurfaces at instantiation. */
         let suppress =
             self.inferable_fns.contains_key(&f.name) && !self.infer_ctx.suppress_unsolved_reports;
         if suppress {
@@ -302,12 +293,6 @@ impl Typer {
 
     fn lower_fn_inner(&mut self, f: &ast::Fn) -> Result<hir::Fn, String> {
         let mut hfn = self.lower_fn_deferred(f)?;
-        // NOTE: hfn.ret may still be an unresolved TypeVar here for fns with
-        // an inferred return type. Resolution is deferred to a final pass in
-        // lower_program() — after all method bodies have been lowered — so
-        // that ret types that ultimately unify with the return of a method
-        // (whose body is lowered later) do not get prematurely defaulted to
-        // i64.
 
         let einfo = crate::escape::analyze_fn(&hfn);
         for (id, t) in einfo.iter() {
@@ -330,11 +315,7 @@ impl Typer {
         for (i, p) in f.params.iter().enumerate() {
             let pid = self.fresh_id();
             let ty = ptys[i].clone();
-            // The effective access mod folds in inferred consuming
-            // parameters (task 8-6): `fn_param_access` was updated by
-            // `infer_consuming_params` before lowering began, so a
-            // parameter whose buffer escapes the function is owned here
-            // and moved at every call site.
+
             let eff_mod = self
                 .fn_param_access
                 .get(&f.name)
@@ -438,30 +419,29 @@ impl Typer {
             } else {
                 let _ = self.infer_ctx.unify(&ret, &Type::Void);
             }
-        } else if f.ret.is_some() && f.name != "main" {
-            /* A DECLARED return type must match the tail (task 8-17): this
-             * used to fall through to the MIR verifier, which reported a
-             * plain source error as "this is a compiler bug". */
-            if let Some(tail_ty) = self.hir_tail_type(&body) {
-                let rt = self.infer_ctx.shallow_resolve(&ret);
-                let tt = self.infer_ctx.shallow_resolve(&tail_ty);
-                let r = self
-                    .infer_ctx
-                    .unify_at(&ret, &tail_ty, f.span, "function tail expression");
-                let rt_lax = matches!(rt, Type::Ptr(_)) || self.infer_ctx.type_has_unresolved(&rt);
-                let tt_lax = matches!(tt, Type::Ptr(_)) || self.infer_ctx.type_has_unresolved(&tt);
-                if let Err(e) = r
-                    && !rt_lax
-                    && !tt_lax
-                    && !(rt.is_num() && tt.is_num())
-                {
-                    return Err(format!(
-                        "{}: function `{}` declares `returns {}` but its body                          produces a different type: {e}",
-                        f.span.loc(),
-                        f.name,
-                        ret,
-                    ));
-                }
+        } else if f.ret.is_some()
+            && f.name != "main"
+            && let Some(tail_ty) = self.hir_tail_type(&body)
+        {
+            let rt = self.infer_ctx.shallow_resolve(&ret);
+            let tt = self.infer_ctx.shallow_resolve(&tail_ty);
+            let r = self
+                .infer_ctx
+                .unify_at(&ret, &tail_ty, f.span, "function tail expression");
+            let rt_lax = matches!(rt, Type::Ptr(_)) || self.infer_ctx.type_has_unresolved(&rt);
+            let tt_lax = matches!(tt, Type::Ptr(_)) || self.infer_ctx.type_has_unresolved(&tt);
+            if let Err(e) = r
+                && !rt_lax
+                && !tt_lax
+                && !(rt.is_num() && tt.is_num())
+            {
+                return Err(format!(
+                    "{}: function `{}` declares `returns {}` but its body produces a \
+                         different type: {e}",
+                    f.span.loc(),
+                    f.name,
+                    ret,
+                ));
             }
         }
 

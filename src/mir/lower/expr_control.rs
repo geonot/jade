@@ -59,8 +59,6 @@ impl Lowerer {
 
             ExprKind::Block(stmts) => self.lower_block_expr(stmts),
             ExprKind::IfExpr(if_expr) => {
-                // Pure Braun SSA: branches write into their per-block
-                // `current_def`; reads after the merge build phis on demand.
                 let cond_val = self.lower_expr(&if_expr.cond);
                 let then_bb = self.new_block("if.then");
                 let merge_bb = self.new_block("if.merge");
@@ -78,12 +76,6 @@ impl Lowerer {
 
                 self.set_terminator(Terminator::Branch(cond_val, then_bb, else_bb));
 
-                // Each branch block has a single predecessor (recorded by the
-                // Branch terminator above / the per-elif Branch below) so it is
-                // safe to seal immediately. Sealing BEFORE lowering the body is
-                // required: reads in an unsealed block insert incomplete phis
-                // that are only filled at seal time — if the block is never
-                // sealed those phis stay empty and LLVM rejects them.
                 self.switch_to(then_bb);
                 self.seal_block(then_bb);
                 let then_val = self.lower_block_expr(&if_expr.then);
@@ -140,7 +132,7 @@ impl Lowerer {
 
                 self.switch_to(merge_bb);
                 self.seal_block(merge_bb);
-                // Reads after the merge build phis lazily via `read_var`.
+
                 if !matches!(ty, Type::Void) && (else_val_info.is_some() || !elif_vals.is_empty()) {
                     let mut incoming = vec![(then_end, then_val)];
                     for &(bb, v) in &elif_vals {
@@ -150,9 +142,6 @@ impl Lowerer {
                         incoming.push((eb, ev));
                     }
 
-                    // Branches that diverged (return/break/continue) end in a
-                    // dead `after.*` block not wired into merge_bb; drop them so
-                    // the result phi only references real predecessors.
                     incoming.retain(|(bb, _)| !self.unreachable_blocks.contains(bb));
                     if incoming.is_empty() {
                         self.emit(InstKind::Void, Type::Void, span)

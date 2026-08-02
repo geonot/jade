@@ -1,4 +1,3 @@
-# Kalman filter 1D: scalar update.
 *kalman_step(x as i64, p as i64, z as i64, q as i64, r as i64) returns i64
     p1 is p + q
     k is p1 * 1000 / (p1 + r)

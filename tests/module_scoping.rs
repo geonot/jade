@@ -1,12 +1,3 @@
-//! Regression tests for module flattening (src/resolve.rs).
-//!
-//! The flattener renames a module's top-level fns/consts to `module_name` and
-//! rewrites references in module bodies. These tests pin the lexical-scoping
-//! contract: a local binder (`is`-bind, `for`/match/lambda binder, ...) with
-//! the same name as a module-level fn or const shadows it — local uses are
-//! never rewritten to the flattened global — and module struct literals keep
-//! their named-field meaning after flattening.
-
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -14,7 +5,6 @@ fn jinnc() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jinnc"))
 }
 
-/// Compile a two-file program (module + main importing it) and run it.
 fn compile_and_run_with_module(module_name: &str, module_src: &str, main_src: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
     let module = dir.path().join(format!("{module_name}.jn"));
@@ -46,9 +36,6 @@ fn compile_and_run_with_module(module_name: &str, module_src: &str, main_src: &s
     String::from_utf8(run.stdout).unwrap()
 }
 
-/// A local `is`-bind whose name collides with a module-level fn must shadow
-/// it: `mask` here is the local 15, not the flattened fn `mymod_mask`.
-/// (Review T-MODCAP: this class broke `use std/bit` and `use std/json`.)
 #[test]
 fn local_bind_shadows_module_fn() {
     let out = compile_and_run_with_module(
@@ -70,8 +57,6 @@ log(mymod.shadow_test())
     assert_eq!(out.trim(), "16");
 }
 
-/// A local that collides with a module-level const must shadow it too, and a
-/// lambda parameter must shadow a module fn/const of the same name.
 #[test]
 fn local_and_lambda_binders_shadow_module_const() {
     let out = compile_and_run_with_module(
@@ -97,7 +82,6 @@ log(constmod.local_test())
     assert_eq!(out.trim(), "6\n14");
 }
 
-/// A `for` binder colliding with a module fn shadows it inside the loop body.
 #[test]
 fn for_binder_shadows_module_fn() {
     let out = compile_and_run_with_module(
@@ -121,10 +105,6 @@ log(formod.sum_test())
     assert_eq!(out.trim(), "6");
 }
 
-/// Named struct-literal fields inside a module keep their meaning after the
-/// literal is rewritten to a flattened ctor call: out-of-declaration-order
-/// named inits must not be silently made positional.
-/// (Review T-MODARGS: `Pair(b is 2, a is 1)` printed `2, 1` after import.)
 #[test]
 fn module_struct_literal_keeps_named_fields() {
     let out = compile_and_run_with_module(
@@ -148,9 +128,6 @@ log(p.b)
     assert_eq!(out.trim(), "1\n2");
 }
 
-/// After the fix, previously-broken std modules must import cleanly through
-/// the normal `use` path. (`bit` and `json` were the review's two confirmed
-/// T-MODCAP casualties fixed by scope-aware renaming.)
 #[test]
 fn std_bit_and_json_import() {
     for m in ["bit", "json"] {

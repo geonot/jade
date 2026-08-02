@@ -92,13 +92,6 @@ impl Lowerer {
                 self.emit_void_typed(InstKind::Store(idx_name, next_idx), Type::I64, span);
                 self.set_terminator(Terminator::Goto(cond_bb));
 
-                // All comprehension loop edges installed. Seal in Braun order:
-                // inc_bb (preds: push/filter or body), cond_bb (preds: entry +
-                // inc back-edge), exit_bb (pred: cond false). Without these the
-                // exit block stays open forever, so a cross-block variable read
-                // landing here (e.g. a drop of a value bound before this
-                // comprehension) inserts an incomplete phi that never receives
-                // operands — an empty phi that fails LLVM verification.
                 self.seal_block(inc_bb);
                 self.seal_block(cond_bb);
 

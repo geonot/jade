@@ -1,12 +1,3 @@
-//! Numeric-coercion property suite.
-//!
-//! Generates random int/float values and coercion scenarios, compiles each
-//! program at -O0 AND -O3, and asserts the runtime output equals a reference
-//! computed in Rust. This pins the inference->lowering coercion boundary that
-//! previously dropped an int->float argument coercion for variables (worked
-//! for literals): the bug would have surfaced here as an -O0/-O3 mismatch or a
-//! wrong value.
-
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -60,7 +51,7 @@ fn fmt_f64(v: f64) -> String {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
-    // int variable passed to an f64 parameter (the historically-dropped case).
+
     #[test]
     fn int_var_to_float_param(a in -1000i64..1000, b in -1000i64..1000) {
         let src = format!(
@@ -69,7 +60,7 @@ proptest! {
         assert_stable(&src, &fmt_f64(a as f64 + b as f64));
     }
 
-    // int literal passed to an f64 parameter.
+
     #[test]
     fn int_literal_to_float_param(a in -1000i64..1000, b in -1000i64..1000) {
         let src = format!(
@@ -78,7 +69,7 @@ proptest! {
         assert_stable(&src, &fmt_f64(a as f64 + b as f64));
     }
 
-    // int variable bound then returned through an i64 function (no float).
+
     #[test]
     fn int_var_identity(a in -100000i64..100000) {
         let src = format!(
@@ -87,7 +78,7 @@ proptest! {
         assert_stable(&src, &(a + 1).to_string());
     }
 
-    // int variable widened into f64 via division producing a fractional value.
+
     #[test]
     fn int_var_float_division(a in 1i64..1000, b in 1i64..1000) {
         let src = format!(
@@ -96,7 +87,7 @@ proptest! {
         assert_stable(&src, &fmt_f64(a as f64 / b as f64));
     }
 
-    // narrow i32-range int variable passed to an i64 parameter (width coercion).
+
     #[test]
     fn int_var_to_wider_param(a in -1000i64..1000) {
         let src = format!(
@@ -105,7 +96,7 @@ proptest! {
         assert_stable(&src, &(a + a).to_string());
     }
 
-    // chained: int var -> f64 param -> bound f64 result -> f64 param again.
+
     #[test]
     fn chained_float_coercion(a in -500i64..500) {
         let src = format!(

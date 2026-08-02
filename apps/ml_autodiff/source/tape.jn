@@ -1,14 +1,9 @@
-# Lightweight reverse-mode tape.
-#
-# Each Value records its forward value and a list of (parent_index,
-# local_partial) pairs.  `backward(root)` walks the tape in reverse
-# accumulating gradients.
 
 type Value
     val   as i64
-    p1    as i64       # parent indices, -1 = none
+    p1    as i64
     p2    as i64
-    g1    as i64       # local partials d(self)/d(parent)
+    g1    as i64
     g2    as i64
 
 type Tape

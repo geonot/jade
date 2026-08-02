@@ -210,8 +210,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    /// Parse a variant-tagged payload field name (`__v{tag}_{idx}`) into
-    /// (tag, idx). Untagged `_{idx}` names return None for the tag.
     pub(in crate::codegen) fn parse_payload_field(field: &str) -> Option<(Option<u32>, usize)> {
         if let Some(rest) = field.strip_prefix("__v") {
             let (tag_s, idx_s) = rest.split_once('_')?;
@@ -223,9 +221,6 @@ impl<'ctx> Compiler<'ctx> {
         None
     }
 
-    /// Byte offset of payload field `target_idx` within VARIANT `tag` of
-    /// `enum_name` — offsets differ per variant, so reads must use the
-    /// variant they were checked against (task 8-19).
     pub(in crate::codegen) fn compute_variant_payload_offset(
         &self,
         enum_name: &str,
@@ -274,8 +269,6 @@ impl<'ctx> Compiler<'ctx> {
                         let type_size = if Compiler::is_recursive_field(fty, enum_name) {
                             8
                         } else {
-                            /* Target-data size, matching the constructor —
-                             * see aggregates.rs (task 8-19). */
                             self.type_store_size(self.llvm_ty(fty))
                         };
                         offset += (type_size + 7) & !7;

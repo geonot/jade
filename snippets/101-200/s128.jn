@@ -1,4 +1,3 @@
-# Polynomial evaluation (Horner).
 *horner(coeffs, x as f64) returns f64
     r is 0.0
     i is 0

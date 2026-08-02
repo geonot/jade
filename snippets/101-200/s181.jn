@@ -1,4 +1,3 @@
-# Convert decimal i64 to binary string.
 *to_bin(n as i64) returns String
     if n equals 0
         return "0"

@@ -245,11 +245,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_load(vec_ty, vec_ptr, "va.result")))
     }
 
-    /// `all <store>` — a first-class row set: a real Vec of the store's
-    /// in-memory record struct (task 8-25, decision D3). Bindable,
-    /// iterable, `.length`-able, passable. The old emission returned a
-    /// bare malloc'd array as `Ptr(Struct)` with no length traveling
-    /// with it, so `for u in all users` walked garbage and crashed.
     pub(in crate::codegen) fn emit_store_all(
         &mut self,
         store_name: &str,
@@ -289,8 +284,6 @@ impl<'ctx> Compiler<'ctx> {
         let count = self.store_read_count(fp)?;
         let raw_buf = self.store_load_records(fp, count, rec_size)?;
 
-        /* Fresh empty vec header {data: null, len: 0, cap: 0}; pushes
-         * grow it exactly like any user vec. */
         let header_ty = self.vec_header_type();
         let malloc_fn = self.ensure_malloc();
         let vec_hdr = self

@@ -1,31 +1,7 @@
-# std.time — Monotonic clocks, instants, durations, sleep
-#
-# Per VISION v6.3, time has three distinct concerns:
-#   * `Instant`  — a point on the monotonic clock. Useful only for
-#                  measuring elapsed time. Cannot be persisted or compared
-#                  across processes; immune to wall-clock jumps.
-#   * `Duration` — a length of time. Add to an `Instant` to get a new
-#                  `Instant`; subtract two `Instant`s to get a `Duration`.
-#   * Wall-clock time — Unix seconds (`now()`), suitable for logs, file
-#                       timestamps, RPCs. For calendar arithmetic and
-#                       formatting, use `std.date`.
-#
-# This separation prevents the classic bug of computing elapsed time
-# across an NTP step or DST jump.
-#
-# Usage:
-#   start is time.instant()
-#   time.sleep(time.ms(100))
-#   d is time.since(start)            # Duration
-#   d.as_ms()                         # 100
-#
-#   wall is time.now()                # Unix seconds
 
 extern *time(t as %i8) returns i64
 
-# ── Duration ─────────────────────────────────────────────────
 
-# Stored internally as nanoseconds. Constructors below give clear units.
 type Duration
     nanos as i64
 
@@ -66,7 +42,6 @@ type Duration
         s_v is self.nanos / 1000000000
         '{s_v}s'
 
-# Constructors with explicit units.
 *nanos(n as i64) returns Duration
     Duration(nanos is n)
 
@@ -85,11 +60,7 @@ type Duration
 *hours(n as i64) returns Duration
     Duration(nanos is n * 3600000000000)
 
-# ── Instant (monotonic clock point) ──────────────────────────
 
-# Construction is restricted: you can only get an `Instant` from
-# `time.instant()`. There is no way to "make up" an Instant value;
-# this enforces the type-distinction discipline.
 type Instant
     nanos as i64
 
@@ -108,45 +79,30 @@ type Instant
     *after(other as Instant) returns bool
         self.nanos > other.nanos
 
-# Read the monotonic clock. Result is opaque — only useful for
-# differencing with another Instant.
 *instant returns Instant
     Instant(nanos is __time_monotonic() as i64)
 
-# Convenience: time elapsed since a prior instant.
 *since(earlier as Instant) returns Duration
     Duration(nanos is (__time_monotonic() as i64) - earlier.nanos)
 
-# ── Wall clock (use only for logs/serialization) ─────────────
 
-# Unix epoch seconds. Subject to NTP corrections; not suitable for
-# measuring elapsed time. Use `instant()` + `since()` for that.
 *now returns i64
     extern.time(0 as %i8)
 
-# Unix epoch milliseconds.
 *now_ms returns i64
     extern.time(0 as %i8) * 1000
 
-# ── Sleep ────────────────────────────────────────────────────
 
-# Sleep for the given duration. Yields to the scheduler if running
-# inside a coroutine; otherwise blocks the OS thread.
 *sleep(d as Duration)
     __sleep_ms(d.as_ms())
 
-# Sleep for `n` milliseconds (convenience).
 *sleep_ms(n as i64)
     __sleep_ms(n)
 
-# Sleep for `n` whole seconds.
 *sleep_secs(n as i64)
     __sleep_ms(n * 1000)
 
-# ── Legacy helpers (deprecated, prefer Instant/Duration) ─────
 
-# Old API: returns raw monotonic seconds (f64). Kept so existing
-# benchmarks compile; new code should use `instant()` / `since()`.
 *monotonic returns f64
     (__time_monotonic() as f64) / 1000000000.0
 

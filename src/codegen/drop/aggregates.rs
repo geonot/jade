@@ -163,9 +163,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    /// Emit (once) and call `__drop_enum_<name>`: a function wrapping
-    /// drop_enum_variants so recursive enums drop by RUNTIME recursion
-    /// instead of infinite inline expansion.
     pub(in crate::codegen) fn call_enum_drop_fn(
         &mut self,
         val: inkwell::values::BasicValueEnum<'ctx>,
@@ -177,7 +174,7 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             let st = match self.module.get_struct_type(name) {
                 Some(st) => st,
-                None => return Ok(()), /* payload-less or undeclared: nothing to drop */
+                None => return Ok(()),
             };
             let ft = self.ctx.void_type().fn_type(&[st.into()], false);
             let f =
@@ -267,13 +264,7 @@ impl<'ctx> Compiler<'ctx> {
 
         for (vd, (_tag_iv, case_bb)) in drop_variants.iter().zip(case_bbs.iter()) {
             self.bld.position_at_end(*case_bb);
-            /* The enum's LLVM layout is {tag, [N x i8] payload}: fields live
-             * at 8-aligned BYTE offsets inside member 1, exactly as the
-             * constructor writes them. The old code struct_gep'd member
-             * fi+1, which is out of range for any droppable field past the
-             * first (the json_parser/linked_list ICE class, task 8-19) —
-             * and recursive fields are boxed, so their slot holds a heap
-             * pointer, which must be freed after its pointee drops. */
+
             let payload_gep = b!(self.bld.build_struct_gep(st, ptr, 1, "de.payload"));
             let mut byte_offset: u64 = 0;
             for fty in vd.field_types.iter() {

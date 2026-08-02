@@ -1,61 +1,45 @@
-# guide_tour.jn
-#
-# A comprehensive tour that exercises the features documented in jinn.md.
-# Every section prints results that can be eyeballed against the expected
-# values in the trailing comments. Run with:
-#
-#     target/release/jinnc run snippets/guide_tour.jn
 
-# ---------------------------------------------------------------------------
-# Strings: single quotes interpolate, double quotes are raw.
-# ---------------------------------------------------------------------------
 *strings_demo
     name is 'world'
-    log('hello {name}')            # hello world
-    log("hello {name}")            # hello {name}   (raw)
+    log('hello {name}')
+    log("hello {name}")
 
     x is 42
-    log('x={x}, doubled={x * 2}')  # x=42, doubled=84
+    log('x={x}, doubled={x * 2}')
 
     s is 'Jinn Language'
-    log(s.length)                  # 13
-    log(s.to_upper())              # JINN LANGUAGE
-    log(s.contains('Lang'))        # true
-    log(s.slice(0, 4))             # Jinn
+    log(s.length)
+    log(s.to_upper())
+    log(s.contains('Lang'))
+    log(s.slice(0, 4))
 
-# ---------------------------------------------------------------------------
-# Operators: chained comparison, logical, membership, arithmetic, casting.
-# ---------------------------------------------------------------------------
 *operators_demo
     x is 50
     if 0 < x < 100
-        log('in range')           # in range
+        log('in range')
 
     a is true
     b is false
     if a and not b
-        log('a only')             # a only
+        log('a only')
     if a xor b
-        log('exactly one')        # exactly one
+        log('exactly one')
 
     if 3 in [1, 2, 3]
-        log('found')              # found
+        log('found')
     if 'lo' in 'hello'
-        log('substring')          # substring
+        log('substring')
 
-    log(2 pow 10)                 # 1024
-    log(17 mod 5)                 # 2
-    log(0xF0 & 0x0F)              # 0
-    log(1 << 4)                   # 16
+    log(2 pow 10)
+    log(17 mod 5)
+    log(0xF0 & 0x0F)
+    log(1 << 4)
 
     big is 300
-    log(big as i16)               # 300  (truncating cast fits here)
+    log(big as i16)
     y is 7 as f64
-    log(y)                        # 7.000000
+    log(y)
 
-# ---------------------------------------------------------------------------
-# Control flow: if/elif/else, ternary, while, for, loop(...), labeled break.
-# ---------------------------------------------------------------------------
 *classify n
     if n > 0
         'positive'
@@ -65,28 +49,28 @@
         'negative'
 
 *control_demo
-    log(classify(5))              # positive
-    log(classify(0))              # zero
-    log(classify(-3))             # negative
+    log(classify(5))
+    log(classify(0))
+    log(classify(-3))
 
     grade is 85 > 90 ? 'A' ! 85 > 80 ? 'B' ! 'C'
-    log(grade)                    # B
+    log(grade)
 
     n is 3
     total is 0
     while n > 0
         total is total + n
         n is n - 1
-    log(total)                    # 6
+    log(total)
 
     acc is 0
     for i in 1 to 5
         acc is acc + i
-    log(acc)                      # 10  (1+2+3+4)... 1 to 5 is exclusive end
+    log(acc)
 
     items is ['a', 'b', 'c']
     loop(0, $ < items.len(), $ + 1)
-        log(items.get($))         # a b c
+        log(items.get($))
 
     hit is 0
     outer is for i in 0 to 10
@@ -94,11 +78,8 @@
             if i * j > 6
                 hit is i * j
                 break outer
-    log(hit)                      # 8  (i=2,j=4 -> 8)
+    log(hit)
 
-# ---------------------------------------------------------------------------
-# Functions: inference, early return, defaults/named args, inline, clauses, HOF.
-# ---------------------------------------------------------------------------
 *add a, b
     a + b
 
@@ -119,34 +100,28 @@
     f(x)
 
 *functions_demo
-    log(add(1, 2))                # 3
-    log(fib(10))                  # 55
-    log(connect('localhost'))     # connecting to localhost:8080
-    log(connect(host is 'db', port is 3000))  # connecting to db:3000
-    log(double(21))               # 42
-    log(gcd(48, 18))              # 6
-    log(apply(double, 9))         # 18
+    log(add(1, 2))
+    log(fib(10))
+    log(connect('localhost'))
+    log(connect(host is 'db', port is 3000))
+    log(double(21))
+    log(gcd(48, 18))
+    log(apply(double, 9))
 
-# ---------------------------------------------------------------------------
-# Lambdas and pipelines.
-# ---------------------------------------------------------------------------
 *normalize s is s.trim().to_lower()
 *shout s is s.to_upper()
 *add5(a as i64, b as i64) is a + b
 
 *pipeline_demo
     square is |x| x * x
-    log(square(6))                # 36
+    log(square(6))
 
     loud is '  Hello  ' ~ normalize ~ shout
-    log(loud)                     # HELLO
+    log(loud)
 
-    placed is 10 ~ add5(5, $)     # add5(5, 10)
-    log(placed)                   # 15
+    placed is 10 ~ add5(5, $)
+    log(placed)
 
-# ---------------------------------------------------------------------------
-# Types with implicit-self methods and a default field.
-# ---------------------------------------------------------------------------
 type Vec3
     x as f64
     y as f64
@@ -165,16 +140,13 @@ type Config
 *types_demo
     a is Vec3(x is 1.0, y is 2.0, z is 2.0)
     b is Vec3(x is 1.0, y is 0.0, z is 0.0)
-    log(a.dot(b))                 # 1.000000
-    log(a.length())               # 3.000000
+    log(a.dot(b))
+    log(a.length())
 
     c is Config(host is 'api')
-    log(c.retries)                # 3
-    log(c.host)                   # api
+    log(c.retries)
+    log(c.host)
 
-# ---------------------------------------------------------------------------
-# Enums and pattern matching.
-# ---------------------------------------------------------------------------
 enum Shape
     Circle(f64)
     Rect(f64, f64)
@@ -187,61 +159,49 @@ enum Shape
         Unit ? 0.0
 
 *enums_demo
-    log(area(Circle(2.0)))        # 12.566360
-    log(area(Rect(3.0, 4.0)))     # 12.000000
-    log(area(Unit))               # 0.000000
+    log(area(Circle(2.0)))
+    log(area(Rect(3.0, 4.0)))
+    log(area(Unit))
 
-# ---------------------------------------------------------------------------
-# Generics.
-# ---------------------------------------------------------------------------
 *max_of of T(a as T, b as T)
     a > b ? a ! b
 
 *generics_demo
-    log(max_of(3, 9))             # 9
-    log(max_of(2.5, 1.5))         # 2.500000
+    log(max_of(3, 9))
+    log(max_of(2.5, 1.5))
 
-# ---------------------------------------------------------------------------
-# Collections: vec, map, and array-literal -> vector inference.
-# ---------------------------------------------------------------------------
 *collections_demo
     v is vec()
     v.push(1)
     v.push(2)
-    log(v.len())                  # 2
-    log(v.get(0))                 # 1
+    log(v.len())
+    log(v.get(0))
 
     m is map()
     m.set('key', 42)
-    log(m.get('key'))             # 42
-    log(m.has('key'))             # true
+    log(m.get('key'))
+    log(m.has('key'))
 
     nums is [10, 20, 30]
-    log(nums.get(1))              # 20
+    log(nums.get(1))
 
     queue is [1, 2, 3]
-    queue.push(4)                 # inferred as a vector
-    log(queue.len())              # 4
+    queue.push(4)
+    log(queue.len())
 
-# ---------------------------------------------------------------------------
-# Comprehensions and functional combinators.
-# ---------------------------------------------------------------------------
 *comprehensions_demo
     squares is [x pow 2 for x in 0 to 5]
-    log(squares.get(4))           # 16
+    log(squares.get(4))
 
     evens is [x for x in 0 to 10 if x mod 2 equals 0]
-    log(evens.len())              # 5
+    log(evens.len())
 
     nums is [1, 2, 3, 4]
     doubled is nums.map(|x| x * 2)
-    log(doubled.get(3))           # 8
+    log(doubled.get(3))
     total is nums.fold(0, |acc, x| acc + x)
-    log(total)                    # 10
+    log(total)
 
-# ---------------------------------------------------------------------------
-# Generators.
-# ---------------------------------------------------------------------------
 *counter()
     n is 0
     loop
@@ -250,13 +210,10 @@ enum Shape
 
 *generators_demo
     g is counter()
-    log(g.next())                 # 0
-    log(g.next())                 # 1
-    log(g.next())                 # 2
+    log(g.next())
+    log(g.next())
+    log(g.next())
 
-# ---------------------------------------------------------------------------
-# Error handling as values.
-# ---------------------------------------------------------------------------
 enum CheckResult
     Ok(i64)
     Err(i64)
@@ -269,13 +226,12 @@ enum CheckResult
 
 *errors_demo
     match checked_add(60, 30)
-        Ok(v) ? log(v)            # 90
+        Ok(v) ? log(v)
         Err(e) ? log(0 - e)
     match checked_add(60, 50)
         Ok(v) ? log(v)
-        Err(e) ? log(0 - e)       # -110
+        Err(e) ? log(0 - e)
 
-# ---------------------------------------------------------------------------
 *main
     log('== strings ==')
     strings_demo()

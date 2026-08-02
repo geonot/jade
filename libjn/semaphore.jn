@@ -1,4 +1,3 @@
-# libjn.semaphore — drop-in for POSIX <semaphore.h>
 
 SEM_FAILED is 0
 

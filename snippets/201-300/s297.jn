@@ -1,4 +1,3 @@
-# Bit-reversal permutation index for FFT.
 *bitrev(x as i64, bits as i64) returns i64
     r is 0
     i is 0

@@ -1,10 +1,3 @@
-//! `jinn fmt` must never destroy source (task 8-2, decision D5; task
-//! 8-18 made comments lexer trivia carried through the printer). A
-//! commented file formats WITH its comments — every comment text, its
-//! position kind (leading/trailing/standalone), and blank-line grouping
-//! survive, and formatting is idempotent. In-place modification still
-//! requires an explicit `--write` (the default prints to stdout).
-
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -46,7 +39,7 @@ fn fmt_write_preserves_comments_and_is_idempotent() {
     assert!(once.contains("# leading comment"), "{once}");
     assert!(once.contains("# trailing comment"), "{once}");
     assert!(once.contains("# standalone comment"), "{once}");
-    // Trailing stays trailing (same line as its code).
+
     assert!(
         once.lines()
             .any(|l| l.contains("x is 1") && l.contains("# trailing comment")),
@@ -106,8 +99,6 @@ fn fmt_write_formats_uncommented_file() {
 
 #[test]
 fn fmt_preserves_shebang() {
-    // A shebang is lexer trivia like a comment; it must survive at the
-    // top of the file.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("script.jn");
     let src = "#!/usr/bin/env jinn\n*main\n    log(1)\n";
@@ -130,9 +121,6 @@ fn fmt_preserves_shebang() {
     );
 }
 
-/// Task 8-18 round-trip property over the whole snippets corpus: for
-/// every parseable snippet, `fmt` succeeds, is idempotent, and preserves
-/// the multiset of comment texts.
 #[test]
 fn fmt_roundtrip_over_snippets_corpus() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("snippets");
@@ -154,7 +142,7 @@ fn fmt_roundtrip_over_snippets_corpus() {
                 };
                 let once = match jinnc::fmt::format_source(&src) {
                     Ok(o) => o,
-                    Err(_) => continue, // unparseable corpus entries are out of scope
+                    Err(_) => continue,
                 };
                 let twice = jinnc::fmt::format_source(&once)
                     .unwrap_or_else(|e| panic!("reformat failed for {}: {e}", p.display()));

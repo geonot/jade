@@ -1,14 +1,6 @@
-# std.stats — Statistical functions
-#
-# Usage:
-#   data is [10, 20, 30, 40, 50]
-#   log(stats.mean(data))      # 30.0
-#   log(stats.median(data))    # 30
-#   log(stats.stdev(data))     # ~15.81
 
 extern *sqrt(x as f64) returns f64
 
-# inline insertion sort for median/percentile (avoids importing sort module)
 *__stats_sort(arr as Vec of i64)
     i is 1
     while i < arr.length
@@ -103,9 +95,7 @@ extern *sqrt(x as f64) returns f64
 *count(data)
     data.length
 
-# ── Correlation ──────────────────────────────────────────────
 
-# Pearson correlation coefficient between two datasets.
 *pearson(x as Vec of i64, y as Vec of i64) returns f64
     n is x.length
     if n < 2 or y.length neq n
@@ -130,14 +120,12 @@ extern *sqrt(x as f64) returns f64
         return 0.0
     num / den
 
-# Spearman rank correlation.
 *spearman(x as Vec of i64, y as Vec of i64) returns f64
     n is x.length
     if n < 2 or y.length neq n
         return 0.0
     rx is __ranks(x)
     ry is __ranks(y)
-    # Compute Pearson on ranks (as f64 values in i64 vecs × 1000)
     d2_sum is 0.0
     loop rx
         d is $ as f64 / 1000.0 - ry.get($$) as f64 / 1000.0
@@ -145,7 +133,6 @@ extern *sqrt(x as f64) returns f64
     nf is n as f64
     1.0 - 6.0 * d2_sum / (nf * (nf * nf - 1.0))
 
-# Covariance.
 *covariance(x as Vec of i64, y as Vec of i64) returns f64
     n is x.length
     if n < 2 or y.length neq n
@@ -157,7 +144,6 @@ extern *sqrt(x as f64) returns f64
         total is total + ($ as f64 - mx) * (y.get($$) as f64 - my)
     total / (n - 1) as f64
 
-# ── Online statistics (Welford's algorithm) ──────────────────
 
 type OnlineStats
     n as i64
@@ -166,7 +152,6 @@ type OnlineStats
     min_v as f64
     max_v as f64
 
-    # Add a new observation.
     *update(x as f64)
         self.n is self.n + 1
         delta is x - self.mean_val
@@ -205,9 +190,7 @@ type OnlineStats
 *online_new returns OnlineStats
     OnlineStats(n is 0, mean_val is 0.0, m2 is 0.0, min_v is 0.0, max_v is 0.0)
 
-# ── Distribution sampling ────────────────────────────────────
 
-# z-score: how many standard deviations from mean.
 *z_score(value as f64, data as Vec of i64) returns f64
     m is mean(data)
     s is stdev(data)
@@ -215,7 +198,6 @@ type OnlineStats
         return 0.0
     (value - m) / s
 
-# z-scores for all values.
 *z_scores(data as Vec of i64) returns Vec of f64
     m is mean(data)
     s is stdev(data)
@@ -227,11 +209,9 @@ type OnlineStats
             result.push(($ as f64 - m) / s)
     result
 
-# Interquartile range.
 *iqr(data as Vec of i64) returns f64
     percentile(data, 75.0) - percentile(data, 25.0)
 
-# Skewness (Fisher's).
 *skewness(data as Vec of i64) returns f64
     n is data.length
     if n < 3
@@ -247,7 +227,6 @@ type OnlineStats
     nf is n as f64
     total * nf / ((nf - 1.0) * (nf - 2.0))
 
-# Kurtosis (excess, Fisher's definition).
 *kurtosis(data as Vec of i64) returns f64
     n is data.length
     if n < 4
@@ -263,9 +242,7 @@ type OnlineStats
     nf is n as f64
     (nf * (nf + 1.0)) / ((nf - 1.0) * (nf - 2.0) * (nf - 3.0)) * total - 3.0 * (nf - 1.0) * (nf - 1.0) / ((nf - 2.0) * (nf - 3.0))
 
-# ── Histogram ────────────────────────────────────────────────
 
-# Generate histogram bin counts.
 *histogram(data as Vec of i64, num_bins as i64) returns Vec of i64
     if data.length equals 0 or num_bins <= 0
         return vec()
@@ -288,18 +265,13 @@ type OnlineStats
         bins.set(idx, bins.get(idx) + 1)
     bins
 
-# ── Internal helpers ─────────────────────────────────────────
 
-# Compute ranks (× 1000 to preserve decimal precision in i64).
 *__ranks(data as Vec of i64) returns Vec of i64
     n is data.length
-    # Build (value, original_index) and sort by value
     indices is vec()
     for i in 0 to n
         indices.push(i)
-    # Sort indices by data values
     __sort_by_data(indices, data)
-    # Assign ranks (average for ties), scaled by 1000
     ranks is vec()
     for i in 0 to n
         ranks.push(0)

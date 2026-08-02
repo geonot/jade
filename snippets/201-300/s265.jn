@@ -1,4 +1,3 @@
-# JK flip-flop: simulate Q sequence.
 *jk(j_seq as Vec of i64, k_seq as Vec of i64, n as i64) returns i64
     q is 0
     i is 0

@@ -1,4 +1,3 @@
-# Compute median of a vec (insertion sort then mid).
 *sort(v)
     n is v.length
     i is 1

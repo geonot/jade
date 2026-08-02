@@ -1,4 +1,3 @@
-# Bringup probe sequence: count successful initialisations.
 *bringup(probes as Vec of i64, n as i64) returns i64
     ok is 0
     i is 0

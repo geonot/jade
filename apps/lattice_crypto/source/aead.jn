@@ -1,4 +1,3 @@
-# AEAD: encrypt-then-MAC over (associated_data || ciphertext || lengths).
 
 use stream
 use poly_mac
@@ -37,7 +36,6 @@ type Opened
     v
 
 *seal(key as i64, nonce as i64, ad as Vec of i64, msg as Vec of i64) returns Sealed
-    # Block 0 is reserved for MAC keys; encrypt with counter=1+.
     ct is stream.xor(key, nonce ^ 0x1, msg)
     mk is derive_mac_keys(key, nonce)
     auth is concat3(ad, ct, length_block(ad.len(), ct.len()))

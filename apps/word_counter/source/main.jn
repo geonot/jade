@@ -1,23 +1,12 @@
-# Word Counter
-# Computes text analysis metrics on generated text
-# Demonstrates: functions, loops, sim for parallelism, computation
-# 
-# Since Jinn uses ownership semantics for strings,
-# we generate text inline and do integer-heavy analysis
 
 extern *jinn_time_now_ns() returns i64
 
-# Simulate character-level text analysis using LCG-generated "text"
-# Each "character" is a pseudo-random value 0..127 (ASCII range)
-# We count various properties of this synthetic text
 
 *lcg_next(state as i64) returns i64
     a is 6364136223846793005
     c is 1442695040888963407
     state * a + c
 
-# Analyze n "characters" of synthetic text from a seed
-# Returns: count of "spaces" (chars where value % 8 == 0)
 *count_spaces_synthetic(n as i64, seed as i64) returns i64
     count is 0
     state is seed
@@ -27,13 +16,11 @@ extern *jinn_time_now_ns() returns i64
         ch is state % 128
         if ch < 0
             ch is 0 - ch
-        # Treat chars divisible by 8 as spaces
         if ch % 8 eq 0
             count is count + 1
         i is i + 1
     count
 
-# Count "vowels" (chars where value % 5 == 0)
 *count_vowels_synthetic(n as i64, seed as i64) returns i64
     count is 0
     state is seed
@@ -48,7 +35,6 @@ extern *jinn_time_now_ns() returns i64
         i is i + 1
     count
 
-# Count "uppercase" (chars where value is 65..90)
 *count_upper_synthetic(n as i64, seed as i64) returns i64
     count is 0
     state is seed
@@ -64,7 +50,6 @@ extern *jinn_time_now_ns() returns i64
         i is i + 1
     count
 
-# Heavy analysis: compute a "hash" of the text by accumulating character values
 *text_hash(n as i64, seed as i64) returns i64
     hash is 5381
     state is seed
@@ -78,7 +63,6 @@ extern *jinn_time_now_ns() returns i64
         i is i + 1
     hash
 
-# Wrapper functions that compute AND log results (for sim block)
 *analyze_spaces(n as i64, seed as i64) returns i64
     result is count_spaces_synthetic(n, seed)
     log("Par spaces:")
@@ -110,7 +94,6 @@ extern *jinn_time_now_ns() returns i64
     log("Text size (chars):")
     log(n)
 
-    # --- Sequential: run all 4 analyses one at a time ---
     t0 is jinn_time_now_ns()
     s1 is count_spaces_synthetic(n, seed)
     s2 is count_vowels_synthetic(n, seed)
@@ -130,7 +113,6 @@ extern *jinn_time_now_ns() returns i64
     log("Sequential ms:")
     log(seq_ms)
 
-    # --- Parallel: run all 4 analyses concurrently ---
     log("=== Parallel (sim block) ===")
     t2 is jinn_time_now_ns()
     sim

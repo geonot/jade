@@ -1,4 +1,3 @@
-# Bank A/B failover: choose newer non-corrupt bank.
 *choose_bank(ver_a as i64, ok_a as i64, ver_b as i64, ok_b as i64) returns i64
     if ok_a equals 1 and (ok_b equals 0 or ver_a >= ver_b)
         return 0

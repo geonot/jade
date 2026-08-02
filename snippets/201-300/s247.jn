@@ -1,4 +1,3 @@
-# PID controller step.
 *pid(setpoint as i64, measured as i64, integral as i64, prev_err as i64, kp as i64, ki as i64, kd as i64) returns i64
     e_term is setpoint - measured
     derivative is e_term - prev_err

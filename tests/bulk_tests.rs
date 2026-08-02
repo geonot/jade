@@ -5561,10 +5561,6 @@ fn b_p42_wrong_arg_count() {
 
 #[test]
 fn b_strict_unsolved_field_among_annotated() {
-    // A genuinely-unsolved type variable: the `payload` field carries no
-    // annotation and is never constrained by construction or use, so the type
-    // checker cannot assign it a concrete type. The annotated `id` field must
-    // not be implicated — checking pinpoints the offending field by name.
     let err =
         expect_strict_fail("type Record\n    id as i64\n    payload\n\n*main()\n    log(1)\n");
     assert!(

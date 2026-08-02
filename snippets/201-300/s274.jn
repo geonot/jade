@@ -1,4 +1,3 @@
-# UART frame: start + 8 data + parity + stop.
 *frame_bits(data as i64, parity as i64) returns i64
     sum is 0
     bit is 0

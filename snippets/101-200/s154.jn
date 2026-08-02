@@ -1,4 +1,3 @@
-# Levenshtein edit distance (flat dp).
 *lev(a as String, b as String) returns i64
     m is a.length
     n is b.length

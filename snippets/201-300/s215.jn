@@ -1,4 +1,3 @@
-# Implied vol via bisection on monotonic price function (toy).
 *price(vol as i64) returns i64
     vol * vol / 100
 

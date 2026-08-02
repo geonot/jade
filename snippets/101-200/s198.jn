@@ -1,4 +1,3 @@
-# Compute checksum: sum of bytes mod 256.
 *checksum(s as String) returns i64
     s2 is 0
     i is 0

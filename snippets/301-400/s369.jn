@@ -1,4 +1,3 @@
-# Count items where x mod 3 == 0.
 *main
     xs is vec()
     i is 1

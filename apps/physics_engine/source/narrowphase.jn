@@ -1,4 +1,3 @@
-# Narrowphase: confirm circle-circle overlap and emit a Contact.
 
 type Contact
     a as i64

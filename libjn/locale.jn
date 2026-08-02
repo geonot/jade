@@ -1,4 +1,3 @@
-# libjn.locale — drop-in for C <locale.h>
 
 LC_ALL      is 6
 LC_COLLATE  is 3
@@ -36,7 +35,6 @@ type Lconv
     nop
     0 as %i8
 
-# POSIX (xlocale)
 alias locale_t = %i8
 
 *newlocale(mask as i32, name as %i8, base as %i8) returns %i8

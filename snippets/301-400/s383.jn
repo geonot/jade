@@ -1,4 +1,3 @@
-# Top-3 maxima via three-pass scan.
 *main
     xs is vec()
     xs.push(3)

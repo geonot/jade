@@ -236,8 +236,6 @@ impl Typer {
         self.lower_struct_or_variant(name, inits, span)
     }
 
-    /// Case-insensitive Levenshtein distance, used to turn a failed name
-    /// lookup into a suggestion instead of a dead end.
     fn edit_distance(a: &str, b: &str) -> usize {
         let a: Vec<char> = a.to_ascii_lowercase().chars().collect();
         let b: Vec<char> = b.to_ascii_lowercase().chars().collect();
@@ -254,10 +252,6 @@ impl Typer {
         prev[b.len()]
     }
 
-    /// A constructor call named a type that does not exist. Offer the
-    /// nearest known type or enum variant so the common cause — a typo, a
-    /// missing `use`, or a variant spelled from another language's prelude
-    /// (`None` for `Nothing`) — is immediately visible.
     fn unknown_constructor_error(&self, name: &str, span: Span) -> String {
         let mut candidates: Vec<String> = self
             .structs
@@ -268,9 +262,7 @@ impl Typer {
             .collect();
         candidates.sort();
         candidates.dedup();
-        // Spellings users import from other languages' preludes. Jinn has
-        // exactly one name per concept; point at it rather than accreting
-        // aliases.
+
         const FOREIGN: &[(&str, &str)] = &[
             ("None", "Nothing"),
             ("Null", "Nothing"),
@@ -507,11 +499,6 @@ impl Typer {
 
         if let Some(fields) = self.structs.get(name).cloned() {
             if self.inferred_field_structs.contains(&Symbol::intern(name)) {
-                // When any init is named, fields must be matched by name only:
-                // positional fallback (`hinits.get(i)`) would pair an omitted field
-                // with an unrelated provided init (e.g. an inferred-Integer field
-                // omitted at index 0 paired with a String init), spuriously
-                // triggering monomorphization with swapped field types.
                 let any_named = hinits.iter().any(|fi| fi.name.is_some());
                 let needs_mono = fields.iter().enumerate().any(|(i, (fname, declared_ty))| {
                     let resolved = self.infer_ctx.shallow_resolve(declared_ty);

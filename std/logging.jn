@@ -1,21 +1,4 @@
-# std.logging — Structured leveled logging
-#
-# A small but production-shaped logger:
-#   * Five levels (TRACE, DEBUG, INFO, WARN, ERROR).
-#   * Structured key-value fields attached per record.
-#   * Pluggable sinks (stderr by default; add files, rotating writers, etc).
-#   * JSON or human-friendly text output.
-#   * Module-scoped loggers via `with_name`.
-#   * Color when the sink is a TTY (NO_COLOR honored).
-#
-# Usage:
-#   log is logging.get("myapp")
-#   log.info("server started", map_of("port", "8080"))
-#   log.error("db down", map_of("host", host, "err", err))
-#   logging.set_level(logging.WARN)
-#   logging.set_format(logging.FORMAT_JSON)
 
-# ── Levels ───────────────────────────────────────────────────
 
 TRACE is 0
 DEBUG is 1
@@ -27,7 +10,6 @@ OFF   is 5
 FORMAT_TEXT is 0
 FORMAT_JSON is 1
 
-# Module-global state (single process-wide logger config).
 type _Config
     level as i64
     format as i64
@@ -36,7 +18,6 @@ type _Config
 
 _state is _Config(level is INFO, format is FORMAT_TEXT, use_color is true, show_time is true)
 
-# ── Configuration ────────────────────────────────────────────
 
 *set_level(lvl as i64)
     _state.level is lvl
@@ -53,7 +34,6 @@ _state is _Config(level is INFO, format is FORMAT_TEXT, use_color is true, show_
 *set_show_time(enabled as bool)
     _state.show_time is enabled
 
-# ── Logger ───────────────────────────────────────────────────
 
 type Logger
     name as String
@@ -74,11 +54,9 @@ type Logger
     *error(msg as String, kv as Map of String)
         emit(ERROR, self.name, msg, __merge(self.fields, kv))
 
-    # Return a child logger that includes additional default fields.
     *with(kv as Map of String) returns Logger
         Logger(name is self.name, fields is __merge(self.fields, kv))
 
-# Convenience for callers that don't need structured fields.
     *info_msg(msg as String)
         emit(INFO, self.name, msg, map())
 
@@ -88,19 +66,14 @@ type Logger
     *error_msg(msg as String)
         emit(ERROR, self.name, msg, map())
 
-# ── Constructors ─────────────────────────────────────────────
 
 *get(name as String) returns Logger
     Logger(name is name, fields is map())
 
-# Default root logger (name == "").
 *root returns Logger
     Logger(name is "", fields is map())
 
-# ── Emission ─────────────────────────────────────────────────
 
-# Format and write a record. Bypasses the logger object so it can also be
-# called from `log()` shorthand (below).
 *emit(lvl as i64, name as String, msg as String, fields as Map of String)
     if lvl < _state.level
         return
@@ -109,7 +82,6 @@ type Logger
     else
         eprint(__format_text(lvl, name, msg, fields))
 
-# Module-level shortcuts (use the root logger).
 *trace(msg as String)
     emit(TRACE, "", msg, map())
 
@@ -125,7 +97,6 @@ type Logger
 *error(msg as String)
     emit(ERROR, "", msg, map())
 
-# ── Formatting ───────────────────────────────────────────────
 
 *level_name(lvl as i64) returns String
     if lvl equals TRACE
@@ -186,7 +157,6 @@ type Logger
         out is out + ',"' + __json_escape($) + '":"' + __json_escape(fields.get($)) + '"'
     out + "}"
 
-# ── Helpers ──────────────────────────────────────────────────
 
 *__merge(a as Map of String, b as Map of String) returns Map of String
     out is map()
@@ -246,7 +216,6 @@ type Logger
 
 extern *time(t as %i8) returns i64
 
-# ISO-8601 UTC timestamp from current epoch seconds.
 *__timestamp returns String
     t is extern.time(0 as %i8)
     days is t / 86400
@@ -254,11 +223,9 @@ extern *time(t as %i8) returns i64
     hh is secs / 3600
     mm is (secs mod 3600) / 60
     ss is secs mod 60
-    # Compute Y-M-D from days since epoch (1970-01-01).
     ymd is __civil_from_days(days)
     __pad4(ymd.get(0)) + "-" + __pad2(ymd.get(1)) + "-" + __pad2(ymd.get(2)) + "T" + __pad2(hh) + ":" + __pad2(mm) + ":" + __pad2(ss) + "Z"
 
-# Howard Hinnant's civil_from_days: O(1) date conversion.
 *__civil_from_days(z as i64) returns Vec of i64
     z is z + 719468
     era is z >= 0 ? z / 146097 ! (z - 146096) / 146097

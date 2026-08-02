@@ -289,14 +289,6 @@ impl Typer {
                 let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
                 let hfilter_exists = self.lower_store_filter(filter, &schema, &store.as_str())?;
 
-                /* D3 (task 8-25): a query that can match nothing has type
-                 * `Result of <row>, StoreError` — reading a field of a miss
-                 * is no longer expressible. It used to fabricate a zero row
-                 * (`name=[] age=0`) indistinguishable from real data. The
-                 * quaternary handles it with no ceremony
-                 * (`users where … ? $.field ! fallback`), and `!! err`
-                 * propagates inside a fallible function. Desugar:
-                 * `exists ? Ok(row-read) ! Err(Missing)`. */
                 let span = *span;
                 let row_ty = Type::Row(*store);
                 let store_err = Symbol::intern("StoreError");
@@ -429,9 +421,7 @@ impl Typer {
                     return Err(format!("unknown store '{store}'"));
                 }
                 let struct_name = Symbol::intern(&format!("__store_{store}"));
-                /* D3 (task 8-25): `all <store>` is a first-class row set —
-                 * a Vec of the store's record struct. The old Ptr type had
-                 * no length, so iteration walked garbage. */
+
                 Ok(hir::Expr {
                     kind: hir::ExprKind::StoreAll(*store),
                     ty: Type::Vec(Box::new(Type::Struct(struct_name, vec![]))),

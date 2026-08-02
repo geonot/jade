@@ -83,12 +83,6 @@ impl<'s> Lexer<'s> {
                 span: sp,
             })
         } else {
-            // Reinterpret the decimal digits through u64 then bit-cast to i64,
-            // matching the based-literal path (`lex_based`). This lets the magic
-            // constant 9223372036854775808 (2^63) lex to the i64::MIN bit
-            // pattern so `-9223372036854775808` (a common sign-bit mask) and
-            // unsuffixed full-range u64 masks are expressible, rather than
-            // being rejected by a signed-only `i64::from_str`.
             let val = text
                 .parse::<u64>()
                 .map(|u| u as i64)
@@ -273,9 +267,6 @@ impl<'s> Lexer<'s> {
                     b'{' => val.push('{'),
                     b'}' => val.push('}'),
                     b'x' => {
-                        // `\xHH` — exactly two hex digits → a single byte. Used
-                        // for control characters such as ESC (`\x1b`) in ANSI
-                        // escape sequences.
                         let hi = self
                             .src
                             .get(self.pos + 1)

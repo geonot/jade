@@ -1,12 +1,6 @@
-# std.json — JSON parsing and serialization
-#
-# Usage:
-#   data is json.parse('\{"name": "jinn"\}')
-#   text is json.stringify(data)
 
 use convert
 
-# ── Types ────────────────────────────────────────────────────
 
 type JsonArray
     items as Vec of JsonValue
@@ -23,7 +17,6 @@ enum JsonValue
     JArray(JsonArray)
     JObject(JsonObject)
 
-# Byte constants for fast comparison
 QUOTE is 34
 BACKSLASH is 92
 LBRACE is 123
@@ -50,7 +43,6 @@ LOWER_R is 114
 LOWER_B is 98
 LOWER_U is 117
 
-# ── Parser type ──────────────────────────────────────────────
 
 type JsonParser
     src as String
@@ -112,7 +104,6 @@ type JsonParser
                     LOWER_B ? result is result + ""
                     LOWER_F ? result is result + ""
                     LOWER_U ?
-                        # \uXXXX — parse 4 hex digits as a Unicode code point
                         hex is self.src.slice(self.pos, self.pos + 4)
                         self.pos is self.pos + 4
                         code is __json_hex_to_int(hex)
@@ -214,14 +205,12 @@ type JsonParser
         self.pos is self.pos + 4
         JNull
 
-# ── Public parse function ────────────────────────────────────
 
 *parse(text as String) returns JsonValue
     p is JsonParser(src is text, pos is 0)
     p.skip_ws()
     p.parse_value()
 
-# ── Serialization ────────────────────────────────────────────
 
 *stringify(value as JsonValue) returns String
     match value
@@ -274,7 +263,6 @@ type JsonParser
         result is result + __escape($) + ":" + stringify(vals.get($$))
     result + "\}"
 
-# ── Pretty printing ─────────────────────────────────────────
 
 *pretty(value as JsonValue) returns String
     __pretty_indent(value, 0)
@@ -318,7 +306,6 @@ type JsonParser
                 result is result + ind
             result + "\}"
 
-# ── Access helpers ───────────────────────────────────────────
 
 *get(obj as JsonValue, key as String) returns JsonValue
     match obj
@@ -362,17 +349,14 @@ type JsonParser
         Str(s) ? s.length
         _ ? 0
 
-# ── Mutation helpers ─────────────────────────────────────────
 
 *set(obj as JsonValue, key as String, value as JsonValue) returns JsonValue
     match obj
         JObject(o) ?
-            # Check if key already exists
             loop o.keys
                 if $ equals key
                     o.vals.set($$, value)
                     return JObject(o)
-            # Key not found — add it
             o.keys.push(key)
             o.vals.push(value)
             JObject(o)
@@ -411,7 +395,6 @@ type JsonParser
             JArray(a)
         _ ? arr
 
-# ── Constructor helpers ──────────────────────────────────────
 
 *obj
     JObject(JsonObject(keys is vec(), vals is vec()))
@@ -419,7 +402,6 @@ type JsonParser
 *arr
     JArray(JsonArray(items is vec()))
 
-# ── Internal helpers ─────────────────────────────────────────
 
 *__json_hex_to_int(s as String) returns i64
     result is 0

@@ -1,4 +1,3 @@
-# libjn.time — drop-in for C <time.h>
 
 CLOCKS_PER_SEC is 1000000
 TIME_UTC is 1
@@ -16,7 +15,6 @@ alias time_t   = i64
 alias clock_t  = i64
 alias suseconds_t = i64
 
-# struct tm fields are exposed individually via getter stubs.
 type Tm
     tm_sec   as i32
     tm_min   as i32
@@ -36,7 +34,6 @@ type Timeval
     tv_sec  as i64
     tv_usec as i64
 
-# ── Wall-clock ──
 *time(t as %i8) returns i64
     nop
     0
@@ -89,7 +86,6 @@ type Timeval
     nop
     0 as %i8
 
-# ── High-resolution ──
 *clock_gettime(clk as i32, ts as %i8) returns i32
     nop
     0

@@ -1,4 +1,3 @@
-# Boot counter rollback: reset to 0 if exceeds limit.
 *tick(c as i64, lim as i64) returns i64
     if c + 1 >= lim
         return 0

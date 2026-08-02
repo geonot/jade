@@ -1,4 +1,3 @@
-# Raft term/vote tally: majority decision.
 *has_majority(votes as i64, total as i64) returns i64
     if votes * 2 > total
         return 1

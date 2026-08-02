@@ -1,16 +1,7 @@
-# std.hex — Hex encoding/decoding utilities
-#
-# Usage:
-#   encoded is hex.encode("Hello")        # "48656c6c6f"
-#   decoded is hex.decode("48656c6c6f")   # "Hello"
-#   hex.is_valid("deadbeef")              # true
-#   hex.format(255)                       # "ff"
-#   hex.format_upper(255)                 # "FF"
 
 HEX_LOWER is "0123456789abcdef"
 HEX_UPPER is "0123456789ABCDEF"
 
-# Encode a string to its hex representation.
 *encode(data as String) returns String
     result is ""
     i is 0
@@ -22,7 +13,6 @@ HEX_UPPER is "0123456789ABCDEF"
         i is i + 1
     result
 
-# Decode a hex string back to raw string.
 *decode(hex_str as String) returns String
     result is ""
     i is 0
@@ -34,7 +24,6 @@ HEX_UPPER is "0123456789ABCDEF"
         i is i + 2
     result
 
-# Format an integer as lowercase hex.
 *format(n as i64) returns String
     if n equals 0
         return "0"
@@ -50,7 +39,6 @@ HEX_UPPER is "0123456789ABCDEF"
         return "-" + result
     result
 
-# Format an integer as uppercase hex.
 *format_upper(n as i64) returns String
     if n equals 0
         return "0"
@@ -66,18 +54,15 @@ HEX_UPPER is "0123456789ABCDEF"
         return "-" + result
     result
 
-# Format an integer as hex with a 0x prefix.
 *format_prefixed(n as i64) returns String
     "0x" + format(n)
 
-# Format with zero-padding to a specific width.
 *format_padded(n as i64, width as i64) returns String
     result is format(n)
     while result.length < width
         result is "0" + result
     result
 
-# Parse a hex string to an integer.
 *parse(hex_str as String) returns i64
     result is 0
     start is 0
@@ -91,7 +76,6 @@ HEX_UPPER is "0123456789ABCDEF"
         i is i + 1
     result
 
-# Check if a string is valid hex.
 *is_valid(s as String) returns bool
     if s.length equals 0
         return false
@@ -113,7 +97,6 @@ HEX_UPPER is "0123456789ABCDEF"
             return false
     true
 
-# Encode integer to hex bytes (little-endian).
 *encode_le_i32(n as i64) returns String
     b0 is n & 255
     b1 is (n >> 8) & 255
@@ -121,7 +104,6 @@ HEX_UPPER is "0123456789ABCDEF"
     b3 is (n >> 24) & 255
     format_padded(b0, 2) + format_padded(b1, 2) + format_padded(b2, 2) + format_padded(b3, 2)
 
-# Encode integer to hex bytes (big-endian).
 *encode_be_i32(n as i64) returns String
     b3 is (n >> 24) & 255
     b2 is (n >> 16) & 255
@@ -129,14 +111,11 @@ HEX_UPPER is "0123456789ABCDEF"
     b0 is n & 255
     format_padded(b3, 2) + format_padded(b2, 2) + format_padded(b1, 2) + format_padded(b0, 2)
 
-# Dump a string as a hex dump (16 bytes per line with ASCII).
 *dump(data as String) returns String
     result is ""
     i is 0
     while i < data.length
-        # Offset
         result is result + format_padded(i, 8) + "  "
-        # Hex bytes
         for j in 0 to 16
             if i + j < data.length
                 result is result + format_padded(data.char_at(i + j), 2) + " "
@@ -145,7 +124,6 @@ HEX_UPPER is "0123456789ABCDEF"
             if j equals 7
                 result is result + " "
         result is result + " |"
-        # ASCII
         for j in 0 to 16
             if i + j < data.length
                 ch is data.char_at(i + j)
@@ -157,7 +135,6 @@ HEX_UPPER is "0123456789ABCDEF"
         i is i + 16
     result
 
-# ── Internal helpers ─────────────────────────────────────────
 
 *__hex_val(ch as i64) returns i64
     if ch >= 48 and ch <= 57

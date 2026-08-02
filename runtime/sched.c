@@ -1,9 +1,3 @@
-/*
- * Jinn Runtime — M:N work-stealing scheduler.
- *
- * N worker threads, each with a Chase-Lev deque.
- * Idle workers steal from others or park on a condvar.
- */
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -13,24 +7,11 @@
 #include <unistd.h>
 #include <sched.h>
 #include <time.h>
-
-/* Global scheduler */
 jinn_sched_t g_sched;
-
-/* Thread-local: current worker */
 _Thread_local jinn_worker_t *tl_worker = NULL;
-
-/*
- * Re-derive the running thread's worker. See the contract in jinn_rt.h: this
- * must stay out-of-line and noinline so that callers which resume after a
- * `jinn_context_swap` cannot reuse a TLS block address cached in a
- * callee-saved register (that address belongs to whichever thread parked them).
- */
 __attribute__((noinline)) jinn_worker_t *jinn_worker_self(void) {
     return tl_worker;
 }
-
-/* ── RNG for steal target selection ─────────────────────────────── */
 
 static uint32_t jinn_xorshift(uint64_t *state) {
     uint64_t x = *state;
@@ -41,11 +22,7 @@ static uint32_t jinn_xorshift(uint64_t *state) {
     return (uint32_t)(x & 0xFFFFFFFF);
 }
 
-/* ── Inject queue (global, for cross-worker spawns) ──────────────── */
-
-/* Spinlock for inject queue — avoids futex overhead of pthread_mutex */
 static _Atomic(int32_t) g_inject_lock = 0;
-
 static inline void inject_lock_acquire(void) {
     int spins = 0;
     while (atomic_exchange_explicit(&g_inject_lock, 1, memory_order_acquire) != 0) {
@@ -61,11 +38,9 @@ static inline void inject_lock_acquire(void) {
         spins++;
     }
 }
-
 static inline void inject_lock_release(void) {
     atomic_store_explicit(&g_inject_lock, 0, memory_order_release);
 }
-
 static void jinn_inject_push(jinn_coro_t *c) {
     inject_lock_acquire();
     c->next = NULL;
@@ -77,7 +52,6 @@ static void jinn_inject_push(jinn_coro_t *c) {
     g_sched.inject_tail = c;
     inject_lock_release();
 }
-
 static jinn_coro_t *jinn_inject_pop(void) {
     inject_lock_acquire();
     jinn_coro_t *c = g_sched.inject_head;
@@ -91,13 +65,8 @@ static jinn_coro_t *jinn_inject_pop(void) {
     inject_lock_release();
     return c;
 }
-
-/* ── Worker parking ─────────────────────────────────────────────── */
-
 static void jinn_worker_park(jinn_worker_t *w) {
-    /* Phase 1: brief spin — avoids costly futex for short idle periods */
     for (int spin = 0; spin < 40; spin++) {
-        /* Check inject queue every 10 spins to avoid lock contention */
         if (spin % 10 == 0) {
             jinn_coro_t *c = jinn_inject_pop();
             if (c) {
@@ -105,7 +74,6 @@ static void jinn_worker_park(jinn_worker_t *w) {
                 return;
             }
         }
-        /* Try stealing once per spin */
         int n = g_sched.num_workers;
         if (n > 1) {
             uint32_t victim = jinn_xorshift(&w->rng_state) % (uint32_t)n;
@@ -126,14 +94,12 @@ static void jinn_worker_park(jinn_worker_t *w) {
         __asm__ volatile("yield");
 #endif
     }
-
-    /* Phase 2: park on condvar with timeout */
     atomic_fetch_add(&g_sched.idle_count, 1);
     pthread_mutex_lock(&g_sched.idle_lock);
     if (!atomic_load(&g_sched.shutdown)) {
         struct timespec ts;
         timespec_get(&ts, TIME_UTC);
-        ts.tv_nsec += 100000; /* 100μs timeout */
+        ts.tv_nsec += 100000;
         if (ts.tv_nsec >= 1000000000) {
             ts.tv_sec += 1;
             ts.tv_nsec -= 1000000000;
@@ -143,34 +109,25 @@ static void jinn_worker_park(jinn_worker_t *w) {
     pthread_mutex_unlock(&g_sched.idle_lock);
     atomic_fetch_sub(&g_sched.idle_count, 1);
 }
-
 static void jinn_sched_wake_one(void) {
-    /* Only signal if there might be idle workers */
     if (atomic_load_explicit(&g_sched.idle_count, memory_order_relaxed) > 0) {
         pthread_mutex_lock(&g_sched.idle_lock);
         pthread_cond_signal(&g_sched.idle_cond);
         pthread_mutex_unlock(&g_sched.idle_lock);
     }
 }
-
 static void jinn_sched_wake_all(void) {
     pthread_mutex_lock(&g_sched.idle_lock);
     pthread_cond_broadcast(&g_sched.idle_cond);
     pthread_mutex_unlock(&g_sched.idle_lock);
 }
-
-/* ── Finding work ───────────────────────────────────────────────── */
-
 static jinn_coro_t *jinn_find_work(jinn_worker_t *w) {
-    /* 1. Pop from own deque (LIFO — hot cache) */
+
     jinn_coro_t *c = jinn_deque_pop(&w->run_queue);
     if (c) return c;
-
-    /* 2. Check global inject queue */
     c = jinn_inject_pop();
     if (c) return c;
 
-    /* 3. Steal from a random other worker (FIFO) */
     int n = g_sched.num_workers;
     if (n <= 1) return NULL;
     uint32_t start = jinn_xorshift(&w->rng_state) % (uint32_t)n;
@@ -180,12 +137,8 @@ static jinn_coro_t *jinn_find_work(jinn_worker_t *w) {
         c = jinn_deque_steal(&g_sched.workers[victim].run_queue);
         if (c) return c;
     }
-
     return NULL;
 }
-
-/* ── Worker loop ────────────────────────────────────────────────── */
-
 static void *jinn_worker_loop(void *arg) {
     jinn_worker_t *w = (jinn_worker_t *)arg;
     tl_worker = w;
@@ -197,27 +150,16 @@ static void *jinn_worker_loop(void *arg) {
             jinn_worker_park(w);
             continue;
         }
-
-        /* Run the coroutine */
         c->state = JINN_CORO_RUNNING;
         w->current = c;
         w->held_lock = NULL;
         w->held_locks = NULL;
         w->held_locks_n = 0;
-        /* Restore this coroutine's structured-concurrency scope so that any
-         * dispatch/spawn it performs registers with the correct scope. */
         jinn_scope_set_current((jinn_scope_t *)c->scope);
         jinn_context_swap(&w->sched_ctx, &c->ctx);
-        /* Coroutine yielded or completed — back in scheduler */
+
         w->current = NULL;
         jinn_scope_set_current(NULL);
-
-        /*
-         * Release any spinlock held across the context swap (channel,
-         * actor-join, scope, io-waiter). This ensures the coroutine's
-         * context is fully saved before any waker can observe it on a
-         * wait queue and swap into it.
-         */
         if (w->held_lock) {
             atomic_store_explicit(w->held_lock, 0, memory_order_release);
             w->held_lock = NULL;
@@ -229,13 +171,7 @@ static void *jinn_worker_loop(void *arg) {
             w->held_locks = NULL;
             w->held_locks_n = 0;
         }
-
         if (w->last_action == SCHED_ACTION_DESTROY) {
-            /* Notify the owning structured-concurrency scope, if any.
-             * Unregister BEFORE child_done: until the live-count decrement
-             * the parent's join cannot return (the scope stays alive), and
-             * once removed under the scope lock no cancel/wake iteration
-             * can reach the coroutine we are about to free (task 8-12). */
             if (c->scope) {
                 jinn_scope_unregister_child((jinn_scope_t *)c->scope, c);
                 jinn_scope_child_done((jinn_scope_t *)c->scope);
@@ -243,7 +179,6 @@ static void *jinn_worker_loop(void *arg) {
             if (!c->daemon) {
                 int64_t remaining = atomic_fetch_sub(&g_sched.active_coros, 1) - 1;
                 if (remaining <= 0) {
-                    /* Last coroutine finished — signal jinn_sched_run() */
                     pthread_mutex_lock(&g_sched.done_lock);
                     pthread_cond_signal(&g_sched.done_cond);
                     pthread_mutex_unlock(&g_sched.done_lock);
@@ -253,19 +188,14 @@ static void *jinn_worker_loop(void *arg) {
         } else if (w->last_action == SCHED_ACTION_REQUEUE) {
             jinn_deque_push(&w->run_queue, c);
         }
-        /* PARK: coroutine is on a wait queue — don't touch it */
     }
     return NULL;
 }
-
-/* ── Public API ─────────────────────────────────────────────────── */
-
 void jinn_sched_init(int num_workers) {
     jinn_install_crash_handlers();
     if (num_workers <= 0) {
         num_workers = (int)sysconf(_SC_NPROCESSORS_ONLN);
         if (num_workers <= 0) num_workers = 4;
-        /* Cap at 8 for sanity in small workloads */
         if (num_workers > 8) num_workers = 8;
     }
     memset(&g_sched, 0, sizeof(g_sched));
@@ -282,10 +212,9 @@ void jinn_sched_init(int num_workers) {
     pthread_cond_init(&g_sched.idle_cond, NULL);
     pthread_mutex_init(&g_sched.done_lock, NULL);
     pthread_cond_init(&g_sched.done_cond, NULL);
-
     for (int i = 0; i < num_workers; i++) {
         g_sched.workers[i].id = (uint32_t)i;
-        g_sched.workers[i].rng_state = (uint64_t)i + 1; /* nonzero seed */
+        g_sched.workers[i].rng_state = (uint64_t)i + 1;
         g_sched.workers[i].current = NULL;
         g_sched.workers[i].held_lock = NULL;
         g_sched.workers[i].held_locks = NULL;
@@ -294,7 +223,6 @@ void jinn_sched_init(int num_workers) {
         jinn_deque_init(&g_sched.workers[i].run_queue);
     }
 }
-
 static void jinn_sched_start_workers(void) {
     int expected = 0;
     if (atomic_compare_exchange_strong(&g_sched.started, &expected, 1)) {
@@ -304,16 +232,11 @@ static void jinn_sched_start_workers(void) {
         }
     }
 }
-
 void jinn_sched_spawn(jinn_coro_t *c) {
     if (!c->daemon) {
         atomic_fetch_add(&g_sched.active_coros, 1);
     }
-
-    /* Start worker threads lazily on first spawn */
     jinn_sched_start_workers();
-
-    /* Push onto local deque if on a worker, otherwise inject globally */
     jinn_worker_t *w = tl_worker;
     if (w) {
         jinn_deque_push(&w->run_queue, c);
@@ -322,7 +245,6 @@ void jinn_sched_spawn(jinn_coro_t *c) {
     }
     jinn_sched_wake_one();
 }
-
 void jinn_sched_enqueue(jinn_coro_t *c) {
     jinn_worker_t *w = tl_worker;
     if (w) {
@@ -334,7 +256,6 @@ void jinn_sched_enqueue(jinn_coro_t *c) {
 }
 
 void jinn_sched_run(void) {
-    /* Block until all coroutines are done */
     if (!atomic_load(&g_sched.started)) { return; }
     pthread_mutex_lock(&g_sched.done_lock);
     while (atomic_load(&g_sched.active_coros) > 0) {
@@ -346,26 +267,15 @@ void jinn_sched_run(void) {
 void jinn_sched_shutdown(void) {
     atomic_store(&g_sched.shutdown, 1);
     jinn_sched_wake_all();
-
     if (atomic_load(&g_sched.started)) {
-        /* Two passes, and the order matters. Freeing worker i's deque as soon
-         * as worker i is joined is a use-after-free: workers i+1..N are still
-         * running, and both jinn_find_work and jinn_worker_park's spin phase
-         * steal from *every* peer queue. A steal on a destroyed deque reads
-         * `dq->buffer[t & (capacity - 1)]` with buffer == NULL — a fault near
-         * address 0, seen as a rare SIGSEGV in jinn_deque_steal at exit.
-         * Nothing can steal once every worker thread has been joined. */
         for (int i = 0; i < g_sched.num_workers; i++) {
             pthread_join(g_sched.workers[i].thread, NULL);
         }
         for (int i = 0; i < g_sched.num_workers; i++) {
             jinn_deque_destroy(&g_sched.workers[i].run_queue);
         }
-        /* All workers are joined, so no stale actor handle can be used
-         * anymore — reclaim retired mailboxes (task 8-10/8-12). */
         jinn_actor_retire_flush();
     }
-
     pthread_mutex_destroy(&g_sched.idle_lock);
     pthread_cond_destroy(&g_sched.idle_cond);
     pthread_mutex_destroy(&g_sched.done_lock);
@@ -374,23 +284,19 @@ void jinn_sched_shutdown(void) {
     g_sched.workers = NULL;
 }
 
-/* Aliases matching the codegen-declared symbols */
 void jinn_sched_yield(void) {
     jinn_worker_t *w = tl_worker;
     if (w && w->current) {
         jinn_coro_yield();
     } else {
-        /* Called from main thread (not a coroutine) — brief sleep to avoid busy-spin */
-        struct timespec ns = {0, 10000}; /* 10μs */
+        struct timespec ns = {0, 10000};
         nanosleep(&ns, NULL);
     }
 }
-
 void jinn_sched_park(void) {
     jinn_worker_t *w = tl_worker;
     if (!w || !w->current) {
-        /* Called from main thread — can't truly park, just brief sleep */
-        struct timespec ns = {0, 10000}; /* 10μs */
+        struct timespec ns = {0, 10000};
         nanosleep(&ns, NULL);
         return;
     }
@@ -399,9 +305,7 @@ void jinn_sched_park(void) {
     w->held_lock = NULL;
     w->last_action = SCHED_ACTION_PARK;
     jinn_context_swap(&c->ctx, &w->sched_ctx);
-    /* Resumed here when unparked */
 }
-
 void jinn_sched_unpark(jinn_coro_t *c) {
     if (!c) return;
     c->state = JINN_CORO_READY;

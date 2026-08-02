@@ -1,4 +1,3 @@
-# Banner: header + body lines printed individually.
 *main
     title is 'REPORT'
     log '== {title} =='

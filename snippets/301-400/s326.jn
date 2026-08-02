@@ -1,4 +1,3 @@
-# Dedupe a sorted Vec into a fresh one.
 *main
     a is vec()
     a.push(1)

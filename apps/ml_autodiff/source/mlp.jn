@@ -1,5 +1,3 @@
-# 2-2-1 MLP:  2 inputs -> 2 hidden (tanh) -> 1 output (tanh)
-# Parameters: w1[4], b1[2], w2[2], b2[1]   = 9 scalars
 
 use fix
 use tape
@@ -33,7 +31,6 @@ type Mlp
     h1 is fix.tanh(fix.mul(m.w1_10, x0) + fix.mul(m.w1_11, x1) + m.b1_1)
     fix.tanh(fix.mul(m.w2_0, h0) + fix.mul(m.w2_1, h1) + m.b2)
 
-# Build a tape that computes (forward(x) - y)^2 and return (tape, loss_node, param_indices_struct).
 type ParamIx
     w1_00 as i64
     w1_01 as i64

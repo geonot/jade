@@ -275,11 +275,6 @@ impl Typer {
             }
         }
 
-        // Resolve generic type applications written as annotations (e.g.
-        // `Maybe of i64`, which the parser emits as `Struct("Maybe", [i64])`)
-        // into their concrete monomorphic forms now that every declaration is
-        // registered. This binds function parameters and return values to the
-        // mangled enum/struct types codegen actually declares a layout for.
         {
             let fn_keys: Vec<Symbol> = self.fns.keys().cloned().collect();
             for k in &fn_keys {
@@ -301,9 +296,6 @@ impl Typer {
         }
         self.infer_param_types(prog);
 
-        // Task 8-6 (memory-model.md M6): decide which parameters consume
-        // their argument before any body is lowered, so every call site's
-        // drop accounting and the callee's ownership agree.
         {
             let all_fns: Vec<&ast::Fn> = prog
                 .decls
@@ -611,19 +603,14 @@ impl Typer {
         }
         self.auto_derive_display(&mut program);
         let default_warnings = self.infer_ctx.drain_default_warnings();
-        // The same origin can be resolved several times across passes;
-        // report each distinct warning once.
+
         let mut seen_warn = std::collections::HashSet::new();
         self.warnings.extend(
             default_warnings
                 .into_iter()
                 .filter(|w| seen_warn.insert(w.clone())),
         );
-        // Every recorded type error is fatal: unification failures
-        // (recorded inside `unify_at` itself, so no call site can discard
-        // one), collected typer errors, and strict-mode unconstrained-var
-        // errors are drained together and reported deduplicated. Nothing
-        // ill-typed may proceed to codegen.
+
         let strict_errors = self.infer_ctx.drain_strict_errors();
         let unify_errors = self.infer_ctx.drain_unify_errors();
         let type_errors = std::mem::take(&mut self.type_errors);
@@ -646,11 +633,7 @@ impl Typer {
                 .join("\n");
             return Err(format!("type checking failed:\n{combined}"));
         }
-        // Attribute every top-level item to its owning dependency package
-        // exactly once (scope.md §1.1), after monomorphization so generated
-        // dependency instances are captured too. This is the sole consultation
-        // of the module-flattening name prefix; the result is carried per item,
-        // retiring the legacy `prefix_module` string-identity recovery (§0).
+
         program.item_pkgs = {
             let names = program
                 .fns

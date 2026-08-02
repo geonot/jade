@@ -1,12 +1,3 @@
-//! Pins the JINN_REVIEW_2026_07 repro programs (task 8-4).
-//!
-//! Each test asserts the **currently observed bad outcome** and carries a
-//! `FIXME(8-N)` naming the task that owns the fix. When that task lands, the
-//! test is flipped to assert the correct behavior and the marker is removed.
-//! `fixme_markers_do_not_outlive_their_tasks` fails the suite if a marker is
-//! still present after its task's `.ryu/tasks/8-N.task` is `status: complete`,
-//! so a "fixed" task cannot leave its regression test asserting the bug.
-
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
@@ -61,12 +52,6 @@ fn exit_desc(o: &Output) -> String {
     )
 }
 
-// ─── Memory (§3) ────────────────────────────────────────────────────────────
-
-/// §3.1 — returning an aggregate parameter used to double-free
-/// (`free(): invalid pointer`). Fixed by task 8-6: `ident`'s parameter is
-/// inferred consuming (memory-model.md M6), the call moves `a`, and
-/// exactly one drop fires.
 #[test]
 fn review_3_1_returning_vec_parameter_runs_clean() {
     let c = compile(
@@ -78,9 +63,6 @@ fn review_3_1_returning_vec_parameter_runs_clean() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "3\n");
 }
 
-/// Companion to §3.1: using the argument after the consuming call is a
-/// use-after-move compile error naming the callee and the copy-binding
-/// escape hatch, and cloning first keeps both values alive (8-6).
 #[test]
 fn review_3_1_use_after_consuming_call_is_rejected() {
     let c = compile(
@@ -106,9 +88,6 @@ fn review_3_1_use_after_consuming_call_is_rejected() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "3\n3\n");
 }
 
-/// Companion to §3.1: an aggregate bind inside a nested scope transfers
-/// the drop obligation; the outer scope must not drop again (8-6's
-/// consumed-set recursion fix).
 #[test]
 fn review_3_1_nested_scope_bind_single_drop() {
     let c = compile(
@@ -120,10 +99,6 @@ fn review_3_1_nested_scope_bind_single_drop() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "3\n7\n");
 }
 
-/// §3.2 — two dispatch tasks mutating one Vec corrupted the allocator;
-/// under M8 (task 8-8) the second capture is a compile error whose
-/// diagnostic names the alternatives (per-task values over a channel, or
-/// an actor owning the value) rather than reading as a bare limitation.
 #[test]
 fn review_3_2_cross_task_shared_vec_is_rejected() {
     let c = compile(
@@ -139,9 +114,6 @@ fn review_3_2_cross_task_shared_vec_is_rejected() {
     );
 }
 
-/// §3.3 — `b is a` on a Vec was silent shared mutable aliasing; under D1
-/// (task 8-7) aggregates move on assignment, so the later read of `a` is
-/// a compile error naming the move site and the `copy` escape hatch.
 #[test]
 fn review_3_3_vec_assignment_is_rejected_as_use_after_move() {
     let c = compile(
@@ -155,7 +127,7 @@ fn review_3_3_vec_assignment_is_rejected_as_use_after_move() {
             && stderr.contains("copy"),
         "diagnostic must name the move site and the copy escape hatch: {stderr}"
     );
-    // The escape hatch keeps both values, independently.
+
     let c = compile(
         "*main\n    a is vec(1,2,3)\n    b is copy a\n    b.push(4)\n    log(a.length)\n    log(b.length)\n",
     );
@@ -164,11 +136,6 @@ fn review_3_3_vec_assignment_is_rejected_as_use_after_move() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "3\n4\n");
 }
 
-// ─── Typer (§4) ─────────────────────────────────────────────────────────────
-
-/// §4.6 — cross-type `equals` (String vs i64) was accepted and
-/// segfaulted; under 8-16 equality operands unify, so it is a compile
-/// error.
 #[test]
 fn review_4_6_cross_type_equals_is_rejected() {
     let c = compile("*main\n    if 'abc' equals 5\n        log('huh')\n");
@@ -176,9 +143,6 @@ fn review_4_6_cross_type_equals_is_rejected() {
     assert!(c.stderr().contains("type mismatch"), "{}", c.stderr());
 }
 
-/// §4.6 — declared `returns String`, body returns i64: a source-level
-/// diagnostic naming the function and its span (task 8-17). It used to
-/// fall through to the MIR verifier and be reported as "a compiler bug".
 #[test]
 fn review_4_6_declared_string_returns_i64() {
     let c = compile("*f(x as i64) returns String\n    x + 1\n\n*main\n    log(f(1))\n");
@@ -194,24 +158,18 @@ fn review_4_6_declared_string_returns_i64() {
     );
 }
 
-/// §4.6 — `'abc' + 1` is rejected by the typer as a source-level
-/// diagnostic (8-16 surfaced operand unification; 8-17 owns rendering).
 #[test]
 fn review_4_6_string_plus_int() {
     let c = compile("*main\n    x is 'abc' + 1\n    log(x)\n");
     assert!(!c.ok(), "must not compile");
     let stderr = c.stderr();
-    // Caught by the TYPER since 8-16 surfaced operand-unification
-    // failures (previously it fell through to hir-validate).
+
     assert!(
         stderr.contains("type mismatch") || stderr.contains("operator"),
         "{stderr}"
     );
 }
 
-/// §4.6 — heterogeneous `vec()` type-checked and read back a leaked
-/// pointer as an integer; under 8-16 push arguments unify with the
-/// element type and the mismatch is surfaced, not swallowed.
 #[test]
 fn review_4_6_heterogeneous_vec_is_rejected() {
     let c = compile("*main\n    v is vec()\n    v.push(1)\n    v.push('two')\n    log(v.get(1))\n");
@@ -219,9 +177,6 @@ fn review_4_6_heterogeneous_vec_is_rejected() {
     assert!(c.stderr().contains("type mismatch"), "{}", c.stderr());
 }
 
-/// §4.7 — multi-clause arity mismatch is a normal span-carrying
-/// diagnostic with a non-zero exit (task 8-17). It used to be delivered
-/// as a Rust panic — and the panic escaped the driver with EXIT CODE 0.
 #[test]
 fn review_4_7_multi_clause_arity_is_a_diagnostic() {
     let c = compile("*f(0) is 0\n*f a, b is a + b\n\n*main\n    log(f(1, 2))\n");
@@ -237,9 +192,6 @@ fn review_4_7_multi_clause_arity_is_a_diagnostic() {
     );
 }
 
-/// Found while pinning: top-level reassignment used to expand the
-/// self-referential const until the compiler's stack overflowed. Now a
-/// clean acyclicity diagnostic (task 8-17: no ICE on user input).
 #[test]
 fn top_level_reassignment_is_cleanly_diagnosed() {
     let c = compile("x is 41\nx is x + 1\nlog(x)\n");
@@ -252,12 +204,6 @@ fn top_level_reassignment_is_cleanly_diagnosed() {
     );
 }
 
-// ─── Store (§5.4) ───────────────────────────────────────────────────────────
-
-/// §5.4 — `for u in all users` segfaults at runtime.
-/// `all <store>` yields a first-class row set (task 8-25, first half):
-/// a real Vec of the store's records — bindable, iterable, `.length`-able.
-/// It used to be a bare pointer with no length, so iteration crashed.
 #[test]
 fn review_5_4_all_store_iteration_works() {
     let c = compile(
@@ -269,11 +215,6 @@ fn review_5_4_all_store_iteration_works() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "Alice\nBob\n2\n");
 }
 
-/// §5.4 — a query that matched nothing used to fabricate a zero row
-/// (`name=[] age=0`), indistinguishable from real data. A query is now
-/// `Result of <row>, StoreError` (task 8-25, decision D3): hit and miss
-/// are distinct values, the quaternary collapses them, and write-through
-/// still works on a match-bound row.
 #[test]
 fn review_5_4_query_miss_is_a_value_not_a_zero_row() {
     let c = compile(
@@ -288,9 +229,6 @@ fn review_5_4_query_miss_is_a_value_not_a_zero_row() {
     );
 }
 
-/// §5.4 — the original review repro is now a compile error, both at the
-/// bare bind (an unhandled fallible value in a non-fallible function)
-/// and at a direct field read off the query result.
 #[test]
 fn review_5_4_unhandled_query_is_a_compile_error() {
     let c = compile(
@@ -313,8 +251,6 @@ fn review_5_4_unhandled_query_is_a_compile_error() {
     assert!(stderr.contains("query result"), "{stderr}");
 }
 
-/// §5.4 — in a fallible function the bind needs no ceremony: the row
-/// comes out unwrapped and a miss propagates as `Err(Missing)`.
 #[test]
 fn review_5_4_query_miss_propagates_in_fallible_fn() {
     let c = compile(
@@ -326,11 +262,6 @@ fn review_5_4_query_miss_propagates_in_fallible_fn() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), "30\npropagated\n");
 }
 
-// ─── Marker lifecycle ───────────────────────────────────────────────────────
-
-/// A `FIXME(8-N)` marker asserting observed-bad behavior must not outlive
-/// its owning task: once `.ryu/tasks/8-N.task` says `status: complete`, the
-/// test above it must have been flipped and the marker removed.
 #[test]
 fn fixme_markers_do_not_outlive_their_tasks() {
     let this = repo_root().join("tests").join("review_2026_07.rs");
@@ -342,7 +273,7 @@ fn fixme_markers_do_not_outlive_their_tasks() {
         };
         let rest = &line[pos + "FIXME(".len()..];
         let Some(end) = rest.find(')') else { continue };
-        let task_id = &rest[..end]; // e.g. "8-6"
+        let task_id = &rest[..end];
         let task_file = repo_root()
             .join(".ryu")
             .join("tasks")
@@ -362,9 +293,6 @@ fn fixme_markers_do_not_outlive_their_tasks() {
     assert!(stale.is_empty(), "{}", stale.join("\n"));
 }
 
-/// Task 8-17 — every diagnostic-producing input exits non-zero (the
-/// multi-clause arity panic used to exit 0), and none is delivered as a
-/// Rust panic or raw LLVM IR.
 #[test]
 fn every_diagnostic_input_exits_nonzero() {
     let bad = [

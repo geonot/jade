@@ -1,5 +1,3 @@
-# std.math — Mathematics
-# Constants and functions built on LLVM intrinsic builtins
 
 PI is 3.14159265358979323846
 E is 2.71828182845904523536
@@ -7,8 +5,6 @@ TAU is 6.28318530717958647692
 INF is 1.0 / 0.0
 NEG_INF is -1.0 / 0.0
 
-# sqrt, abs, floor, ceil, round, trunc are compiler builtins (called as x.sqrt(), x.floor() etc).
-# Top-level wrappers exposed under math.* so `math.sqrt(x)` etc. work too.
 extern *sqrt(x as f64) returns f64
 extern *floor(x as f64) returns f64
 extern *ceil(x as f64) returns f64
@@ -32,7 +28,6 @@ extern *fmax(x as f64, y as f64) returns f64
 extern *hypot(x as f64, y as f64) returns f64
 extern *fabs(x as f64) returns f64
 
-# ── Aliases with Jinn-idiomatic names ────────────────────────
 
 *ln(x)
     __ln(x)
@@ -58,7 +53,6 @@ extern *fabs(x as f64) returns f64
 *fma(a, b, c)
     __fma(a, b, c)
 
-# ── Composite functions ──────────────────────────────────────
 
 *log_base(x, base)
     __ln(x) / __ln(base)
@@ -98,7 +92,6 @@ extern *fabs(x as f64) returns f64
 *is_inf(x)
     extern.fabs(x) equals INF
 
-# ── Integer math ─────────────────────────────────────────────
 
 *abs(n)
     n < 0 ? 0 - n ! n
@@ -139,7 +132,6 @@ extern *fabs(x as f64) returns f64
 *is_odd(n)
     n mod 2 neq 0
 
-# ── Bit manipulation ─────────────────────────────────────────
 
 *popcount(n)
     count is 0
@@ -150,7 +142,6 @@ extern *fabs(x as f64) returns f64
     count
 
 *ctz(n)
-    # Count trailing zeros
     if n equals 0
         return 64
     count is 0
@@ -161,12 +152,10 @@ extern *fabs(x as f64) returns f64
     count
 
 *clz(n)
-    # Count leading zeros (for 64-bit)
     if n equals 0
         return 64
     count is 0
     x is n
-    # Binary search approach
     if (x >> 32) equals 0
         count is count + 32
         x is x << 32

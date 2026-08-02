@@ -1,4 +1,3 @@
-# Reverse digits of an i64.
 *rev(n as i64) returns i64
     r is 0
     while n > 0

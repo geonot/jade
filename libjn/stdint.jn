@@ -1,9 +1,4 @@
-# libjn.stdint — drop-in for C <stdint.h>
-#
-# Fixed-width integer aliases. Jinn already names types `i8/i16/i32/i64`
-# and `u8/u16/u32/u64`; the libjn aliases preserve C source-compat names.
 
-# ── Type aliases ──
 alias int8_t   = i8
 alias int16_t  = i16
 alias int32_t  = i32

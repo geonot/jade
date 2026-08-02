@@ -1,4 +1,3 @@
-# Word frequency via parallel vecs (no map module needed).
 *main
     words is vec("a", "b", "a", "c", "a", "b")
     keys is vec()

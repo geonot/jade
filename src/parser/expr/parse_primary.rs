@@ -156,15 +156,6 @@ impl Parser {
                 ))
             }
             Token::Log => {
-                // `log` is a builtin command (`log msg` / `log(msg)`), but it is
-                // also a natural variable or field name (e.g. a replicated/audit
-                // log). When the following token cannot begin a command argument
-                // — a closing delimiter, separator, newline, member access, or a
-                // bind operator — `log` is a bare value reference, so emit a plain
-                // identifier and let the postfix/operator parser take over. Every
-                // genuine command form is followed by an argument-starting token
-                // (a literal, identifier, `(`, prefix operator, …) and is
-                // therefore unaffected.
                 let bare = matches!(
                     self.tok.get(self.pos + 1).map(|t| &t.token),
                     Some(
@@ -259,21 +250,7 @@ impl Parser {
                     Ok(Expr::Builder(name, fields, sp))
                 }
             }
-            // Range / slice / index keywords (`from`, `to`, `by`, `at`) and the
-            // other contextual nouns (`default`, `end`, `query`, `view`,
-            // `set`, `insert`, `delete`, `close`, `xor`) plus the word-operator
-            // aliases that have no prefix-operator meaning (`eq`/`equals`,
-            // `neq`, `lt`/`gt`/`lte`/`gte`, `pow`) are soft keywords: in
-            // expression-atom (prefix) position they name a plain variable.
-            // Their infix roles (`a equals b`, `x pow 2`) are consumed by the
-            // operator loop before this prefix position is reached, so only
-            // genuine name uses arrive here. `mod` is intentionally absent: its
-            // token (`%`) is the address-of/ref prefix operator (`%expr`),
-            // which wins in atom position — `mod` remains usable as a function
-            // or field name through `ident()`, just not as a bare variable in
-            // expression prefix position. `build`/`send`/`log`/`assert` are
-            // excluded — they have dedicated atom/command arms above. The
-            // logical operators `and`/`or`/`not` are likewise excluded.
+
             Token::From
             | Token::To
             | Token::By

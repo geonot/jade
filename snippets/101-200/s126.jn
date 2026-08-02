@@ -1,4 +1,3 @@
-# Stack via vec.
 *main
     s is vec()
     s.push(1)

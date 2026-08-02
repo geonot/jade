@@ -1,23 +1,3 @@
-# std.tls — TLS/SSL streams (client and server)
-#
-# Backed by OpenSSL via the runtime. Provides client-side `connect`,
-# server-side `listen`/`accept`, and read/write on the resulting
-# encrypted streams.
-#
-# Usage:
-#   conn is tls.connect("example.com", 443)
-#   if not conn.is_valid()
-#       eprintln(tls.last_error())
-#       return
-#   conn.write("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
-#   data is conn.read(8192)
-#   conn.shut()
-#
-# Server:
-#   srv is tls.listen("0.0.0.0", 8443, "cert.pem", "key.pem")
-#   client is srv.accept()
-#   client.write("hello\n")
-#   client.shut()
 
 extern *jinn_tls_connect(host as %i8, port as i32) returns %i8
 extern *jinn_tls_send(conn as %i8, buf as %i8, len as i64) returns i64
@@ -105,7 +85,6 @@ type TlsStream @resource
             extern.jinn_tls_close(self.handle)
             self.handle is 0 as %i8
 
-    # Auto-invoked at scope exit: close the TLS connection.
     *drop
         self.shut()
 
@@ -124,27 +103,20 @@ type TlsListener @resource
             extern.jinn_tls_listener_close(self.handle)
             self.handle is 0 as %i8
 
-    # Auto-invoked at scope exit: shut down the TLS listener.
     *drop
         self.shut()
 
-# Open a TLS client connection.
 *connect(host as String, port as i64) returns TlsStream
     handle is extern.jinn_tls_connect(%host, port as i32)
     TlsStream(handle is handle)
 
-# Backwards-compat alias.
 *is_valid(stream as TlsStream) returns bool
     stream.handle as i64 neq 0
 
-# Start a TLS server listening on `host:port` with the given PEM
-# certificate and private-key files.
 *listen(host as String, port as i64, cert_path as String, key_path as String) returns TlsListener
     handle is extern.jinn_tls_listen(%host, port as i32, %cert_path, %key_path)
     TlsListener(handle is handle)
 
-# Last OpenSSL error string, or "" if none. Useful right after a
-# failed `connect`, `listen`, or `accept`.
 *last_error returns String
     buf is extern.malloc(512)
     n is extern.jinn_tls_last_error(buf, 512)

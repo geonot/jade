@@ -1,7 +1,3 @@
-# Regression (MAJOR-2): `[T]` list-type syntax (the symmetric counterpart of the
-# `[...]` list literal) must parse as a type everywhere a type is expected —
-# struct fields, parameters, return types, and `as` casts. Equivalent to
-# `Vec of T`.
 
 type Bag
     items as [i64]

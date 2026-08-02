@@ -38,10 +38,6 @@ pub struct Function {
     pub name: Symbol,
     pub def_id: DefId,
 
-    /// Identity of the package this function belongs to (scope.md §1), recovered
-    /// in MIR lowering from the HIR program's package attribution. `None` for
-    /// legacy single-package builds and synthesized functions with no package
-    /// origin. Codegen mangling (§1.2) derives the `pkgid_hash` prefix from this.
     pub pkg_id: Option<crate::pkgid::PkgId>,
     pub params: Vec<Param>,
     pub ret_ty: Type,
@@ -54,15 +50,8 @@ pub struct Function {
 
     pub is_coroutine: bool,
 
-    /// A scheduler-spawned concurrent task (structured `together` child), as
-    /// opposed to a lazy generator. Both set `is_coroutine` (they share the
-    /// capture-struct ABI), but a scheduler task returns normally to the
-    /// trampoline (`jinn_coro_exit`) instead of emitting a generator suspend.
     pub scheduler_task: bool,
 
-    /// For scheduler tasks: a cleanup block that runs the body's defers and
-    /// returns. Cooperative-cancellation checks branch here so a cancelled
-    /// task unwinds through its defers instead of running to completion.
     pub cancel_cleanup: Option<BlockId>,
 
     pub drops: DropMeta,
@@ -349,12 +338,8 @@ pub struct Program {
     pub externs: Vec<ExternDecl>,
     pub globals: Vec<GlobalDef>,
 
-    /// Root package identity, carried through from `hir::Program` (scope.md §1).
     pub pkg_id: Option<crate::pkgid::PkgId>,
 
-    /// Exact per-item dependency package identities, carried through from
-    /// `hir::Program::item_pkgs` (scope.md §1.1). Empty on the single-package
-    /// fast path; non-empty iff this build links items from a dependency.
     pub item_pkgs: std::collections::HashMap<Symbol, crate::pkgid::PkgId>,
 }
 

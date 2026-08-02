@@ -824,11 +824,6 @@ fn extern_puts() {
     );
 }
 
-/// A declared `%i8` / `%u8` / `%void` extern parameter is C's opaque-handle
-/// convention (`char *` / `void *`): any raw pointer satisfies it. The
-/// runtime's `jinn_spawn_exec(const void *vec_ptr, ...)` takes a vec header
-/// this way, so `%argv` on a `Vec of String` must be accepted without the
-/// typer demanding the pointee match.
 #[test]
 fn extern_opaque_pointer_accepts_any_raw_pointer() {
     expect(
@@ -2205,8 +2200,6 @@ fn comptime_type_of_string() {
 
 #[test]
 fn qualified_module_without_use_is_rejected() {
-    // D4 (task 8-15): imports are explicit; the old auto-import silently
-    // pulled in any std module named in x.y position.
     let err = expect_compile_fail("*main\n    log(fmt.hex(255))\n");
     assert!(
         err.contains("not imported") && err.contains("`use fmt`"),

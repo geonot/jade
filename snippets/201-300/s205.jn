@@ -1,4 +1,3 @@
-# Black-Scholes-ish: simplified call payoff sum over price grid.
 *call_payoff(prices as Vec of i64, strike as i64, n as i64) returns i64
     s is 0
     i is 0

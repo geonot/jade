@@ -1,4 +1,3 @@
-# Pascal's triangle row.
 *row(n as i64) returns Vec of i64
     r is vec()
     r.push(1)

@@ -8,21 +8,6 @@ use crate::pkgid::{
     PackageRecord, PkgId, ScopePath, ScopedUseMap, Visibility, compute_semantic_hash,
 };
 
-// For each package A with a `use B` in its manifest, record the scoped PkgId
-// that `B` resolves to from A's perspective.
-//
-// Key: `(consumer_pkg_id, dep_name_symbol)`
-// Value: the dep's `PkgId` as seen by the consumer (path-scoped under the
-//        consumer's owner scope, per scope.md §2.1).
-
-/// Build the `ScopedUseMap` for the given `ResolutionDag`.
-///
-/// For every node in the DAG, for every dep edge, the dep's identity is:
-///   - `owner_scope` = child scope of the consumer's full path
-///   - hash computed from the dep's source + its own transitive dep hashes
-///
-/// This is the structural realisation of scope.md §2.1 "local, deterministic,
-/// no global arbitration".
 pub fn resolve_scoped_pkg_ids(dag: &ResolutionDag) -> ScopedUseMap {
     let mut map = ScopedUseMap::new();
     for node in &dag.nodes {
@@ -80,17 +65,6 @@ pub fn flatten_workspace(
     Ok(dag)
 }
 
-/// scope.md §5 / lamp.md §5.7.6: multi-version coexistence is deferred to
-/// post-traits. The `PackageId` model already represents two live majors of the
-/// same package distinctly (the version field forks the identity), so this is
-/// the *only* thing holding the door shut — and lifting it later is purely
-/// additive once the coherence/orphan rule lands.
-///
-/// Detect any package name that resolves to two **distinct major versions**
-/// anywhere in the DAG and hard-reject with an honest diagnostic. Two instances
-/// of the same major (only minor/patch differing) are not a coexistence hazard —
-/// the resolver already unifies on the single highest compatible version per
-/// major — so we key strictly on `name + major`.
 fn reject_multi_version(dag: &ResolutionDag) -> Result<(), String> {
     let mut majors: HashMap<Symbol, HashSet<u32>> = HashMap::new();
     for node in &dag.nodes {
@@ -359,7 +333,7 @@ mod tests {
         let resolved = crate::pkgid::resolve_use(&map, consumer, sym("helper")).unwrap();
         assert_eq!(resolved.name(), sym("helper"));
         assert_eq!(resolved.fully_qualified(), "myapp:helper");
-        // Local: a name the consumer never required does not resolve.
+
         assert!(crate::pkgid::resolve_use(&map, consumer, sym("nope")).is_err());
     }
 
@@ -367,8 +341,6 @@ mod tests {
         std::fs::write(dir.join("project.jn"), body).unwrap();
     }
 
-    // foo (root) -> baz -> bar. Build the scoped graph from real manifests and
-    // exercise the path-import + visibility-ceiling resolver end to end.
     fn build_three_tier(bar_visibility: &str) -> (ResolutionDag, PkgId) {
         let root = TempDir::new().unwrap();
         let baz = TempDir::new().unwrap();
@@ -440,13 +412,11 @@ mod tests {
             .find(|n| n.pkg_id.name() == sym("baz"))
             .unwrap()
             .pkg_id;
-        // baz is bar's parent: a direct `use bar` from baz satisfies the ceiling.
+
         let got = crate::pkgid::resolve_path_use(&map, baz, &[sym("bar")]).unwrap();
         assert_eq!(got.fully_qualified(), "foo:baz:bar");
     }
 
-    // scope.md §5: root requires foo@1 directly and a sibling dep requires
-    // foo@2 transitively. Two live majors of the same package => hard reject.
     #[test]
     fn two_live_majors_hard_rejected() {
         let root = TempDir::new().unwrap();
@@ -494,8 +464,6 @@ mod tests {
         assert!(err.contains("coherence/traits"), "{err}");
     }
 
-    // Same package at differing minor/patch under one major is NOT a hazard:
-    // it is the ordinary single-version resolution and must be accepted.
     #[test]
     fn same_major_minor_diff_accepted() {
         let root = TempDir::new().unwrap();

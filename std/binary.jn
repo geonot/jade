@@ -1,11 +1,3 @@
-# std.binary — Binary serialization (little-endian byte packing)
-#
-# Usage:
-#   buf is binary.new(1024)
-#   buf.write_i32(42)
-#   buf.write_f64(3.14)
-#   buf.seek(0)
-#   n is buf.read_i32()
 
 extern *jinn_f64_to_bits(val as f64) returns i64
 extern *jinn_bits_to_f64(bits as i64) returns f64
@@ -92,10 +84,8 @@ type Buffer
         self.pos is 0
         self.data is vec()
 
-    # ── Float support ──────────────────────────────────────
 
     *write_f64(val as f64)
-        # Store as i64 bit-pattern via reinterpret
         bits is extern.jinn_f64_to_bits(val)
         self.write_i64(bits)
 
@@ -103,7 +93,6 @@ type Buffer
         bits is self.read_i64()
         extern.jinn_bits_to_f64(bits)
 
-    # ── Big-endian variants ──────────────────────────────
 
     *write_i16_be(val as i64)
         self.write_i8((val >> 8) & 255)
@@ -144,7 +133,6 @@ type Buffer
         bits is self.read_i64_be()
         extern.jinn_bits_to_f64(bits)
 
-    # ── Bulk operations ──────────────────────────────────
 
     *write_bytes(src as Vec of i64, count as i64)
         i is 0
@@ -158,7 +146,6 @@ type Buffer
             result.push(self.read_i8())
         result
 
-    # ── Remaining ────────────────────────────────────────
 
     *remaining returns i64
         self.data.length - self.pos
@@ -176,20 +163,6 @@ type Buffer
 *from_vec(data as Vec of i64) returns Buffer
     Buffer(data is data, pos is 0)
 
-# ── JinnPack: compact binary serialization ───────────────────
-#
-# Type tags (1 byte):
-#   0x00 = nil
-#   0x01 = bool false
-#   0x02 = bool true
-#   0x03 = i64
-#   0x04 = f64
-#   0x05 = string (length-prefixed)
-#   0x06 = array (length-prefixed)
-#   0x07 = map (length-prefixed, key-value pairs)
-#
-# This is Jinn's native wire format, used by actors, channels,
-# and persistent storage.
 
 TAG_NIL    is 0
 TAG_FALSE  is 1
@@ -209,7 +182,6 @@ type Value
     map_keys as Vec of String
     map_vals as Vec of Value
 
-# ── Value constructors ───────────────────────────────────────
 
 *nil_val returns Value
     Value(tag is TAG_NIL, int_val is 0, float_val is 0.0, str_val is "", array_val is vec(), map_keys is vec(), map_vals is vec())
@@ -235,7 +207,6 @@ type Value
 *map_val(keys as Vec of String, vals as Vec of Value) returns Value
     Value(tag is TAG_MAP, int_val is 0, float_val is 0.0, str_val is "", array_val is vec(), map_keys is keys, map_vals is vals)
 
-# ── Serialization (Value → Buffer) ──────────────────────────
 
 *pack(val as Value) returns Buffer
     buf is new(256)
@@ -270,7 +241,6 @@ type Value
             buf.write_str($)
             __pack_into(buf, val.map_vals.get($$))
 
-# ── Deserialization (Buffer → Value) ─────────────────────────
 
 *unpack(buf as Buffer) returns Value
     if buf.remaining() < 1
@@ -304,7 +274,6 @@ type Value
         return map_val(keys, vals)
     nil_val()
 
-# ── Convenience: pack/unpack common types ────────────────────
 
 *pack_int(n as i64) returns Buffer
     pack(int_val(n))

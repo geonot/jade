@@ -1,6 +1,5 @@
 use models/task
 
-# Pick highest-priority ready task. Returns index or -1.
 *pick_next(tasks as Vec of Task) returns i64
     best is -1
     best_p is -1

@@ -1,6 +1,5 @@
 use models/sample
 
-# Sensor sim: combination of slow drift + spike pattern.
 *read(sensor as i64, t as i64) returns i64
     base is 200 + sensor * 30
     drift is (t / 10) % 50

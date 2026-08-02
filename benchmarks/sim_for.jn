@@ -1,5 +1,3 @@
-# Sim for benchmark
-# Spawns N independent coroutines via sim for
 
 *main
     sim for i in 200000

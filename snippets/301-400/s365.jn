@@ -1,4 +1,3 @@
-# First odd in vec, else -1.
 *first_odd(xs as Vec of i64) returns i64
     i is 0
     while i < xs.length

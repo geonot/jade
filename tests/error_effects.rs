@@ -1,8 +1,3 @@
-//! Conformance for the canonical Option/Result prelude (docs/error-effects.md
-//! §2). Pins the combinator method surfaces shared by typer and codegen:
-//! Option{is_some,is_none,unwrap,unwrap_or,map,and_then,ok_or},
-//! Result{is_ok,is_err,unwrap,unwrap_or,map,map_err,and_then,ok,err}.
-
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -217,14 +212,6 @@ fn propagate_reflexive_conversion_needs_no_impl() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Quaternary `? ok ! nothing !! err` lowering + fallibility inference
-// (docs/error-effects.md §4-5, task 2-4-4). New post-migration semantics:
-// `err X` raises, the subject of `?`/`!!` is a `Result`/`Option`, `$` binds the
-// success value, `err` binds the error value, `!! err` propagates, and a bare
-// fallible bind implicitly propagates (`v is f()` == `f() ? $ !! err`).
-// ---------------------------------------------------------------------------
-
 const READ_RES: &str = "err FileError\n    NotFound\n    Denied\n\n*read(ok as bool) returns Result of i64, FileError\n    if ok\n        Ok(42)\n    else\n        Err(NotFound)\n\n";
 
 #[test]
@@ -381,12 +368,6 @@ fn bare_insert_propagates_and_yields_result() {
     );
 }
 
-// A multi-variant error enum carrying a by-value enum payload (`StoreError`)
-// must lay out with the uniform tagged-union representation so that a bare
-// `insert` propagation and `From` conversion through it round-trip correctly.
-// Regression: a 2-variant enum (one empty, one single-payload) was wrongly
-// niche-packed into a single pointer, while variant_init/field_get assumed the
-// `{tag, payload}` layout, crashing codegen with "GEP index out of range".
 #[test]
 fn insert_propagation_through_multivariant_from_enum() {
     expect(
@@ -395,8 +376,6 @@ fn insert_propagation_through_multivariant_from_enum() {
     );
 }
 
-// A plain 2-variant enum whose payload is itself a payload-less (by-value)
-// enum must construct and match without the niche-packing GEP crash.
 #[test]
 fn two_variant_enum_with_byvalue_enum_payload() {
     expect(
@@ -437,11 +416,6 @@ fn match_on_fallible_struct_return() {
     );
 }
 
-/// `! E` on a **method** desugars to `Result of T, E` exactly as it does on
-/// a free function. Regression: both method-signature paths in
-/// `typer/resolve.rs` dropped `error_types`, so `err X` inside any method
-/// was rejected with "this function returns T" and the whole error-effect
-/// system was unreachable from methods.
 #[test]
 fn method_declares_error_union() {
     expect(
@@ -450,7 +424,6 @@ fn method_declares_error_union() {
     );
 }
 
-/// A ptr-method (`self` by pointer) honours `! E` the same way.
 #[test]
 fn ptr_method_declares_error_union() {
     expect(
@@ -459,9 +432,6 @@ fn ptr_method_declares_error_union() {
     );
 }
 
-/// Error diagnostics carry `file:line:col`, never a raw `Span { .. }` Debug
-/// dump. Regression: six diagnostics in the error-effect paths printed the
-/// internal span struct straight at the user.
 #[test]
 fn error_diagnostics_have_no_debug_spans() {
     let err = compile_fails(

@@ -1,4 +1,3 @@
-# Max - Min in one pass.
 *main
     a is vec()
     a.push(7)

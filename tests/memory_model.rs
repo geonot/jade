@@ -1,12 +1,3 @@
-//! Conformance tests for `docs/memory-model.md` (decision D1).
-//!
-//! Each test is named for the M-rule it pins and follows the
-//! `tests/access_semantics.rs` pattern: real programs through `jinnc`,
-//! asserting exact runtime output or the diagnostic lead line. Rules whose
-//! enforcement has not landed yet (M1/M3/M4 rejection — task 8-7, M8 —
-//! task 8-8) are pinned as observed-bad in `tests/review_2026_07.rs`
-//! instead, and their conformance tests are added here when they flip.
-
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
@@ -54,8 +45,6 @@ fn compile(src: &str) -> Compiled {
     Compiled { dir, out }
 }
 
-/// M6 — a parameter returned by the callee is inferred consuming; the
-/// §3.1 program compiles, runs clean, and drops the one buffer once.
 #[test]
 fn m6_consuming_param_inferred_from_return() {
     let c = compile(
@@ -65,8 +54,6 @@ fn m6_consuming_param_inferred_from_return() {
     assert_eq!(c.run_stdout(), "3\n");
 }
 
-/// M6 — using the argument after the consuming call is rejected, and the
-/// diagnostic names the callee (not a `take` the user never wrote).
 #[test]
 fn m6_use_after_consuming_call_names_callee() {
     let c = compile(
@@ -80,8 +67,6 @@ fn m6_use_after_consuming_call_names_callee() {
     );
 }
 
-/// M6 — inference follows alias chains inside the callee
-/// (`w is v; return w` consumes `v`).
 #[test]
 fn m6_alias_chain_in_callee_consumes() {
     let c = compile(
@@ -91,9 +76,6 @@ fn m6_alias_chain_in_callee_consumes() {
     assert_eq!(c.run_stdout(), "3\n");
 }
 
-/// M6 — inference is transitive across calls: `f` forwards its parameter
-/// to consuming `g`, so `f` is consuming too and the whole chain is
-/// single-drop.
 #[test]
 fn m6_transitive_consuming_through_forwarding() {
     let c = compile(
@@ -103,8 +85,6 @@ fn m6_transitive_consuming_through_forwarding() {
     assert_eq!(c.run_stdout(), "2\n");
 }
 
-/// M6 — a borrowing helper stays borrowing: the caller keeps ownership
-/// and sees in-place mutation (unchanged behavior, access-semantics §6.1).
 #[test]
 fn m6_non_escaping_param_still_borrows() {
     let c = compile(
@@ -114,8 +94,6 @@ fn m6_non_escaping_param_still_borrows() {
     assert_eq!(c.run_stdout(), "4\n");
 }
 
-/// M6 escape hatch — an explicit `copy` binding before the consuming call
-/// keeps the original usable.
 #[test]
 fn m6_copy_binding_escape_hatch() {
     let c = compile(
@@ -125,7 +103,6 @@ fn m6_copy_binding_escape_hatch() {
     assert_eq!(c.run_stdout(), "3\n3\n");
 }
 
-/// M7 — returning a local transfers ownership to the caller (one drop).
 #[test]
 fn m7_return_local_transfers_ownership() {
     let c = compile(
@@ -135,8 +112,6 @@ fn m7_return_local_transfers_ownership() {
     assert_eq!(c.run_stdout(), "2\n");
 }
 
-/// Nested-scope aggregate binds transfer the drop obligation out of the
-/// inner scope; no double free (8-6 consumed-set recursion).
 #[test]
 fn nested_scope_bind_transfers_drop() {
     let c = compile(
@@ -146,8 +121,6 @@ fn nested_scope_bind_transfers_drop() {
     assert_eq!(c.run_stdout(), "3\n7\n");
 }
 
-/// The recursive real-world shape the review called out: merge sort built
-/// from consuming helpers sorts correctly with no allocator abort.
 #[test]
 fn m6_merge_sort_shape_runs_clean() {
     let src = std::fs::read_to_string(
@@ -159,8 +132,6 @@ fn m6_merge_sort_shape_runs_clean() {
     assert_eq!(c.run_stdout(), "1\n2\n3\n4\n5\n6\n7\n8\n9\n");
 }
 
-/// M1 — aggregates move on assignment: the §3.3 program is rejected with
-/// the D1 diagnostic naming the move site and the `copy` escape hatch.
 #[test]
 fn m1_move_on_assign_rejects_use_of_source() {
     let c = compile("*main\n    a is vec(1, 2, 3)\n    b is a\n    log(a.length)\n");
@@ -174,7 +145,6 @@ fn m1_move_on_assign_rejects_use_of_source() {
     );
 }
 
-/// M1 — the moved-to binding owns the one buffer; the program runs clean.
 #[test]
 fn m1_move_on_assign_new_owner_runs_clean() {
     let c = compile("*main\n    a is vec(1, 2, 3)\n    b is a\n    b.push(4)\n    log(b.length)\n");
@@ -182,7 +152,6 @@ fn m1_move_on_assign_new_owner_runs_clean() {
     assert_eq!(c.run_stdout(), "4\n");
 }
 
-/// M2 — reassignment revives the tombstone (identical to the `take` rule).
 #[test]
 fn m2_reassignment_revives() {
     let c = compile(
@@ -192,8 +161,6 @@ fn m2_reassignment_revives() {
     assert_eq!(c.run_stdout(), "2\n1\n");
 }
 
-/// M1 + branches — a move on any branch tombstones after the join
-/// (union merge), so the later read is rejected even with no else.
 #[test]
 fn m1_move_in_branch_rejected_after_join() {
     let c = compile(
@@ -207,9 +174,6 @@ fn m1_move_in_branch_rejected_after_join() {
     );
 }
 
-/// M1 + loops — an aggregate assignment inside a loop body would re-move
-/// the tombstone on the next iteration; rejected by the loop check
-/// (including `while`, which previously skipped it).
 #[test]
 fn m1_move_in_while_loop_rejected() {
     let c =
@@ -222,8 +186,6 @@ fn m1_move_in_while_loop_rejected() {
     );
 }
 
-/// M3 — a plain bind of an aggregate struct field is a partial move, as
-/// `take` is: the field read is rejected, siblings stay readable.
 #[test]
 fn m3_field_bind_is_partial_move() {
     let src_bad = "type Bag\n    items as Vec of i64\n    label as String\n\n*main\n    b is Bag(items is vec(1), label is 'x')\n    v is b.items\n    log(b.items.length)\n";
@@ -237,8 +199,6 @@ fn m3_field_bind_is_partial_move() {
     assert_eq!(c.run_stdout(), "x\n1\n");
 }
 
-/// M4 — binding an aggregate container element is rejected (it would
-/// alias the container's memory); `copy` and `take` are the escapes.
 #[test]
 fn m4_aggregate_element_bind_rejected_with_escapes() {
     let c = compile(
@@ -260,7 +220,6 @@ fn m4_aggregate_element_bind_rejected_with_escapes() {
     }
 }
 
-/// M4 — scalar elements bind freely (they copy).
 #[test]
 fn m4_scalar_element_bind_is_legal() {
     let c = compile("*main\n    nums is vec(7, 8)\n    x is nums.get(1)\n    log(x)\n");
@@ -268,8 +227,6 @@ fn m4_scalar_element_bind_is_legal() {
     assert_eq!(c.run_stdout(), "8\n");
 }
 
-/// M9 — `send ch, v` moves an aggregate; the sender's later read is
-/// rejected with a diagnostic naming the send.
 #[test]
 fn m9_channel_send_tombstones_sender() {
     let c = compile(
@@ -283,8 +240,6 @@ fn m9_channel_send_tombstones_sender() {
     );
 }
 
-/// M10 — moving a value that a registered `defer` reads is rejected; the
-/// same defer with no later move runs after the scope body.
 #[test]
 fn m10_defer_read_blocks_move() {
     let c = compile(
@@ -303,9 +258,6 @@ fn m10_defer_read_blocks_move() {
     assert_eq!(c.run_stdout(), "7\n2\n");
 }
 
-/// The ported return-of-borrowed check (formerly src/ownership): a
-/// function returning `%local` is rejected — the pointee dies with the
-/// frame.
 #[test]
 fn return_of_reference_to_local_rejected() {
     let c = compile("*f() returns %i64\n    x is 5\n    return %x\n\n*main\n    log(1)\n");
@@ -317,8 +269,6 @@ fn return_of_reference_to_local_rejected() {
     );
 }
 
-/// M8 — the §3.2 race: two dispatch tasks capturing one Vec is a
-/// use-after-move at the second capture, with the actionable diagnostic.
 #[test]
 fn m8_second_task_capture_rejected() {
     let c = compile(
@@ -334,8 +284,6 @@ fn m8_second_task_capture_rejected() {
     );
 }
 
-/// M8 — any later use in the parent after a single task capture is also
-/// a use-after-move.
 #[test]
 fn m8_parent_use_after_capture_rejected() {
     let c = compile(
@@ -350,8 +298,6 @@ fn m8_parent_use_after_capture_rejected() {
     );
 }
 
-/// M8 — the equivalent correct program: per-task vectors merged over a
-/// channel compiles and runs.
 #[test]
 fn m8_per_task_vectors_merged_over_channel_runs() {
     let c = compile(
@@ -361,8 +307,6 @@ fn m8_per_task_vectors_merged_over_channel_runs() {
     assert_eq!(c.run_stdout(), "200\n");
 }
 
-/// M8 — the other correct shape: a single actor owns the aggregate and
-/// receives messages.
 #[test]
 fn m8_actor_owned_aggregate_runs() {
     let c = compile(
@@ -372,8 +316,6 @@ fn m8_actor_owned_aggregate_runs() {
     assert_eq!(c.run_stdout(), "9\n");
 }
 
-/// M8 — `sim for` iterations are each a task, so capturing an outer
-/// aggregate is a hard error naming the alternatives.
 #[test]
 fn m8_sim_for_capture_rejected() {
     let c =
@@ -386,7 +328,6 @@ fn m8_sim_for_capture_rejected() {
     );
 }
 
-/// M8 — an actor message payload moves into the actor's task.
 #[test]
 fn m8_actor_payload_moves() {
     let c = compile(
@@ -401,8 +342,6 @@ fn m8_actor_payload_moves() {
     );
 }
 
-/// M8 — a `spawn` initializer from a variable moves the aggregate into
-/// the actor.
 #[test]
 fn m8_spawn_initializer_moves() {
     let c = compile(
@@ -417,8 +356,6 @@ fn m8_spawn_initializer_moves() {
     );
 }
 
-/// M8 — a `copy` capture shares a snapshot legally; the parent's value
-/// is untouched.
 #[test]
 fn m8_copy_capture_is_legal() {
     let c = compile(
@@ -428,12 +365,6 @@ fn m8_copy_capture_is_legal() {
     assert_eq!(c.run_stdout(), "2\n2\n");
 }
 
-/// M2 — consume-and-rebind is the canonical builder idiom: passing an
-/// aggregate to a consuming call and rebinding the result to the same
-/// name re-initializes the binding, so the next iteration is legal.
-/// Regression: the post-lowering move pass re-marked the argument as
-/// moved without observing that the bind target was re-initialized,
-/// which rejected the shape six sample apps are written in.
 #[test]
 fn m2_consume_and_rebind_same_name_is_legal() {
     let c = compile(
@@ -443,8 +374,6 @@ fn m2_consume_and_rebind_same_name_is_legal() {
     assert_eq!(c.run_stdout(), "3\n");
 }
 
-/// M2 — the revival holds across a loop body, which is the shape the
-/// sample apps use: consume the accumulator and rebind it each iteration.
 #[test]
 fn m2_consume_and_rebind_in_loop_is_legal() {
     let c = compile(
@@ -454,8 +383,6 @@ fn m2_consume_and_rebind_in_loop_is_legal() {
     assert_eq!(c.run_stdout(), "4\n");
 }
 
-/// M2 — revival is precise: rebinding a *different* name still leaves
-/// the consumed source tombstoned.
 #[test]
 fn m2_rebind_of_other_name_does_not_revive_source() {
     let c = compile(
@@ -469,10 +396,6 @@ fn m2_rebind_of_other_name_does_not_revive_source() {
     );
 }
 
-/// A constructor call naming a type that does not exist must be a
-/// diagnostic, not a silently-fabricated struct. Regression: the typer's
-/// struct-literal fallthrough invented `Type::Struct(name)` for any
-/// unknown name, so `x is Bogus()` compiled and ran.
 #[test]
 fn unknown_constructor_is_rejected() {
     let c = compile("*main\n    x is TotallyUndefinedThing()\n    log('ok')\n");
@@ -484,7 +407,6 @@ fn unknown_constructor_is_rejected() {
     );
 }
 
-/// The rejection carries a suggestion when a near-miss exists.
 #[test]
 fn unknown_constructor_suggests_nearest_type() {
     let c = compile("type Point\n    a as i64\n\n*main\n    x is Poimt(a is 1)\n    log(x.a)\n");
@@ -496,8 +418,6 @@ fn unknown_constructor_suggests_nearest_type() {
     );
 }
 
-/// `None` is the prelude spelling in several other languages; Jinn's is
-/// `Nothing`. Say so directly instead of "unknown variant".
 #[test]
 fn foreign_prelude_spelling_names_the_jinn_one() {
     let c = compile(
@@ -511,7 +431,6 @@ fn foreign_prelude_spelling_names_the_jinn_one() {
     );
 }
 
-/// The canonical Option shape compiles once spelled correctly.
 #[test]
 fn option_nothing_and_some_typecheck() {
     let c = compile(

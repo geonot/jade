@@ -1,4 +1,3 @@
-# Number of trailing zeros in n!.
 *trailing_zeros(n as i64) returns i64
     z is 0
     while n > 0

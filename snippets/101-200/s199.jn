@@ -1,4 +1,3 @@
-# Naive substring search (returns -1 if not found).
 *find_sub(h as String, n as String) returns i64
     if n.length equals 0
         return 0

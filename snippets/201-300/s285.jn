@@ -1,4 +1,3 @@
-# SPI master tx/rx loop: count bytes processed.
 *xfer(n as i64) returns i64
     sent is 0
     i is 0

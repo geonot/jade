@@ -1,4 +1,3 @@
-# Multiple return via type-record.
 type MinMax
     lo as i64
     hi as i64

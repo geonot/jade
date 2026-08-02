@@ -1,4 +1,3 @@
-# I2C address scan: count responding slaves.
 *scan(present as Vec of i64, n as i64) returns i64
     c is 0
     i is 0

@@ -1,4 +1,3 @@
-# Ackermann (small inputs only).
 *ack(m as i64, n as i64) returns i64
     if m equals 0
         return n + 1

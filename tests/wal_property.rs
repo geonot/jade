@@ -1,26 +1,3 @@
-//! Property tests for the Write-Ahead Log (P1-14).
-//!
-//! The WAL is the durability substrate for the persistent store. Its single
-//! most important contract under crash conditions is **prefix consistency**:
-//!
-//!   After a crash at *any* point — a torn tail write, a truncation in the
-//!   middle of an entry, or a corrupted byte — replay must return a byte-exact
-//!   *prefix* of the entries that were written. It may never resurrect a
-//!   partially-written entry as if it were committed, never reorder entries,
-//!   and never surface an entry whose contents differ from what was appended.
-//!
-//! These tests drive the real C runtime WAL (`runtime/wal.c`) through its FFI
-//! surface with randomized operation sequences and randomized crash points,
-//! then assert the prefix invariant exactly. The on-disk entry layout is:
-//!
-//!   [4B payload_len][1B op][8B timestamp][payload_len bytes][4B CRC32]
-//!
-//! so a fully-present entry occupies `17 + payload_len` bytes, and replay's
-//! header/length/CRC checks must reject anything less than a complete entry.
-//!
-//! CI runs this with a large `PROPTEST_CASES` (≈5 min budget); locally it runs
-//! the proptest default (256 cases) and is fast.
-
 use std::ffi::{CString, c_void};
 use std::os::raw::c_uchar;
 use std::path::{Path, PathBuf};
@@ -31,17 +8,13 @@ use jinnc::runtime_ffi::{
 };
 use proptest::prelude::*;
 
-/// On-disk size of one entry: 4B len + 1B op + 8B ts + payload + 4B CRC.
 const ENTRY_OVERHEAD: u64 = 4 + 1 + 8 + 4;
-/// Size of the WAL magic header that precedes all entries.
+
 const MAGIC_LEN: u64 = 8;
 
 fn ensure_linked() {
     std::hint::black_box(force_link_wal());
-    // The WAL caches its sync policy on first open (process-global static).
-    // This is a separate test binary from wal_crash.rs, so we own that static
-    // and pin "none": these tests simulate crashes by editing the file bytes
-    // after a clean close, so per-entry fsync is pure overhead here.
+
     unsafe { std::env::set_var("JINN_WAL_SYNC", "none") };
 }
 
@@ -73,8 +46,6 @@ extern "C" fn collect_cb(op: c_uchar, payload: *const c_void, len: u32, _ts: i64
     col.entries.push((op, bytes));
 }
 
-/// Append `ops` to a fresh WAL and close it cleanly (libc buffers flushed to
-/// the kernel; the bytes are now what a crash would leave behind).
 fn write_wal(path: &Path, ops: &[(u8, Vec<u8>)]) {
     let cpath = CString::new(path.to_str().unwrap()).unwrap();
     unsafe {
@@ -92,7 +63,6 @@ fn write_wal(path: &Path, ops: &[(u8, Vec<u8>)]) {
     }
 }
 
-/// Reopen the WAL and replay it, collecting every entry the runtime accepts.
 fn replay_wal(path: &Path) -> Vec<(u8, Vec<u8>)> {
     let cpath = CString::new(path.to_str().unwrap()).unwrap();
     let mut col = Collector {
@@ -107,8 +77,6 @@ fn replay_wal(path: &Path) -> Vec<(u8, Vec<u8>)> {
     col.entries
 }
 
-/// Cumulative end offsets of each entry on disk, including the magic header.
-/// `end_offset[i]` is the first byte *after* entry `i`.
 fn end_offsets(ops: &[(u8, Vec<u8>)]) -> Vec<u64> {
     let mut off = MAGIC_LEN;
     ops.iter()
@@ -119,9 +87,6 @@ fn end_offsets(ops: &[(u8, Vec<u8>)]) -> Vec<u64> {
         .collect()
 }
 
-/// A randomized, valid WAL operation: op in 1..=4 (insert/update/delete/destroy)
-/// with a small arbitrary payload (delete/destroy carry offset bytes; empty
-/// payloads are legal too).
 fn op_strategy() -> impl Strategy<Value = (u8, Vec<u8>)> {
     (1u8..=4, prop::collection::vec(any::<u8>(), 0..=48))
 }
@@ -131,8 +96,8 @@ fn ops_strategy() -> impl Strategy<Value = Vec<(u8, Vec<u8>)>> {
 }
 
 proptest! {
-    /// Clean round-trip: with no crash, replay returns exactly what was written,
-    /// in order, byte-for-byte. This is the baseline the crash properties refine.
+
+
     #[test]
     fn replay_roundtrips_cleanly(ops in ops_strategy()) {
         ensure_linked();
@@ -143,10 +108,10 @@ proptest! {
         prop_assert_eq!(got, ops);
     }
 
-    /// Crash via truncation at an arbitrary byte: a torn tail write, or a power
-    /// loss that left the file short. Replay must return exactly the maximal
-    /// prefix of entries that are *fully* present on disk — never a partial
-    /// entry, never garbage past the cut.
+
+
+
+
     #[test]
     fn truncation_yields_exact_prefix(
         ops in ops_strategy(),
@@ -160,15 +125,15 @@ proptest! {
         let full_len = *ends.last().unwrap();
         let entries_bytes = full_len - MAGIC_LEN;
 
-        // Choose a truncation length in [MAGIC_LEN, full_len]. Keep the magic
-        // header intact (a WAL without magic is a *different* failure mode —
-        // jinn_wal_open recreates it — exercised elsewhere).
+
+
+
         let cut_len = MAGIC_LEN + (entries_bytes * cut_permille) / 1000;
         let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
         f.set_len(cut_len).unwrap();
         drop(f);
 
-        // Expected survivors: every entry whose end offset fits within cut_len.
+
         let expected_k = ends.iter().filter(|&&e| e <= cut_len).count();
 
         let got = replay_wal(&path);
@@ -182,10 +147,10 @@ proptest! {
         prop_assert_eq!(&got[..], &ops[..expected_k]);
     }
 
-    /// Crash via a corrupted byte inside an entry's CRC-covered region (op,
-    /// timestamp, or payload — never the length prefix, never the stored CRC).
-    /// The CRC check must catch it: every entry before the damaged one replays
-    /// intact, and replay stops exactly at the damaged entry.
+
+
+
+
     #[test]
     fn corruption_stops_at_damaged_entry(
         ops in ops_strategy(),
@@ -198,36 +163,36 @@ proptest! {
         let path = unique_path("corrupt");
         write_wal(&path, &ops);
 
-        // Locate entry j's CRC-covered bytes: [entry_start+4 .. entry_start+13+plen).
-        // That is the 1B op + 8B timestamp + payload — exactly the bytes the
-        // stored CRC32 protects. The 4B length prefix and 4B trailing CRC are
-        // deliberately excluded so the damage can only manifest as a CRC
-        // mismatch (no length realignment, no accidental CRC rewrite).
+
+
+
+
+
         let ends = end_offsets(&ops);
         let entry_start = if j == 0 { MAGIC_LEN } else { ends[j - 1] };
         let plen = ops[j].1.len() as u64;
-        let region_start = entry_start + 4;          // skip the length prefix
-        let region_len = 1 + 8 + plen;               // op + ts + payload
+        let region_start = entry_start + 4;
+        let region_len = 1 + 8 + plen;
         let flip_at = region_start + (byte_sel % region_len);
 
         let mut bytes = std::fs::read(&path).unwrap();
-        bytes[flip_at as usize] ^= 0xFF;             // guaranteed value change
+        bytes[flip_at as usize] ^= 0xFF;
         std::fs::write(&path, &bytes).unwrap();
 
         let got = replay_wal(&path);
         let _ = std::fs::remove_file(&path);
 
-        // Entries before j are untouched and replay; entry j fails its CRC and
-        // halts replay. Result is the exact prefix original[..j].
+
+
         prop_assert_eq!(got.len(), j, "damage in entry {} should stop replay there", j);
         prop_assert_eq!(&got[..], &ops[..j]);
     }
 }
 
 proptest! {
-    /// Task 8-22 — the length prefix is inside the CRC now. Corrupting it
-    /// must stop replay at that entry (v1 excluded the length from the
-    /// CRC, so corrupted framing could frame garbage that verified).
+
+
+
     #[test]
     fn length_prefix_corruption_detected(
         ops in ops_strategy(),
@@ -242,7 +207,7 @@ proptest! {
 
         let ends = end_offsets(&ops);
         let entry_start = if j == 0 { MAGIC_LEN } else { ends[j - 1] };
-        let flip_at = entry_start + (byte_sel % 4); // inside the 4B length
+        let flip_at = entry_start + (byte_sel % 4);
 
         let mut bytes = std::fs::read(&path).unwrap();
         bytes[flip_at as usize] ^= 0xFF;
@@ -254,9 +219,9 @@ proptest! {
         prop_assert_eq!(&got[..], &ops[..j]);
     }
 
-    /// Task 8-22 — a zeroed CRC field is corruption, not a verification
-    /// bypass (v1 treated stored_crc == 0 as "skip the check", so a
-    /// zeroed field validated arbitrary garbage).
+
+
+
     #[test]
     fn zero_crc_is_rejected(
         ops in ops_strategy(),
@@ -271,7 +236,7 @@ proptest! {
         let ends = end_offsets(&ops);
         let crc_at = (ends[j] - 4) as usize;
         let mut bytes = std::fs::read(&path).unwrap();
-        // If the true CRC is already 0 (1 in 2^32), zeroing changes nothing.
+
         prop_assume!(bytes[crc_at..crc_at + 4] != [0, 0, 0, 0]);
         bytes[crc_at..crc_at + 4].fill(0);
         std::fs::write(&path, &bytes).unwrap();
@@ -282,9 +247,9 @@ proptest! {
         prop_assert_eq!(&got[..], &ops[..j]);
     }
 
-    /// Task 8-22 — a torn tail is truncated at open, BEFORE any append.
-    /// The old open appended at SEEK_END past the torn record, so every
-    /// post-crash append was permanently unreachable to replay.
+
+
+
     #[test]
     fn torn_tail_then_append_is_reachable(
         ops in ops_strategy(),
@@ -295,15 +260,15 @@ proptest! {
         let path = unique_path("tornappend");
         write_wal(&path, &ops);
 
-        // Tear the last entry: cut 1..=8 bytes off the end (always inside
-        // the final entry, whose overhead alone is 17 bytes).
+
+
         let ends = end_offsets(&ops);
         let full = *ends.last().unwrap();
         let f = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
         f.set_len(full - cut_back).unwrap();
         drop(f);
 
-        // Append through the normal open path (which must truncate first).
+
         write_wal(&path, &appended);
 
         let got = replay_wal(&path);

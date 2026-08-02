@@ -1,4 +1,3 @@
-# Enumerate via while: emit (index, value) products.
 *main
     xs is vec()
     xs.push(10)

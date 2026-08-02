@@ -1,4 +1,3 @@
-# Count vowels in a string.
 *is_vowel(c as i64) returns bool
     if c equals 97
         return true

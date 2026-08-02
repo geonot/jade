@@ -1,4 +1,3 @@
-# Two-arg lambda used as accumulator.
 *reduce(xs as Vec of i64, init as i64, f as (i64, i64) returns i64) returns i64
     acc is init
     i is 0

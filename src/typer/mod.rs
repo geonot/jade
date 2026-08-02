@@ -46,28 +46,16 @@ pub(crate) struct MoveState {
     pub(crate) vars: std::collections::HashMap<DefId, MoveReason>,
 }
 
-/// Why a variable is tombstoned, so the use-after-move diagnostic can say
-/// what actually happened instead of blaming a `take` the user never wrote
-/// (memory-model.md M1/M6).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum MoveReason {
-    /// An explicit `take` binding or `take` parameter the user wrote.
     TakeExplicit,
-    /// Passed to a function whose parameter consumes its argument
-    /// (explicitly `take`, or inferred because the value escapes through
-    /// the callee — task 8-6).
+
     ConsumingCall(Symbol),
-    /// A plain aggregate bind/assignment `b is a` (memory-model.md M1):
-    /// aggregates move on assignment, so `a` is a tombstone. Carries the
-    /// new owner's name and the move site for the diagnostic.
+
     AssignMove(Symbol, crate::ast::Span),
-    /// Sent on a channel (memory-model.md M9): `send ch, v` transfers
-    /// ownership to the receiver; the sender's binding tombstones.
+
     Sent(crate::ast::Span),
-    /// Captured by a concurrent task — a `dispatch` block, an actor
-    /// message payload, or a `spawn` initializer (memory-model.md M8):
-    /// an aggregate moves into at most one task, so a second capture or
-    /// any later use in the parent is a use-after-move.
+
     TaskCapture(crate::ast::Span),
 }
 
@@ -136,13 +124,6 @@ pub struct Typer {
 
     pub(crate) const_vars: std::collections::HashSet<DefId>,
 
-    /// Variables read by a registered `defer` block → the defer's span.
-    /// Moving one is a compile error (memory-model.md M10: defers run at
-    /// scope exit and may read any binding they could read at
-    /// registration). Never cleared — DefIds are globally unique, and
-    /// keeping entries past their scope only over-approximates (a move
-    /// after an inner-scope defer already ran is rejected too, which is
-    /// the safe direction).
     pub(crate) defer_read_vars: std::collections::HashMap<DefId, crate::ast::Span>,
 
     pub(crate) suppress_moved_field_check: u32,
@@ -168,11 +149,9 @@ pub struct Typer {
     pub(crate) dep_pkg_ids: std::collections::HashMap<crate::intern::Symbol, crate::pkgid::PkgId>,
     pub(crate) scoped_use_map: crate::pkgid::ScopedUseMap,
     pub(crate) declared_type_names: std::collections::HashSet<Symbol>,
-    /// Guard against self-referential const expansion (task 8-17).
+
     pub(crate) const_expansion_stack: Vec<Symbol>,
-    /// Inferable generics that were instantiated by at least one call
-    /// site in this unit (D2/task 8-16 — used to scope the exported-
-    /// generic diagnostic to functions with NO call site).
+
     pub(crate) instantiated_generics: std::collections::HashSet<Symbol>,
 }
 
@@ -287,14 +266,6 @@ impl Typer {
         self.scoped_use_map = map;
     }
 
-    /// Resolve a plain `use <name>` against the current package's own manifest,
-    /// per scope.md §2.1 (local, deterministic, no global arbitration).
-    ///
-    /// Returns `Ok(None)` for the single-package fast path (§2.2: no scoped map,
-    /// or `name` is not a package dependency at all — e.g. a local module),
-    /// `Ok(Some(pkg_id))` when `name` resolves to a scoped dependency, and
-    /// `Err` when `name` is a known dependency of *some other* scope but absent
-    /// from this consumer's manifest (a global-arbitration attempt).
     pub(crate) fn resolve_scoped_use(
         &self,
         name: Symbol,
@@ -322,9 +293,6 @@ impl Typer {
         }
     }
 
-    /// Resolve a multi-segment path import `use seg0/seg1/.../segN` against the
-    /// scoped graph, enforcing the final target's visibility ceiling
-    /// (scope.md §4). Single-package builds (no scoped map) are a no-op.
     pub(crate) fn resolve_scoped_path_use(
         &self,
         path: &[Symbol],
@@ -337,13 +305,7 @@ impl Typer {
         }
         match crate::pkgid::resolve_path_use(&self.scoped_use_map, consumer, path) {
             Ok(id) => Ok(Some(id)),
-            Err(crate::pkgid::UseResolveError::Unresolved { .. }) => {
-                // First hop absent from the consumer's manifest: in the
-                // single-package / local-module case this is not a package
-                // reference at all, so stay silent (scope.md §2.2). A genuine
-                // arbitration attempt is caught by `resolve_scoped_use`.
-                Ok(None)
-            }
+            Err(crate::pkgid::UseResolveError::Unresolved { .. }) => Ok(None),
             Err(e) => Err(e.to_string()),
         }
     }
@@ -469,10 +431,7 @@ impl Typer {
     fn resolve_ty(&self, ty: Type) -> Type {
         match &ty {
             Type::Struct(n, _) if self.enums.contains_key(n) => Type::Enum(*n),
-            /* A single-uppercase annotation parses as a type parameter;
-             * when a DECLARED type has that name (enum `J`), the
-             * annotation means the type, not a generic (task 8-19 — the
-             * collision sent Param('J') into codegen). */
+
             Type::Param(n) if self.enums.contains_key(n) => Type::Enum(*n),
             Type::Param(n) if self.structs.contains_key(n) => Type::Struct(*n, vec![]),
             _ => ty,
@@ -485,10 +444,6 @@ impl Typer {
         }
     }
 
-    /// Check one argument at the C FFI boundary. A Jinn `String` is accepted
-    /// where the extern declares a byte pointer (`&i8`/`&u8`/`&void`) —
-    /// codegen marshals the string's data pointer across — everything else
-    /// must unify with the declared parameter type.
     pub(crate) fn check_extern_arg(
         &mut self,
         pty: &Type,
@@ -498,11 +453,7 @@ impl Typer {
     ) {
         let rp = self.infer_ctx.shallow_resolve(pty);
         let ra = self.infer_ctx.shallow_resolve(aty);
-        // A declared `%i8` / `%u8` / `%void` parameter is C's opaque-handle
-        // convention (`char *` / `void *`). At an extern boundary the C
-        // signature is the user's assertion, not something the typer can
-        // recover, so a `String` (marshalled to its data pointer) and any
-        // raw pointer both satisfy it. Every other pointee must still match.
+
         let param_is_opaque_ptr =
             matches!(&rp, Type::Ptr(inner) if matches!(**inner, Type::I8 | Type::U8 | Type::Void));
         if param_is_opaque_ptr && matches!(ra, Type::String | Type::Ptr(_)) {
@@ -511,16 +462,6 @@ impl Typer {
         let _ = self.infer_ctx.unify_at(pty, aty, span, reason);
     }
 
-    /// Propagate an expectation into a call result for inference only.
-    ///
-    /// `expected` here is a hint from surrounding context (e.g. the enclosing
-    /// function's return type flowing into a tail expression), not an
-    /// obligation: a void call in statement/tail position is legal even when
-    /// the context "expects" a value. Hard checks live at the boundaries that
-    /// own them — bind annotations, assignments, call arguments, `return`,
-    /// and declared-return tail checks — all of which report fatally through
-    /// `unify_at`. This must therefore use the speculative `unify`, never
-    /// `unify_at`.
     pub(crate) fn unify_call_result(
         &mut self,
         expected: &Type,
@@ -548,9 +489,6 @@ impl Typer {
         }
     }
 
-    /// D4 (task 8-15): does `name` denote a module the user could import
-    /// with `use name` — a sibling `.jn` next to the entry file, or a std
-    /// module? Mirrors the path candidates `resolve_modules` probes.
     pub(crate) fn importable_module_exists(&self, name: &str) -> bool {
         if let Some(dir) = &self.source_dir
             && dir.join(format!("{name}.jn")).exists()
@@ -588,11 +526,6 @@ impl Typer {
         false
     }
 
-    /// D2 (task 8-16): inferable-generic functions whose parameter types
-    /// were never pinned. Fine inside a program (each call site
-    /// instantiates them), but an exported library function with no call
-    /// site in the compilation unit has nothing to instantiate against —
-    /// it needs an annotation or a trait bound.
     pub fn unresolved_exported_generics(&self) -> Vec<String> {
         self.inferable_fns
             .keys()
@@ -623,9 +556,6 @@ impl Typer {
         self.moved_vars.insert(id, reason);
     }
 
-    /// Mark a move, first rejecting it if a registered `defer` reads the
-    /// variable (memory-model.md M10: defers run at scope exit, after the
-    /// move would have hollowed the value out).
     pub(crate) fn mark_var_moved_checked(
         &mut self,
         id: DefId,

@@ -1,6 +1,3 @@
-# physics.jn — 2D physics simulation
-# Complexity: Advanced
-# Demonstrates: structs, methods, loops, math, type casting
 
 type Vec2
     x as f64
@@ -40,38 +37,29 @@ type Body
     *momentum(self)
         self.vel.scale(self.mass)
 
-# Gravitational constant (scaled for sim)
 *gravity_force(a as Body, b as Body)
     diff is b.pos.sub(a.pos)
     dist is diff.length()
     if dist < 0.1
         return Vec2(x is 0.0, y is 0.0)
-    # F = G * m1 * m2 / r^2
     g is 6.674
     force_mag is g * a.mass * b.mass / (dist * dist)
     diff.normalize().scale(force_mag)
 
-# Euler integration step
 *step(body as Body, force as Vec2, dt as f64)
-    # a = F/m
     acc is force.scale(1.0 / body.mass)
-    # v = v + a*dt
     new_vel is body.vel.add(acc.scale(dt))
-    # p = p + v*dt
     new_pos is body.pos.add(new_vel.scale(dt))
     Body(pos is new_pos, vel is new_vel, mass is body.mass, radius is body.radius)
 
-# Check collision between two bodies
 *collides(a as Body, b as Body)
     dist is a.pos.sub(b.pos).length()
     dist < (a.radius + b.radius)
 
-# Elastic collision response (1D simplification)
 *elastic_velocity(m1 as f64, m2 as f64, v1 as f64, v2 as f64)
     ((m1 - m2) * v1 + 2.0 * m2 * v2) / (m1 + m2)
 
 *main
-    # Two-body gravitational simulation
     sun is Body(
         pos is Vec2(x is 0.0, y is 0.0),
         vel is Vec2(x is 0.0, y is 0.0),
@@ -89,15 +77,12 @@ type Body
     dt is 0.01
     total_energy_start is sun.kinetic_energy() + planet.kinetic_energy()
 
-    # Simulate 100 steps
     p is planet
     s is sun
     for tick from 0 to 100
-        # Force on planet from sun
         f is gravity_force(p, s)
         p is step(p, f, dt)
 
-        # Force on sun from planet (Newton's third law)
         f_sun is gravity_force(s, p)
         s is step(s, f_sun, dt)
 
@@ -105,7 +90,6 @@ type Body
     log(p.pos.y)
     log(p.vel.length())
 
-    # Check collision detection
     a is Body(
         pos is Vec2(x is 0.0, y is 0.0),
         vel is Vec2(x is 1.0, y is 0.0),
@@ -118,7 +102,7 @@ type Body
         mass is 1.0,
         radius is 2.0
     )
-    log(collides(a, b))             # true (dist=3, radii sum=4)
+    log(collides(a, b))
 
     c is Body(
         pos is Vec2(x is 10.0, y is 10.0),
@@ -126,8 +110,7 @@ type Body
         mass is 1.0,
         radius is 1.0
     )
-    log(collides(a, c))             # false
+    log(collides(a, c))
 
-    # Elastic collision
     v1_new is elastic_velocity(1.0, 1.0, 1.0, -1.0)
-    log(v1_new)                      # -1.0 (equal mass swap)
+    log(v1_new)

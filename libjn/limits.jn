@@ -1,6 +1,3 @@
-# libjn.limits — drop-in for C <limits.h>
-#
-# Architectural limits. Values match LP64 Linux/glibc, x86_64 / aarch64.
 
 CHAR_BIT  is 8
 SCHAR_MIN is -128
@@ -21,7 +18,6 @@ LLONG_MIN is -9223372036854775808
 LLONG_MAX is 9223372036854775807
 ULLONG_MAX is 18446744073709551615
 
-# POSIX limits
 PATH_MAX  is 4096
 NAME_MAX  is 255
 ARG_MAX   is 131072

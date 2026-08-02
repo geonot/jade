@@ -1,13 +1,3 @@
-//! Conformance suite for Jinn's bounded polymorphism (traits / protocols).
-//!
-//! Pins the documented semantics of the trait system:
-//!   * direct method dispatch through an `impl Trait for T`;
-//!   * generic dispatch through a trait bound (`of T: Trait`);
-//!   * trait-bound enforcement diagnostics at the call site;
-//!   * multi-bound parameters (`of T: A + B`);
-//!   * default trait method bodies (synthesized into impls that omit them);
-//!   * default methods overridden by an explicit impl method.
-
 use std::path::PathBuf;
 use std::process::Command;
 

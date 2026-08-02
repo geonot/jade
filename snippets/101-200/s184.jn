@@ -1,4 +1,3 @@
-# Validate balanced parentheses (no chained or).
 *is_close(c as i64) returns bool
     if c equals 41
         return true

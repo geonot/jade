@@ -1,4 +1,3 @@
-# Topological sort via Kahn's algorithm.
 *main
     n is 6
     adj is vec(vec(1, 2), vec(3), vec(3), vec(4, 5), vec(), vec())

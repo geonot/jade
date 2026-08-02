@@ -339,10 +339,6 @@ impl Typer {
         Ok(result)
     }
 
-    /// Is `resolved` the same nominal enum as `en`, modulo the two spellings
-    /// a generic enum instance can carry (`List<i64>` as `Struct(List, [i64])`
-    /// vs the monomorphized `Enum(List__G_i64)`)? Used to avoid "unifying" a
-    /// type with itself under a different spelling, which is not an error.
     fn same_enum_modulo_mono(&self, en: crate::intern::Symbol, resolved: &Type) -> bool {
         fn base(s: &str) -> &str {
             s.split("__G_").next().unwrap_or(s)

@@ -1,4 +1,3 @@
-# Power of two via bit ops.
 *is_pow2(n as i64) returns bool
     n > 0 and (n & (n - 1)) equals 0
 

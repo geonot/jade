@@ -1,4 +1,3 @@
-# Selection sort.
 *ssort(v)
     n is v.length
     i is 0

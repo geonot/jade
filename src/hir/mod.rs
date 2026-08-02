@@ -87,27 +87,12 @@ pub struct Program {
     pub migrations: Vec<crate::ast::MigrationDef>,
     pub globals: Vec<Global>,
 
-    /// Identity of the package this program's own (non-imported) items belong
-    /// to (scope.md §1). `None` only for the legacy single-package builds that
-    /// never assigned a root `PkgId`. Codegen mangling (§1.2) derives the
-    /// `pkgid_hash` prefix from this.
     pub pkg_id: Option<crate::pkgid::PkgId>,
 
-    /// Exact per-item owning `PkgId` for items pulled in from a dependency
-    /// (scope.md §1.1), keyed by the item's own (already module-flattened)
-    /// symbol name. This is the first-class identity attribution that replaces
-    /// the legacy `prefix_module` string model (§0): an item's package is
-    /// *carried* here, not re-derived from its name prefix at each query. Any
-    /// name absent from this map — every root item and every compiler-synthesized
-    /// item — belongs to `pkg_id` (the root). Empty on the single-package fast
-    /// path (§2.2).
     pub item_pkgs: std::collections::HashMap<Symbol, crate::pkgid::PkgId>,
 }
 
 impl Program {
-    /// Resolve the owning `PkgId` of a top-level item by its symbol name. An
-    /// exact lookup into `item_pkgs` (no string-prefix scan): dependency items
-    /// were attributed at HIR construction, everything else is the root package.
     pub fn owner_pkg_id(&self, name: Symbol) -> Option<crate::pkgid::PkgId> {
         self.item_pkgs.get(&name).copied().or(self.pkg_id)
     }

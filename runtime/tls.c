@@ -1,4 +1,3 @@
-/* runtime/tls.c — TLS/SSL wrappers using OpenSSL */
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/x509.h>
@@ -26,39 +25,30 @@ void jinn_tls_init(void) {
     }
 }
 
-/* Create a TLS client connection to host:port.
- * Returns a pointer to jinn_tls_conn, or NULL on failure. */
 jinn_tls_conn *jinn_tls_connect(const char *host, int port) {
     jinn_tls_init();
-    
     const SSL_METHOD *method = TLS_client_method();
     SSL_CTX *ctx = SSL_CTX_new(method);
     if (!ctx) return NULL;
-    
     SSL_CTX_set_default_verify_paths(ctx);
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
-    
-    /* DNS resolve + connect */
+
     struct addrinfo hints, *result;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    
     char port_str[16];
     snprintf(port_str, sizeof(port_str), "%d", port);
-    
     if (getaddrinfo(host, port_str, &hints, &result) != 0) {
         SSL_CTX_free(ctx);
         return NULL;
     }
-    
     int fd = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
     if (fd < 0) {
         freeaddrinfo(result);
         SSL_CTX_free(ctx);
         return NULL;
     }
-    
     if (connect(fd, result->ai_addr, result->ai_addrlen) < 0) {
         freeaddrinfo(result);
         close(fd);
@@ -66,39 +56,32 @@ jinn_tls_conn *jinn_tls_connect(const char *host, int port) {
         return NULL;
     }
     freeaddrinfo(result);
-    
     SSL *ssl = SSL_new(ctx);
     SSL_set_fd(ssl, fd);
     SSL_set_tlsext_host_name(ssl, host);
-    
-    /* Set SNI for certificate verification */
+
     X509_VERIFY_PARAM *param = SSL_get0_param(ssl);
     X509_VERIFY_PARAM_set1_host(param, host, strlen(host));
-    
     if (SSL_connect(ssl) <= 0) {
         SSL_free(ssl);
         close(fd);
         SSL_CTX_free(ctx);
         return NULL;
     }
-    
     jinn_tls_conn *conn = (jinn_tls_conn *)malloc(sizeof(jinn_tls_conn));
     conn->ctx = ctx;
     conn->ssl = ssl;
     conn->fd = fd;
     return conn;
 }
-
 long jinn_tls_send(jinn_tls_conn *conn, const char *buf, long len) {
     if (!conn || !conn->ssl) return -1;
     return SSL_write(conn->ssl, buf, (int)len);
 }
-
 long jinn_tls_recv(jinn_tls_conn *conn, char *buf, long len) {
     if (!conn || !conn->ssl) return -1;
     return SSL_read(conn->ssl, buf, (int)len);
 }
-
 void jinn_tls_close(jinn_tls_conn *conn) {
     if (!conn) return;
     if (conn->ssl) {
@@ -110,38 +93,26 @@ void jinn_tls_close(jinn_tls_conn *conn) {
     free(conn);
 }
 
-/* DNS resolution: resolve hostname to first IPv4/IPv6 address string.
- * Writes result into out_buf (at most out_len bytes).
- * Returns 0 on success, -1 on failure. */
 int jinn_dns_resolve(const char *host, char *out_buf, int out_len) {
     struct addrinfo hints, *result;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    
     if (getaddrinfo(host, NULL, &hints, &result) != 0) return -1;
-    
     int ret = getnameinfo(result->ai_addr, result->ai_addrlen,
                           out_buf, out_len, NULL, 0, NI_NUMERICHOST);
     freeaddrinfo(result);
     return ret == 0 ? 0 : -1;
 }
-
-/* DNS resolution: resolve hostname to all addresses.
- * Writes newline-separated IP strings into out_buf.
- * Returns number of addresses found. */
 int jinn_dns_resolve_all(const char *host, char *out_buf, int out_len) {
     struct addrinfo hints, *result, *rp;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    
     if (getaddrinfo(host, NULL, &hints, &result) != 0) return 0;
-    
     int count = 0;
     int pos = 0;
     char addr_str[INET6_ADDRSTRLEN];
-    
     for (rp = result; rp != NULL; rp = rp->ai_next) {
         if (getnameinfo(rp->ai_addr, rp->ai_addrlen,
                         addr_str, sizeof(addr_str), NULL, 0, NI_NUMERICHOST) == 0) {
@@ -158,16 +129,11 @@ int jinn_dns_resolve_all(const char *host, char *out_buf, int out_len) {
     freeaddrinfo(result);
     return count;
 }
-
-/* === Server-side TLS, error retrieval, peer info === */
-
 struct jinn_tls_listener {
     SSL_CTX *ctx;
     int listen_fd;
 };
 
-/* Start a TLS server bound to host:port using cert/key PEM files.
- * Returns a pointer or NULL on failure. */
 struct jinn_tls_listener *jinn_tls_listen(const char *host, int port,
                                           const char *cert_path,
                                           const char *key_path) {
@@ -211,7 +177,6 @@ struct jinn_tls_listener *jinn_tls_listen(const char *host, int port,
     l->listen_fd = fd;
     return l;
 }
-
 jinn_tls_conn *jinn_tls_accept(struct jinn_tls_listener *l) {
     if (!l) return NULL;
     int cfd = accept(l->listen_fd, NULL, NULL);
@@ -224,29 +189,23 @@ jinn_tls_conn *jinn_tls_accept(struct jinn_tls_listener *l) {
         return NULL;
     }
     jinn_tls_conn *c = (jinn_tls_conn *)malloc(sizeof(*c));
-    c->ctx = NULL;          /* shared from listener; do not free */
+    c->ctx = NULL;
     c->ssl = ssl;
     c->fd = cfd;
     return c;
 }
-
 void jinn_tls_listener_close(struct jinn_tls_listener *l) {
     if (!l) return;
     if (l->listen_fd >= 0) close(l->listen_fd);
     if (l->ctx) SSL_CTX_free(l->ctx);
     free(l);
 }
-
-/* Copy the most recent OpenSSL error string into buf. Returns bytes
- * written (excluding NUL), or 0 if no error. */
 long jinn_tls_last_error(char *buf, long len) {
     unsigned long e = ERR_peek_last_error();
     if (e == 0 || len <= 0) return 0;
     ERR_error_string_n(e, buf, (size_t)len);
     return (long)strlen(buf);
 }
-
-/* Copy the peer certificate subject DN into buf. Returns bytes written. */
 long jinn_tls_peer_cert_subject(jinn_tls_conn *conn, char *buf, long len) {
     if (!conn || !conn->ssl) return 0;
     X509 *cert = SSL_get_peer_certificate(conn->ssl);
@@ -264,8 +223,6 @@ long jinn_tls_peer_cert_subject(jinn_tls_conn *conn, char *buf, long len) {
     X509_free(cert);
     return n;
 }
-
-/* Copy the negotiated TLS protocol version (e.g. "TLSv1.3"). */
 long jinn_tls_protocol_version(jinn_tls_conn *conn, char *buf, long len) {
     if (!conn || !conn->ssl || len <= 0) return 0;
     const char *v = SSL_get_version(conn->ssl);

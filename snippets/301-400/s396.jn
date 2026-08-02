@@ -1,4 +1,3 @@
-# Set membership via sorted Vec + binary search.
 *bsearch(xs as Vec of i64, t as i64) returns i64
     lo is 0
     hi is xs.length - 1

@@ -1,4 +1,3 @@
-# Sleep/wake state machine: count cycles to reach DEEP_SLEEP.
 *next_state(s as i64, idle as i64) returns i64
     if s equals 0
         if idle > 5

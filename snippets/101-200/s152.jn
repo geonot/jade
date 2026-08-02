@@ -1,4 +1,3 @@
-# Spiral matrix traversal (4x4) using flat vec.
 *main
     n is 4
     grid is vec()

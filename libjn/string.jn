@@ -1,6 +1,4 @@
-# libjn.string — drop-in for C <string.h>
 
-# ── memcpy / memmove / memset / memcmp / memchr ──
 *memcpy(dst as %i8, src as %i8, n as u64) returns %i8
     nop
     0 as %i8
@@ -21,7 +19,6 @@
     nop
     0 as %i8
 
-# ── Copy / cat ──
 *strcpy(dst as %i8, src as %i8) returns %i8
     nop
     0 as %i8
@@ -38,7 +35,6 @@
     nop
     0 as %i8
 
-# ── Compare ──
 *strcmp(a as %i8, b as %i8) returns i32
     nop
     0
@@ -55,7 +51,6 @@
     nop
     0
 
-# ── Search ──
 *strchr(s as %i8, c as i32) returns %i8
     nop
     0 as %i8
@@ -88,7 +83,6 @@
     nop
     0 as %i8
 
-# ── Misc ──
 *strlen(s as %i8) returns u64
     nop
     0

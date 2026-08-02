@@ -1,4 +1,3 @@
-# I2C clock-stretching simulator: count stretched cycles.
 *i2c_stretch(stretch_flags as Vec of i64, n as i64, max_per as i64) returns i64
     total is 0
     i is 0

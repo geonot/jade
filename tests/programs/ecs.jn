@@ -1,9 +1,4 @@
-# ecs.jn — Entity Component System pattern
-# Complexity: Advanced
-# Demonstrates: structs, enums, arrays, methods, generics, pattern matching
-# Note: uses planned features (traits, dynamic arrays) — may not fully compile yet
 
-# Components
 type Position
     x as f64
     y as f64
@@ -39,7 +34,6 @@ enum EntityKind
     Projectile
     Item(String)
 
-# An entity with optional components
 type Entity
     id as i64
     kind as EntityKind
@@ -91,7 +85,6 @@ type Entity
         hp is Health(current is 50, max_hp is 50)
     )
 
-    # Simulate 5 ticks
     p is player
     e is enemy
     for tick from 0 to 5
@@ -100,7 +93,6 @@ type Entity
         d is distance(p.pos, e.pos)
         log(d)
 
-    # Combat
     e_damaged is Entity(
         id is e.id,
         kind is e.kind,
@@ -109,7 +101,7 @@ type Entity
         hp is e.hp.damage(30)
     )
     describe_entity(e_damaged)
-    log(e_damaged.hp.is_alive())     # true
+    log(e_damaged.hp.is_alive())
 
     e_dead is Entity(
         id is e_damaged.id,
@@ -118,4 +110,4 @@ type Entity
         vel is e_damaged.vel,
         hp is e_damaged.hp.damage(999)
     )
-    log(e_dead.hp.is_alive())        # false
+    log(e_dead.hp.is_alive())

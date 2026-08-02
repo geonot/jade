@@ -1,4 +1,3 @@
-# Pattern match on a built-in Option-like wrapper.
 enum Maybe
     Just(i64)
     Nothing

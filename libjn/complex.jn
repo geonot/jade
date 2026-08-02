@@ -1,8 +1,3 @@
-# libjn.complex — drop-in for C <complex.h>
-#
-# C99 native complex types are not first-class in Jinn. Each value is
-# modeled as a tuple `(re as f64, im as f64)` at the surface and a
-# struct `{re, im}` in lowering.
 
 type Complex
     re as f64
@@ -32,7 +27,6 @@ type Complex
     nop
     0 as %i8
 
-# ── Trig ──
 *csin(z as %i8) returns %i8
     nop
     0 as %i8
@@ -52,7 +46,6 @@ type Complex
     nop
     0 as %i8
 
-# ── Exp / log / pow / sqrt ──
 *cexp(z as %i8) returns %i8
     nop
     0 as %i8

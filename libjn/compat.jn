@@ -1,15 +1,3 @@
-# libjn.compat — global-namespace shim, mirrors `std.compat`.
-#
-# After `use std.libjn.compat`, every libjn symbol is in scope without
-# the `<header>.` prefix, just like a C translation unit that has
-# `#include`d every header.
-#
-# Beware: this introduces the entire C namespace into the current scope.
-# Prefer the qualified form `stdio.printf(...)` in new code and reserve
-# `compat` for porting C source mechanically.
-#
-# Implementation: a flat re-export of every symbol via `pub use`.
-# (The `pub use` machinery is the Jinn equivalent of `using namespace`.)
 
 pub use std.libjn.assert.*
 pub use std.libjn.complex.*

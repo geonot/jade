@@ -1,20 +1,4 @@
-# std.regex — Regular expressions (PCRE2-backed)
-#
-# Compiled regex objects are cached as opaque PCRE2 handles. The
-# compile cost is amortized when the same pattern is reused. For
-# string literal patterns, the Jinn compiler emits the compile call
-# at module init time.
-#
-# Usage:
-#   re is regex.compile("\\d+")
-#   regex.is_match(text, "[a-z]+")
-#   regex.find_first(text, "\\w+")
-#   regex.find_all(text, "\\d+")
-#   regex.captures(text, "(\\w+)=(\\d+)")
-#   regex.replace_all(text, "\\d+", "N")
-#   regex.split(text, "\\s+")
 
-# Flag bits — combine with `|`.
 FLAG_CASELESS    is 0x00000008
 FLAG_MULTILINE   is 0x00000400
 FLAG_DOTALL      is 0x00000020
@@ -22,7 +6,6 @@ FLAG_EXTENDED    is 0x00000080
 FLAG_UNGREEDY    is 0x00040000
 FLAG_UTF         is 0x00080000
 
-# PCRE2 extern bindings.
 extern *pcre2_compile_8(pattern as %i8, length as i64, options as i64, errcode as %i32, erroffset as %i64, ctx as %void) returns %void
 extern *pcre2_match_8(code as %void, subject as %i8, length as i64, startoffset as i64, options as i64, match_data as %void, ctx as %void) returns i32
 extern *pcre2_match_data_create_from_pattern_8(code as %void, ctx as %void) returns %void
@@ -32,9 +15,7 @@ extern *pcre2_get_ovector_pointer_8(match_data as %void) returns %void
 extern *pcre2_substring_number_from_name_8(code as %void, name as %i8) returns i32
 extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
 
-# ── Compile / handle ─────────────────────────────────────────
 
-# Returns 0 on compile failure.
 *compile(pattern as String) returns i64
     compile_with(pattern, 0)
 
@@ -47,7 +28,6 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     if code neq 0
         extern.pcre2_code_free_8(code as %void)
 
-# ── Match predicates ─────────────────────────────────────────
 
 *is_match(text as String, pattern as String) returns bool
     code is compile(pattern)
@@ -59,7 +39,6 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     extern.pcre2_code_free_8(code as %void)
     rc > 0
 
-# ── Find ─────────────────────────────────────────────────────
 
 *find_first(text as String, pattern as String) returns String
     code is compile(pattern)
@@ -79,7 +58,6 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     extern.pcre2_code_free_8(code as %void)
     out
 
-# Backwards-compat alias.
 *find(text as String, pattern as String) returns String
     find_first(text, pattern)
 
@@ -103,10 +81,7 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     extern.pcre2_code_free_8(code as %void)
     results
 
-# ── Captures ─────────────────────────────────────────────────
 
-# Returns a Vec where index 0 is the full match and 1..N are capture
-# groups. Empty Vec on no match.
 *captures(text as String, pattern as String) returns Vec of String
     out is vec()
     code is compile(pattern)
@@ -130,7 +105,6 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     extern.pcre2_code_free_8(code as %void)
     out
 
-# Same as `captures` but returns all matches in the input.
 *captures_all(text as String, pattern as String) returns Vec of Vec of String
     out is vec()
     code is compile(pattern)
@@ -158,10 +132,7 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     extern.pcre2_code_free_8(code as %void)
     out
 
-# ── Replace ──────────────────────────────────────────────────
 
-# Replace all non-overlapping matches with `replacement` (literal).
-# To use captures in the replacement, prefer `replace_with`.
 *replace_all(text as String, pattern as String, replacement as String) returns String
     code is compile(pattern)
     if code equals 0
@@ -183,8 +154,6 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     extern.pcre2_code_free_8(code as %void)
     out
 
-# Replace using a callback that receives the full match string and
-# returns its replacement.
 *replace_with(text as String, pattern as String, fn) returns String
     code is compile(pattern)
     if code equals 0
@@ -206,7 +175,6 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     extern.pcre2_code_free_8(code as %void)
     out
 
-# Replace only the first match.
 *replace_first(text as String, pattern as String, replacement as String) returns String
     code is compile(pattern)
     if code equals 0
@@ -224,9 +192,7 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     extern.pcre2_code_free_8(code as %void)
     text.slice(0, s) + replacement + text.slice(e, text.length)
 
-# ── Split ────────────────────────────────────────────────────
 
-# Split on every match of `pattern`.
 *split(text as String, pattern as String) returns Vec of String
     out is vec()
     code is compile(pattern)
@@ -249,9 +215,7 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     extern.pcre2_code_free_8(code as %void)
     out
 
-# ── Convenience ──────────────────────────────────────────────
 
-# Escape regex metacharacters in `s` so it can be used as a literal pattern.
 *escape(s as String) returns String
     out is ""
     i is 0

@@ -1,4 +1,3 @@
-# 7-segment encoder for digits 0..9.
 *seven_seg(d as i64) returns i64
     segs is vec()
     segs.push(63)

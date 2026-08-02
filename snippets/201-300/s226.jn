@@ -1,4 +1,3 @@
-# Blockchain: simple SHA-like 32-bit mixer.
 *mix(x as i64) returns i64
     y is x
     y is (y * 2654435761) % 4294967296

@@ -1,4 +1,3 @@
-# Prime check by trial division up to sqrt-ish.
 *is_prime(n as i64) returns bool
     if n < 2
         return false

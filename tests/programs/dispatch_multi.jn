@@ -1,4 +1,3 @@
-# Multiple generators test — multiple generators interleaved
 *main
     evens is dispatch
         for i in 5

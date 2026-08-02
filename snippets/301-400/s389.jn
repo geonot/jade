@@ -1,4 +1,3 @@
-# Strictly monotonic increasing check.
 *is_strict_inc(a as Vec of i64) returns bool
     i is 1
     while i < a.length

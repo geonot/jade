@@ -1,4 +1,3 @@
-# IBAN-style mod-97 check (simplified to digit string).
 *mod97(digits as Vec of i64, n as i64) returns i64
     r is 0
     i is 0

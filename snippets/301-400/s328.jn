@@ -1,4 +1,3 @@
-# 2D vec via Vec-of-Vec; row sums.
 *main
     g is vec()
     r is 0

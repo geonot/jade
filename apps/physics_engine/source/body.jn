@@ -1,5 +1,3 @@
-# Rigid body record.  We use integer coords (scaled by 100) so we
-# stay in i64 arithmetic everywhere.
 
 type Body
     id as i64

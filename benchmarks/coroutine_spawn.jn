@@ -1,5 +1,3 @@
-# Coroutine spawn benchmark
-# Spawn 100K dispatch blocks, each yields a value
 
 *main
     n is 100000

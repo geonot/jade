@@ -1,7 +1,3 @@
-# libjn.stdbool — drop-in for C <stdbool.h>
-#
-# Jinn already has `bool` / `true` / `false` as native primitives. The
-# libjn aliases preserve C source-compat spellings.
 
 alias _Bool = bool
 

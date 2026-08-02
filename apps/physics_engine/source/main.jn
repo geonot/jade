@@ -1,12 +1,3 @@
-# physics_engine — 2D rigid-body simulation.
-#
-# Pipeline:
-#   integrator.jn  — semi-implicit Euler under gravity/damping
-#   broadphase.jn  — sweep-and-prune on x-axis AABBs
-#   narrowphase.jn — circle-vs-circle contact resolution
-#   solver.jn      — sequential impulse solver, 4 iterations
-#
-# We seed 16 circular bodies and step the world for 60 frames.
 
 use body
 use integrator
@@ -26,20 +17,16 @@ use solver
         vy is ((i * 23) mod 9 ) - 4
         world.push(body.new(i, x, y, vx, vy, 8, 1))
 
-    dt is 100                        # tenths of seconds, integer
+    dt is 100
     contacts_total is 0
     impulses_total is 0
 
     loop(0, $ < 60, $ + 1)
-        # 1. integrate
         loop(0, $ < world.len(), $ + 1)
             integrator.step(world.get($), dt)
-        # 2. broadphase candidate pairs
         pairs is broadphase.sap(world)
-        # 3. narrowphase contacts
         contacts is narrowphase.resolve_pairs(world, pairs)
         contacts_total is contacts_total + contacts.len()
-        # 4. solve
         impulses is solver.solve(world, contacts, 4)
         impulses_total is impulses_total + impulses
 

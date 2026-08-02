@@ -1,13 +1,4 @@
-# std.net — TCP and UDP networking (POSIX sockets)
-#
-# Usage:
-#   server is net.tcp_listen("0.0.0.0", 8080)
-#   client is server.accept()
-#   data is client.read(4096)
-#   client.write("hello")
-#   client.shut()
 
-# ── POSIX socket externs (via runtime/net.c wrappers) ────────
 
 extern *jinn_socket(domain as i32, kind as i32, protocol as i32) returns i32
 extern *bind(fd as i32, addr as %i8, addrlen as i32) returns i32
@@ -37,7 +28,6 @@ err NetError
     ConnectFailed
     AcceptFailed
 
-# Constants
 AF_INET is 2
 SOCK_STREAM is 1
 SOCK_DGRAM is 2
@@ -46,7 +36,6 @@ SO_REUSEADDR is 2
 SOCKADDR_IN_SIZE is 16
 SHUT_RDWR is 2
 
-# ── TCP types ────────────────────────────────────────────────
 
 type TcpListener @resource
     fd as i32
@@ -63,8 +52,6 @@ type TcpListener @resource
             extern.jinn_close(self.fd)
             self.fd is -1 as i32
 
-    # Auto-invoked at scope exit: release the listener fd if the user
-    # did not call `.shut()` explicitly. Idempotent.
     *drop
         self.shut()
 
@@ -98,11 +85,9 @@ type TcpStream @resource
             extern.jinn_close(self.fd)
             self.fd is -1 as i32
 
-    # Auto-invoked at scope exit: close the stream socket cleanly.
     *drop
         self.shut()
 
-# ── UDP type ─────────────────────────────────────────────────
 
 type UdpSocket @resource
     fd as i32
@@ -125,11 +110,9 @@ type UdpSocket @resource
             extern.jinn_close(self.fd)
             self.fd is -1 as i32
 
-    # Auto-invoked at scope exit: release the UDP socket fd.
     *drop
         self.shut()
 
-# ── Helpers ──────────────────────────────────────────────────
 
 *__make_sockaddr(host as String, port as i64) returns %i8
     addr is extern.malloc(SOCKADDR_IN_SIZE)
@@ -141,7 +124,6 @@ type UdpSocket @resource
     extern.inet_pton(AF_INET, %host, addr + 4)
     addr
 
-# ── TCP factory functions ────────────────────────────────────
 
 *tcp_listen(host as String, port as i64) returns TcpListener ! NetError
     if port < 0 or port > 65535
@@ -176,12 +158,10 @@ type UdpSocket @resource
     extern.free(addr)
     TcpStream(fd is fd)
 
-# ── DNS resolution ───────────────────────────────────────────
 
 extern *jinn_dns_resolve(host as %i8, buf as %i8, buf_len as i32) returns i32
 extern *jinn_dns_resolve_all(host as %i8, buf as %i8, buf_len as i32) returns i32
 
-# Resolve a hostname to its first IP address.
 *resolve(host as String) returns String
     buf is extern.malloc(256)
     extern.memset(buf, 0, 256)
@@ -193,7 +173,6 @@ extern *jinn_dns_resolve_all(host as %i8, buf as %i8, buf_len as i32) returns i3
     extern.free(buf)
     addr
 
-# Resolve a hostname to all IP addresses.
 *resolve_all(host as String) returns Vec of String
     buf is extern.malloc(4096)
     extern.memset(buf, 0, 4096)
@@ -205,7 +184,6 @@ extern *jinn_dns_resolve_all(host as %i8, buf as %i8, buf_len as i32) returns i3
     extern.free(buf)
     raw.split("\n")
 
-# ── IPv6 support ─────────────────────────────────────────────
 
 AF_INET6 is 10
 SOCKADDR_IN6_SIZE is 28
@@ -220,13 +198,10 @@ SOCKADDR_IN6_SIZE is 28
     extern.inet_pton(AF_INET6, %host, addr + 8)
     addr
 
-# Detect if an address is IPv6.
 *__is_ipv6(host as String) returns bool
     host.find(":") >= 0
 
-# Connect to a host and port, auto-detecting IPv4 or IPv6.
 *tcp_connect_auto(host as String, port as i64) returns TcpStream ! NetError
-    # Try DNS resolution first
     resolved is resolve(host)
     if resolved.length equals 0
         resolved is host
@@ -243,7 +218,6 @@ SOCKADDR_IN6_SIZE is 28
         return TcpStream(fd is fd)
     tcp_connect(resolved, port)
 
-# ── UDP factory functions ────────────────────────────────────
 
 *udp_bind(host as String, port as i64) returns UdpSocket ! NetError
     fd is extern.jinn_socket(AF_INET, SOCK_DGRAM, 0)

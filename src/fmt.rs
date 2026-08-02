@@ -12,15 +12,6 @@ pub fn format_source(src: &str) -> Result<String, String> {
     Ok(format_program(&prog, &mut sink))
 }
 
-/// Comment trivia carried through formatting (task 8-18, decision D5).
-///
-/// The lexer records every `#` comment's span; the printer flushes
-/// pending comments before each declaration/statement whose source
-/// position follows them, at the current indent. A comment that shares
-/// its line with code re-attaches as a trailing `  # …`; a standalone
-/// comment keeps a preceding blank line if the source had one.
-/// Comments inside a single expression re-anchor to its statement —
-/// position within one logical line is not preserved.
 struct CommentSink {
     entries: Vec<CmtEntry>,
     idx: usize,
@@ -41,7 +32,7 @@ impl CommentSink {
             .iter()
             .map(|sp| {
                 let text = src[sp.start..sp.end].trim_end().to_string();
-                // Standalone iff only whitespace precedes it on its line.
+
                 let mut i = sp.start;
                 let mut own_line = true;
                 while i > 0 && bytes[i - 1] != b'\n' {
@@ -51,11 +42,10 @@ impl CommentSink {
                     }
                     i -= 1;
                 }
-                // Blank line directly above? (two newlines with only
-                // whitespace between them)
+
                 let mut blank_before = false;
                 if own_line && i > 0 {
-                    let mut j = i - 1; // the '\n' ending the previous line
+                    let mut j = i - 1;
                     if bytes[j] == b'\n' {
                         let mut k = j;
                         let mut saw_content = false;
@@ -87,7 +77,6 @@ impl CommentSink {
         CommentSink { entries, idx: 0 }
     }
 
-    /// Emit every pending standalone comment positioned before `upto`.
     fn flush_before(&mut self, out: &mut String, upto: usize, level: usize) {
         while self.idx < self.entries.len() && self.entries[self.idx].start < upto {
             let e = &self.entries[self.idx];
@@ -101,9 +90,6 @@ impl CommentSink {
         }
     }
 
-    /// If the next pending comment shares `line` with just-printed code,
-    /// re-attach it as a trailing comment (the printed text ends with a
-    /// newline; splice before it).
     fn attach_trailing(&mut self, out: &mut String, line: u32) {
         while self.idx < self.entries.len()
             && !self.entries[self.idx].own_line
@@ -120,7 +106,6 @@ impl CommentSink {
         }
     }
 
-    /// End of input: whatever remains prints standalone at column 0.
     fn flush_rest(&mut self, out: &mut String) {
         let end = usize::MAX;
         self.flush_before(out, end, 0);
@@ -396,8 +381,7 @@ fn format_block(out: &mut String, stmts: &[Stmt], level: usize, sink: &mut Comme
     for stmt in stmts {
         sink.flush_before(out, stmt.span().start, level);
         format_stmt(out, stmt, level, sink);
-        /* Trailing comments re-attach to single-line statements only; a
-         * compound statement's interior comments flush inside its body. */
+
         let compound = matches!(
             stmt,
             Stmt::If(_)
@@ -511,8 +495,7 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize, sink: &mut CommentSi
                     out.push_str(&format_expr(guard));
                 }
                 out.push_str(" ?");
-                // Single-expression arms print inline (`Pat ? expr`);
-                // multi-statement arms indent underneath.
+
                 if arm.body.len() == 1
                     && let Stmt::Expr(e) = &arm.body[0]
                 {
@@ -651,12 +634,6 @@ fn format_expr(e: &Expr) -> String {
         Expr::Int(n, _) => n.to_string(),
         Expr::Float(f, _) => format!("{f}"),
         Expr::Str(s, _) => {
-            // Single quotes interpolate `{ident}`; there are no escape
-            // sequences. Quote choice must keep the reparse identical:
-            //  - contains braces or a single quote, and no double quote →
-            //    double-quote (raw) so nothing interpolates/terminates;
-            //  - otherwise single-quote (a brace next to a double quote
-            //    cannot interpolate as an identifier, so it stays literal).
             let braceish = s.contains('{') || s.contains('}') || s.contains('\'');
             if braceish && !s.contains('"') {
                 format!("\"{s}\"")
@@ -774,8 +751,6 @@ fn format_expr(e: &Expr) -> String {
             )
         }
         Expr::Pipe(l, r, rest, _) => {
-            // The pipeline operator is `~` (the old printer emitted `|>`,
-            // which does not lex as one token).
             let mut out = format!("{} ~ {}", format_expr(l), format_expr(r));
             for e in rest {
                 out.push_str(&format!(", {}", format_expr(e)));
@@ -785,9 +760,7 @@ fn format_expr(e: &Expr) -> String {
         Expr::Block(_, _) => "do ... end".into(),
         Expr::Lambda(params, _, body, _) => {
             let ps: Vec<String> = params.iter().map(|p| p.name.to_string()).collect();
-            // Lambdas print in the `|x| expr` form; a multi-statement body
-            // reprints its final expression (the printer never emits the
-            // old invalid `=> ...` placeholder).
+
             let body_txt = match body.last() {
                 Some(Stmt::Expr(e)) => format_expr(e),
                 Some(Stmt::Ret(Some(e), _)) => format_expr(e),
@@ -889,8 +862,6 @@ fn format_pat(p: &Pat) -> String {
 fn format_type(ty: &crate::types::Type) -> String {
     use crate::types::Type;
     match ty {
-        // Display prints `(a) -> r`, which the parser does not accept;
-        // source syntax is `(a) returns r`.
         Type::Fn(params, ret) => {
             let ps: Vec<String> = params.iter().map(format_type).collect();
             format!("({}) returns {}", ps.join(", "), format_type(ret))

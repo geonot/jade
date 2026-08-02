@@ -1,4 +1,3 @@
-# Build a tiny dispatcher of named ops via lambdas.
 *apply2(op as i64, a as i64, b as i64) returns i64
     add is |x as i64, y as i64| x + y
     sub is |x as i64, y as i64| x - y

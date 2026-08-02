@@ -1,4 +1,3 @@
-# Nested record: list of points represented as Vec-of-Vec.
 *mkpt(x as i64, y as i64) returns Vec of i64
     p is vec()
     p.push(x)

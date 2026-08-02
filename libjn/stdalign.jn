@@ -1,4 +1,3 @@
-# libjn.stdalign — drop-in for C <stdalign.h>
 
 *alignof(_type as %i8) returns u64
     nop

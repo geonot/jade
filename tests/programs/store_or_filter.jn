@@ -7,12 +7,10 @@ store items
     insert items 'Beta', 20
     insert items 'Gamma', 30
 
-    # OR filter as value equals 10 or value equals 30
     delete items where value equals 10 or value equals 30
     c is count items
     log c
 
-    # Should only have Beta left
     match items where name equals 'Beta'
         Ok(r) ?
             log r.name

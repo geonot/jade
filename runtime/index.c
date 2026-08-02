@@ -1,56 +1,25 @@
-/* runtime/index.c – Hash-index and B-tree-stub helpers for Jinn stores.
- *
- * Hash index file layout:
- *   [8B  magic   "JINNIDX1"]
- *   [8B  capacity (power-of-2 slot count)]
- *   [8B  count   (number of occupied slots)]
- *   [8B  fingerprint (schema fingerprint of the indexed store)]
- *   [capacity × 24B slots ...]
- *
- * Each slot: [8B hash][8B record_offset][8B status]
- *   status: 0 = empty, 1 = occupied, 2 = tombstone
- *
- * Open-addressing with linear probing.  Grows (2×) when load > 0.7.
- *
- * Persistence & recovery:
- *   The index lives beside the store data file and survives across runs,
- *   giving O(1) opens.  The header carries the store's compile-time schema
- *   fingerprint.  jinn_idx_open_checked() validates the magic, fingerprint,
- *   and header invariants; on any mismatch or corruption it recreates a
- *   fresh index stamped with the expected fingerprint and signals the
- *   caller to rebuild it from the store records.  A clean, matching index
- *   is reused as-is with no scan.
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include "jinn_rt.h"
-
 #define IDX_MAGIC     "JINNIDX1"
 #define IDX_MAGIC_LEN 8
-#define IDX_HEADER    32          /* magic + capacity + count + fingerprint */
-#define SLOT_SIZE     24          /* hash + offset + status */
+#define IDX_HEADER    32
+#define SLOT_SIZE     24
 #define INITIAL_CAP   256
 #define STATUS_EMPTY     0
 #define STATUS_OCCUPIED  1
 #define STATUS_TOMBSTONE 2
-
-/* ── Hash a store field value (i64 or fixed string) ─────────────── */
 uint64_t jinn_idx_hash_i64(int64_t val) {
     return jinn_fnv1a(&val, sizeof(val));
 }
-
 uint64_t jinn_idx_hash_str(const char *buf, int64_t len) {
     return jinn_fnv1a(buf, len);
 }
-
 uint64_t jinn_idx_hash_f64(double val) {
     return jinn_fnv1a(&val, sizeof(val));
 }
-
-/* ── Index file management ──────────────────────────────────────── */
 
 struct JinnIndex {
     FILE   *fp;
@@ -59,7 +28,6 @@ struct JinnIndex {
     int64_t fingerprint;
 };
 
-/* Read header from an open index file */
 static int read_header(JinnIndex *idx) {
     fseek(idx->fp, 0, SEEK_SET);
     char mag[IDX_MAGIC_LEN];
@@ -71,7 +39,6 @@ static int read_header(JinnIndex *idx) {
     return 0;
 }
 
-/* Write header */
 static int write_header(JinnIndex *idx) {
     if (fseek(idx->fp, 0, SEEK_SET) != 0 ||
         fwrite(IDX_MAGIC, 1, IDX_MAGIC_LEN, idx->fp) != IDX_MAGIC_LEN ||
@@ -83,13 +50,10 @@ static int write_header(JinnIndex *idx) {
     }
     return 0;
 }
-
-/* Create a fresh index file with initial capacity */
 static void init_file(JinnIndex *idx) {
     idx->capacity = INITIAL_CAP;
     idx->count = 0;
     write_header(idx);
-    /* Zero-fill slots */
     uint8_t zero0[SLOT_SIZE];
     memset(zero0, 0, SLOT_SIZE);
     for (int64_t i = 0; i < INITIAL_CAP; i++) {
@@ -97,9 +61,6 @@ static void init_file(JinnIndex *idx) {
     }
     fflush(idx->fp);
 }
-
-/* Header invariants: power-of-2 capacity, sane count, file big enough to
- * hold every slot.  A violation means the index is corrupt or truncated. */
 static int header_is_sane(JinnIndex *idx) {
     int64_t cap = idx->capacity;
     if (cap < INITIAL_CAP) return 0;
@@ -111,13 +72,6 @@ static int header_is_sane(JinnIndex *idx) {
     if (end < (long)(IDX_HEADER + cap * SLOT_SIZE)) return 0;
     return 1;
 }
-
-/* Open or create an index, validating it against the store schema
- * fingerprint.  On a clean, matching index this is O(1): the persisted
- * header is reused with no scan.  On a missing file, bad magic, fingerprint
- * mismatch, or any header corruption, a fresh index is created stamped with
- * `fingerprint` and *needs_rebuild is set so the caller repopulates it from
- * the store records. */
 JinnIndex *jinn_idx_open_checked(const char *path, int64_t fingerprint,
                                  int *needs_rebuild) {
     JinnIndex *idx = (JinnIndex *)calloc(1, sizeof(JinnIndex));
@@ -136,20 +90,14 @@ JinnIndex *jinn_idx_open_checked(const char *path, int64_t fingerprint,
     if (needs_rebuild) *needs_rebuild = 1;
     return idx;
 }
-
-/* Back-compat: open without fingerprint validation. */
 JinnIndex *jinn_idx_open(const char *path) {
     return jinn_idx_open_checked(path, 0, NULL);
 }
-
 void jinn_idx_close(JinnIndex *idx) {
     if (!idx) return;
     if (idx->fp) fclose(idx->fp);
     free(idx);
 }
-
-/* ── Slot I/O ───────────────────────────────────────────────────── */
-
 static void read_slot(JinnIndex *idx, int64_t slot,
                       uint64_t *hash, int64_t *offset, int64_t *status) {
     fseek(idx->fp, IDX_HEADER + slot * SLOT_SIZE, SEEK_SET);
@@ -157,7 +105,6 @@ static void read_slot(JinnIndex *idx, int64_t slot,
     fread(offset, 8, 1, idx->fp);
     fread(status, 8, 1, idx->fp);
 }
-
 static int write_slot(JinnIndex *idx, int64_t slot,
                       uint64_t hash, int64_t offset, int64_t status) {
     if (fseek(idx->fp, IDX_HEADER + slot * SLOT_SIZE, SEEK_SET) != 0 ||
@@ -170,16 +117,11 @@ static int write_slot(JinnIndex *idx, int64_t slot,
     return 0;
 }
 
-/* ── Grow (rehash) ──────────────────────────────────────────────── */
-
 static void grow(JinnIndex *idx) {
     int64_t old_cap = idx->capacity;
 
-    /* Overflow guard: capacity can never exceed 2^60 slots (prevents
-     * integer overflow in old_cap * 2 and slot-count * SLOT_SIZE).   */
     if (old_cap > ((int64_t)1 << 60)) return;
 
-    /* Read all occupied slots */
     typedef struct { uint64_t h; int64_t off; } Entry;
     if (idx->count <= 0 || (size_t)idx->count > SIZE_MAX / sizeof(Entry)) return;
     Entry *entries = (Entry *)malloc(sizeof(Entry) * (size_t)idx->count);
@@ -194,13 +136,10 @@ static void grow(JinnIndex *idx) {
             n++;
         }
     }
-
-    /* Double capacity, rewrite file */
     idx->capacity = old_cap * 2;
     idx->count = 0;
     write_header(idx);
 
-    /* Zero-fill new slots */
     uint8_t zero[SLOT_SIZE];
     memset(zero, 0, SLOT_SIZE);
     for (int64_t i = 0; i < idx->capacity; i++) {
@@ -208,7 +147,6 @@ static void grow(JinnIndex *idx) {
     }
     fflush(idx->fp);
 
-    /* Re-insert */
     for (int64_t i = 0; i < n; i++) {
         int64_t slot = (int64_t)(entries[i].h & (uint64_t)(idx->capacity - 1));
         for (;;) {
@@ -227,23 +165,18 @@ static void grow(JinnIndex *idx) {
     free(entries);
 }
 
-/* ── Insert into index ──────────────────────────────────────────── */
-
 static void idx_txn_rollback(void *arg) {
     JinnIndex *idx = (JinnIndex *)arg;
     if (idx && idx->fp) (void)read_header(idx);
 }
-
 static void idx_txn_guard(JinnIndex *idx) {
     if (idx && idx->fp && jinn_txn_active()) {
         jinn_txn_track_aux(idx->fp, idx_txn_rollback, idx);
     }
 }
-
 void jinn_idx_insert(JinnIndex *idx, uint64_t hash, int64_t record_offset) {
     if (!idx) return;
     idx_txn_guard(idx);
-    /* Check load factor */
     if (idx->count * 10 >= idx->capacity * 7) {
         grow(idx);
     }
@@ -262,8 +195,6 @@ void jinn_idx_insert(JinnIndex *idx, uint64_t hash, int64_t record_offset) {
     }
 }
 
-/* ── Lookup: returns record offset or -1 if not found ───────────── */
-
 int64_t jinn_idx_lookup(JinnIndex *idx, uint64_t hash) {
     if (!idx) return -1;
     int64_t slot = (int64_t)(hash & (uint64_t)(idx->capacity - 1));
@@ -275,15 +206,9 @@ int64_t jinn_idx_lookup(JinnIndex *idx, uint64_t hash) {
         slot = (slot + 1) & (idx->capacity - 1);
     }
 }
-
-/* ── Check if a hash exists (for @unique enforcement) ───────────── */
-
 int jinn_idx_contains(JinnIndex *idx, uint64_t hash) {
     return jinn_idx_lookup(idx, hash) >= 0 ? 1 : 0;
 }
-
-/* ── Delete by hash ─────────────────────────────────────────────── */
-
 void jinn_idx_delete(JinnIndex *idx, uint64_t hash) {
     if (!idx) return;
     idx_txn_guard(idx);
@@ -302,8 +227,6 @@ void jinn_idx_delete(JinnIndex *idx, uint64_t hash) {
         slot = (slot + 1) & (idx->capacity - 1);
     }
 }
-
-/* ── Rebuild (clear all entries) ────────────────────────────────── */
 
 void jinn_idx_clear(JinnIndex *idx) {
     if (!idx) return;

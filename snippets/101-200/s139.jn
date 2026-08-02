@@ -1,4 +1,3 @@
-# Reverse a string by iterating bytes.
 *reverse_str(s as String) returns String
     out is ""
     i is s.length - 1

@@ -315,9 +315,6 @@ impl Typer {
                     ));
                 }
 
-                // Non-strict: `ty` may still hold unsolved vars here (e.g. a
-                // polymorphic lambda bind before generalization); an
-                // unsolved type is simply not an aggregate.
                 let resolved_bind_ty = {
                     let was_strict = self.infer_ctx.is_strict();
                     self.infer_ctx.set_strict(false);
@@ -326,14 +323,6 @@ impl Typer {
                     r
                 };
 
-                // M4 (memory-model.md): a container slot cannot be
-                // tombstoned, so binding an aggregate element would alias
-                // the container's memory. Scalar and String elements bind
-                // freely (they copy); expression-position reads stay
-                // borrows. Checked on the expression KIND plus the
-                // resolved type — `is_aliased_read_of_heap` tests the
-                // unresolved `expr.ty`, which is still a TypeVar for an
-                // inferred-element container.
                 let is_element_read = match &value.kind {
                     hir::ExprKind::VecMethod(_, mname, _)
                     | hir::ExprKind::MapMethod(_, mname, _) => matches!(
@@ -358,11 +347,6 @@ impl Typer {
                     ));
                 }
 
-                // M3 (memory-model.md): a plain bind of an aggregate
-                // struct field is a partial move, exactly as `take b.f`
-                // does today — canonicalize the access modifier so the
-                // MIR FieldClear tombstone and the moved-field
-                // diagnostics both apply.
                 let access_mod = {
                     let field_of_var = matches!(
                         &value.kind,
@@ -1237,10 +1221,7 @@ impl Typer {
                 let pre_loop = self.snapshot_moved_fields();
                 let mut body = self.lower_block_no_scope(&f.body, ret_ty)?;
                 self.check_loop_body_moves(&pre_loop, &outer_ids, *span)?;
-                /* M8 (task 8-8): every `sim for` iteration is its own
-                 * concurrent task, and an aggregate moves into at most
-                 * one task — so capturing one here is a hard error, not
-                 * a mark (there is no single task to own it). */
+
                 if let Some((_, name)) = self
                     .collect_aggregate_captures(&body, &outer_ids)
                     .into_iter()

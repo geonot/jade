@@ -1,5 +1,3 @@
-# Raft node state machine.  `role` is encoded:
-#   0 = Follower    1 = Candidate    2 = Leader
 
 actor Node
     id as i64
@@ -14,13 +12,11 @@ actor Node
     votes as i64
 
     *start_election bs as Bus
-        # Bump term, vote for self, broadcast RequestVote.
         term is term + 1
         role is 1
         voted_for is id
         votes is 1
         bs.send_vote_req(id, term)
-        # Simulate immediate quorum (other 4 nodes grant the vote).
         bs.send_vote_grant(2, term)
         bs.send_vote_grant(3, term)
         bs.send_vote_grant(4, term)
@@ -36,18 +32,15 @@ actor Node
             if votes * 2 > peer_count
                 role is 2
                 leader is id
-                # Send initial empty heartbeat.
                 bs.send_append(id, term, 0)
 
     *append cmd as i64, bs as Bus
         if role neq 2
             return
         log_size is log_size + 1
-        # Replicate to peers and pretend they all ack.
         loop(2, $ <= peer_count, $ + 1)
             bs.send_append(id, term, cmd)
             bs.send_append_ack($, term)
-        # Quorum reached -> commit.
         commit_index is log_size
         last_applied is commit_index
 

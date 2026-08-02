@@ -1,4 +1,3 @@
-# Predicate lambda passed to a counting HOF.
 *count_if(xs as Vec of i64, pred as (i64) returns bool) returns i64
     n is 0
     i is 0

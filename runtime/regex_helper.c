@@ -1,4 +1,3 @@
-/* runtime/regex_helper.c — Helpers for PCRE2 ovector access */
 #include <stdint.h>
 #include "jinn_rt.h"
 

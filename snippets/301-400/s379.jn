@@ -1,4 +1,3 @@
-# Hailstone (Collatz) step count.
 *steps(n as i64) returns i64
     c is 0
     while n neq 1

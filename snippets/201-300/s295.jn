@@ -1,4 +1,3 @@
-# Q16.16 fixed-point multiply.
 *q_mul(a as i64, b as i64) returns i64
     a * b / 65536
 

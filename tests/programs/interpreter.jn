@@ -1,12 +1,5 @@
-# interpreter.jn — Bytecode VM interpreter
-# Complexity: Advanced
-# Demonstrates: enums, arrays, match, loops, structs, systems features
 
-# ── Opcodes ─────────────────────────────────────────────────────────────────
 
-# We encode opcodes as integers for the bytecode array
-# 0 = HALT, 1 = PUSH, 2 = POP, 3 = ADD, 4 = SUB, 5 = MUL, 6 = DIV
-# 7 = DUP, 8 = PRINT, 9 = JMP, 10 = JZ (jump if zero)
 
 *op_halt
     0
@@ -31,13 +24,9 @@
 *op_jz
     10
 
-# ── VM State ────────────────────────────────────────────────────────────────
 
-# Stack is a fixed array, sp is stack pointer
-# We simulate a stack machine with arrays
 
 *vm_run(code, code_len as i64)
-    # Stack: fixed size 256
     stack is [
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -118,37 +107,28 @@
                 ip is ip + 1
 
     log(steps)
-    # Return top of stack
     if sp > 0
         stack[sp - 1]
     else
         0
 
 *main
-    # Program 1: compute (3 + 4) * 2 = 14
-    # PUSH 3, PUSH 4, ADD, PUSH 2, MUL, PRINT, HALT
     prog1 is [1, 3, 1, 4, 3, 1, 2, 5, 8, 0,
               0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     result1 is vm_run(prog1, 10)
-    log(result1)                     # 14
+    log(result1)
 
-    # Program 2: compute 10 - 3 = 7
-    # PUSH 10, PUSH 3, SUB, PRINT, HALT
     prog2 is [1, 10, 1, 3, 4, 8, 0,
               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     result2 is vm_run(prog2, 7)
-    log(result2)                     # 7
+    log(result2)
 
-    # Program 3: compute 100 / 5 = 20
-    # PUSH 100, PUSH 5, DIV, PRINT, HALT
     prog3 is [1, 100, 1, 5, 6, 8, 0,
               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     result3 is vm_run(prog3, 7)
-    log(result3)                     # 20
+    log(result3)
 
-    # Program 4: DUP + MUL = square
-    # PUSH 7, DUP, MUL, PRINT, HALT → 49
     prog4 is [1, 7, 7, 5, 8, 0,
               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     result4 is vm_run(prog4, 6)
-    log(result4)                     # 49
+    log(result4)

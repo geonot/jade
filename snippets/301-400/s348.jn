@@ -1,4 +1,3 @@
-# Tagged record: first slot = tag, rest = payload.
 *mk_msg(tag as i64, a as i64, b as i64) returns Vec of i64
     m is vec()
     m.push(tag)

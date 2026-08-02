@@ -1,5 +1,3 @@
-# 8-round ARX stream cipher derived from a 64-bit key + 64-bit nonce.
-# Output is a vec of bytes of arbitrary length.  Same call decrypts.
 
 *rotl32(x as i64, n as i64) returns i64
     ((x << n) | ((x & 0xFFFFFFFF) >> (32 - n))) & 0xFFFFFFFF
@@ -16,10 +14,10 @@
 
 *block(key as i64, nonce as i64, counter as i64) returns Vec of i64
     s is vec()
-    s.push(0x61707865)            # "expa"
-    s.push(0x3320646E)            # "nd 3"
-    s.push(0x79622D32)            # "2-by"
-    s.push(0x6B206574)            # "te k"
+    s.push(0x61707865)
+    s.push(0x3320646E)
+    s.push(0x79622D32)
+    s.push(0x6B206574)
     s.push(key & 0xFFFFFFFF)
     s.push((key >> 32) & 0xFFFFFFFF)
     s.push(0)
@@ -33,7 +31,6 @@
     s.push(nonce & 0xFFFFFFFF)
     s.push((nonce >> 32) & 0xFFFFFFFF)
 
-    # Snapshot for final addition.
     init is vec()
     loop(0, $ < 16, $ + 1)
         init.push(s.get($))
@@ -58,7 +55,6 @@
     pos is 0
     while pos < msg.len()
         ks is block(key, nonce, counter)
-        # Each ks word is 32 bits = 4 bytes; lane order LE.
         loop(0, $ < 16, $ + 1)
             w is ks.get($)
             loop(0, $ < 4, $ + 1)

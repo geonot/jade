@@ -1,4 +1,3 @@
-# Bresenham line: count pixels touched.
 *bresenham(x0 as i64, y0 as i64, x1 as i64, y1 as i64) returns i64
     dx is x1 - x0
     if dx < 0

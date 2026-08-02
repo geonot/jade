@@ -1,4 +1,3 @@
-# lcm built on top of gcd.
 *gcd(a as i64, b as i64) returns i64
     while b neq 0
         t is b

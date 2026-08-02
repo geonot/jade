@@ -28,9 +28,6 @@ actor Multiplier
     m.mul(7)
     extern.usleep(100000)
     a.show()
-    # Message order is guaranteed per-actor, not across actors: `a.show()`
-    # and `m.show()` are sends to two different mailboxes and race. Drain
-    # the first before sending the second so the snapshot is deterministic.
     extern.usleep(100000)
     m.show()
     extern.usleep(100000)

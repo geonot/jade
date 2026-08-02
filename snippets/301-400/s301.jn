@@ -1,4 +1,3 @@
-# Lambda stored in a variable, then invoked.
 *main
     sq is |x as i64| x * x
     log sq(7)

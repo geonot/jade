@@ -1,4 +1,3 @@
-# Interrupt vector handler_at: pick handler index by vector.
 *handler_at(handlers as Vec of i64, vec_id as i64) returns i64
     handlers.get(vec_id)
 

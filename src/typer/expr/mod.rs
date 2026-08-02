@@ -249,12 +249,6 @@ impl Typer {
             ast::Expr::Ref(inner, span) => {
                 let hi = self.lower_expr(inner)?;
 
-                // `%x : T` is `&T` — codegen materializes the value into a
-                // stack slot and passes that slot's address.
-                // Special cases for C-interop:
-                //   `%s : String`      → `%i8`  (data pointer, C-string marshal)
-                //   `%v : Vec of T`    → `%T`   (data pointer to first element)
-                //   `%v : [T]`         → `%T`   (same, list-literal sugar)
                 let resolved = self.infer_ctx.shallow_resolve(&hi.ty);
                 let ty = match resolved {
                     Type::String => Type::Ptr(Box::new(Type::I8)),
@@ -396,12 +390,6 @@ impl Typer {
         }
     }
 
-    /// The legality lattice for `as`. Scalars (numeric/bool) convert among
-    /// themselves; enums convert to/from integers via their discriminant; raw
-    /// pointers convert to/from integers and each other (the C FFI needs
-    /// opaque handles). Everything else — and in particular any conversion
-    /// into or out of a managed type (String, Vec, Map, structs) — is
-    /// rejected: `as` is a conversion, never a reinterpretation.
     fn cast_legal(from: &Type, to: &Type) -> bool {
         fn unwrap(t: &Type) -> &Type {
             match t {
@@ -426,17 +414,6 @@ impl Typer {
     }
 
     pub(crate) fn maybe_coerce_to(&mut self, mut expr: hir::Expr, target: &Type) -> hir::Expr {
-        // Resolve inference variables for the coercion *decision* only. A value
-        // derived from an integer literal (e.g. `n is 7`) may still carry an
-        // unbound integer TypeVar whose `is_int()`/`is_float()` queries return
-        // false, which would otherwise silently skip a required numeric
-        // coercion and emit a type-mismatched call in codegen.
-        //
-        // Critically, we must NOT mutate `expr.ty` on the no-coercion path:
-        // the node's original TypeVar may still need to be unified/solved by
-        // later inference (HOFs, lambdas, generic calls). We only concretize
-        // `expr.ty` when actually wrapping the node in a `Coerce`, where the
-        // source type is genuinely fixed and MIR lowering needs it concrete.
         let et = self.infer_ctx.resolve(&expr.ty);
         let tt = self.infer_ctx.resolve(target);
         if et == tt {

@@ -1,4 +1,3 @@
-# libjn.sys_types — drop-in for POSIX <sys/types.h>
 
 alias pid_t     = i32
 alias uid_t     = u32

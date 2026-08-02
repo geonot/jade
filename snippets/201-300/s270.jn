@@ -1,4 +1,3 @@
-# Watchdog: simulate elapsed-since-kick events; count timeouts.
 *timeouts(events as Vec of i64, n as i64, limit as i64) returns i64
     t is 0
     cnt is 0

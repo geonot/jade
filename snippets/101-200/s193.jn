@@ -1,4 +1,3 @@
-# Shuffle is hard without rng — instead, log a deterministic permutation.
 *main
     n is 8
     perm is vec()

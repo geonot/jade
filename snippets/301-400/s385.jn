@@ -1,4 +1,3 @@
-# Dot product over two equal-length Vecs.
 *main
     a is vec()
     b is vec()

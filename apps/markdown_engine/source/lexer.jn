@@ -1,8 +1,5 @@
 use models/token
 
-# Lines are encoded as integer codes:
-#   code / 1000 = first-char class (1=#, 2=*, 3=`, 4=blank, 5=text)
-#   code % 1000 = payload word count
 *classify_line(code as i64) returns i64
     code / 1000
 

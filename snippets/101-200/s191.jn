@@ -1,4 +1,3 @@
-# Approximate e via 1/n! summation.
 *main
     s is 0.0
     f is 1.0

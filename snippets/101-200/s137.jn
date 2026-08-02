@@ -1,4 +1,3 @@
-# Concrete Result enum.
 enum Res
     Ok(i64)
     Err

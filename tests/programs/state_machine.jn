@@ -1,6 +1,3 @@
-# state_machine.jn — Simple state machine with enums
-# Complexity: Intermediate
-# Demonstrates: enums, match, loops, structs, methods
 
 enum State
     Idle
@@ -50,29 +47,24 @@ enum Event
         Done(n) ? n
 
 *main
-    # Simulate a state machine
     s is Idle
 
-    # Start
     s is transition(s, Start)
-    state_name(s)                       # running
+    state_name(s)
 
-    # Tick a few times
     s is transition(s, Tick)
     s is transition(s, Tick)
     s is transition(s, Tick)
-    log(state_count(s))                 # 3
+    log(state_count(s))
 
-    # Pause and resume
     s is transition(s, Pause)
-    state_name(s)                       # paused
+    state_name(s)
 
     s is transition(s, Resume)
-    state_name(s)                       # running
+    state_name(s)
 
-    # Tick more and stop
     s is transition(s, Tick)
     s is transition(s, Tick)
     s is transition(s, Stop)
-    state_name(s)                       # done
-    log(state_count(s))                 # 5
+    state_name(s)
+    log(state_count(s))

@@ -1,5 +1,3 @@
-# fizzbuzz.jn — Classic FizzBuzz
-# Complexity: Beginner
 
 *main
     for i from 1 to 101

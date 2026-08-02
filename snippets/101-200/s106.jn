@@ -1,4 +1,3 @@
-# Quicksort (Lomuto partition).
 *partition(v as Vec of i64, lo as i64, hi as i64) returns i64
     pivot is v.get(hi)
     i is lo - 1

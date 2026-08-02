@@ -1,4 +1,3 @@
-# Maximum subarray (Kadane).
 *max_subarray(v) returns i64
     best is v.get(0)
     cur is v.get(0)

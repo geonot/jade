@@ -1,4 +1,3 @@
-# SR latch: simulate Q after sequence of (S,R) inputs.
 *sr(states_s as Vec of i64, states_r as Vec of i64, n as i64) returns i64
     q is 0
     i is 0

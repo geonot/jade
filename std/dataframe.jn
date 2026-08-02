@@ -1,22 +1,7 @@
-# std.dataframe — Tabular data manipulation (inspired by Spark, R, Julia, NumPy)
-#
-# Best-of-all-worlds DataFrame: columnar storage like Spark, R-style
-# vectorized operations, Julia's type flexibility, NumPy's broadcasting.
-#
-# Usage:
-#   df is dataframe.from_csv(csv.parse(text))
-#   df is dataframe.new(["name", "age", "score"])
-#   df.add_row(["Alice", "30", "95"])
-#   filtered is df.filter("age", |v| convert.parse_int(v) > 25)
-#   grouped is df.group_by("name")
-#   sorted is df.sort_by("score")
-#   df.select(["name", "score"])
-#   log(df.describe())
 
 use csv
 use convert
 
-# ── Core types ───────────────────────────────────────────────
 
 type DataFrame
     columns as Vec of String
@@ -24,23 +9,19 @@ type DataFrame
     nrows as i64
     ncols as i64
 
-    # ── Access ───────────────────────────────────────────────
 
-    # Get a column by name.
     *col(name as String) returns Vec of String
         idx is __col_idx(self.columns, name)
         if idx < 0
             return vec()
         self.data.get(idx)
 
-    # Get a cell value.
     *at(row as i64, col_name as String) returns String
         idx is __col_idx(self.columns, col_name)
         if idx < 0 or row < 0 or row >= self.nrows
             return ""
         self.data.get(idx).get(row)
 
-    # Get a row as a map.
     *row(idx as i64) returns Map of String
         result is map()
         if idx < 0 or idx >= self.nrows
@@ -49,21 +30,17 @@ type DataFrame
             result.set($, self.data.get($$).get(idx))
         result
 
-    # ── Manipulation ─────────────────────────────────────────
 
-    # Add a row of values.
     *add_row(values as Vec of String)
         i is 0
         while i < self.ncols and i < values.length
             self.data.get(i).push(values.get(i))
             i is i + 1
-        # Pad with empty strings if fewer values
         while i < self.ncols
             self.data.get(i).push("")
             i is i + 1
         self.nrows is self.nrows + 1
 
-    # Add a new column with default value.
     *add_column(name as String, default_val as String)
         self.columns.push(name)
         col_data is vec()
@@ -72,7 +49,6 @@ type DataFrame
         self.data.push(col_data)
         self.ncols is self.ncols + 1
 
-    # Select specific columns, return new DataFrame.
     *select(col_names as Vec of String) returns DataFrame
         new_data is vec()
         new_cols is vec()
@@ -83,7 +59,6 @@ type DataFrame
                 new_data.push(__copy_vec(self.data.get(idx)))
         DataFrame(columns is new_cols, data is new_data, nrows is self.nrows, ncols is new_cols.length)
 
-    # Drop a column, return new DataFrame.
     *drop_col(name as String) returns DataFrame
         new_data is vec()
         new_cols is vec()
@@ -93,9 +68,7 @@ type DataFrame
                 new_data.push(__copy_vec(self.data.get($$)))
         DataFrame(columns is new_cols, data is new_data, nrows is self.nrows, ncols is new_cols.length)
 
-    # ── Filtering ────────────────────────────────────────────
 
-    # Filter rows where column value equals target.
     *where_eq(col_name as String, target as String) returns DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
@@ -107,7 +80,6 @@ type DataFrame
                 mask.push($$)
         __apply_mask(self, mask)
 
-    # Filter rows where column value does not equal target.
     *where_neq(col_name as String, target as String) returns DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
@@ -119,7 +91,6 @@ type DataFrame
                 mask.push($$)
         __apply_mask(self, mask)
 
-    # Filter rows where numeric column > threshold.
     *where_gt(col_name as String, threshold as f64) returns DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
@@ -132,7 +103,6 @@ type DataFrame
                 mask.push($$)
         __apply_mask(self, mask)
 
-    # Filter rows where numeric column < threshold.
     *where_lt(col_name as String, threshold as f64) returns DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
@@ -145,7 +115,6 @@ type DataFrame
                 mask.push($$)
         __apply_mask(self, mask)
 
-    # Filter rows where column contains substring.
     *where_contains(col_name as String, substr as String) returns DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
@@ -157,7 +126,6 @@ type DataFrame
                 mask.push($$)
         __apply_mask(self, mask)
 
-    # Take first n rows.
     *head(n as i64) returns DataFrame
         mask is vec()
         i is 0
@@ -168,7 +136,6 @@ type DataFrame
             mask.push(i)
         __apply_mask(self, mask)
 
-    # Take last n rows.
     *tail(n as i64) returns DataFrame
         mask is vec()
         start is self.nrows - n
@@ -178,22 +145,18 @@ type DataFrame
             mask.push(i)
         __apply_mask(self, mask)
 
-    # ── Sorting ──────────────────────────────────────────────
 
-    # Sort by a column (lexicographic ascending).
     *sort_by(col_name as String) returns DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
             return __clone_df(self)
         col_data is copy self.data.get(idx)
-        # Build index array and sort by values
         indices is vec()
         for i in 0 to self.nrows
             indices.push(i)
         __sort_indices(indices, col_data)
         __apply_mask(self, indices)
 
-    # Sort by a numeric column (ascending).
     *sort_by_num(col_name as String) returns DataFrame
         idx is __col_idx(self.columns, col_name)
         if idx < 0
@@ -205,9 +168,7 @@ type DataFrame
         __sort_indices_num(indices, col_data)
         __apply_mask(self, indices)
 
-    # ── Aggregation ──────────────────────────────────────────
 
-    # Sum of a numeric column.
     *sum(col_name as String) returns f64
         idx is __col_idx(self.columns, col_name)
         if idx < 0
@@ -218,13 +179,11 @@ type DataFrame
             total is total + convert.parse_float($)
         total
 
-    # Mean of a numeric column.
     *mean(col_name as String) returns f64
         if self.nrows equals 0
             return 0.0
         self.sum(col_name) / self.nrows as f64
 
-    # Min of a numeric column.
     *min_val(col_name as String) returns f64
         idx is __col_idx(self.columns, col_name)
         if idx < 0 or self.nrows equals 0
@@ -237,7 +196,6 @@ type DataFrame
                 m is v
         m
 
-    # Max of a numeric column.
     *max_val(col_name as String) returns f64
         idx is __col_idx(self.columns, col_name)
         if idx < 0 or self.nrows equals 0
@@ -250,7 +208,6 @@ type DataFrame
                 m is v
         m
 
-    # Count non-empty values in a column.
     *count_non_empty(col_name as String) returns i64
         idx is __col_idx(self.columns, col_name)
         if idx < 0
@@ -262,7 +219,6 @@ type DataFrame
                 n is n + 1
         n
 
-    # Count unique values in a column.
     *nunique(col_name as String) returns i64
         idx is __col_idx(self.columns, col_name)
         if idx < 0
@@ -273,7 +229,6 @@ type DataFrame
             seen.set($, "1")
         seen.length
 
-    # Value counts for a column.
     *value_counts(col_name as String) returns Map of String
         idx is __col_idx(self.columns, col_name)
         result is map()
@@ -289,9 +244,7 @@ type DataFrame
                 result.set(val, "1")
         result
 
-    # ── Transformation ───────────────────────────────────────
 
-    # Rename a column.
     *rename_col(old_name as String, new_name as String) returns DataFrame
         new_cols is vec()
         loop self.columns
@@ -301,9 +254,7 @@ type DataFrame
                 new_cols.push($)
         DataFrame(columns is new_cols, data is self.data, nrows is self.nrows, ncols is self.ncols)
 
-    # ── Display ──────────────────────────────────────────────
 
-    # Describe the DataFrame (shape and column names).
     *describe returns String
         result is "DataFrame: " + to_string(self.nrows) + " rows x " + to_string(self.ncols) + " cols\n"
         result is result + "Columns: "
@@ -313,19 +264,16 @@ type DataFrame
             result is result + $
         result
 
-    # Pretty-print the first n rows.
     *show(n as i64) returns String
         limit is n
         if limit > self.nrows
             limit is self.nrows
-        # Header
         result is ""
         loop self.columns
             if $$ > 0
                 result is result + "\t"
             result is result + $
         result is result + "\n"
-        # Rows
         for r in 0 to limit
             loop self.data
                 if $$ > 0
@@ -334,16 +282,13 @@ type DataFrame
             result is result + "\n"
         result
 
-    # Convert to CSV string.
     *to_csv returns String
         result is ""
-        # Header
         loop self.columns
             if $$ > 0
                 result is result + ","
             result is result + $
         result is result + "\n"
-        # Rows
         for r in 0 to self.nrows
             loop self.data
                 if $$ > 0
@@ -352,22 +297,18 @@ type DataFrame
             result is result + "\n"
         result
 
-# ── Constructors ─────────────────────────────────────────────
 
-# Create an empty DataFrame with given column names.
 *new(col_names as Vec of String) returns DataFrame
     data is vec()
     loop col_names
         data.push(vec())
     DataFrame(columns is col_names, data is data, nrows is 0, ncols is col_names.length)
 
-# Create a DataFrame from parsed CSV rows (first row = headers).
 *from_csv(rows as Vec of Vec of String) returns DataFrame
     if rows.length < 1
         return new(vec())
     headers is copy rows.get(0)
     ncols is headers.length
-    # Columnar conversion: transpose row-major to column-major
     col_data is vec()
     for c in 0 to ncols
         col_data.push(vec())
@@ -381,21 +322,17 @@ type DataFrame
                     col_data.get($$).push("")
     DataFrame(columns is headers, data is col_data, nrows is rows.length - 1, ncols is ncols)
 
-# Create a DataFrame from a CSV text string.
 *read_csv(text as String) returns DataFrame
     rows is csv.parse(text)
     from_csv(rows)
 
-# ── Join operations ──────────────────────────────────────────
 
-# Inner join two DataFrames on a common column.
 *inner_join(left as DataFrame, right as DataFrame, on_col as String) returns DataFrame
     l_idx is __col_idx(left.columns, on_col)
     r_idx is __col_idx(right.columns, on_col)
     if l_idx < 0 or r_idx < 0
         return left
 
-    # Build column names for result (all left cols + right cols except join col)
     result_cols is vec()
     loop left.columns
         result_cols.push($)
@@ -405,7 +342,6 @@ type DataFrame
 
     result is new(result_cols)
 
-    # Index right side by join column
     right_index is map()
     r is 0
     while r < right.nrows
@@ -413,19 +349,16 @@ type DataFrame
         right_index.set(key, to_string(r))
         r is r + 1
 
-    # Match rows
     r is 0
     while r < left.nrows
         key is left.data.get(l_idx).get(r)
         if right_index.has(key)
             right_row is convert.parse_int(right_index.get(key))
             row_vals is vec()
-            # Left columns
             c is 0
             while c < left.ncols
                 row_vals.push(left.data.get(c).get(r))
                 c is c + 1
-            # Right columns (skip join col)
             c is 0
             while c < right.ncols
                 if right.columns.get(c) neq on_col
@@ -435,7 +368,6 @@ type DataFrame
         r is r + 1
     result
 
-# ── Internal helpers ─────────────────────────────────────────
 
 *__col_idx(columns as Vec of String, name as String) returns i64
     loop columns
@@ -443,10 +375,6 @@ type DataFrame
             return $$
     -1
 
-# An independent DataFrame with the same contents. Used where a query
-# matches nothing and the result must still be an owned value: `self` is a
-# borrow, so returning it directly would hand out a reference to the
-# receiver.
 *__clone_df(df as DataFrame) returns DataFrame
     new_cols is vec()
     loop df.columns
@@ -472,7 +400,6 @@ type DataFrame
     DataFrame(columns is df.columns, data is new_data, nrows is indices.length, ncols is df.ncols)
 
 *__sort_indices(indices as Vec of i64, values as Vec of String)
-    # Simple insertion sort on indices by string values
     i is 1
     while i < indices.length
         key_idx is indices.get(i)
@@ -489,7 +416,6 @@ type DataFrame
         i is i + 1
 
 *__sort_indices_num(indices as Vec of i64, values as Vec of String)
-    # Insertion sort on indices by numeric values
     i is 1
     while i < indices.length
         key_idx is indices.get(i)

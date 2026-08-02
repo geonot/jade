@@ -1,20 +1,3 @@
-//! Conformance for StoreError and fallible store statements (store-improvement.md
-//! item 3, task 2-31-2). Pins the documented semantics:
-//!
-//!   * `insert` / `set` with handler arms (`?` / `!!`, inline or multiline)
-//!     become fallible expressions of type `Result of i64, StoreError`;
-//!   * the Ok payload is the new sid for `insert` and the updated-row count
-//!     for `set`;
-//!   * `StoreError` is a built-in err enum (Duplicate, Missing, Constraint,
-//!     Io) that can be matched on and propagated with `!! err`;
-//!   * @unique violations yield Duplicate; empty @required strings yield
-//!     Constraint; a `set` whose filter matches no rows yields Missing;
-//!   * a bare unhandled `insert` that violates @unique TRAPS with a
-//!     diagnostic instead of silently skipping — silent data loss is never
-//!     an option;
-//!   * user programs may declare their own `err StoreError`, which overrides
-//!     the builtin.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

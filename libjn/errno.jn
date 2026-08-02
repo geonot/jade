@@ -1,10 +1,4 @@
-# libjn.errno — drop-in for C <errno.h>
-#
-# Errno is a thread-local i32 in C. Jinn exposes it as a function `errno()`
-# that returns the calling thread's value, plus `set_errno(v)` to write it.
-# A thread-local global is the eventual underlying storage.
 
-# ── Canonical error numbers (POSIX subset) ──
 
 EPERM   is 1
 ENOENT  is 2
@@ -56,7 +50,6 @@ ECANCELED is 125
 *set_errno(v as i32)
     nop
 
-# Thread-local back-end pointer — runtime stub.
 *__errno_location() returns %i32
     nop
     0 as %i32

@@ -1,63 +1,44 @@
-# systems_demo.jn — Low-level systems programming features
-# Complexity: Advanced
-# Demonstrates: FFI, syscalls, inline asm, overflow control, signals, volatile,
-#               memory layout, pointers, bitwise ops
-# Note: some features may not be fully implemented yet
 
-# Note: printf with ... (variadic) is not supported; FFI demo omitted
 
-# ── Integer Overflow Control ────────────────────────────────────────────────
 
 *overflow_demo
     max_i64 is 9223372036854775807
 
-    # Wrapping: silently wraps around
     w is wrapping_add(max_i64, 1)
-    log(w)                               # i64 min
+    log(w)
 
-    # Saturating: clamps at boundary
     s is saturating_add(max_i64, 1)
-    log(s)                               # i64 max (no change)
+    log(s)
 
-    # Checked: reports overflow
     result, did_overflow is checked_add(max_i64, 1)
-    log(did_overflow)                    # true
+    log(did_overflow)
 
-    # Wrapping subtraction
-    log(wrapping_sub(0, 1))              # i64 max
+    log(wrapping_sub(0, 1))
 
-    # Saturating subtraction
     min_i64 is -9223372036854775807 - 1
-    log(saturating_sub(min_i64, 1))      # stays at min
+    log(saturating_sub(min_i64, 1))
 
-# ── Bit Manipulation ───────────────────────────────────────────────────────
 
 *bit_tricks
     x is 0xDEADBEEF
 
-    # Population count (number of set bits)
-    log(popcount(0xFF))                  # 8
-    log(popcount(0))                     # 0
-    log(popcount(1))                     # 1
+    log(popcount(0xFF))
+    log(popcount(0))
+    log(popcount(1))
 
-    # Leading/trailing zeros
-    log(clz(1))                          # 63
-    log(ctz(8))                          # 3
-    log(ctz(16))                         # 4
+    log(clz(1))
+    log(ctz(8))
+    log(ctz(16))
 
-    # Byte swap (endianness conversion)
     log(bswap(0x0102030405060708))
 
-    # Bit rotation
-    log(rotate_left(1, 3))               # 8
-    log(rotate_right(8, 3))              # 1
+    log(rotate_left(1, 3))
+    log(rotate_right(8, 3))
 
-    # Power of 2 check
     n is 1024
     is_pow2 is (n & (n - 1)) equals 0 and n > 0
-    log(is_pow2)                         # true
+    log(is_pow2)
 
-    # Next power of 2 (for n=5 → 8)
     v is 5
     v is v - 1
     v is v | (v >> 1)
@@ -67,26 +48,23 @@
     v is v | (v >> 16)
     v is v | (v >> 32)
     v is v + 1
-    log(v)                               # 8
+    log(v)
 
-# ── Raw Pointers ───────────────────────────────────────────────────────────
 
 *pointer_demo
     x is 42
     ptr is %x
     val is @ptr
-    log(val)                             # 42
+    log(val)
 
-# ── Volatile Memory ────────────────────────────────────────────────────────
 
 *volatile_demo
     x is 0
     ptr is %x
     volatile_store(ptr, 99)
     v is volatile_load(ptr)
-    log(v)                               # 99
+    log(v)
 
-# ── Memory Layout ──────────────────────────────────────────────────────────
 
 type NetworkHeader @packed @strict
     version as u8
@@ -97,12 +75,10 @@ type NetworkHeader @packed @strict
 type AlignedBuffer @align(64)
     data as i64
 
-# ── FFI Demo ───────────────────────────────────────────────────────────────
 
 *ffi_demo
     log('ffi demo (variadic printf not yet supported)')
 
-# ── Signal Demo ────────────────────────────────────────────────────────────
 
 *on_signal(sig as i32)
     log(sig)

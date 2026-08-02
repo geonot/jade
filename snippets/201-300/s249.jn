@@ -1,4 +1,3 @@
-# Dead reckoning: integrate velocity over n steps, return final pos.
 *dr(v as i64, dt as i64, steps as i64) returns i64
     x is 0
     i is 0

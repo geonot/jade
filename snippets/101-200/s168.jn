@@ -1,4 +1,3 @@
-# Bubble sort.
 *bsort(v)
     n is v.length
     i is 0

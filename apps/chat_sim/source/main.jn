@@ -1,22 +1,12 @@
-# Chat Room Simulation
-# Multiple "user" actors exchange messages through a "router" actor
-# Demonstrates: actors, spawn, send, message handlers, parallelism
-#
-# Architecture:
-#   - Router actor receives messages and broadcasts to all users
-#   - User actors process received messages (simulate work with fib computation)
-#   - This models a simple pub-sub or chat relay system
 
 extern *jinn_time_now_ns() returns i64
 
-# Simulate "processing" a message by computing fib
 *fib(n as i64) returns i64
     if n < 2
         n
     else
         fib(n - 1) + fib(n - 2)
 
-# A chat user who processes messages by doing computation
 actor User
     processed as i64
     user_id as i64
@@ -24,7 +14,6 @@ actor User
         user_id is id
         processed is 0
     @receive_msg msg_id as i64
-        # Process the message (simulate work)
         result is fib(25 + msg_id % 5)
         processed is processed + 1
     @status
@@ -35,20 +24,16 @@ actor User
     log("=== Chat Room Simulation ===")
     t0 is jinn_time_now_ns()
 
-    # Spawn 4 user actors
     u0 is spawn User
     u1 is spawn User
     u2 is spawn User
     u3 is spawn User
 
-    # Initialize users
     u0.init(0)
     u1.init(1)
     u2.init(2)
     u3.init(3)
 
-    # Simulate 40 messages being broadcast to all users
-    # Each message goes to all 4 users = 160 total message handlers
     msg is 0
     while msg < 40
         u0.receive_msg(msg)
@@ -57,7 +42,6 @@ actor User
         u3.receive_msg(msg)
         msg is msg + 1
 
-    # Request status from each user
     u0.status()
     u1.status()
     u2.status()

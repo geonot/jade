@@ -1,4 +1,3 @@
-# libjn.sys_mman — drop-in for POSIX <sys/mman.h>
 
 PROT_NONE  is 0
 PROT_READ  is 1

@@ -2,8 +2,6 @@ use models/order
 use models/trade
 use book
 
-# Try to match `incoming` against opposite-side resting `book`.
-# Returns updated book and produced trades.
 *match_one(orders as Vec of Order, incoming as Order, trades as Vec of Trade) returns Vec of Order
     rem is incoming.qty
     i is 0

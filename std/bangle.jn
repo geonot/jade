@@ -1,24 +1,8 @@
-# std.bangle — Minimal HTTP server framework for Jinn
-#
-# The Jinn equivalent of Flask/Sinatra/Express. Takes the best of all
-# micro web frameworks: simplicity of Flask, middleware of Express,
-# pattern matching of Sinatra.
-#
-# Usage:
-#   use bangle
-#
-#   app is bangle.new()
-#   app.get "/", |req| bangle.text("Hello, world!")
-#   app.get "/users/:id", |req| bangle.json('{"id": ' + req.param("id") + '}')
-#   app.post "/data", |req| bangle.text("Got: " + req.body)
-#   app.use_middleware |req| log("Request: " + req.method + " " + req.path)
-#   app.listen 8080
 
 use net
 use strings
 use json
 
-# ── Types ────────────────────────────────────────────────────
 
 type Request
     method as String
@@ -74,72 +58,69 @@ type App
         self.port is port
         __serve(self)
 
-# ── Constructors ─────────────────────────────────────────────
 
 *new
-    App(routes is vec(), 
-        handlers is vec(), 
-        middleware is vec(), 
-        port is 8080, 
+    App(routes is vec(),
+        handlers is vec(),
+        middleware is vec(),
+        port is 8080,
         host is "0.0.0.0")
 
-# ── Response builders ────────────────────────────────────────
 
 *text(body as String) returns Response
-    Response(status is 200, 
-             content_type is "text/plain", 
-             body is body, 
+    Response(status is 200,
+             content_type is "text/plain",
+             body is body,
              headers is vec())
 
 *html(body as String) returns Response
-    Response(status is 200, 
-             content_type is "text/html", 
-             body is body, 
+    Response(status is 200,
+             content_type is "text/html",
+             body is body,
              headers is vec())
 
 *json_response(body as String) returns Response
-    Response(status is 200, 
-             content_type is "application/json", 
-             body is body, 
+    Response(status is 200,
+             content_type is "application/json",
+             body is body,
              headers is vec())
 
 *redirect(location as String) returns Response
     h is vec()
     h.push(ResponseHeader(name is "Location", value is location))
-    Response(status is 302, 
-             content_type is "text/plain", 
-             body is "", 
+    Response(status is 302,
+             content_type is "text/plain",
+             body is "",
              headers is h)
 
 *not_found returns Response
-    Response(status is 404, 
-             content_type is "text/plain", 
-             body is "Not Found", 
+    Response(status is 404,
+             content_type is "text/plain",
+             body is "Not Found",
              headers is vec())
 
 *bad_request(msg as String) returns Response
-    Response(status is 400, 
-             content_type is "text/plain", 
-             body is msg, 
+    Response(status is 400,
+             content_type is "text/plain",
+             body is msg,
              headers is vec())
 
 *server_error(msg as String) returns Response
-    Response(status is 500, 
-             content_type is "text/plain", 
-             body is msg, 
+    Response(status is 500,
+             content_type is "text/plain",
+             body is msg,
              headers is vec())
 
 *with_status(status as i64, body as String) returns Response
-    Response(status is status, 
-             content_type is "text/plain", 
-             body is body, 
+    Response(status is status,
+             content_type is "text/plain",
+             body is body,
              headers is vec())
 
 *with_header(resp as Response, name as String, value as String) returns Response
     resp.headers.push(ResponseHeader(name is name, value is value))
     resp
 
-# ── Route matching ───────────────────────────────────────────
 
 *__add_route(app as App, method as String, pattern as String, handler_name as String)
     segments is __split_path(pattern)
@@ -188,7 +169,6 @@ type App
         return map()
     params
 
-# ── HTTP parsing ─────────────────────────────────────────────
 
 *__parse_request(raw as String) returns Request
     headers is map()
@@ -198,7 +178,6 @@ type App
     query_map is map()
     raw_query is ""
 
-    # Split headers from body
     sep is raw.find("\r\n\r\n")
     header_section is raw
     if sep >= 0
@@ -207,13 +186,11 @@ type App
 
     lines is header_section.split("\r\n")
     if lines.length > 0
-        # Parse request line: METHOD PATH HTTP/1.1
         request_line is lines.get(0)
         parts is request_line.split(" ")
         if parts.length >= 2
             method is parts.get(0)
             full_path is parts.get(1)
-            # Split path and query string
             qmark is full_path.find("?")
             if qmark >= 0
                 path is full_path.slice(0, qmark)
@@ -222,7 +199,6 @@ type App
             else
                 path is full_path
 
-    # Parse headers
     loop lines
         if $$ > 0
             colon is $.find(":")
@@ -244,7 +220,6 @@ type App
             result.set(key, val)
     result
 
-# ── HTTP response serialization ──────────────────────────────
 
 *__status_text(code as i64) returns String
     match code
@@ -275,7 +250,6 @@ type App
     sb.write(resp.body)
     sb.to_string()
 
-# ── Server loop ──────────────────────────────────────────────
 
 *__serve(app as App) ! NetError
     log("bangle listening on " + app.host + ":" + to_string(app.port))
@@ -293,14 +267,12 @@ type App
     req is __parse_request(raw)
     path_segs is __split_path(req.path)
 
-    # Try to match a route
     resp is not_found()
     matched is false
     i is 0
     while i < app.routes.length
         route is copy app.routes.get(i)
         params is __match_route(route, req.method, path_segs)
-        # Check if match succeeded (non-empty params map or exact match)
         if route.segments.length equals path_segs.length
             test_match is true
             j is 0
@@ -320,7 +292,6 @@ type App
                 break
         i is i + 1
 
-    # Send response
     resp_str is __serialize_response(resp)
     client.write_all(resp_str)
     client.shut()

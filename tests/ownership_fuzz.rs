@@ -1,26 +1,3 @@
-//! Adversarial memory-model soundness fuzzer.
-//!
-//! Generates random ownership-stressing Jinn programs and asserts each one is
-//! handled soundly: it either (a) is rejected at compile time with a clean
-//! diagnostic, or (b) compiles and runs to completion WITHOUT a use-after-free,
-//! double-free, leak, or abort (exit 134 / SIGSEGV 139). When the C runtime is
-//! built under ASan/UBSan (ci/sanitize.sh), this same corpus catches heap
-//! corruption (UAF/double-free/OOB) in the drop + escape + tombstone passes
-//! — the soundness-critical core that previously hosted the `vec_get` aliasing
-//! bug and the `take`-inside-loop double-free.
-//!
-//! The generator deliberately stresses: nested `take`, field moves under
-//! control flow, container-read aliasing (`v.get(i)`), `copy` of heap values,
-//! rebinding after move, and aliasing through bindings — and, since task
-//! 8-9: returns of aggregate parameters through an inferred-consuming
-//! callee (the §3.1 double-free shape), cross-task captures in
-//! `together`/`dispatch` (the §3.2 allocator-race shape), aggregate binds
-//! in nested scopes (M1 under control flow), and aggregate struct fields
-//! (M3 partial moves). Under the landed 8-6/8-7/8-8 fixes each generated
-//! program must be cleanly rejected or run to completion; the §3.1/§3.2
-//! shapes are additionally pinned deterministically below so the corpus
-//! provably contains them.
-
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -40,16 +17,13 @@ enum Stmt {
     Rebind(u8),
     LenLog(u8),
     IfPush(u8, i64),
-    /// `v{b} is chain(v{a})` — returns an aggregate parameter through an
-    /// inferred-consuming callee (§3.1). `a` is left "declared" so later
-    /// statements may reference the moved var: that path must be REJECTED.
+
     ChainInto(u8, u8),
-    /// `together` with two dispatches capturing vars — same var twice is
-    /// the §3.2 race and must be rejected (M8).
+
     TogetherCapture(u8, u8),
-    /// Aggregate bind inside a nested scope (M1 under control flow).
+
     ScopedBind(u8),
-    /// Struct with an aggregate field: bind, field move (M3), sibling read.
+
     BindBox(u8),
     FieldMove(u8),
     BoxTagLog(u8),
@@ -130,18 +104,12 @@ fn emit(stmts: &[Stmt]) -> String {
             }
             Stmt::ChainInto(a, b) => {
                 if declared[*a as usize] && a != b {
-                    // §3.1 shape: the callee returns its parameter, so the
-                    // argument moves into the call. `a` stays "declared":
-                    // later references exercise the use-after-move REJECT path.
                     s.push_str(&format!("    v{b} is chain(v{a})\n"));
                     declared[*b as usize] = true;
                 }
             }
             Stmt::TogetherCapture(a, b) => {
                 if declared[*a as usize] && declared[*b as usize] {
-                    // §3.2 shape when a == b: two tasks capture one vec —
-                    // must be rejected (M8). Distinct vars must compile and
-                    // run clean.
                     s.push_str("    together\n");
                     s.push_str(&format!("        dispatch\n            pusher(v{a}, 1)\n"));
                     s.push_str(&format!("        dispatch\n            pusher(v{b}, 2)\n"));
@@ -154,8 +122,6 @@ fn emit(stmts: &[Stmt]) -> String {
                     s.push_str(&format!(
                         "    if v{v}.len() >= 0\n        w{w} is v{v}\n        log(w{w}.len())\n"
                     ));
-                    // v{v} stays "declared": a later use is M1
-                    // use-after-move (branch-union) and must be rejected.
                 }
             }
             Stmt::BindBox(k) => {
@@ -166,14 +132,12 @@ fn emit(stmts: &[Stmt]) -> String {
                 if boxes[*k as usize] {
                     let w = scoped;
                     scoped += 1;
-                    // M3 partial move; a later FieldMove of the same box is
-                    // use-of-moved-field and must be rejected.
+
                     s.push_str(&format!("    w{w} is b{k}.items\n    log(w{w}.len())\n"));
                 }
             }
             Stmt::BoxTagLog(k) => {
                 if boxes[*k as usize] {
-                    // Sibling scalar read stays legal after a field move.
                     s.push_str(&format!("    log(b{k}.tag)\n"));
                 }
             }
@@ -204,16 +168,16 @@ proptest! {
             .output()
             .expect("jinnc failed to start");
 
-        // The compiler must never ICE/panic on a well-formed-ish program.
+
         let cerr = String::from_utf8_lossy(&c.stderr);
         prop_assert!(
             !cerr.contains("internal compiler error") && !cerr.contains("RUST_BACKTRACE"),
             "compiler ICE on:\n{src}\nstderr: {cerr}"
         );
 
-        // If it compiled, running it must terminate cleanly: no UAF/double-free
-        // abort (134), no segfault (139). Under ASan this also catches heap
-        // corruption that would otherwise be silent.
+
+
+
         if c.status.success() {
             let r = Command::new(&out)
                 .current_dir(dir.path())
@@ -229,12 +193,6 @@ proptest! {
     }
 }
 
-/// The corpus provably contains the review shapes: §3.1 (return of an
-/// aggregate parameter) and §3.2 (cross-task capture of one vec). With
-/// 8-6/8-8 landed, the first runs clean single-drop and the second is
-/// rejected with the M8 diagnostic — pinned here deterministically since
-/// re-verifying "the fuzzer finds the bug" would require reverting the
-/// fixes themselves.
 #[test]
 fn generator_emits_review_shapes() {
     let src = emit(&[Stmt::BindVec(0), Stmt::ChainInto(0, 1), Stmt::LenLog(1)]);

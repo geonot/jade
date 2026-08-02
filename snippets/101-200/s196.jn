@@ -1,4 +1,3 @@
-# Mutual recursion: even/odd.
 *is_even(n as i64) returns bool
     if n equals 0
         return true

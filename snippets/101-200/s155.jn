@@ -1,4 +1,3 @@
-# Compute GCD of a vec via reduce-style fold.
 *gcd(a as i64, b as i64) returns i64
     while b not equals 0
         t is b

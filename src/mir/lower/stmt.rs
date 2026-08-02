@@ -11,8 +11,6 @@ impl Lowerer {
                 let val = match b.access_mod {
                     Some(AccessMod::Take) => self.lower_expr(&b.value),
                     Some(AccessMod::Copy) => {
-                        // Explicit `copy` binds deep-clone the value so the new
-                        // binding owns an independent copy (e.g. `b is copy a`).
                         let v = self.lower_expr(&b.value);
                         if !b.value.ty.is_trivially_droppable() && b.value.ty.is_value_clonable() {
                             self.emit(
@@ -47,9 +45,7 @@ impl Lowerer {
                     && !b.value.ty.is_trivially_droppable()
                 {
                     let parent_ty = obj.ty.clone();
-                    // If the parent struct is itself an actor field,
-                    // read it from / write it back to the state
-                    // struct; otherwise use the SSA local.
+
                     if let Some((parent_field_sym, parent_field_ty)) =
                         self.field_lookup(*parent_did)
                     {
@@ -68,13 +64,6 @@ impl Lowerer {
                             b.span,
                         );
                     } else {
-                        // SSA-form field tombstone: read the parent's
-                        // current SSA value, emit `FieldClear` to
-                        // produce a new struct value with the field
-                        // zeroed, and write the new value back as the
-                        // parent's definition. No memory demotion
-                        // needed — the drop pass sees the cleared
-                        // field on the new SSA value.
                         let parent_val = self.read_var(
                             *parent_name,
                             self.current_block,
@@ -97,12 +86,7 @@ impl Lowerer {
                 {
                     inst.def_id = Some(b.def_id);
                 }
-                // In an actor handler, `field is expr` desugars to a `Bind`
-                // that re-uses the field's canonical DefId. Such a rebinding
-                // is a write to the persistent state struct, not a fresh SSA
-                // local — store through `self_state`. Subsequent bare reads of
-                // the field re-load from the struct (see `lower_expr_value`),
-                // so no SSA rebinding is needed.
+
                 if let Some((field_sym, _)) = self.field_lookup(b.def_id) {
                     let self_state = self.field_self();
                     let state_ty = self.field_state_ty();
@@ -120,9 +104,6 @@ impl Lowerer {
                 let val = self.lower_expr_owned(value);
                 match &target.kind {
                     ExprKind::Var(def_id, name) => {
-                        // Bare assignment to an actor field stores through the
-                        // persistent state struct rather than rebinding an SSA
-                        // local.
                         if let Some((field_sym, _)) = self.field_lookup(*def_id) {
                             let self_state = self.field_self();
                             let state_ty = self.field_state_ty();
@@ -145,9 +126,7 @@ impl Lowerer {
                             let arr_ty = arr.ty.clone();
                             let updated =
                                 self.emit(InstKind::IndexSet(a, i, val), arr_ty, target.span);
-                            // If the indexed array is itself an actor field,
-                            // write the updated array back into the state
-                            // struct; otherwise rebind the SSA local.
+
                             if let Some((field_sym, _)) = self.field_lookup(*def_id) {
                                 let self_state = self.field_self();
                                 let state_ty = self.field_state_ty();

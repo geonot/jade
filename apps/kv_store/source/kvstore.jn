@@ -1,6 +1,5 @@
 use models/entry
 
-# Simplified flat store; sharding kept as a hash helper.
 
 *new_store() returns Vec of Entry
     vec()

@@ -1,5 +1,3 @@
-# Polynomial ring  R_q  =  Z_q[x] / (x^N + 1).
-# N=64, q=12289.  Coefficients live in 0..q-1.
 
 use prng
 
@@ -30,7 +28,6 @@ type Poly
     Poly(coef is c)
 
 *sample_small(seed as i64) returns Poly
-    # Centred binomial: each coefficient in {-2..2}.
     p is prng.seed(seed)
     c is vec()
     loop(0, $ < N(), $ + 1)
@@ -58,7 +55,6 @@ type Poly
     Poly(coef is r)
 
 *mul(x as Poly, y as Poly) returns Poly
-    # School-book multiplication mod x^N + 1.
     r is vec()
     loop(0, $ < N(), $ + 1)
         r.push(0)

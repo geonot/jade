@@ -1,4 +1,3 @@
-# Recursive digit sum.
 *dsum(n as i64) returns i64
     if n < 10
         return n

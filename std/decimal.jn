@@ -1,19 +1,10 @@
-# std.decimal — Fixed-point decimal arithmetic (4 decimal places)
-#
-# Usage:
-#   a is decimal.new(10, 50)   # 10.50  → stored as 105000
-#   b is decimal.parse("3.14") # 3.14   → stored as 31400
-#   c is decimal.add(a, b)
-#   log(decimal.to_string(c))  # "13.6400"
 
-# Internal representation: integer scaled by 10000 (4 decimal places)
 SCALE is 10000
 
 type Decimal
-    raw as i64   # value * 10000
+    raw as i64
 
 *new(whole as i64, frac as i64)
-    # frac is in hundredths, e.g. 50 means .50
     Decimal(raw is whole * SCALE + frac * 100)
 
 *from_raw(raw as i64)
@@ -45,7 +36,6 @@ type Decimal
             frac is frac * 10 + (ch - 48)
             places is places + 1
         i is i + 1
-    # Pad remaining places
     while places < 4
         frac is frac * 10
         places is places + 1
@@ -104,7 +94,6 @@ type Decimal
         raw is 0 - raw
     whole is raw / SCALE
     frac is raw mod SCALE
-    # Pad fraction to 4 digits
     ws is '{whole}'
     fs is '{frac}'
     while fs.length < 4
@@ -121,7 +110,6 @@ type Decimal
     Decimal(raw is SCALE)
 
 *round_to(d as Decimal, places as i64)
-    # Round to n decimal places (0-4), half-up
     if places >= 4
         return d
     divisor is 1
@@ -130,11 +118,10 @@ type Decimal
     rounded is ((d.raw + divisor / 2) / divisor) * divisor
     Decimal(raw is rounded)
 
-# ── Rounding modes ───────────────────────────────────────────
 
 ROUND_HALF_UP   is 0
 ROUND_HALF_DOWN is 1
-ROUND_HALF_EVEN is 2   # Banker's rounding
+ROUND_HALF_EVEN is 2
 ROUND_FLOOR     is 3
 ROUND_CEIL      is 4
 ROUND_TRUNCATE  is 5

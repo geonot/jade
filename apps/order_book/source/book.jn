@@ -1,6 +1,5 @@
 use models/order
 
-# best_bid: highest buy price; best_ask: lowest sell price
 *best_bid(orders as Vec of Order) returns i64
     best is -1
     loop(0, $ < orders.len(), $ + 1)
@@ -32,7 +31,6 @@ use models/order
     s
 
 *find_index(orders as Vec of Order, side as i64) returns i64
-    # earliest live order on side, returns -1 if none
     best_ts is 0
     found is -1
     loop(0, $ < orders.len(), $ + 1)

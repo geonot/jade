@@ -19,13 +19,6 @@ fn reachable_from(func: &Function, start: BlockId) -> HashSet<BlockId> {
 }
 
 fn runs_in_coroutine_context(func: &Function) -> bool {
-    // Lazy generators (`is_coroutine && !scheduler_task`) are excluded: they
-    // run by direct context swap from their consumer, so there is no scheduler
-    // to yield to and no cancellation to observe. On a worker the injected
-    // yield is dead weight per iteration; on the main thread it falls into
-    // jinn_sched_yield's anti-spin nanosleep — ~50µs of timer slack per loop
-    // back-edge, which turned a 30M-iteration generator into a half-hour run
-    // (found regenerating benchmarks/results.csv, task 8-26).
     (func.is_coroutine && func.scheduler_task) || func.name.as_str().starts_with("__actor_")
 }
 
@@ -69,11 +62,6 @@ pub fn inject_yields(func: &mut Function) -> bool {
     true
 }
 
-/// For a scheduler task with a cancel-cleanup block, make every back-edge a
-/// cooperative cancellation point: if the running coroutine has been cancelled
-/// (its enclosing scope was `stop`ped or a sibling failed), branch to the
-/// cleanup block so the body's defers run before the task exits, instead of
-/// looping forever.
 fn inject_cancel_checks(func: &mut Function, yield_srcs: &HashSet<BlockId>) {
     let Some(cleanup) = func.cancel_cleanup else {
         return;

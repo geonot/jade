@@ -1,12 +1,3 @@
-//! Conformance for the single shared builtin-method registry.
-//!
-//! `src/builtin_methods.rs` is the one place that declares which names exist
-//! on Vec/Map/String receivers. Both the typer (return-type inference) and the
-//! codegen (instruction selection) consult it; codegen `match`es the registry
-//! enums exhaustively, so adding a method in the registry without wiring
-//! codegen breaks the build. These tests pin the runtime behaviour of the
-//! methods that previously drifted between typer and codegen.
-
 use std::path::PathBuf;
 use std::process::Command;
 

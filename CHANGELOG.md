@@ -1,4 +1,21 @@
 # Changelog
+- **[138]** (2026-08-02 18:59) tests run in their own cwd; add gitignored .data/ for ad-hoc runs
+
+A store resolves its .store/.wal relative to the process cwd, so any test
+that compiled into a tempdir but ran the binary with the harness's cwd
+wrote its state into the repo root. 18 run-sites across 11 test files did
+exactly that; tests/error_effects.rs was the live offender, leaving
+items.* and jobs.* behind on every `cargo test`.
+
+Every compiled-binary run site now passes .current_dir(dir.path()) (or the
+harness's scratch dir). A full suite run now leaves the root clean.
+
+Added .data/ — a gitignored scratch cwd for running programs with
+persistent state by hand, with a tracked README explaining why it exists.
+Benchmarks already isolate into benchmarks/_build/cwd_*; unchanged.
+
+Removed 30 stale .store/.wal files from the root (untracked, already
+covered by .gitignore).
 - **[137]** (2026-08-02 18:25) std gate green: all 49 alpha-stable modules type-check
 
 The last failing test suite is now passing. Full suite 2013/2013, zero

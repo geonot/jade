@@ -1,4 +1,3 @@
-# Clock divider: count ticks before output toggles.
 *divide(in_ticks as i64, divisor as i64) returns i64
     in_ticks / divisor
 

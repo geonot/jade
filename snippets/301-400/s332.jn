@@ -1,4 +1,3 @@
-# Build a greeting via interpolation in a function.
 *greet(who as String) returns String
     'hello, {who}!'
 

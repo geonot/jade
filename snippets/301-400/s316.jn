@@ -1,4 +1,3 @@
-# Count via fold: how many elements equal a target.
 *count_eq(xs as Vec of i64, target as i64) returns i64
     n is 0
     i is 0

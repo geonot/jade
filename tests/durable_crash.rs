@@ -1,9 +1,3 @@
-//! Task 8-21 — crash-injection for the atomic durable write discipline.
-//! Compiles tests/durable_crash.c against runtime/durable.c + kv.c and
-//! runs its three probes: die-mid-rewrite leaves the old image intact,
-//! SIGKILL-during-kv-churn always leaves a complete self-consistent
-//! image, and the D6 single-writer lock refuses a second writer.
-
 use std::path::PathBuf;
 use std::process::Command;
 

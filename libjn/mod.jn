@@ -1,16 +1,4 @@
-# libjn — Jinn drop-in replacement for the C standard library.
-#
-# Aggregator module. Re-exports every libjn header under the
-# `std.libjn.<header>` namespace.
-#
-# Usage:
-#     use std.libjn.stdio
-#     stdio.printf("hello\n")
-#
-# For C-style global namespace (every symbol unqualified), see
-# `std.libjn.compat` and the libjn.md document.
 
-# ── ISO C standard headers ──
 use std.libjn.assert
 use std.libjn.complex
 use std.libjn.ctype
@@ -41,7 +29,6 @@ use std.libjn.uchar
 use std.libjn.wchar
 use std.libjn.wctype
 
-# ── POSIX subset ──
 use std.libjn.dirent
 use std.libjn.fcntl
 use std.libjn.pthread

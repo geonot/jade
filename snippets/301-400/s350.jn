@@ -1,4 +1,3 @@
-# Pass-by behavior: function gets the same Vec; modifications are visible.
 *push_one(v as Vec of i64)
     v.push(99)
 

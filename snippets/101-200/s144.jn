@@ -1,4 +1,3 @@
-# Longest common prefix of two strings.
 *lcp(a as String, b as String) returns String
     n is a.length
     if b.length < n

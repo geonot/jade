@@ -1,38 +1,3 @@
-/*
- * Jinn WAL (Write-Ahead Log) Runtime
- *
- * File format v2: [8B magic "JINNWAL2"][entries...]
- * Entry:          [4B payload_len][1B op][8B timestamp][payload_len bytes][4B CRC32]
- *
- * The CRC covers the WHOLE frame before it — payload_len, op, timestamp,
- * and payload (task 8-22; v1 excluded payload_len, so corrupted framing
- * could frame garbage that verified, and a CRC of 0 bypassed
- * verification entirely). v1 logs ("JINNWAL\0") are upgraded by
- * truncation on open: v1 was written data-file-first (write-behind), so
- * a v1 log's content is redundant with the data file by construction.
- *
- * Ops: 1=Insert, 2=Update, 3=Delete(soft), 4=Destroy(hard)
- *
- * Durability model:
- *   The WAL guarantees that every entry returned to user code as "committed"
- *   has been forced to stable storage via fdatasync(2) (Linux) or fsync(2)
- *   (macOS / where fdatasync is unavailable). After fdatasync returns, the
- *   data and minimum file metadata required to retrieve it survive an OS
- *   crash or power loss.
- *
- *   The sync policy is selected at runtime by the JINN_WAL_SYNC environment
- *   variable, parsed once on first WAL open:
- *     - "none"      : no sync; fastest but unsafe (test/bench only)
- *     - "fdatasync" : default; sync after every entry append
- *     - "fsync"     : full fsync after every entry append
- *     - "group"     : do not sync per-entry; caller must invoke
- *                     jinn_wal_commit_group() at transaction boundaries
- *
- *   Group-commit lets a higher-level coordinator amortize fsync latency
- *   across many records of one logical transaction. Records written between
- *   commits are NOT durable until commit_group() returns.
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,15 +5,11 @@
 #include <time.h>
 #include <unistd.h>
 #include "jinn_rt.h"
-
-/* Sync policy --------------------------------------------------------- */
 #define JINN_WAL_SYNC_NONE       0
 #define JINN_WAL_SYNC_FDATASYNC  1
 #define JINN_WAL_SYNC_FSYNC      2
 #define JINN_WAL_SYNC_GROUP      3
-
 static int  jinn_wal_sync_policy = -1;
-
 static int jinn_wal_get_policy(void) {
     if (jinn_wal_sync_policy >= 0) return jinn_wal_sync_policy;
     const char *env = getenv("JINN_WAL_SYNC");
@@ -61,24 +22,15 @@ static int jinn_wal_get_policy(void) {
     } else if (strcmp(env, "group") == 0) {
         jinn_wal_sync_policy = JINN_WAL_SYNC_GROUP;
     } else {
-        /* Default for unknown values: fdatasync. */
         jinn_wal_sync_policy = JINN_WAL_SYNC_FDATASYNC;
     }
     return jinn_wal_sync_policy;
 }
-
-/* Returns 0 on success, -1 if the data could not be made durable. A
- * discarded fsync error is the PostgreSQL fsync-gate class: the write is
- * reported committed while the kernel has already dropped the pages. */
 static int jinn_wal_force(FILE *wal, int policy) {
     if (!wal) return -1;
-    /* Inside an open transaction every store runs in group-commit mode:
-     * per-record syncs are deferred until jinn_txn_commit() issues the
-     * group barrier (or rollback truncates the records away). */
     if (jinn_txn_active()) {
         return fflush(wal) == 0 ? 0 : -1;
     }
-    /* Push libc buffers to the kernel first. */
     if (fflush(wal) != 0) return -1;
     int fd = fileno(wal);
     if (fd < 0) return -1;
@@ -96,11 +48,6 @@ static int jinn_wal_force(FILE *wal, int policy) {
             return fsync(fd) == 0 ? 0 : -1;
     }
 }
-
-/* Public: explicit group-commit barrier. Always issues a full fdatasync
- * (or fsync where fdatasync is unavailable) regardless of the configured
- * default policy. Used by transaction coordinators to make a batch of
- * appended records durable. */
 void jinn_wal_commit_group(FILE *wal) {
     if (!wal) return;
     if (fflush(wal) != 0) {
@@ -116,14 +63,10 @@ void jinn_wal_commit_group(FILE *wal) {
         fprintf(stderr, "jinn: wal: group-commit fsync failed — batch may not be durable\n");
     }
 }
-
 static const char WAL_MAGIC[8]    = {'J','I','N','N','W','A','L','2'};
 static const char WAL_MAGIC_V1[8] = {'J','I','N','N','W','A','L','\0'};
-
-/* Simple CRC32 (IEEE polynomial) */
 static uint32_t crc32_table[256];
 static int crc32_initialized = 0;
-
 static void crc32_init(void) {
     if (crc32_initialized) return;
     for (uint32_t i = 0; i < 256; i++) {
@@ -136,11 +79,7 @@ static void crc32_init(void) {
     crc32_initialized = 1;
 }
 
-/* Streaming CRC: begin with JINN_CRC_SEED, fold pieces in with
- * crc32_update, finish with ^0xFFFFFFFF. No allocation, so there is no
- * malloc-failure path that could write an unverifiable record. */
 #define JINN_CRC_SEED 0xFFFFFFFFu
-
 static uint32_t crc32_update(uint32_t crc, const void *data, size_t len) {
     crc32_init();
     const uint8_t *p = (const uint8_t *)data;
@@ -149,8 +88,6 @@ static uint32_t crc32_update(uint32_t crc, const void *data, size_t len) {
     }
     return crc;
 }
-
-/* Frame CRC over [payload_len | op | timestamp | payload]. */
 static uint32_t wal_frame_crc(uint32_t payload_len, uint8_t op, int64_t ts,
                               const void *payload) {
     uint32_t c = JINN_CRC_SEED;
@@ -161,9 +98,6 @@ static uint32_t wal_frame_crc(uint32_t payload_len, uint8_t op, int64_t ts,
     return c ^ 0xFFFFFFFFu;
 }
 
-/* Scan entries from offset 8, verifying each frame CRC, and return the
- * offset just past the last fully-valid entry. Reports (but does not
- * decide about) a torn or corrupt tail via *damaged. */
 static long wal_scan_valid_end(FILE *f, int *damaged) {
     fseek(f, 0, SEEK_END);
     long file_end = ftell(f);
@@ -200,15 +134,6 @@ static long wal_scan_valid_end(FILE *f, int *damaged) {
 done:
     return valid_end;
 }
-
-/* Open or create a WAL file. Returns FILE* or NULL (creation failure).
- * A structurally invalid log is a hard error, never a silent recreate:
- * silently truncating it was silent data loss. A v1-magic log is
- * upgraded by truncation with a notice — v1 was write-behind (the data
- * file was always written first), so its content is redundant with the
- * data file by construction. A torn tail is truncated away HERE, before
- * any append: the old code appended at SEEK_END past the torn record,
- * making every later entry permanently unreachable to replay. */
 FILE *jinn_wal_open(const char *path) {
     FILE *f = fopen(path, "r+b");
     if (f) {
@@ -256,15 +181,11 @@ FILE *jinn_wal_open(const char *path) {
             fclose(f);
             abort();
         }
-        /* Zero-length file: treat as fresh. */
         fclose(f);
     }
     f = fopen(path, "w+b");
     if (!f) return NULL;
     fwrite(WAL_MAGIC, 1, 8, f);
-    /* The magic header itself must be durable so a torn create cannot
-     * later be mistaken for a valid empty WAL with garbage entries; the
-     * file's existence in its directory must survive power loss too. */
     if (jinn_wal_force(f, jinn_wal_get_policy() == JINN_WAL_SYNC_NONE
                               ? JINN_WAL_SYNC_NONE
                               : JINN_WAL_SYNC_FDATASYNC) != 0) {
@@ -277,28 +198,14 @@ FILE *jinn_wal_open(const char *path) {
     }
     return f;
 }
-
-/* Write a WAL entry.
- * op: 1=insert, 2=update, 3=delete, 4=destroy
- * payload: record bytes (for insert/update) or offset bytes (for delete/destroy)
- * payload_len: size of payload
- */
 int jinn_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload_len) {
     if (!wal) return -1;
-
     int64_t ts = (int64_t)time(NULL);
-
     if (fseek(wal, 0, SEEK_END) != 0) {
         fprintf(stderr, "jinn: wal: fseek failed\n");
         return -1;
     }
     long start = ftell(wal);
-
-    /* Write: [4B len][1B op][8B timestamp][payload][4B CRC32]. The CRC is
-     * computed by streaming (wal_frame_crc) — no allocation, so there is
-     * no path that appends an unverifiable record. On ANY failure the
-     * partial frame is truncated away immediately so the log stays
-     * append-clean. */
     uint32_t checksum = wal_frame_crc(payload_len, op, ts, payload);
     int ok = fwrite(&payload_len, 4, 1, wal) == 1 &&
              fwrite(&op, 1, 1, wal) == 1 &&
@@ -307,7 +214,6 @@ int jinn_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload_
         ok = fwrite(payload, 1, payload_len, wal) == payload_len;
     }
     if (ok) ok = fwrite(&checksum, 4, 1, wal) == 1;
-
     if (!ok) {
         fprintf(stderr, "jinn: wal: append failed; truncating partial frame\n");
         fflush(wal);
@@ -315,29 +221,20 @@ int jinn_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload_
         fseek(wal, 0, SEEK_END);
         return -1;
     }
-
-    /* Per-record durability per JINN_WAL_SYNC. Group-commit policy defers
-     * until jinn_wal_commit_group(). */
     if (jinn_wal_force(wal, jinn_wal_get_policy()) != 0) {
         fprintf(stderr, "jinn: wal: sync failed — record may not be durable\n");
         return -1;
     }
     return 0;
 }
-
-/* Abort-on-failure wrapper for generated store code: a WAL append that
- * cannot be made durable must stop the program, not silently continue
- * with a durability story that no longer holds (the fsync-gate lesson). */
 void jinn_wal_write_must(FILE *wal, uint8_t op, const void *payload,
                          uint32_t payload_len) {
-    if (!wal) return; /* store running without a WAL (open failed loudly earlier) */
+    if (!wal) return;
     if (jinn_wal_write(wal, op, payload, payload_len) != 0) {
         fprintf(stderr, "jinn: wal: cannot guarantee durability — aborting\n");
         abort();
     }
 }
-
-/* Checkpoint: truncate WAL back to just the magic header. */
 void jinn_wal_checkpoint(FILE *wal) {
     if (!wal) return;
     fflush(wal);
@@ -348,9 +245,6 @@ void jinn_wal_checkpoint(FILE *wal) {
         return;
     }
     fseek(wal, 8, SEEK_SET);
-    /* Checkpoint is a durability boundary: callers expect that on return,
-     * the truncated state is on stable storage. Always force regardless of
-     * the per-record sync policy (except explicit "none" for tests). */
     int policy = jinn_wal_get_policy();
     if (jinn_wal_force(wal, policy == JINN_WAL_SYNC_NONE
                                 ? JINN_WAL_SYNC_NONE
@@ -359,37 +253,14 @@ void jinn_wal_checkpoint(FILE *wal) {
     }
 }
 
-/* Close WAL file. */
 void jinn_wal_close(FILE *wal) {
     if (wal) fclose(wal);
 }
-
-/* ── Transactions ──────────────────────────────────────────────────
- *
- * A `transaction` block makes the stores it touches atomic with respect
- * to escaping errors: `jinn_txn_begin()` opens the scope; every store
- * mutation that runs inside it registers its data file and WAL via
- * jinn_txn_track(), which snapshots the data file and records the WAL
- * offset on first contact. While a transaction is active, WAL writes
- * run in group-commit mode (no per-record fsync).
- *
- *   commit   — group-syncs each tracked WAL and fsyncs each data file;
- *              the batch becomes durable as a unit.
- *   rollback — restores each data file from its snapshot, truncates
- *              each WAL back to the recorded offset, and invokes any
- *              auxiliary rollback callback (e.g. index header reload)
- *              so in-memory handle state is discarded too.
- *
- * Nested begins are counted; only the outermost commit applies. A
- * rollback aborts the whole nest. Single-threaded by design: stores
- * are flock-guarded per process and transactions are lexical scopes.
- */
-
 typedef struct JinnTxnFile {
-    FILE  *fp;        /* by-value handle (aux entries) */
-    FILE **fpp;       /* by-address handle (store entries; survives atomic reopen) */
+    FILE  *fp;
+    FILE **fpp;
     FILE  *wal;
-    char  *path;      /* store data-file path — enables atomic rollback */
+    char  *path;
     long   wal_off;
     unsigned char *snap;
     long   snap_len;
@@ -397,22 +268,11 @@ typedef struct JinnTxnFile {
     void  *rb_arg;
     struct JinnTxnFile *next;
 } JinnTxnFile;
-
-/* Transaction state is PER-COROUTINE (task 8-24): the old process-global
- * depth/list meant two coroutines in `transaction` corrupted each
- * other's tracking, and one coroutine's open transaction silently
- * disabled per-record fsync for every other coroutine's writes
- * (jinn_wal_force consults jinn_txn_active). Coroutines migrate between
- * worker threads, so the state hangs off the coroutine itself; plain
- * threads (no scheduler) fall back to a thread-local slot. Every access
- * re-derives the slot — nothing is cached across a context swap. */
 typedef struct JinnTxnState {
     int          depth;
     JinnTxnFile *files;
 } JinnTxnState;
-
 static _Thread_local JinnTxnState *tl_txn_fallback = NULL;
-
 static JinnTxnState **jinn_txn_slot(void) {
     jinn_worker_t *w = jinn_worker_self();
     if (w && w->current) {
@@ -420,16 +280,13 @@ static JinnTxnState **jinn_txn_slot(void) {
     }
     return &tl_txn_fallback;
 }
-
 static JinnTxnState *jinn_txn_cur(void) {
     return *jinn_txn_slot();
 }
-
 int jinn_txn_active(void) {
     JinnTxnState *t = jinn_txn_cur();
     return t && t->depth > 0;
 }
-
 void jinn_txn_begin(void) {
     JinnTxnState **slot = jinn_txn_slot();
     if (!*slot) {
@@ -441,7 +298,6 @@ void jinn_txn_begin(void) {
     }
     (*slot)->depth++;
 }
-
 static JinnTxnFile *jinn_txn_find(JinnTxnState *st, FILE **fpp, FILE *fp) {
     for (JinnTxnFile *t = st->files; t; t = t->next) {
         if (fpp && t->fpp == fpp) return t;
@@ -449,7 +305,6 @@ static JinnTxnFile *jinn_txn_find(JinnTxnState *st, FILE **fpp, FILE *fp) {
     }
     return NULL;
 }
-
 static void jinn_txn_free_files(JinnTxnState *st) {
     JinnTxnFile *t = st->files;
     while (t) {
@@ -461,7 +316,6 @@ static void jinn_txn_free_files(JinnTxnState *st) {
     }
     st->files = NULL;
 }
-
 static void jinn_txn_release(void) {
     JinnTxnState **slot = jinn_txn_slot();
     if (*slot) {
@@ -470,11 +324,6 @@ static void jinn_txn_release(void) {
         *slot = NULL;
     }
 }
-
-/* Snapshot memory is bounded: a transaction snapshots each touched data
- * file on first contact, and refusing an over-limit snapshot is the only
- * honest option — without it, rollback would be impossible. Default
- * 256MB per file, overridable via JINN_TXN_SNAPSHOT_MAX (bytes). */
 static long jinn_txn_snapshot_max(void) {
     static long cached = -1;
     if (cached >= 0) return cached;
@@ -483,7 +332,6 @@ static long jinn_txn_snapshot_max(void) {
     cached = v > 0 ? v : 256L * 1024 * 1024;
     return cached;
 }
-
 static void jinn_txn_track_impl(FILE **fpp, FILE *fp, FILE *wal,
                                 const char *path,
                                 void (*cb)(void *), void *arg) {
@@ -523,7 +371,7 @@ static void jinn_txn_track_impl(FILE **fpp, FILE *fp, FILE *wal,
                 t->snap_len, jinn_txn_snapshot_max());
         free(t->path);
         free(t);
-        abort(); /* proceeding would make rollback silently impossible */
+        abort();
     }
     t->snap = (unsigned char *)malloc(t->snap_len > 0 ? (size_t)t->snap_len : 1);
     if (!t->snap) {
@@ -546,15 +394,12 @@ static void jinn_txn_track_impl(FILE **fpp, FILE *fp, FILE *wal,
     t->next = st->files;
     st->files = t;
 }
-
 void jinn_txn_track_store(FILE **fpp, FILE *wal, const char *path) {
     jinn_txn_track_impl(fpp, NULL, wal, path, NULL, NULL);
 }
-
 void jinn_txn_track_aux(FILE *fp, void (*cb)(void *), void *arg) {
     jinn_txn_track_impl(NULL, fp, NULL, NULL, cb, arg);
 }
-
 void jinn_txn_swap_fp(FILE *oldfp, FILE *newfp) {
     JinnTxnState *st = jinn_txn_cur();
     if (!st) return;
@@ -562,7 +407,6 @@ void jinn_txn_swap_fp(FILE *oldfp, FILE *newfp) {
         if (!t->fpp && t->fp == oldfp) t->fp = newfp;
     }
 }
-
 void jinn_txn_commit(void) {
     JinnTxnState *st = jinn_txn_cur();
     if (!st || st->depth <= 0) return;
@@ -591,8 +435,6 @@ void jinn_txn_commit(void) {
     }
     jinn_txn_release();
 }
-
-/* Fill callback: the pre-transaction snapshot image. */
 static int txn_snap_fill(FILE *tmp, void *arg) {
     JinnTxnFile *t = (JinnTxnFile *)arg;
     if (t->snap_len > 0 &&
@@ -601,19 +443,11 @@ static int txn_snap_fill(FILE *tmp, void *arg) {
     }
     return 0;
 }
-
 void jinn_txn_rollback(void) {
     JinnTxnState *st = jinn_txn_cur();
     if (!st || st->depth <= 0) return;
     st->depth = 0;
     for (JinnTxnFile *t = st->files; t; t = t->next) {
-        /* WAL first: the transaction's entries must not survive into the
-         * next open's recovery replay, or the rolled-back records would
-         * be resurrected onto the restored data file. (A crash between
-         * the truncate and the restore leaves the data file un-rolled-
-         * back but structurally intact — strictly better than the old
-         * in-place restore, which could leave a torn store with no
-         * recovery path at all.) */
         if (t->wal) {
             fflush(t->wal);
             int wfd = fileno(t->wal);
@@ -623,14 +457,11 @@ void jinn_txn_rollback(void) {
             fseek(t->wal, t->wal_off, SEEK_SET);
         }
         if (t->fpp && t->path) {
-            /* Store entry: crash-safe restore via the 8-21 atomic path. */
             if (jinn_atomic_rewrite_reopen(t->path, txn_snap_fill, t, t->fpp) != 0) {
                 fprintf(stderr, "jinn: txn: rollback of %s failed — store "
                                 "left in pre-rollback state\n", t->path);
             }
         } else if (t->fp) {
-            /* Aux entry (index/column sidecars): in-place restore, then
-             * the registered callback reloads in-memory header state. */
             fseek(t->fp, 0, SEEK_SET);
             if (t->snap_len > 0 &&
                 fwrite(t->snap, 1, (size_t)t->snap_len, t->fp)
@@ -649,7 +480,6 @@ void jinn_txn_rollback(void) {
     jinn_txn_release();
 }
 
-/* Get WAL size (number of bytes of entries after magic). Returns 0 if empty. */
 int64_t jinn_wal_size(FILE *wal) {
     if (!wal) return 0;
     long cur = ftell(wal);
@@ -658,45 +488,25 @@ int64_t jinn_wal_size(FILE *wal) {
     fseek(wal, cur, SEEK_SET);
     return (end > 8) ? (int64_t)(end - 8) : 0;
 }
-
-/*
- * Replay WAL entries with CRC verification.
- * Calls `callback(op, payload, payload_len, timestamp, user_data)` for each
- * valid entry. Stops at first corrupted/truncated entry.
- * Returns number of entries successfully replayed, or -1 on error.
- */
-
 int64_t jinn_wal_replay(FILE *wal, jinn_wal_replay_cb callback, void *user_data) {
     if (!wal || !callback) return -1;
 
-    /* Save current position, seek past magic */
     long saved = ftell(wal);
     fseek(wal, 0, SEEK_END);
     long file_end = ftell(wal);
-    fseek(wal, 8, SEEK_SET); /* skip magic */
-
+    fseek(wal, 8, SEEK_SET);
     int64_t count = 0;
-
     while (ftell(wal) < file_end) {
-        (void)ftell(wal); /* track position for diagnostics if needed */
-
-        /* Read header: [4B payload_len][1B op][8B timestamp] */
+        (void)ftell(wal);
         uint32_t payload_len;
         uint8_t  op;
         int64_t  ts;
-
         if (fread(&payload_len, 4, 1, wal) != 1) break;
         if (fread(&op, 1, 1, wal) != 1) break;
         if (fread(&ts, 8, 1, wal) != 1) break;
-
-        /* Sanity check payload_len (max 64MB) */
         if (payload_len > 64 * 1024 * 1024) break;
-
-        /* Check remaining file has enough bytes for payload + CRC */
         long remaining = file_end - ftell(wal);
         if (remaining < (long)(payload_len + 4)) break;
-
-        /* Read payload */
         uint8_t *payload = NULL;
         if (payload_len > 0) {
             payload = (uint8_t *)malloc(payload_len);
@@ -706,30 +516,20 @@ int64_t jinn_wal_replay(FILE *wal, jinn_wal_replay_cb callback, void *user_data)
                 break;
             }
         }
-
-        /* Read stored CRC */
         uint32_t stored_crc;
         if (fread(&stored_crc, 4, 1, wal) != 1) {
             free(payload);
             break;
         }
-
-        /* Verify the full-frame CRC. No zero-CRC bypass: a record that
-         * cannot be verified is corrupt, full stop (the v1 bypass let a
-         * zeroed CRC field validate arbitrary garbage). */
         uint32_t computed_crc = wal_frame_crc(payload_len, op, ts, payload);
         if (computed_crc != stored_crc) {
             free(payload);
             break;
         }
-
-        /* Valid entry — invoke callback */
         callback(op, payload, payload_len, ts, user_data);
         free(payload);
         count++;
     }
-
-    /* Restore file position */
     fseek(wal, saved, SEEK_SET);
     return count;
 }

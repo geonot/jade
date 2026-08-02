@@ -1,4 +1,3 @@
-# Consistent hashing ring: nearest node id for key.
 *nearest(nodes as Vec of i64, n as i64, key as i64) returns i64
     best is nodes.get(0)
     i is 1

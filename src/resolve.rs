@@ -2,19 +2,6 @@ use crate::ast::{self, Decl, Expr, Pat, Stmt};
 use crate::intern::Symbol;
 use std::collections::HashMap;
 
-/// Flatten a module's top-level items into the global namespace by renaming each
-/// `*name` to `module_name` and each `Type` reference accordingly.
-///
-/// This is a purely mechanical name-flattening step with **no identity
-/// semantics**: package ownership is carried first-class as a `PkgId`
-/// (scope.md §1, `crate::pkgid::build_item_pkgs`), never recovered from the
-/// names this stamps. The legacy "the prefix *is* the identity" model
-/// (scope.md §0) is retired.
-///
-/// Renaming is lexically scoped: a local binder (`is`-bind, tuple bind,
-/// `for`/match/lambda/select/receive binder, ...) shadows a module-level
-/// fn/const of the same name for the rest of its scope, so local uses are
-/// never rewritten to the flattened global.
 pub fn flatten_module(decls: Vec<Decl>, module: &str) -> Vec<Decl> {
     let mut rename_map: HashMap<Symbol, Symbol> = HashMap::new();
     for d in &decls {
@@ -105,9 +92,6 @@ pub fn flatten_module(decls: Vec<Decl>, module: &str) -> Vec<Decl> {
         .collect()
 }
 
-/// Scope-aware identifier rewriter. `shadowed` counts, per name, how many
-/// enclosing scopes have bound it locally; a name is only rewritten to its
-/// flattened module global when that count is zero.
 struct Renamer<'a> {
     renames: &'a HashMap<Symbol, Symbol>,
     scopes: Vec<Vec<Symbol>>,
@@ -154,8 +138,6 @@ impl<'a> Renamer<'a> {
         self.renames.get(&name).copied()
     }
 
-    /// Run `f` in a fresh scope with `params` pre-shadowed (a function or
-    /// handler body: parameters shield same-named module globals).
     fn in_fn_scope(&mut self, params: &[Symbol], f: impl FnOnce(&mut Self)) {
         self.push_scope();
         for p in params {
@@ -176,8 +158,6 @@ impl<'a> Renamer<'a> {
     fn rewrite_stmt(&mut self, stmt: &mut Stmt) {
         match stmt {
             Stmt::Bind(b) => {
-                // The RHS is evaluated before the name is bound, so it still
-                // sees the module-level name; the binding shadows from here on.
                 self.rewrite_expr(&mut b.value);
                 self.shadow(b.name);
             }
@@ -379,9 +359,6 @@ impl<'a> Renamer<'a> {
             }
             Expr::Struct(name, fields, span) => {
                 if let Some(renamed) = self.lookup(*name) {
-                    // A struct literal whose type ctor was flattened becomes a
-                    // call; named field inits are preserved as named args so
-                    // out-of-declaration-order literals keep their meaning.
                     let mut args: Vec<Expr> = Vec::with_capacity(fields.len());
                     for fi in fields.drain(..) {
                         let mut v = fi.value;
@@ -533,10 +510,6 @@ impl<'a> Renamer<'a> {
     }
 }
 
-/// Collect every name a pattern binds (`Ident` leaves and all nested
-/// positions). Unit-variant patterns are indistinguishable from binders here;
-/// shadowing them is harmless because variant names are never in the rename
-/// map.
 fn collect_pat_binders(pat: &Pat, out: &mut Vec<Symbol>) {
     match pat {
         Pat::Ident(s, _) => out.push(*s),

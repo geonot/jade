@@ -113,18 +113,11 @@ impl Typer {
             ast::Expr::DispatchBlock(name, body, span) => {
                 let outer_ids = self.in_scope_def_ids();
                 let hbody = self.lower_block_no_scope(body, &Type::Void)?;
-                /* M8 (task 8-8): aggregates this task captures move into
-                 * it. A sibling dispatch capturing the same value — or
-                 * any later use in the parent — is then a use-after-move
-                 * (the §3.2 review race, caught at compile time). */
+
                 self.mark_task_captures(&hbody, &outer_ids, *span)?;
                 let yield_ty = self.infer_coroutine_yield_type(&hbody);
                 let coro_ty = Type::Coroutine(Box::new(yield_ty));
                 let coro_name = if name.as_str() == "__anon" {
-                    // Anonymous dispatch blocks get a unique generated name so
-                    // multiple of them (e.g. concurrent tasks in a `together`
-                    // scope) lower to distinct coroutine body functions. The
-                    // `__anon` prefix marks them as anonymous for scope-spawn.
                     let id = self.next_id;
                     self.next_id += 1;
                     crate::intern::Symbol::intern(&format!("__anon{id}"))

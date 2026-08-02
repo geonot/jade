@@ -1,16 +1,3 @@
-//! Conformance for schema fingerprinting + migration enforcement
-//! (store-improvement.md item 7, task 2-31-3). Pins the documented semantics:
-//!
-//!   * a store file's header carries a stable fingerprint of the declared
-//!     schema (field names, types, order, decorators) plus a schema version;
-//!   * reopening a store whose on-disk fingerprint matches the program's
-//!     declared schema succeeds silently;
-//!   * reopening a store whose layout changed WITHOUT a bridging migration
-//!     aborts with a precise diagnostic naming the store, rather than reading
-//!     garbage;
-//!   * an applied migration stamps the new fingerprint, so a program built at
-//!     the migrated schema reopens the store cleanly.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

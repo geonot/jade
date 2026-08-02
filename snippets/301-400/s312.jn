@@ -1,4 +1,3 @@
-# filter: keep only elements satisfying predicate.
 *filter_i64(xs as Vec of i64, p as (i64) returns bool) returns Vec of i64
     out is vec()
     i is 0

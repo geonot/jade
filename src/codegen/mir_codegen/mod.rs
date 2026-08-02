@@ -66,8 +66,7 @@ impl<'ctx> Compiler<'ctx> {
         hints: DropHints,
     ) -> Result<(), String> {
         self.hints = hints;
-        // Multi-package builds mangle symbols by owning package (scope.md §1.3);
-        // single-package builds (no dependency modules) keep bare names.
+
         self.is_multi_package = !prog.item_pkgs.is_empty();
         self.setup_target()?;
         self.declare_builtins();
@@ -102,11 +101,6 @@ impl<'ctx> Compiler<'ctx> {
             self.structs.insert(td.name, fields);
         }
 
-        /* Stores must be declared before enums are sized: a query result
-         * is `Result of Row(store), StoreError` (task 8-25), and sizing
-         * that Ok payload needs the `__store_N` struct type — declared
-         * after enums, the payload fell back to 8 bytes and the stored
-         * row clobbered the stack past the alloca. */
         if !hir_prog.stores.is_empty() {
             self.declare_store_runtime();
             for sd in &hir_prog.stores {
@@ -115,11 +109,6 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        /* Pre-register every enum's variant list before ANY body is
-         * sized: payload sizing consults other enums' layouts, and a
-         * monomorphized Result declared before the user's err enum sized
-         * its payload from the 8-byte fallback — the stored error value
-         * then clobbered the stack past the alloca (task 8-19). */
         for ed in &hir_prog.enums {
             let variants: Vec<(String, Vec<Type>)> = ed
                 .variants
@@ -360,10 +349,6 @@ impl<'ctx> Compiler<'ctx> {
             self.module.print_to_stderr();
         }
         self.module.verify().map_err(|e| {
-            /* Reaching LLVM verification with bad IR means the frontend
-             * let an ill-typed program through — a compiler bug, and it
-             * must be reported as one, never as raw IR at the user
-             * (task 8-17). */
             format!(
                 "internal compiler error: generated LLVM IR failed verification — \
                  this is a compiler bug; please report it together with the source \
@@ -373,19 +358,6 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
-    /// Compute the emitted LLVM symbol name for a MIR function (scope.md §1.3).
-    ///
-    /// The MIR `func.name` is already the module-flattened form `<module>_<name>`.
-    /// In a package build with more than one distinct package we prepend the
-    /// owning package's `<pkgid_hash>_` so two non-promotable instances of the
-    /// same module mangle distinctly (§3 / §5.7.6 multi-version coexistence),
-    /// while two promoted instances — equal `semantic_hash` — share one prefix
-    /// and therefore one symbol.
-    ///
-    /// The single-package fast path (§2.2: `item_pkgs` empty, or no `pkg_id`)
-    /// emits the bare `<module>_<name>` unchanged, so 98% of programs see zero
-    /// change. `main` is never mangled (it is the C entry point), and library
-    /// builds never mangle (their symbols are the FFI surface).
     fn mangle_symbol(&self, func: &mir::Function) -> String {
         let bare = func.name.as_str();
         if self.is_multi_package
@@ -457,12 +429,6 @@ impl<'ctx> Compiler<'ctx> {
                 .build_store(argv_global.as_pointer_value(), argv_param));
 
             if !self.standalone {
-                // The crash-handler installer lives in the C runtime, so emitting
-                // this call commits us to linking `-ljinn_rt`. Keep the link
-                // decision (`needs_runtime`) in lockstep with the emission
-                // condition; otherwise a program that touches no other runtime op
-                // (e.g. pure value-semantic code) would reference
-                // `jinn_install_crash_handlers` without linking the runtime.
                 self.needs_runtime = true;
                 let install_crash = self
                     .module
@@ -940,7 +906,7 @@ mod mangle_tests {
     fn single_package_emits_bare_names() {
         let ctx = Context::create();
         let mut c = Compiler::new(&ctx, "m");
-        c.is_multi_package = false; // single-package fast path (scope.md §2.2)
+        c.is_multi_package = false;
         let root = pkg_id("app", "fn main");
         assert_eq!(
             c.mangle_symbol(&mir_fn("greeter_hello", Some(root))),
@@ -955,7 +921,7 @@ mod mangle_tests {
         c.is_multi_package = true;
         let dep = pkg_id("greeter", "fn hello returns 1");
         let sym = c.mangle_symbol(&mir_fn("greeter_hello", Some(dep)));
-        // Format: <pkgid_hash>_<module>_<name>, hash is 8 hex chars (4 bytes).
+
         assert!(sym.ends_with("_greeter_hello"), "got {sym}");
         let prefix = sym.strip_suffix("_greeter_hello").unwrap();
         assert_eq!(
@@ -975,8 +941,7 @@ mod mangle_tests {
         let ctx = Context::create();
         let mut c = Compiler::new(&ctx, "m");
         c.is_multi_package = true;
-        // Same module name, two coexisting versions => distinct PkgId =>
-        // distinct symbols (scope.md §5.7.6 multi-version coexistence).
+
         let v1 = pkg_id_ver(
             "greeter",
             SemVer {
@@ -1006,8 +971,7 @@ mod mangle_tests {
         let ctx = Context::create();
         let mut c = Compiler::new(&ctx, "m");
         c.is_multi_package = true;
-        // Byte-identical packages => equal semantic_hash => promoted to one
-        // symbol (scope.md §3: promotion *is* "they mangle to the same name").
+
         let a = pkg_id("greeter", "fn hello returns 1");
         let b = pkg_id("greeter", "fn hello returns 1");
         let sa = c.mangle_symbol(&mir_fn("greeter_hello", Some(a)));
@@ -1029,7 +993,7 @@ mod mangle_tests {
         let ctx = Context::create();
         let mut c = Compiler::new(&ctx, "m");
         c.is_multi_package = true;
-        c.lib_mode = true; // FFI surface keeps stable names
+        c.lib_mode = true;
         let dep = pkg_id("greeter", "fn hello returns 1");
         assert_eq!(
             c.mangle_symbol(&mir_fn("greeter_hello", Some(dep))),

@@ -1,4 +1,3 @@
-# Settlement netting: bilateral net amount.
 *net(payable as i64, receivable as i64) returns i64
     receivable - payable
 

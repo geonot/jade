@@ -1,6 +1,4 @@
-# libjn.fcntl — drop-in for POSIX <fcntl.h>
 
-# ── Open flags ──
 O_RDONLY    is 0
 O_WRONLY    is 1
 O_RDWR      is 2
@@ -19,7 +17,6 @@ O_CLOEXEC   is 0x80000
 O_PATH      is 0x200000
 O_TMPFILE   is 0x410000
 
-# ── fcntl commands ──
 F_DUPFD         is 0
 F_GETFD         is 1
 F_SETFD         is 2

@@ -1,4 +1,3 @@
-# N-6: query blocks now execute (where + delete + set).
 store users
     name as String
     age as i64
@@ -8,13 +7,11 @@ store users
     insert users 'Bob', 25
     insert users 'Charlie', 35
 
-    # Read query block
     r is users query
         where age > 28 and name equals 'Alice'
     log r.name
     log r.age
 
-    # Set query block
     users query
         where name equals 'Bob'
         set age is 26
@@ -22,7 +19,6 @@ store users
     b is users where name equals 'Bob' ? $.age ! 0 - 1
     log b
 
-    # Delete query block
     users query
         where age > 28
         delete

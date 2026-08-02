@@ -1,31 +1,4 @@
-# std.raft — Raft consensus primitives (single-node state machine)
-#
-# Implements the Raft state machine and RPC payloads from the original
-# paper (Ongaro & Ousterhout, 2014). This module is transport-agnostic:
-# it exposes pure functions and message types so applications can plug in
-# their own network and persistence layers.
-#
-# Provided:
-#   * State enum: Follower / Candidate / Leader.
-#   * Persistent state: `current_term`, `voted_for`, `log[]`.
-#   * RPC types: `RequestVote`, `RequestVoteReply`, `AppendEntries`,
-#     `AppendEntriesReply`.
-#   * Pure transitions: `tick`, `handle_request_vote`,
-#     `handle_request_vote_reply`, `handle_append_entries`,
-#     `handle_append_entries_reply`, `start_election`, `become_leader`.
-#   * Log helpers: `last_index`, `last_term`, `term_at`, `truncate_from`.
-#   * Snapshot stubs (size-bounded log compaction).
-#
-# A full distributed implementation requires (a) a network shim that
-# round-trips the message types, and (b) durable storage for log + term
-# (use `std.fs` + `std.binary` or `std.sqlite`).
-#
-# References:
-#   - "In Search of an Understandable Consensus Algorithm" (Raft, 2014)
-#   - https://raft.github.io/raft.pdf
-#   - etcd Raft library
 
-# ── Server states ────────────────────────────────────────────
 
 FOLLOWER  is 0
 CANDIDATE is 1
@@ -38,20 +11,17 @@ LEADER    is 2
         return "candidate"
     "leader"
 
-# ── Log entry ────────────────────────────────────────────────
 
 type LogEntry
     term as i64
     index as i64
-    command as String     # opaque, application-defined
+    command as String
 
-# ── Persistent state ─────────────────────────────────────────
 
-# Modified only after fsync to durable storage in production.
 type Persistent
     current_term as i64
-    voted_for as String          # "" if none
-    log as Vec of LogEntry       # 1-indexed; entry 0 is sentinel
+    voted_for as String
+    log as Vec of LogEntry
 
     *last_index returns i64
         self.log.length - 1
@@ -73,23 +43,20 @@ type Persistent
     *append(entry as LogEntry)
         self.log.push(entry)
 
-# ── Volatile state ───────────────────────────────────────────
 
 type Volatile
     commit_index as i64
     last_applied as i64
 
-# Per-peer leader state.
 type LeaderState
-    next_index as Map of i64        # peer_id → next log index to send
-    match_index as Map of i64       # peer_id → highest replicated index
+    next_index as Map of i64
+    match_index as Map of i64
 
-# ── Server (composes the above) ──────────────────────────────
 
 type Server
     id as String
     peers as Vec of String
-    state as i64                          # FOLLOWER | CANDIDATE | LEADER
+    state as i64
     persistent as Persistent
     volatile as Volatile
     leader as LeaderState
@@ -99,7 +66,6 @@ type Server
     heartbeat_interval_ms as i64
     elapsed_ms as i64
 
-# ── Constructors ─────────────────────────────────────────────
 
 *new_server(id as String, peers as Vec of String) returns Server
     sentinel is LogEntry(term is 0, index is 0, command is "")
@@ -122,7 +88,6 @@ type Server
         elapsed_ms is 0,
     )
 
-# ── RPC: RequestVote ─────────────────────────────────────────
 
 type RequestVote
     term as i64
@@ -134,7 +99,6 @@ type RequestVoteReply
     term as i64
     vote_granted as bool
 
-# Handle an incoming RequestVote. Returns the reply and (mutates `s`).
 *handle_request_vote(s as Server, req as RequestVote) returns RequestVoteReply
     if req.term > s.persistent.current_term
         __become_follower(s, req.term)
@@ -159,7 +123,6 @@ type RequestVoteReply
         if s.votes_granted * 2 > (s.peers.length + 1)
             become_leader(s)
 
-# ── RPC: AppendEntries (also used as heartbeat when entries empty) ──
 
 type AppendEntries
     term as i64
@@ -182,12 +145,10 @@ type AppendEntriesReply
     s.elapsed_ms is 0
     s.leader_id is req.leader_id
     s.state is FOLLOWER
-    # Log matching property
     if req.prev_log_index > s.persistent.last_index()
         return AppendEntriesReply(term is s.persistent.current_term, success is false, match_index is 0)
     if s.persistent.term_at(req.prev_log_index) neq req.prev_log_term
         return AppendEntriesReply(term is s.persistent.current_term, success is false, match_index is 0)
-    # Append entries (with conflict-truncation per §5.3)
     i is 0
     while i < req.entries.length
         e is req.entries.get(i)
@@ -217,10 +178,7 @@ type AppendEntriesReply
         if cur > 1
             s.leader.next_index.set(peer, cur - 1)
 
-# ── Time-driven transitions ──────────────────────────────────
 
-# Advance the local clock; callers should invoke once per tick.
-# Returns true if the server changed state or wants to send messages.
 *tick(s as Server, dt_ms as i64) returns bool
     s.elapsed_ms is s.elapsed_ms + dt_ms
     if s.state equals LEADER
@@ -249,9 +207,7 @@ type AppendEntriesReply
         s.leader.next_index.set($, next)
         s.leader.match_index.set($, 0)
 
-# ── Client API: propose a command (only valid on the leader) ──
 
-# Returns the index where the entry was appended, or 0 if not leader.
 *propose(s as Server, command as String) returns i64
     if s.state neq LEADER
         return 0
@@ -259,7 +215,6 @@ type AppendEntriesReply
     s.persistent.append(LogEntry(term is s.persistent.current_term, index is idx, command is command))
     idx
 
-# ── Internal helpers ─────────────────────────────────────────
 
 *__become_follower(s as Server, term as i64)
     s.state is FOLLOWER
@@ -275,7 +230,6 @@ type AppendEntriesReply
     last_idx >= s.persistent.last_index()
 
 *__advance_commit_index(s as Server)
-    # Find highest N such that majority of match_index >= N and log[N].term == current_term.
     n is s.persistent.last_index()
     while n > s.volatile.commit_index
         if s.persistent.term_at(n) equals s.persistent.current_term

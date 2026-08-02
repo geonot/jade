@@ -1,13 +1,4 @@
-/*
- * Jinn Runtime — Concurrency primitives for the Jinn language.
- *
- * Stackful coroutines, typed channels, M:N work-stealing scheduler,
- * actor support, select, timers.
- *
- * All functions prefixed with jinn_ to avoid symbol collisions.
- */
 #pragma once
-
 #include <stdint.h>
 #include <stddef.h>
 #include <stdatomic.h>
@@ -18,9 +9,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* ── Forward declarations ────────────────────────────────────────── */
-
 typedef struct jinn_coro    jinn_coro_t;
 typedef struct jinn_sched   jinn_sched_t;
 typedef struct jinn_chan     jinn_chan_t;
@@ -28,23 +16,16 @@ typedef struct jinn_worker  jinn_worker_t;
 typedef struct jinn_deque   jinn_deque_t;
 typedef struct jinn_timer   jinn_timer_t;
 
-/* ── Persistence / store extension types (opaque) ────────────── */
 typedef struct JinnBloom JinnBloom;
 typedef struct JinnCol   JinnCol;
 typedef struct JinnFts   JinnFts;
 typedef struct JinnIndex JinnIndex;
 typedef struct JinnKV    JinnKV;
 typedef struct JinnVec   JinnVec;
-
-/* ── Small-string optimization layout ─────────────────────────── */
 typedef struct { char bytes[24]; } jinn_sso_t;
-
-/* ── WAL replay callback ─────────────────────────────────────── */
 typedef void (*jinn_wal_replay_cb)(uint8_t op, const void *payload,
                                    uint32_t payload_len, int64_t timestamp,
                                    void *user_data);
-
-/* ── Context (platform-specific) ─────────────────────────────────── */
 
 #if defined(__x86_64__) || defined(_M_X64)
 typedef struct {
@@ -55,7 +36,7 @@ typedef struct {
     void *r13;
     void *r14;
     void *r15;
-} jinn_context_t;  /* 56 bytes */
+} jinn_context_t;
 #elif defined(__aarch64__) || defined(_M_ARM64)
 typedef struct {
     void *sp;
@@ -63,7 +44,7 @@ typedef struct {
     void *fp;
     void *x19_x28[10];
     double d8_d15[8];
-} jinn_context_t;  /* 168 bytes */
+} jinn_context_t;
 #else
 #error \
 "jinn runtime: unsupported target architecture. " \
@@ -74,27 +55,11 @@ typedef struct {
 "swap/start asm in runtime/sched.c, runtime/select.c and " \
 "runtime/channel.c before building on this architecture."
 #endif
-
-/* ── Channel wait-queue node (task 8-11) ─────────────────────────── */
-
-/* Membership in a channel wait queue. Plain send/recv waiters use the
- * node embedded in their coroutine (one queue at a time, zero
- * allocation); a `select` allocates one node per case on its own stack so
- * the selector sits on EVERY case's queue simultaneously (Go's model —
- * the old single-queue round-robin could park on channel A and never be
- * woken by traffic on channel B).
- *
- * `select_claim` is NULL for plain waiters. For select nodes it points at
- * the selector's claim word: a waker must CAS it 0→1 before waking; on
- * failure another case already won and the node is simply discarded (the
- * waker then services the next node in its queue). */
 typedef struct jinn_waitq_node {
     struct jinn_waitq_node *next;
     struct jinn_coro       *coro;
     _Atomic(int32_t)       *select_claim;
 } jinn_waitq_node_t;
-
-/* ── Coroutine ───────────────────────────────────────────────────── */
 
 typedef enum {
     JINN_CORO_READY,
@@ -102,7 +67,6 @@ typedef enum {
     JINN_CORO_SUSPENDED,
     JINN_CORO_DONE
 } jinn_coro_state_t;
-
 struct jinn_coro {
     jinn_context_t     ctx;
     void              *stack_base;
@@ -110,79 +74,51 @@ struct jinn_coro {
     jinn_coro_state_t  state;
     void             (*entry)(void*);
     void              *arg;
-    jinn_coro_t       *next;          /* intrusive list (scheduler inject queue, actor join) */
-    void              *wait_chan;      /* channel blocked on, or NULL */
+    jinn_coro_t       *next;
+    void              *wait_chan;
     uint32_t           id;
-    uint8_t            daemon;        /* 1 = daemon coro (actor), doesn't block sched_run */
-    void             (*on_exit_cb)(void *);  /* called when coro returns (before destroy) */
+    uint8_t            daemon;
+    void             (*on_exit_cb)(void *);
     void              *on_exit_arg;
-    void              *scope;         /* owning jinn_scope_t, or NULL — structured concurrency */
-    _Atomic(int32_t)   cancelled;     /* set when the owning scope is cancelled */
-    jinn_waitq_node_t  wq_node;       /* embedded node for plain channel waits */
-    void              *txn_state;     /* per-coroutine transaction state (task 8-24) */
+    void              *scope;
+    _Atomic(int32_t)   cancelled;
+    jinn_waitq_node_t  wq_node;
+    void              *txn_state;
 };
-
-#define JINN_STACK_SIZE  (64 * 1024)   /* 64KB per coroutine */
-#define JINN_GUARD_SIZE  4096          /* 1 page guard */
-
+#define JINN_STACK_SIZE  (64 * 1024)
+#define JINN_GUARD_SIZE  4096
 jinn_coro_t *jinn_coro_create(void (*entry)(void*), void *arg);
 void         jinn_coro_destroy(jinn_coro_t *c);
 void         jinn_coro_yield(void);
 void         jinn_coro_set_daemon(jinn_coro_t *c);
 void         jinn_coro_set_on_exit(jinn_coro_t *c, void (*cb)(void *), void *arg);
-
-/* ── Generator direct context-swap API ───────────────────────────── */
-
 void jinn_gen_resume(void *gen_blk);
 void jinn_gen_suspend(void *gen_blk);
 void jinn_gen_destroy(void *gen_blk);
-
 extern _Thread_local jinn_coro_t *tl_gen_coro;
 
-/* ── Context switch (defined in assembly or fallback) ────────────── */
-
 void jinn_context_swap(jinn_context_t *from, jinn_context_t *to);
-
-/* ── Work-stealing deque ─────────────────────────────────────────── */
-
 #define JINN_DEQUE_INIT_CAP 1024
 
-/* One deque buffer: the capacity travels WITH the slots so a thief reads a
- * consistent (buffer, capacity) pair from a single atomic pointer — the old
- * separate `buffer`/`capacity` fields could be observed torn across a grow
- * (task 8-14). Slots are atomics: they are formally racy between the
- * owner's store and a thief's read. Retired buffers chain through `prev`
- * and are freed only at deque destroy, never inline (canonical Chase-Lev:
- * a thief may still be reading a slot of the old buffer after the owner
- * swaps in the grown one; retired buffers are immutable, so that read
- * stays valid). Total retired memory is bounded by the sum of the smaller
- * powers of two, i.e. less than one final-size buffer. */
 typedef struct jinn_deque_buf jinn_deque_buf_t;
 struct jinn_deque_buf {
-    int64_t                 size; /* power of two */
-    jinn_deque_buf_t       *prev; /* retired predecessor (owner-written) */
+    int64_t                 size;
+    jinn_deque_buf_t       *prev;
     _Atomic(jinn_coro_t *)  slots[];
 };
-
 struct jinn_deque {
     _Atomic(jinn_deque_buf_t *) buf;
     _Atomic(int64_t)            top;
     _Atomic(int64_t)            bottom;
 };
-
 void         jinn_deque_init(jinn_deque_t *dq);
 void         jinn_deque_destroy(jinn_deque_t *dq);
 void         jinn_deque_push(jinn_deque_t *dq, jinn_coro_t *c);
 jinn_coro_t *jinn_deque_pop(jinn_deque_t *dq);
 jinn_coro_t *jinn_deque_steal(jinn_deque_t *dq);
-
-/* ── Scheduler ───────────────────────────────────────────────────── */
-
-/* Scheduler actions communicated from coroutine to scheduler across swap */
-#define SCHED_ACTION_PARK    0  /* parked on wait queue — don't touch coroutine */
-#define SCHED_ACTION_REQUEUE 1  /* voluntary yield — re-enqueue */
-#define SCHED_ACTION_DESTROY 2  /* coroutine exited — destroy it */
-
+#define SCHED_ACTION_PARK    0
+#define SCHED_ACTION_REQUEUE 1
+#define SCHED_ACTION_DESTROY 2
 struct jinn_worker {
     pthread_t          thread;
     uint32_t           id;
@@ -190,41 +126,26 @@ struct jinn_worker {
     jinn_coro_t       *current;
     jinn_context_t     sched_ctx;
     uint64_t           rng_state;
-    /* Spinlock word held across a park's context swap; the scheduler
-     * releases it only after the parking coroutine's context is fully
-     * saved. This is the lock-handoff that makes publish-then-park safe:
-     * a waker that finds the coroutine on a wait queue must acquire this
-     * lock first, and cannot get it until the context is saved (task
-     * 8-10, generalizing the channel-only `held_chan_lock`). */
     _Atomic(int32_t)  *held_lock;
-    /* Multi-lock variant for `select`, which parks holding EVERY case
-     * channel's lock (its waiter nodes are published on all of them). The
-     * array lives on the parker's stack, which stays valid while parked;
-     * the scheduler zeroes each word after the context save. */
     _Atomic(int32_t) **held_locks;
     int                held_locks_n;
-    int                last_action;     /* SCHED_ACTION_* set before swap */
+    int                last_action;
 };
-
 struct jinn_sched {
     jinn_worker_t     *workers;
     int                num_workers;
     _Atomic(int64_t)   active_coros;
     _Atomic(int32_t)   shutdown;
-    /* Global inject queue */
+
     jinn_coro_t       *inject_head;
     jinn_coro_t       *inject_tail;
-    /* Idle parking */
     pthread_mutex_t    idle_lock;
     pthread_cond_t     idle_cond;
     _Atomic(int32_t)   idle_count;
-    /* Started flag */
     _Atomic(int32_t)   started;
-    /* Completion signaling — replaces usleep polling in jinn_sched_run */
     pthread_mutex_t    done_lock;
     pthread_cond_t     done_cond;
 };
-
 void jinn_sched_init(int num_workers);
 void jinn_sched_spawn(jinn_coro_t *c);
 void jinn_sched_run(void);
@@ -233,34 +154,9 @@ void jinn_sched_enqueue(jinn_coro_t *c);
 void jinn_sched_yield(void);
 void jinn_sched_park(void);
 void jinn_sched_unpark(jinn_coro_t *c);
-
-/* Get current coroutine (thread-local) */
 jinn_coro_t  *jinn_current_coro(void);
 jinn_worker_t *jinn_current_worker(void);
-
-/*
- * jinn_worker_self: the worker running the calling thread, re-derived now.
- *
- * MUST be used instead of reading `tl_worker` directly by any code that may
- * run *after* a `jinn_context_swap` — i.e. anything in a park/resume loop.
- *
- * Why: a compiler materialises the thread pointer once per function and keeps
- * the TLS block address in a callee-saved register. `jinn_context_swap` saves
- * and restores callee-saved registers as part of the coroutine context, so a
- * coroutine that parks on worker A and is resumed on worker B (work-stealing,
- * or the global inject queue) comes back with that register still pointing at
- * *A's* TLS block. Every later `tl_worker` read in the same function then
- * yields the wrong worker — typically one that is idle, whose `current` is
- * NULL, which reads as "not on a coroutine" and silently disables parking and
- * cancellation checks.
- *
- * This accessor is deliberately out-of-line and noinline: the call re-derives
- * the thread pointer on the thread that is actually running.
- */
 jinn_worker_t *jinn_worker_self(void);
-
-/* ── Channels ────────────────────────────────────────────────────── */
-
 struct jinn_chan {
     _Atomic(uint64_t)  head;
     _Atomic(uint64_t)  tail;
@@ -272,9 +168,8 @@ struct jinn_chan {
     jinn_waitq_node_t *send_waitq_tail;
     jinn_waitq_node_t *recv_waitq;
     jinn_waitq_node_t *recv_waitq_tail;
-    _Atomic(int32_t)   lock;         /* spinlock (no thread-ownership tracking) */
+    _Atomic(int32_t)   lock;
 };
-
 jinn_chan_t *jinn_chan_create(size_t elem_size, size_t capacity);
 int         jinn_chan_send(jinn_chan_t *ch, const void *data);
 int         jinn_chan_recv(jinn_chan_t *ch, void *data_out);
@@ -282,104 +177,61 @@ int         jinn_chan_try_recv(jinn_chan_t *ch, void *data_out);
 void        jinn_chan_close(jinn_chan_t *ch);
 void        jinn_chan_wake_coro(jinn_chan_t *ch, jinn_coro_t *c);
 void        jinn_chan_destroy(jinn_chan_t *ch);
-
-/* ── Select ──────────────────────────────────────────────────────── */
-
 typedef struct jinn_select_case {
     jinn_chan_t   *chan;
     void          *data;
     int            is_send;
 } jinn_select_case_t;
-
 int jinn_select(jinn_select_case_t *cases, int n, int has_default);
-
-/* ── Timers ──────────────────────────────────────────────────────── */
-
 struct jinn_timer {
     uint64_t deadline_ns;
     int      fired;
 };
-
 void     jinn_timer_set(jinn_timer_t *t, uint64_t deadline_ns);
 int      jinn_timer_check(jinn_timer_t *t);
 uint64_t jinn_time_now_ns(void);
-
-/* ── Actor helpers ───────────────────────────────────────────────── */
-
 void jinn_actor_park(void *mailbox_ptr);
 void jinn_actor_wake(void *mailbox_ptr);
 void jinn_actor_stop(void *mailbox_ptr);
-/* Reclaim mailboxes retired by exited actors (see jinn_actor_destroy). */
 void jinn_actor_retire_flush(void);
 void jinn_actor_destroy(void *mailbox_ptr);
 
-/* ── Join (actor completion latch) ───────────────────────────────── */
-
 typedef struct jinn_join jinn_join_t;
-
 jinn_join_t *jinn_join_create(void);
 jinn_join_t *jinn_join_get(void *join_slot_ptr);
 void         jinn_join_signal(void *join_slot_ptr);
 void         jinn_actor_join(void *join_slot_ptr);
-
-/* ── Structured concurrency: `together` scopes ───────────────────── */
-
 typedef struct jinn_scope jinn_scope_t;
 
-/* Open a scope, push it as the current scope for this thread, return it. */
 jinn_scope_t *jinn_scope_create(void);
-/* Current thread-local scope (NULL outside any `together` block). */
 jinn_scope_t *jinn_scope_current(void);
-/* Register a freshly-created child coroutine with the current scope (if any):
- * sets child->scope and increments the scope's live-child count. No-op when
- * there is no current scope (preserves daemon/fire-and-forget spawn). */
 void jinn_scope_register_child(jinn_coro_t *child);
-/* Track a scope-owned actor mailbox so the scope can stop it on exit. */
 void jinn_scope_add_actor(jinn_scope_t *s, void *mailbox_ptr);
-/* Remove an exiting child/mailbox from the scope registry BEFORE it is
- * destroyed, so cancellation and wake can never touch freed memory
- * (task 8-12). Must precede jinn_scope_child_done for the same child. */
+
 void jinn_scope_unregister_child(jinn_scope_t *s, jinn_coro_t *child);
 void jinn_scope_unregister_actor(jinn_scope_t *s, void *mailbox_ptr);
-/* A child completed; decrement live count and wake the parent at zero. */
 void jinn_scope_child_done(jinn_scope_t *s);
-/* Mark the scope (and its live children) cancelled and wake them. */
 void jinn_scope_cancel(jinn_scope_t *s);
-/* True if the calling coroutine has been cancelled by its scope. */
 int  jinn_scope_check_cancelled(void);
-/* Record a child's propagated error (first-error-wins) and cancel the scope. */
 void jinn_scope_record_error(jinn_scope_t *s, int64_t errval);
-/* Record an error on the scope owning the currently running coroutine. */
 void jinn_scope_record_current_error(int64_t errval);
-/* If an error was recorded, write it to *out and return 1, else return 0. */
 int  jinn_scope_take_error(jinn_scope_t *s, int64_t *out);
-/* Join, take any recorded error before free; returns the error word or INT64_MIN. */
 int64_t jinn_scope_join_take_error(jinn_scope_t *s);
-/* Close every scope-owned actor mailbox (graceful stop-and-drain). */
+
 void jinn_scope_stop_actors(jinn_scope_t *s);
-/* Block the parent until all children complete, pop the scope, then free it. */
 void jinn_scope_join(jinn_scope_t *s);
-/* Set the thread-local current scope (used by the worker loop on resume). */
+
 void jinn_scope_set_current(jinn_scope_t *s);
-/* Actor spawn hook: scope-own (non-daemon, registered) if a scope is current,
- * else daemon. Replaces the unconditional set_daemon at spawn. */
+
 void jinn_actor_spawn_scoped(jinn_coro_t *coro, void *mailbox_ptr);
-
-/* ── Supervisor (OTP-style) ──────────────────────────────────────── */
-
 typedef struct jinn_sup jinn_sup_t;
-
 typedef enum {
     JINN_SUP_ONE_FOR_ONE = 0,
     JINN_SUP_ONE_FOR_ALL = 1,
     JINN_SUP_REST_FOR_ONE = 2,
 } jinn_sup_strategy_t;
-
-/* Factory: allocate + initialise a fresh mailbox for this child.
- * Returns the mailbox pointer. Must be called fresh for every (re)start. */
 typedef void *(*jinn_sup_factory_t)(void);
 
-/* Loop function (the actor's entry point). Takes mb_ptr. */
 typedef void (*jinn_sup_loop_t)(void *);
 
 jinn_sup_t *jinn_sup_create(jinn_sup_strategy_t strategy);
@@ -389,28 +241,14 @@ void        jinn_sup_start(jinn_sup_t *sup);
 int         jinn_sup_restart_count(jinn_sup_t *sup);
 void        jinn_sup_destroy(jinn_sup_t *sup);
 void       *jinn_sup_child_mailbox(jinn_sup_t *sup, size_t idx);
-
-/* ── Global scheduler instance ───────────────────────────────────── */
-
 extern jinn_sched_t g_sched;
 extern _Thread_local jinn_worker_t *tl_worker;
-
-/* ── Crash handlers (P0-6) ───────────────────────────────────────── */
-
 void jinn_install_crash_handlers(void);
 void jinn_install_worker_sigaltstack(void);
-
-/* ── Checked allocation ──────────────────────────────────────────── */
-
 void *jinn_xmalloc(size_t size);
 void jinn_store_truncation_warn(int64_t original_len, int64_t max_len);
 void jinn_store_reserve(FILE *fp, int64_t count, int64_t rec_size);
-
-/* ── Hashing ─────────────────────────────────────────────────────── */
 uint64_t jinn_fnv1a(const void *data, int64_t len);
-
-/* ── Process helpers ─────────────────────────────────────────────── */
-
 long jinn_popen_read(const char *cmd, char *buf, long buf_size, int *exit_code);
 int  jinn_system(const char *cmd);
 long jinn_exec_capture(const char *prog, char *const argv[], char *buf, long buf_size, int *exit_code);
@@ -419,14 +257,10 @@ int  jinn_exec_argv_timeout(const char *prog, char *const argv[], int *exit_code
 long jinn_exec_argv_capture(const char *prog, char *const argv[], char *buf, long buf_size, int *exit_code);
 long jinn_exec_argv_capture_timeout(const char *prog, char *const argv[],
                                     char *buf, long buf_size, int *exit_code, long timeout_ms);
-
-/* Vec<String>-aware spawn (called from std/process.jn) */
 long jinn_spawn_capture(const void *vec_ptr, char *buf, long buf_size, int *exit_code);
 int  jinn_spawn_exec(const void *vec_ptr, int *exit_code);
 
 
-/* ── Auto-collected runtime FFI prototypes ──────────────── */
-/* runtime/bloom.c */
 JinnBloom *jinn_bloom_create(int64_t expected_items, double fp_rate);
 JinnBloom *jinn_bloom_open(const char *path, int64_t expected_items);
 void jinn_bloom_close(JinnBloom *b);
@@ -436,7 +270,7 @@ void jinn_bloom_add_i64(JinnBloom *b, int64_t val);
 int64_t jinn_bloom_test_i64(JinnBloom *b, int64_t val);
 void jinn_bloom_add_str(JinnBloom *b, const char *data, int64_t len);
 int64_t jinn_bloom_test_str(JinnBloom *b, const char *data, int64_t len);
-/* runtime/column.c */
+
 JinnCol *jinn_col_open(const char *path, int64_t elem_size);
 void jinn_col_close(JinnCol *c);
 void jinn_col_append(JinnCol *c, const void *data);
@@ -450,7 +284,6 @@ double jinn_col_sum_f64(JinnCol *c);
 double jinn_col_min_f64(JinnCol *c);
 double jinn_col_max_f64(JinnCol *c);
 int64_t jinn_col_distinct_i64(JinnCol *c);
-/* runtime/event.c */
 void *jinn_event_loop_create(int max_events);
 void jinn_event_loop_destroy(void *handle);
 int jinn_fd_set_nonblock(int fd);
@@ -465,10 +298,7 @@ int jinn_event_wait_writable(int fd, int timeout_ms);
 void *jinn_io_waiter_create(int fd);
 void jinn_io_waiter_destroy(void *waiter);
 void jinn_io_waiter_set_coro(void *waiter, void *coro);
-/* Park the current coroutine until the waiter's event fires; safe against
- * the fire-before-park race and the wake-during-park race (task 8-10). */
 void jinn_io_waiter_park(void *waiter);
-/* runtime/fs.c */
 int c_mkdir(const char *path, int mode);
 int c_rmdir(const char *path);
 int c_remove(const char *path);
@@ -487,7 +317,6 @@ int jinn_chmod(const char *path, int mode);
 double c_hypot(double x, double y);
 const char *jinn_hostname(void);
 const char *jinn_cwd(void);
-/* runtime/fts.c */
 JinnFts *jinn_fts_open(const char *path);
 void jinn_fts_close(JinnFts *f);
 void jinn_fts_add(JinnFts *f, int64_t doc_id, const char *text, int64_t text_len);
@@ -498,7 +327,6 @@ int64_t jinn_fts_count_n(JinnFts *f, const char *query, int64_t qlen);
 int64_t jinn_fts_search_ids_n(JinnFts *f, const char *query, int64_t qlen, int64_t *out_ids, int64_t max_ids);
 void jinn_fts_add_n(JinnFts *f, int64_t doc_id, const char *text, int64_t text_len);
 int64_t jinn_fts_posting_count(JinnFts *f);
-/* runtime/index.c */
 uint64_t jinn_idx_hash_i64(int64_t val);
 uint64_t jinn_idx_hash_str(const char *buf, int64_t len);
 uint64_t jinn_idx_hash_f64(double val);
@@ -511,7 +339,6 @@ int64_t jinn_idx_lookup(JinnIndex *idx, uint64_t hash);
 int jinn_idx_contains(JinnIndex *idx, uint64_t hash);
 void jinn_idx_delete(JinnIndex *idx, uint64_t hash);
 void jinn_idx_clear(JinnIndex *idx);
-/* runtime/kv.c */
 JinnKV *jinn_kv_open(const char *path);
 void jinn_kv_close(JinnKV *kv);
 void jinn_kv_set(JinnKV *kv, const char *key, int64_t key_len, int64_t value);
@@ -521,7 +348,6 @@ void jinn_kv_del(JinnKV *kv, const char *key, int64_t key_len);
 void jinn_kv_incr(JinnKV *kv, const char *key, int64_t key_len, int64_t delta);
 int64_t jinn_kv_count(JinnKV *kv);
 void jinn_kv_persist(JinnKV *kv);
-/* runtime/migrate.c */
 FILE *jinn_mig_log_open(const char *path);
 void jinn_mig_log_close(FILE *fp);
 int64_t jinn_mig_log_applied(FILE *fp, int64_t version);
@@ -534,7 +360,6 @@ void jinn_store_check_schema(FILE *fp, int64_t expected_fp, int64_t expected_ver
 void jinn_store_stamp_schema(FILE **store_fp_ptr, int64_t fingerprint, int64_t version);
 void jinn_migration_enter(void);
 void jinn_migration_leave(void);
-/* runtime/net.c */
 int jinn_socket(int domain, int type, int protocol);
 int jinn_close(int fd);
 int listen_sock(int fd, int backlog);
@@ -542,21 +367,15 @@ long jinn_send(int fd, const void *buf, long len, int flags);
 long jinn_recv(int fd, void *buf, long len, int flags);
 long jinn_sendto(int fd, const void *buf, long len, int flags, const void *addr, int addrlen);
 long jinn_recvfrom(int fd, void *buf, long len, int flags, void *addr, int *addrlen);
-/* runtime/pool.c */
-/* runtime/process.c */
-/* runtime/regex_helper.c */
 int64_t jinn_ovector_get(void *ovector, int64_t idx);
-/* runtime/util.c */
 int64_t jinn_f64_to_bits(double val);
 double jinn_bits_to_f64(int64_t bits);
 const char *jinn_getenv_or_empty(const char *name);
 void jinn_sort_i64(int64_t *data, int64_t len);
 void jinn_sort_f64(double *data, int64_t len);
-/* runtime/terminal.c */
 int jinn_terminal_enable_raw(int fd);
 int jinn_terminal_disable_raw(int fd);
 int jinn_terminal_size(int32_t *out_cols, int32_t *out_rows);
-/* runtime/vec.c */
 void *__jinn_vec_slice(void *hdr, int64_t start, int64_t end, int64_t elem_size);
 void *__jinn_vec_clone_pod(void *hdr, int64_t elem_size);
 jinn_sso_t __jinn_str_slice(jinn_sso_t str, int64_t start, int64_t end);
@@ -567,14 +386,12 @@ void __jinn_deque_push_front(void *handle, int64_t val);
 int64_t __jinn_deque_pop_front(void *handle);
 int64_t __jinn_deque_pop_back(void *handle);
 int64_t __jinn_deque_len(void *handle);
-/* runtime/vector.c */
 JinnVec *jinn_vec_open(const char *path, int64_t dims);
 void jinn_vec_close(JinnVec *v);
 void jinn_vec_insert(JinnVec *v, const double *vec);
 int64_t jinn_vec_count(JinnVec *v);
 int64_t jinn_vec_nearest(JinnVec *v, const double *query, int64_t k, int64_t *out_indices);
 int64_t jinn_vec_nearest_scored(JinnVec *v, const double *query, int64_t k, int64_t *out_indices, double *out_dists);
-/* runtime/version.c */
 FILE *jinn_ver_open(const char *path);
 void jinn_ver_close(FILE *f);
 void jinn_ver_append(FILE *f, int64_t sid, int64_t version, const void *record_data, int64_t rec_size);
@@ -582,7 +399,6 @@ int64_t jinn_ver_count(FILE *f, int64_t sid, int64_t rec_size);
 int64_t jinn_ver_at(FILE *f, int64_t sid, int64_t version, void *out_buf, int64_t rec_size);
 int64_t jinn_ver_history(FILE *f, int64_t sid, void *out_buf, int64_t rec_size, int64_t max_versions);
 void jinn_ver_compact(FILE **fpp, const char *path, int64_t rec_size, int64_t keep_n);
-/* runtime/wal.c */
 void jinn_txn_begin(void);
 void jinn_txn_commit(void);
 void jinn_txn_rollback(void);
@@ -598,8 +414,6 @@ void jinn_wal_checkpoint(FILE *wal);
 void jinn_wal_close(FILE *wal);
 int64_t jinn_wal_size(FILE *wal);
 int64_t jinn_wal_replay(FILE *wal, jinn_wal_replay_cb callback, void *user_data);
-
-/* ── Atomic durable rewrites + single-writer lock (task 8-21) ────── */
 typedef int (*jinn_fill_fn)(FILE *tmp, void *arg);
 int  jinn_fsync_checked(int fd, const char *what);
 int  jinn_dir_fsync(const char *filepath);
@@ -611,9 +425,6 @@ int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
                            int64_t sid_offset, int64_t deleted_offset);
 int  jinn_writer_lock(const char *path);
 void jinn_writer_unlock(int lock_fd);
-
-/* ── Optional modules (only linked when feature available) ── */
-/* runtime/crypto.c (requires OpenSSL) */
 int  jinn_sha256(const unsigned char *data, long len, unsigned char *out);
 int  jinn_sha512(const unsigned char *data, long len, unsigned char *out);
 int  jinn_hmac_sha256(const unsigned char *key, long key_len,
@@ -662,8 +473,6 @@ int  jinn_argon2id(const unsigned char *pass, long pass_len,
 int  jinn_scrypt(const unsigned char *pass, long pass_len,
                  const unsigned char *salt, long salt_len,
                  long n, long r, long p, long dklen, unsigned char *out);
-
-/* runtime/tls.c (requires OpenSSL) */
 typedef struct jinn_tls_conn jinn_tls_conn;
 void           jinn_tls_init(void);
 jinn_tls_conn *jinn_tls_connect(const char *host, int port);
@@ -681,9 +490,6 @@ long           jinn_tls_peer_cert_subject(jinn_tls_conn *conn, char *buf, long l
 long           jinn_tls_protocol_version(jinn_tls_conn *conn, char *buf, long len);
 int            jinn_dns_resolve(const char *host, char *out_buf, int out_len);
 int            jinn_dns_resolve_all(const char *host, char *out_buf, int out_len);
-
-/* runtime/sqlite.c (requires sqlite3) — raw FFI surface; bind it with
- * `extern *jinn_sqlite_*` declarations. There is no std/ wrapper module. */
 void       *jinn_sqlite_open(const char *path);
 int         jinn_sqlite_close(void *db);
 int         jinn_sqlite_exec(void *db, const char *sql);
@@ -711,7 +517,6 @@ long        jinn_sqlite_column_blob_len(void *stmt, int idx);
 int         jinn_sqlite_begin(void *db);
 int         jinn_sqlite_commit(void *db);
 int         jinn_sqlite_rollback(void *db);
-
 #ifdef __cplusplus
 }
 #endif

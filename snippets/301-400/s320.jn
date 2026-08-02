@@ -1,4 +1,3 @@
-# Reverse a Vec by walking from the back and pushing.
 *reverse(xs as Vec of i64) returns Vec of i64
     out is vec()
     i is xs.length - 1

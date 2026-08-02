@@ -1,4 +1,3 @@
-# Bounding box over a list of (x,y).
 *main
     pts is vec()
     p1 is vec()

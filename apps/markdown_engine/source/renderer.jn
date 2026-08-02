@@ -1,6 +1,5 @@
 use parser
 
-# Each block emits a "tag count" estimate: <h1>x</h1> = 2 tags, <ul><li>...</li></ul> = 2 + 2N
 *tag_count(blocks as Vec of Block) returns i64
     s is 0
     loop(0, $ < blocks.len(), $ + 1)

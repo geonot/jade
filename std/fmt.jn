@@ -1,16 +1,4 @@
-# std.fmt — String formatting and presentation helpers
-#
-# Numeric formatting (hex/oct/bin/float), padding, alignment, repetition,
-# tables, durations, file sizes, and printf-style format strings.
-#
-# Usage:
-#   fmt.hex(255)                       # "ff"
-#   fmt.pad_left("5", 3, "0")          # "005"
-#   fmt.bytes(1536)                    # "1.5 KiB"
-#   fmt.duration_ns(1500000)           # "1.50ms"
-#   fmt.commas(1234567)                # "1,234,567"
 
-# ── Number bases ─────────────────────────────────────────────
 
 *float(x, decimals)
     __fmt_float(x, decimals)
@@ -27,11 +15,9 @@
 *hex_with_prefix(n) returns String
     "0x" + __fmt_hex(n)
 
-# Fixed-width hex (zero-padded), e.g. hex_n(255, 4) -> "00ff"
 *hex_n(n as i64, width as i64) returns String
     pad_left(__fmt_hex(n), width, "0")
 
-# ── Padding & alignment ──────────────────────────────────────
 
 *pad_left(s as String, width, fill as String)
     if s.length >= width
@@ -70,7 +56,6 @@
         return s
     s.slice(0, max_len - suffix.length) + suffix
 
-# ── Joining & repetition ─────────────────────────────────────
 
 *join(items, sep as String)
     if items.length equals 0
@@ -88,9 +73,7 @@
         result is result + s
     result
 
-# ── Number presentation ──────────────────────────────────────
 
-# Insert thousands separators: 1234567 -> "1,234,567"
 *commas(n as i64) returns String
     if n equals 0
         return "0"
@@ -114,7 +97,6 @@
         return "-" + out
     out
 
-# Shorten big numbers: 1500 -> "1.5K", 2400000 -> "2.4M"
 *si_suffix(n as i64) returns String
     abs is n
     if abs < 0
@@ -129,7 +111,6 @@
         return __fmt_float((n as f64) / 1000000000.0, 1) + "G"
     __fmt_float((n as f64) / 1000000000000.0, 1) + "T"
 
-# Human-readable byte sizes (binary KiB/MiB/GiB).
 *bytes(n as i64) returns String
     abs is n
     if abs < 0
@@ -144,7 +125,6 @@
         return __fmt_float((n as f64) / 1073741824.0, 2) + " GiB"
     __fmt_float((n as f64) / 1099511627776.0, 2) + " TiB"
 
-# Human-readable duration from a nanosecond count.
 *duration_ns(ns as i64) returns String
     if ns < 1000
         return '{ns}ns'
@@ -162,13 +142,10 @@
     m is (ns mod 3600000000000) / 60000000000
     '{h}h {m}m'
 
-# Percent: percent(0.875, 1) -> "87.5%"
 *percent(x as f64, decimals as i64) returns String
     __fmt_float(x * 100.0, decimals) + "%"
 
-# ── Simple table layout ──────────────────────────────────────
 
-# Pretty-print a table given header + rows. Columns auto-sized.
 *table(header as Vec of String, rows as Vec of Vec of String) returns String
     cols is header.length
     widths is vec()
@@ -215,9 +192,6 @@
         i is i + 1
     out
 
-# ── Tiny printf-style formatter ──────────────────────────────
-#
-# Accepts %s, %d, %x, %% (literal %).
 
 *printf(format as String, args as Vec of String) returns String
     out is ""

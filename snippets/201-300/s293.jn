@@ -1,4 +1,3 @@
-# CRC32-style: reflected poly mock over byte stream.
 *crc(bytes as Vec of i64, n as i64) returns i64
     c is 0xFFFFFFFF
     i is 0

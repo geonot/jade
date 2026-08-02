@@ -1,4 +1,3 @@
-# Iterative factorial.
 *fact(n as i64) returns i64
     r is 1
     i is 2

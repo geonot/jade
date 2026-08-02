@@ -180,8 +180,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
-    /// Byte offset of a named field within the on-disk record, following
-    /// the same alignment walk LLVM performs for the unpacked struct.
     pub(in crate::codegen) fn store_field_offset(
         &self,
         sd: &hir::StoreDef,

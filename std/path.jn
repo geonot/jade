@@ -1,27 +1,13 @@
-# std.path — Filesystem path manipulation
-#
-# Pure-string path operations — no I/O. For existence checks, listing,
-# walking, and metadata, see `std.fs`.
-#
-# Usage:
-#   path.join("src", "main.jn")        # "src/main.jn"
-#   path.dir("/etc/hosts")               # "/etc"
-#   path.base("/etc/hosts")              # "hosts"
-#   path.ext("file.tar.gz")              # ".gz"
-#   path.normalize("/a/./b/../c")        # "/a/c"
-#   path.relative("/a/b", "/a/b/c/d")    # "c/d"
 
-SLASH is 47   # /
-DOT   is 46   # .
+SLASH is 47
+DOT   is 46
 
-# ── Joining ──────────────────────────────────────────────────
 
 *join(a as String, b as String) returns String
     if a.length equals 0
         return b
     if b.length equals 0
         return a
-    # Absolute b discards a.
     if b.char_at(0) equals SLASH
         return b
     a.char_at(a.length - 1) equals SLASH ? a + b ! a + "/" + b
@@ -39,7 +25,6 @@ DOT   is 46   # .
         i is i + 1
     out
 
-# ── Decomposition ────────────────────────────────────────────
 
 *dir(p as String) returns String
     if p.length equals 0
@@ -106,11 +91,9 @@ DOT   is 46   # .
 *with_name(p as String, new_name as String) returns String
     join(dir(p), new_name)
 
-# Split a path into its individual segments. Leading "/" preserved as "".
 *segments(p as String) returns Vec of String
     p.split("/")
 
-# ── Predicates ───────────────────────────────────────────────
 
 *is_absolute(p as String) returns bool
     if p.length equals 0
@@ -133,9 +116,7 @@ DOT   is 46   # .
         return true
     b.char_at(1) neq DOT
 
-# ── Normalization ────────────────────────────────────────────
 
-# Resolve "." and ".." segments. Does not consult the filesystem.
 *normalize(p as String) returns String
     abs is is_absolute(p)
     parts is p.split("/")
@@ -166,10 +147,7 @@ DOT   is 46   # .
         if part.length > 0
             result.push(part)
 
-# ── Relative path ────────────────────────────────────────────
 
-# Compute the relative path from `base` to `target`. Both must be
-# absolute, or both relative; otherwise returns `target` unchanged.
 *relative(base as String, target as String) returns String
     if is_absolute(base) neq is_absolute(target)
         return target
@@ -202,7 +180,6 @@ DOT   is 46   # .
         s is s + $
     s
 
-# ── Common prefix ────────────────────────────────────────────
 
 *common_prefix(a as String, b as String) returns String
     pa is a.split("/")

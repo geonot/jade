@@ -1,4 +1,3 @@
-# Loan amortization: total interest over n periods.
 *interest_total(p as i64, r_bp as i64, n as i64) returns i64
     bal is p
     pay is p / n + p * r_bp / 10000

@@ -1,4 +1,3 @@
-# Sliding-window maximum sum of size k.
 *max_window(a, k as i64) returns i64
     n is a.length
     if n < k

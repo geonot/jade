@@ -1,41 +1,25 @@
-/* runtime/event.c — Event loop using epoll (Linux) or kqueue (macOS/BSD)
- *
- * Provides a multiplexed I/O event loop for non-blocking socket operations.
- * Integrates with the coroutine scheduler: when a socket isn't ready,
- * the coroutine is parked and automatically resumed when the FD becomes ready.
- */
 #include "jinn_rt.h"
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
-
 #ifdef __linux__
 #include <sys/epoll.h>
-
-/* ── Event loop handle ───────────────────────────────────────── */
 
 typedef struct {
     int epfd;
     int max_events;
 } jinn_event_loop_t;
 
-/* ── Waiter: associates an fd with a parked coroutine ─────────── */
-
 typedef struct {
     int fd;
-    jinn_coro_t *coro;   /* parked coroutine to resume (guarded by `lock`) */
-    int events;           /* EPOLLIN, EPOLLOUT, etc. */
-    /* Park/wake synchronization (task 8-10). `lock` serializes the poll
-     * thread's wake against the waiter's park; the parker hands it to the
-     * scheduler across the swap so a wake can never run against a
-     * half-saved context. `fired` latches an event that arrives before the
-     * waiter parks, closing the lost-wakeup window. */
+    jinn_coro_t *coro;
+    int events;
+
     _Atomic(int32_t) lock;
     _Atomic(int32_t) fired;
 } jinn_io_waiter_t;
-
 static inline void waiter_lock(jinn_io_waiter_t *w) {
     while (atomic_exchange_explicit(&w->lock, 1, memory_order_acquire) != 0) {
 #if defined(__x86_64__)
@@ -45,12 +29,9 @@ static inline void waiter_lock(jinn_io_waiter_t *w) {
 #endif
     }
 }
-
 static inline void waiter_unlock(jinn_io_waiter_t *w) {
     atomic_store_explicit(&w->lock, 0, memory_order_release);
 }
-
-/* Create a new event loop. Returns handle, or NULL on failure. */
 void *jinn_event_loop_create(int max_events) {
     if (max_events <= 0) max_events = 256;
     jinn_event_loop_t *loop = (jinn_event_loop_t *)calloc(1, sizeof(jinn_event_loop_t));
@@ -63,8 +44,6 @@ void *jinn_event_loop_create(int max_events) {
     loop->max_events = max_events;
     return loop;
 }
-
-/* Destroy an event loop. */
 void jinn_event_loop_destroy(void *handle) {
     jinn_event_loop_t *loop = (jinn_event_loop_t *)handle;
     if (!loop) return;
@@ -72,14 +51,11 @@ void jinn_event_loop_destroy(void *handle) {
     free(loop);
 }
 
-/* Set an fd to non-blocking mode. Returns 0 on success. */
 int jinn_fd_set_nonblock(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags < 0) return -1;
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
-
-/* Register an fd for read events. waiter_ptr is a pointer to jinn_io_waiter_t. */
 int jinn_event_loop_add_read(void *handle, int fd, void *waiter_ptr) {
     jinn_event_loop_t *loop = (jinn_event_loop_t *)handle;
     if (!loop) return -1;
@@ -88,8 +64,6 @@ int jinn_event_loop_add_read(void *handle, int fd, void *waiter_ptr) {
     ev.data.ptr = waiter_ptr;
     return epoll_ctl(loop->epfd, EPOLL_CTL_ADD, fd, &ev);
 }
-
-/* Register an fd for write events. */
 int jinn_event_loop_add_write(void *handle, int fd, void *waiter_ptr) {
     jinn_event_loop_t *loop = (jinn_event_loop_t *)handle;
     if (!loop) return -1;
@@ -98,8 +72,6 @@ int jinn_event_loop_add_write(void *handle, int fd, void *waiter_ptr) {
     ev.data.ptr = waiter_ptr;
     return epoll_ctl(loop->epfd, EPOLL_CTL_ADD, fd, &ev);
 }
-
-/* Re-arm an fd for read events (after EPOLLONESHOT fires). */
 int jinn_event_loop_rearm_read(void *handle, int fd, void *waiter_ptr) {
     jinn_event_loop_t *loop = (jinn_event_loop_t *)handle;
     if (!loop) return -1;
@@ -108,8 +80,6 @@ int jinn_event_loop_rearm_read(void *handle, int fd, void *waiter_ptr) {
     ev.data.ptr = waiter_ptr;
     return epoll_ctl(loop->epfd, EPOLL_CTL_MOD, fd, &ev);
 }
-
-/* Re-arm an fd for write events. */
 int jinn_event_loop_rearm_write(void *handle, int fd, void *waiter_ptr) {
     jinn_event_loop_t *loop = (jinn_event_loop_t *)handle;
     if (!loop) return -1;
@@ -118,42 +88,28 @@ int jinn_event_loop_rearm_write(void *handle, int fd, void *waiter_ptr) {
     ev.data.ptr = waiter_ptr;
     return epoll_ctl(loop->epfd, EPOLL_CTL_MOD, fd, &ev);
 }
-
-/* Remove an fd from the event loop. */
 int jinn_event_loop_remove(void *handle, int fd) {
     jinn_event_loop_t *loop = (jinn_event_loop_t *)handle;
     if (!loop) return -1;
     return epoll_ctl(loop->epfd, EPOLL_CTL_DEL, fd, NULL);
 }
-
-/* Poll for ready events. Returns number of events, or -1 on error.
- * timeout_ms: -1 = block indefinitely, 0 = non-blocking, >0 = milliseconds.
- * On return, ready_fds and ready_events arrays are filled with fd/event pairs. */
 int jinn_event_loop_poll(void *handle, int timeout_ms,
                          int *ready_fds, int *ready_events, int max_ready) {
     jinn_event_loop_t *loop = (jinn_event_loop_t *)handle;
     if (!loop || !ready_fds || !ready_events) return -1;
-
     int n = (max_ready < loop->max_events) ? max_ready : loop->max_events;
     struct epoll_event *events = (struct epoll_event *)alloca(
         (size_t)n * sizeof(struct epoll_event));
-
     int nev = epoll_wait(loop->epfd, events, n, timeout_ms);
     if (nev < 0) {
         if (errno == EINTR) return 0;
         return -1;
     }
-
     for (int i = 0; i < nev; i++) {
         jinn_io_waiter_t *w = (jinn_io_waiter_t *)events[i].data.ptr;
         if (w) {
             ready_fds[i] = w->fd;
             ready_events[i] = (int)events[i].events;
-            /* Unpark the waiting coroutine under the waiter lock: the
-             * parker hands this lock to the scheduler across its swap, so
-             * acquiring it here guarantees the parked context is fully
-             * saved. If no coroutine parked yet, latch `fired` so the
-             * parker skips the park instead of missing the wakeup. */
             waiter_lock(w);
             if (w->coro) {
                 jinn_coro_t *c = w->coro;
@@ -170,10 +126,6 @@ int jinn_event_loop_poll(void *handle, int timeout_ms,
     }
     return nev;
 }
-
-/* ── Simple synchronous poll (no coroutine integration) ────────── */
-
-/* Wait for a single fd to become readable. Returns 0 when ready, -1 on error. */
 int jinn_event_wait_readable(int fd, int timeout_ms) {
     int epfd = epoll_create1(EPOLL_CLOEXEC);
     if (epfd < 0) return -1;
@@ -189,8 +141,6 @@ int jinn_event_wait_readable(int fd, int timeout_ms) {
     close(epfd);
     return (nev > 0) ? 0 : -1;
 }
-
-/* Wait for a single fd to become writable. */
 int jinn_event_wait_writable(int fd, int timeout_ms) {
     int epfd = epoll_create1(EPOLL_CLOEXEC);
     if (epfd < 0) return -1;
@@ -206,9 +156,6 @@ int jinn_event_wait_writable(int fd, int timeout_ms) {
     close(epfd);
     return (nev > 0) ? 0 : -1;
 }
-
-/* ── Waiter allocation helpers ────────────────────────────────── */
-
 void *jinn_io_waiter_create(int fd) {
     jinn_io_waiter_t *w = (jinn_io_waiter_t *)calloc(1, sizeof(jinn_io_waiter_t));
     if (!w) return NULL;
@@ -217,15 +164,10 @@ void *jinn_io_waiter_create(int fd) {
     w->events = 0;
     return w;
 }
-
 void jinn_io_waiter_destroy(void *waiter) {
     free(waiter);
 }
 
-/* Set the coroutine that should be unparked when this waiter fires.
- * Prefer jinn_io_waiter_park() below, which closes the set-then-park race;
- * this setter remains for ABI compatibility and takes the lock so a
- * concurrent poll cannot observe a torn pointer. */
 void jinn_io_waiter_set_coro(void *waiter, void *coro) {
     jinn_io_waiter_t *w = (jinn_io_waiter_t *)waiter;
     if (!w) return;
@@ -233,17 +175,11 @@ void jinn_io_waiter_set_coro(void *waiter, void *coro) {
     w->coro = (jinn_coro_t *)coro;
     waiter_unlock(w);
 }
-
-/* Park the current coroutine on this waiter until the event loop fires it.
- * Returns immediately when the event already fired (the `fired` latch),
- * and hands the waiter lock to the scheduler across the swap so the poll
- * thread's wake can only run once the context is saved (task 8-10). */
 void jinn_io_waiter_park(void *waiter) {
     jinn_io_waiter_t *wt = (jinn_io_waiter_t *)waiter;
     if (!wt) return;
     jinn_worker_t *w = jinn_worker_self();
     if (!w || !w->current) {
-        /* Non-coroutine thread: spin until the event fires. */
         while (!atomic_exchange_explicit(&wt->fired, 0, memory_order_acq_rel)) {
             jinn_sched_yield();
         }
@@ -252,7 +188,7 @@ void jinn_io_waiter_park(void *waiter) {
     waiter_lock(wt);
     if (atomic_exchange_explicit(&wt->fired, 0, memory_order_acq_rel)) {
         waiter_unlock(wt);
-        return; /* event arrived before we parked */
+        return;
     }
     jinn_coro_t *self = w->current;
     wt->coro = self;
@@ -260,11 +196,8 @@ void jinn_io_waiter_park(void *waiter) {
     w->held_lock = &wt->lock;
     w->last_action = SCHED_ACTION_PARK;
     jinn_context_swap(&self->ctx, &w->sched_ctx);
-    /* Resumed by the poll thread's unpark. */
 }
-
 #else
-/* ── Stub for non-Linux (placeholder for future kqueue support) ── */
 void *jinn_event_loop_create(int max_events) { (void)max_events; return NULL; }
 void jinn_event_loop_destroy(void *handle) { (void)handle; }
 int jinn_fd_set_nonblock(int fd) { (void)fd; return -1; }

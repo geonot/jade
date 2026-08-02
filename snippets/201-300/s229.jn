@@ -1,4 +1,3 @@
-# UTXO selection: greedy first-fit by value.
 *sel_count(values as Vec of i64, n as i64, target as i64) returns i64
     sel is 0
     s is 0

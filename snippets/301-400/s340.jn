@@ -1,4 +1,3 @@
-# Echo a Vec of strings.
 *main
     xs is vec()
     xs.push('alpha')

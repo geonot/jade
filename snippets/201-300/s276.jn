@@ -1,4 +1,3 @@
-# Bootloader stage transitions: rom -> sbl -> aboot -> kernel.
 *next(stage as i64, ok as i64) returns i64
     if ok equals 0
         return -1

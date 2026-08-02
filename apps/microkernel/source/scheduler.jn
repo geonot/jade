@@ -1,9 +1,6 @@
-# Priority + round-robin scheduler.  Each priority class is a FIFO;
-# higher class number == higher priority.  On `tick(n)` we run n
-# quanta, dispatching the highest-priority non-empty queue.
 
 actor Scheduler
-    q0 as Vec of i64          # pids at priority 0
+    q0 as Vec of i64
     q1 as Vec of i64
     q2 as Vec of i64
     q3 as Vec of i64
@@ -44,7 +41,6 @@ actor Scheduler
                 pid is q0.shift()
             if pid neq -1
                 dispatched is dispatched + 1
-                # Re-admit at base priority so it stays runnable.
                 q1.push(pid)
 
     *report

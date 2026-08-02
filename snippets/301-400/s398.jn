@@ -1,4 +1,3 @@
-# Sorted-set intersection.
 *main
     a is vec()
     a.push(1)

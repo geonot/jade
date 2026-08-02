@@ -1,4 +1,3 @@
-# SPI: full-duplex shift exchange of 8 bits.
 *spi_xchg(tx as i64, rx_in as i64) returns i64
     rx is 0
     bit is 7

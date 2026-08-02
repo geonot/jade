@@ -1,4 +1,3 @@
-# Vector clock merge: max per index.
 *merge(a as Vec of i64, b as Vec of i64, n as i64) returns Vec of i64
     out is vec()
     i is 0

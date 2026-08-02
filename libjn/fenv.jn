@@ -1,4 +1,3 @@
-# libjn.fenv — drop-in for C <fenv.h>
 
 FE_INVALID   is 1
 FE_DIVBYZERO is 4

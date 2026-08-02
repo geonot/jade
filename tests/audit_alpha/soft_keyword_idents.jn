@@ -1,7 +1,3 @@
-# Regression: reserved-but-contextual keywords (`from`, `to`, `by`, `at`) used
-# as parameter names and as plain variables in expression position. These lex as
-# keywords (for range loops `a to b by c`, slicing `e from a to b`, indexing
-# `e at i`) but must parse as identifiers everywhere an identifier is expected.
 
 *window(from as i64, to as i64, by as i64) returns i64
     total is 0

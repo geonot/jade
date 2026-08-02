@@ -77,14 +77,12 @@ impl<'ctx> Compiler<'ctx> {
                 .add_function("jinn_wal_open", ft, Some(Linkage::External));
         }
         if self.module.get_function("jinn_store_recover").is_none() {
-            // Recovery-at-open (task 8-23): replay committed WAL records
-            // into the data file, then checkpoint.
             let i64t = self.ctx.i64_type();
             let ft = i64t.fn_type(
                 &[
-                    ptr.into(), // FILE **store_fpp (the __store_N_fp global)
-                    ptr.into(), // store path
-                    ptr.into(), // wal path
+                    ptr.into(),
+                    ptr.into(),
+                    ptr.into(),
                     i64t.into(),
                     i64t.into(),
                     i64t.into(),
@@ -95,9 +93,6 @@ impl<'ctx> Compiler<'ctx> {
                 .add_function("jinn_store_recover", ft, Some(Linkage::External));
         }
         if self.module.get_function("jinn_wal_write_must").is_none() {
-            // Abort-on-failure variant (task 8-22): a WAL append that cannot
-            // be made durable stops the program instead of silently
-            // continuing with a broken durability story.
             let void_ty = self.ctx.void_type();
             let u8t = self.ctx.i8_type();
             let ft = void_ty.fn_type(&[ptr.into(), u8t.into(), ptr.into(), i32t.into()], false);

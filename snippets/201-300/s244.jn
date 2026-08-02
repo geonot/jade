@@ -1,4 +1,3 @@
-# HyperLogLog-ish: leading-zero count cardinality estimate (toy).
 *lz(x as i64) returns i64
     n is 0
     bit is 31

@@ -1,23 +1,3 @@
-//! Every fenced ```jinn code block in `docs/jinn.md` must compile (task 8-3).
-//!
-//! The review found documented examples that fail to parse, type-check, or
-//! link. The docs now carry a contract: they describe the language as
-//! implemented today, and this test enforces it — a documented example that
-//! stops compiling fails CI.
-//!
-//! Blocks are compiled with the real `jinnc` binary, each in its own temp
-//! directory (so `store` examples write their files there). A block that is
-//! a bare fragment is wrapped: top-level declarations stay top-level, loose
-//! statements are indented into a synthetic `*main`.
-//!
-//! Markers, written as HTML comments immediately before a fence:
-//!
-//! - `<!-- doctest:skip <reason> -->` — do not compile (reference tables).
-//! - `<!-- doctest:prelude` … lines … `-->` — hidden setup prepended to the
-//!   block before wrapping (bindings/functions the prose assumes).
-//! - `<!-- doctest:file <relpath> -->` — the block is written to `<relpath>`
-//!   in the temp directory of the next compiled block (multi-file examples).
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -40,7 +20,7 @@ struct Markers {
 
 #[derive(Debug)]
 struct Block {
-    line: usize, // 1-based line of the opening fence in jinn.md
+    line: usize,
     code: String,
     markers: Markers,
 }
@@ -58,7 +38,6 @@ fn extract_blocks(doc: &str) -> Vec<Block> {
             } else if let Some(name) = rest.strip_prefix("file") {
                 pending.file = Some(name.trim_end_matches("-->").trim().to_string());
             } else if rest.starts_with("prelude") {
-                // multi-line: lines until a line that is exactly `-->`
                 for (_, pl) in lines.by_ref() {
                     if pl.trim() == "-->" {
                         break;
@@ -89,7 +68,6 @@ fn extract_blocks(doc: &str) -> Vec<Block> {
                 markers: std::mem::take(&mut pending),
             });
         } else if trimmed.starts_with("```") && trimmed != "```" {
-            // a non-jinn fence; markers do not carry across it
             pending = Markers::default();
         }
     }
@@ -117,8 +95,6 @@ fn is_decl_start(line: &str) -> bool {
     DECL_STARTERS.iter().any(|k| line.starts_with(k))
 }
 
-/// Split source into top-level chunks (a column-0 line plus its indented
-/// continuation). Leading comment lines attach to the chunk that follows.
 fn chunks(src: &str) -> Vec<Vec<String>> {
     let mut out: Vec<Vec<String>> = Vec::new();
     let mut cur: Vec<String> = Vec::new();
@@ -146,8 +122,6 @@ fn chunks(src: &str) -> Vec<Vec<String>> {
     out
 }
 
-/// Wrap a doc fragment into a compilable program: declarations stay
-/// top-level, loose statements move into a synthetic `*main`.
 fn wrap(code: &str) -> String {
     let all = chunks(code);
     let has_main = all.iter().any(|c| {
@@ -165,7 +139,6 @@ fn wrap(code: &str) -> String {
     let mut decls: Vec<String> = Vec::new();
     let mut stmts: Vec<String> = Vec::new();
     for chunk in all {
-        // A chunk's kind is decided by its first non-comment line.
         let first = chunk
             .iter()
             .map(|l| l.trim_start())

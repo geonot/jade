@@ -1,25 +1,5 @@
-# std.test — Assertion library and test orchestration
-#
-# Complements Jinn's built-in `*test` blocks with composable assertion
-# helpers, table-driven test runners, and a tiny matcher DSL.
-#
-# Usage:
-#   test "hello"
-#       test.equal(2 + 2, 4)
-#       test.contains("hello world", "world")
-#       test.throws(fn() { divide(1, 0) })
-#
-#   test "table-driven"
-#       cases is vec()
-#       cases.push(test.case("0", 0, "zero"))
-#       cases.push(test.case("1", 1, "one"))
-#       test.table(cases, fn(input) { name_of(input) })
 
-# ── Public assertion failure model ───────────────────────────
 
-# A failed assertion throws via `__panic` so the surrounding `*test` block
-# catches and records the failure. Each helper records the asserted
-# expression in the message for clear failure diagnostics.
 
 *equal(actual, expected)
     if not __eq(actual, expected)
@@ -80,9 +60,7 @@
     if arr.length equals 0
         __fail("expected non-empty")
 
-# ── Exception assertions ─────────────────────────────────────
 
-# Run the closure and assert that it panics. Returns true on success.
 *throws(f) returns bool
     rescued is false
     try
@@ -100,10 +78,6 @@
         __fail("expected no panic, got: " + e.message)
     true
 
-# ── Snapshot testing ─────────────────────────────────────────
-#
-# Compares stringified output against a stored snapshot file. On first
-# run with `JINN_UPDATE_SNAPSHOTS=1`, writes the snapshot.
 
 *snapshot(name as String, actual as String)
     extern *getenv(name as %i8) returns %i8
@@ -116,27 +90,21 @@
     if expected neq actual
         __fail("snapshot mismatch for " + name + "; rerun with JINN_UPDATE_SNAPSHOTS=1 to update")
 
-# ── Table-driven tests ───────────────────────────────────────
 
 type Case
     name as String
     input
     want
 
-# Build a test case.
 *case(name as String, input, want) returns Case
     Case(name is name, input is input, want is want)
 
-# Run `body(input)` for each case and assert the return equals `want`.
 *table(cases as Vec of Case, body)
     loop cases
         result is body($.input)
         if not __eq(result, $.want)
             __fail("case '" + $.name + "': expected " + __repr($.want) + ", got " + __repr(result))
 
-# ── Benchmarking helper ──────────────────────────────────────
-#
-# Returns nanoseconds per iteration, averaged over `iters` runs.
 
 *bench(iters as i64, body) returns i64
     if iters <= 0
@@ -150,7 +118,6 @@ type Case
     elapsed is __time_monotonic() - start
     elapsed / iters
 
-# ── Internal ─────────────────────────────────────────────────
 
 *__fail(msg as String)
     __panic("test assertion failed: " + msg)

@@ -1,4 +1,3 @@
-# Bloom filter: insert + lookup using two hash functions in a bit array.
 *h1(x as i64) returns i64
     (x * 2654435761) % 4096
 

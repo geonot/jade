@@ -5,7 +5,7 @@ use crate::lexer::{Spanned, Token};
 pub enum ParseError {
     #[error("line {line}:{col}: {msg}")]
     Error { line: u32, col: u32, msg: String },
-    /// A message that already carries its own span prefix.
+
     #[error("{msg}")]
     Plain { msg: String },
 }
@@ -157,7 +157,6 @@ impl Parser {
             prog.decls = remaining_decls;
         }
         if let Err(msg) = desugar_multi_clause_fns(&mut prog) {
-            // The message carries its own span prefix; don't double it.
             return Err(ParseError::Plain { msg });
         }
         Ok(prog)
@@ -296,12 +295,6 @@ impl Parser {
         Err(self.error(&format!("expected identifier, got {}", self.peek())))
     }
 
-    /// Keywords that may also be used as plain identifiers (declaration names,
-    /// parameter names, field names). These are "soft" keywords: they carry
-    /// special meaning only in their grammar context (store DSL, range loops,
-    /// indexing) and lex back to their spelling everywhere an identifier is
-    /// expected. Returning a name here is the single source of truth shared by
-    /// `ident()` and the expression-atom fallback in `parse_primary`.
     pub(in crate::parser) fn soft_keyword_ident(tok: &Token) -> Option<&'static str> {
         Some(match tok {
             Token::Set => "set",
@@ -324,18 +317,9 @@ impl Parser {
             Token::Not => "not",
             Token::Default => "default",
             Token::End => "end",
-            // `test` introduces a test block at declaration level (matched there
-            // before `ident()` is consulted), but is otherwise an ordinary name:
-            // a function named `*test`, a parameter, field, or variable.
+
             Token::Test => "test",
-            // Word-operator aliases (`eq`/`equals`, `neq`, `lt`/`gt`/`lte`/
-            // `gte`, `mod`, `pow`) are contextual: they are infix operators
-            // after an operand but plain identifiers in any name position
-            // (function/method/field/parameter names, or a bare variable in
-            // prefix position). The infix-operator parsers consume these tokens
-            // before this fallback is ever reached for a valid binary
-            // expression, so only genuine name uses arrive here. Each maps to
-            // its canonical word spelling (`==` and `eq` both name "equals").
+
             Token::Equals => "equals",
             Token::Neq => "neq",
             Token::Lt => "lt",
@@ -519,8 +503,6 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Result<Fn, String> {
 
     for (i, c) in clauses.iter().enumerate().skip(1) {
         if c.params.len() != param_count {
-            /* A user-input error must be a diagnostic, never a Rust panic
-             * (task 8-17 — the panic also exited 0 through the driver). */
             return Err(format!(
                 "{}: multi-clause function `{}`: clause {} has {} parameters, but the first clause has {}; every clause of a multi-clause function must take the same number of parameters",
                 c.span.loc(),

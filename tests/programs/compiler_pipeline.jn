@@ -1,9 +1,4 @@
-# compiler_pipeline.jn — Mini language compiler (lexer + parser + evaluator)
-# Complexity: Advanced
-# Demonstrates: enums, pattern matching, string ops, recursion, structs
-# Represents Jinn's vision for real-world programs
 
-# ── Tokens ──────────────────────────────────────────────────────────────────
 
 enum Token
     TNum(i64)
@@ -15,7 +10,6 @@ enum Token
     TRParen
     TEnd
 
-# ── AST ─────────────────────────────────────────────────────────────────────
 
 enum Ast
     ANum(i64)
@@ -24,7 +18,6 @@ enum Ast
     AMul(Ast, Ast)
     ADiv(Ast, Ast)
 
-# ── Lexer ───────────────────────────────────────────────────────────────────
 
 *is_digit(ch as i64)
     ch >= 48 and ch <= 57
@@ -41,7 +34,6 @@ enum Ast
     (TNum(n), p)
 
 *lex_one(src as String, pos as i64)
-    # Skip whitespace
     p is pos
     while p < src.length and is_space(src.char_at(p))
         p is p + 1
@@ -52,35 +44,31 @@ enum Ast
     ch is src.char_at(p)
     if is_digit(ch)
         return lex_number(src, p)
-    if ch equals 43     # '+'
+    if ch equals 43
         return (TPlus, p + 1)
-    if ch equals 45     # '-'
+    if ch equals 45
         return (TMinus, p + 1)
-    if ch equals 42     # '*'
+    if ch equals 42
         return (TStar, p + 1)
-    if ch equals 47     # '/'
+    if ch equals 47
         return (TSlash, p + 1)
-    if ch equals 40     # '('
+    if ch equals 40
         return (TLParen, p + 1)
-    if ch equals 41     # ')'
+    if ch equals 41
         return (TRParen, p + 1)
     (TEnd, p)
 
-# ── Parser (recursive descent, respects precedence) ─────────────────────────
 
-# parse_primary as number or (expr)
 *parse_primary(src as String, pos as i64)
     tok, p is lex_one(src, pos)
     match tok
         TNum(n) ? (ANum(n), p)
         TLParen ?
             expr, p2 is parse_add(src, p)
-            # skip closing paren
             _, p3 is lex_one(src, p2)
             (expr, p3)
-        _ ? (ANum(0), p)    # error fallback
+        _ ? (ANum(0), p)
 
-# parse_mul as handles * and /
 *parse_mul(src as String, pos as i64)
     left, p is parse_primary(src, pos)
     loop
@@ -97,7 +85,6 @@ enum Ast
             _ ?
                 return (left, p)
 
-# parse_add as handles + and -
 *parse_add(src as String, pos as i64)
     left, p is parse_mul(src, pos)
     loop
@@ -114,7 +101,6 @@ enum Ast
             _ ?
                 return (left, p)
 
-# ── Evaluator ───────────────────────────────────────────────────────────────
 
 *eval(node as Ast)
     match node
@@ -135,26 +121,20 @@ enum Ast
 *max(a, b)
     a > b ? a ! b
 
-# ── Main ────────────────────────────────────────────────────────────────────
 
 *main
-    # Parse and evaluate "3 + 4 * 2"
     ast1, _ is parse_add('3 + 4 * 2', 0)
-    log(eval(ast1))                  # 11 (not 14, respects precedence)
-    log(ast_depth(ast1))             # 2
+    log(eval(ast1))
+    log(ast_depth(ast1))
 
-    # "(3 + 4) * 2"
     ast2, _ is parse_add('(3 + 4) * 2', 0)
-    log(eval(ast2))                  # 14
+    log(eval(ast2))
 
-    # "10 - 2 * 3 + 1"
     ast3, _ is parse_add('10 - 2 * 3 + 1', 0)
-    log(eval(ast3))                  # 5
+    log(eval(ast3))
 
-    # "100 / (5 + 5)"
     ast4, _ is parse_add('100 / (5 + 5)', 0)
-    log(eval(ast4))                  # 10
+    log(eval(ast4))
 
-    # Simple number
     ast5, _ is parse_add('42', 0)
-    log(eval(ast5))                  # 42
+    log(eval(ast5))

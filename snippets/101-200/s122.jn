@@ -1,4 +1,3 @@
-# Counting sort for bytes.
 *csort(v) returns Vec of i64
     cnt is vec()
     i is 0

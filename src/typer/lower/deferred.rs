@@ -217,9 +217,6 @@ impl Typer {
                             _ => false,
                         };
                         if candidates.len() > 1 && !recv_quantified {
-                            /* A quantified (row-polymorphic generic) receiver
-                             * may legitimately match several types — each call
-                             * site instantiates its own copy (task 8-16). */
                             let names: Vec<String> =
                                 candidates.iter().map(|(n, _, _)| n.as_str()).collect();
                             self.type_errors.push(format!(
@@ -330,10 +327,6 @@ impl Typer {
             candidates.sort();
 
             if candidates.len() > 1 && !self.infer_ctx.is_quantified(_root) {
-                /* Quantified receiver: a row-polymorphic generic is ALLOWED
-                 * to match several structs — each call site instantiates
-                 * its own copy (task 8-16). Ambiguity is only an error for
-                 * a concrete receiver. */
                 let field_names: Vec<String> =
                     fields.iter().map(|f| f.field_name.as_str()).collect();
                 self.type_errors.push(format!(

@@ -760,12 +760,6 @@ impl Typer {
 }
 
 impl Typer {
-    /// Resolve a type and fold any generic-enum application
-    /// (`Struct("List", [i64])`) into its monomorphized enum
-    /// (`Enum(List__G_i64)`). Mono function signatures carried the
-    /// unfolded application into codegen, which then looked up a struct
-    /// named "List" that never exists as an LLVM type (the linked_list
-    /// FieldGet-`__tag` ICE, task 8-19).
     pub(in crate::typer) fn resolve_canon(&mut self, ty: &Type) -> Type {
         let r = self.infer_ctx.resolve(ty);
         self.canonicalize_generic_enums(&r)

@@ -1,5 +1,3 @@
-# Channel throughput benchmark
-# Send/recv 1M i64 values through a buffered channel
 
 *main
     ch is channel of i64(1024)

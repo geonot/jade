@@ -1,6 +1,3 @@
-# linked_list.jn — Singly linked list with enum + generics
-# Complexity: Intermediate
-# Demonstrates: recursive enums, generics, pattern matching, methods
 
 enum List of T
     Cons(T, List of T)
@@ -34,13 +31,12 @@ enum List of T
     list_reverse_acc(lst, Nil)
 
 *main
-    # Build a list: 1, 2, 3, 4, 5
     lst is Cons(1, Cons(2, Cons(3, Cons(4, Cons(5, Nil)))))
 
-    log(list_length(lst))          # 5
-    log(list_sum(lst))             # 15
-    log(list_contains(lst, 3))     # true
-    log(list_contains(lst, 9))     # false
+    log(list_length(lst))
+    log(list_sum(lst))
+    log(list_contains(lst, 3))
+    log(list_contains(lst, 9))
 
     rev is list_reverse(lst)
-    log(list_sum(rev))             # 15 (same sum)
+    log(list_sum(rev))

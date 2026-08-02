@@ -1,4 +1,3 @@
-# PWM duty cycle: count high samples in 100-sample window.
 *pwm_duty(period as i64, duty_pct as i64, samples as i64) returns i64
     high is 0
     i is 0

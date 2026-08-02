@@ -1,4 +1,3 @@
-# Apply 2x2 rotation matrix to a vector.
 *rotx(a as i64, b as i64, c as i64, d as i64, x as i64, y as i64) returns i64
     a * x + b * y
 

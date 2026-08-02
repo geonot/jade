@@ -267,13 +267,13 @@ impl<'ctx> Compiler<'ctx> {
                 let code = self.val(args[0]).into_int_value();
                 let i8t = self.ctx.i8_type();
                 let i64t = self.ctx.i64_type();
-                // Narrow the code to a single byte (inverse of `String.char_at`).
+
                 let byte = if code.get_type().get_bit_width() > 8 {
                     b!(self.bld.build_int_truncate(code, i8t, "chr.byte"))
                 } else {
                     code
                 };
-                // Heap buffer: one data byte plus a trailing NUL for C interop.
+
                 let size = i64t.const_int(2, false);
                 let malloc = self.ensure_malloc();
                 let buf = b!(self.bld.build_call(malloc, &[size.into()], "chr.buf"))

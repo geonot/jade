@@ -1,20 +1,3 @@
-/*
- * Jinn Runtime — the one atomic durable write discipline (task 8-21).
- *
- * Every persistence-layer file REWRITE goes through jinn_atomic_rewrite:
- * write the complete new image to a temp file in the same directory,
- * fsync it, rename(2) it over the target, and fsync the directory. A
- * crash at any point leaves either the complete old file or the complete
- * new file — never a truncated or mixed one. The old pattern this
- * replaces (`fopen(path, "w+b")` and rewrite in place) destroyed the
- * store if the process died between the truncating open and the final
- * write, and left stale trailing bytes when the new image was shorter.
- *
- * Also here: checked fsync (an EIO from fsync means "committed" data is
- * gone — consuming it is the PostgreSQL fsync-gate bug class), directory
- * fsync, and the D6 single-writer advisory lock.
- */
-
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -25,8 +8,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "jinn_rt.h"
-
-/* Checked fsync: returns 0 on success, -1 with the error surfaced. */
 int jinn_fsync_checked(int fd, const char *what) {
     if (fd < 0) return -1;
     if (fsync(fd) != 0) {
@@ -36,9 +17,6 @@ int jinn_fsync_checked(int fd, const char *what) {
     }
     return 0;
 }
-
-/* fsync the directory containing `filepath`, so a rename/create in it
- * survives power loss. */
 int jinn_dir_fsync(const char *filepath) {
     if (!filepath) return -1;
     char dirbuf[4096];
@@ -46,7 +24,7 @@ int jinn_dir_fsync(const char *filepath) {
     const char *dir;
     if (slash && (size_t)(slash - filepath) < sizeof(dirbuf)) {
         size_t n = (size_t)(slash - filepath);
-        if (n == 0) n = 1; /* "/file" → "/" */
+        if (n == 0) n = 1;
         memcpy(dirbuf, filepath, n);
         dirbuf[n] = '\0';
         dir = dirbuf;
@@ -63,21 +41,13 @@ int jinn_dir_fsync(const char *filepath) {
     close(dfd);
     return rc;
 }
-
-/*
- * Atomically replace `path` with content produced by `fill(tmp, arg)`.
- * Returns 0 on success. On ANY failure the original file is untouched
- * and the temp file is removed. `fill` must return 0 on success.
- */
 int jinn_atomic_rewrite(const char *path, jinn_fill_fn fill, void *arg) {
     if (!path || !fill) return -1;
-
     size_t plen = strlen(path);
     char *tmp_path = (char *)malloc(plen + 12);
     if (!tmp_path) return -1;
     memcpy(tmp_path, path, plen);
     memcpy(tmp_path + plen, ".tmpXXXXXX", 11);
-
     int tfd = mkstemp(tmp_path);
     if (tfd < 0) {
         fprintf(stderr, "jinn: cannot create temp file for %s: %s\n",
@@ -92,7 +62,6 @@ int jinn_atomic_rewrite(const char *path, jinn_fill_fn fill, void *arg) {
         free(tmp_path);
         return -1;
     }
-
     int rc = fill(tmp, arg);
     if (rc == 0 && fflush(tmp) != 0) {
         fprintf(stderr, "jinn: write to temp for %s failed: %s\n",
@@ -111,7 +80,6 @@ int jinn_atomic_rewrite(const char *path, jinn_fill_fn fill, void *arg) {
         rc = -1;
     }
     if (rc == 0) {
-        /* The rename itself must be durable. */
         rc = jinn_dir_fsync(path);
     } else {
         unlink(tmp_path);
@@ -119,14 +87,6 @@ int jinn_atomic_rewrite(const char *path, jinn_fill_fn fill, void *arg) {
     free(tmp_path);
     return rc;
 }
-
-/*
- * Rewrite-and-reopen variant for callers holding a long-lived FILE* on
- * the target: after the atomic replace, the old handle points at the
- * unlinked inode, so it is closed and *fpp is reopened on the new file
- * ("r+b", positioned at end). On failure the original file AND the
- * original handle are left untouched.
- */
 int jinn_atomic_rewrite_reopen(const char *path, jinn_fill_fn fill, void *arg,
                                FILE **fpp) {
     if (jinn_atomic_rewrite(path, fill, arg) != 0) return -1;
@@ -143,14 +103,6 @@ int jinn_atomic_rewrite_reopen(const char *path, jinn_fill_fn fill, void *arg,
     }
     return 0;
 }
-
-/*
- * D6 single-writer contract: an advisory exclusive lock on
- * `<path>.lock`, held for the lifetime of the store handle. Returns the
- * lock fd (keep it open), or -1 after a clear contention diagnostic.
- * The lock file itself is never renamed or deleted, so the lock cannot
- * be lost to an atomic rewrite of the data file.
- */
 int jinn_writer_lock(const char *path) {
     if (!path) return -1;
     size_t plen = strlen(path);
@@ -158,7 +110,6 @@ int jinn_writer_lock(const char *path) {
     if (!lock_path) return -1;
     memcpy(lock_path, path, plen);
     memcpy(lock_path + plen, ".lock", 6);
-
     int fd = open(lock_path, O_CREAT | O_RDWR | O_CLOEXEC, 0644);
     if (fd < 0) {
         fprintf(stderr, "jinn: cannot create lock file %s: %s\n",
@@ -179,7 +130,6 @@ int jinn_writer_lock(const char *path) {
     free(lock_path);
     return fd;
 }
-
 void jinn_writer_unlock(int lock_fd) {
-    if (lock_fd >= 0) close(lock_fd); /* closing releases the flock */
+    if (lock_fd >= 0) close(lock_fd);
 }

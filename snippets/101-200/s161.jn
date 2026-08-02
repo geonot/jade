@@ -1,4 +1,3 @@
-# String concatenation via fold.
 *main
     parts is vec("hello", " ", "from", " ", "jinn")
     out is ""

@@ -1,4 +1,3 @@
-# Frequency of each digit in n.
 *main
     n is 1224488800
     cnt is vec(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)

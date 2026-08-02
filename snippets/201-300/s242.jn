@@ -1,4 +1,3 @@
-# Bully leader election: highest id wins.
 *leader(ids as Vec of i64, n as i64) returns i64
     m is ids.get(0)
     i is 1

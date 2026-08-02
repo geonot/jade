@@ -1,16 +1,3 @@
-//! Conformance for persistent secondary indexes
-//! (store-improvement.md item 10, task 2-31-9). Pins the documented semantics:
-//!
-//!   * a @index field's structure persists beside the store as
-//!     `name.field.idx` and survives across runs, giving O(1) opens with no
-//!     rescan when the on-disk fingerprint matches the program's schema;
-//!   * a missing index is transparently rebuilt from the store records, so a
-//!     crash that lost the index file still yields correct lookups;
-//!   * a corrupt or truncated index is detected and rebuilt rather than
-//!     serving stale offsets;
-//!   * rebuild is correct for both string and integer indexed fields and
-//!     honours soft-deletes.
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

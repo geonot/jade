@@ -1,4 +1,3 @@
-# Moving average crossover backtest (count buy signals).
 *sma(p as Vec of i64, i as i64, w as i64) returns i64
     s is 0
     j is 0
