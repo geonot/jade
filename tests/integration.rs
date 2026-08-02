@@ -18,6 +18,7 @@ fn compile_and_run(src: &str) -> String {
         .expect("jinnc failed to start");
     assert!(status.success(), "jinnc compilation failed for:\n{src}");
     let output = Command::new(&out)
+        .current_dir(dir.path())
         .output()
         .expect("compiled binary failed to start");
     assert!(
@@ -40,6 +41,7 @@ fn compile_file_and_run(path: &str) -> String {
         .expect("jinnc failed to start");
     assert!(status.success(), "jinnc compilation failed for: {path}");
     let output = Command::new(&out)
+        .current_dir(dir.path())
         .output()
         .expect("compiled binary failed to start");
     assert!(
@@ -1044,6 +1046,7 @@ fn module_import() {
         .expect("jinnc failed to start");
     assert!(status.success(), "module import: jinnc compilation failed");
     let output = Command::new(&out)
+        .current_dir(dir.path())
         .output()
         .expect("compiled binary failed to start");
     assert!(output.status.success());

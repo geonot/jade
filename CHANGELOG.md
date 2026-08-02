@@ -1,4 +1,33 @@
 # Changelog
+- **[137]** (2026-08-02 18:25) std gate green: all 49 alpha-stable modules type-check
+
+The last failing test suite is now passing. Full suite 2013/2013, zero
+failures, clippy clean, fmt clean, apps 21/21, benchmarks 36/36.
+
+Two compiler defects found by working the gate:
+
+1. extern opaque-pointer rule. A declared `%i8`/`%u8`/`%void` parameter is
+   C's opaque-handle convention (`char *`/`void *`). The typer accepted a
+   String there but rejected every other raw pointer, so passing a vec
+   header to `jinn_spawn_exec(const void *)` was impossible — std/process
+   could not bind its own runtime. At an extern boundary the C signature
+   is the user's assertion; any raw pointer now satisfies an opaque
+   pointee. Non-opaque pointees still unify strictly.
+
+2. `copy` is a binding modifier, not an expression (access-semantics.md
+   §2), so `copy self` in tail position fails. std/dataframe leaned on
+   `return self` from a by-ptr method instead, handing out a borrow where
+   the signature promised an owned DataFrame. Added `__clone_df` and
+   routed all 7 "no matching column" paths through it.
+
+std source fixes: bangle/http/event/url/terminal/dataframe. Types are
+global and unqualified (std.md), so error unions are written `! NetError`,
+not `! net.NetError`. http's PoolEntry.fd was i64 while every socket API
+is i32.
+
+New regression tests: method + ptr-method `! E` unions, no-Debug-spans in
+error diagnostics, extern opaque-pointer FFI round-trip through a real
+subprocess.
 - **[136]** (2026-08-02 18:12) std gate: remove sqlite; fix `! E` on methods; clean error diagnostics
 
 Removed std/sqlite.jn — the wrapper never type-checked and shipping a

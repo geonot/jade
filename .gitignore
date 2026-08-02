@@ -9,9 +9,15 @@ ok
 a.out
 **/a.out
 
-# Store/WAL runtime artifacts produced by running programs and benchmarks
+# Store/WAL runtime artifacts produced by running programs and benchmarks.
+# A store's path is its declared name relative to the process cwd, so any
+# program with a `store` decl writes these wherever it is run from. Tests
+# and benchmarks run their binaries inside a scratch cwd; use .data/ for
+# ad-hoc runs so the repo root stays clean.
 *.store
 *.wal
+.data/*
+!.data/README.md
 
 # Benchmark run outputs. results.csv is deliberately TRACKED: it is the
 # published baseline (with hardware/run-count header and per-row

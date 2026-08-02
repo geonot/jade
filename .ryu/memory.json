@@ -3,7 +3,7 @@
   "entries": {
     "review-remediation-status-2026-07": {
       "key": "review-remediation-status-2026-07",
-      "value": "docs/review roadmap (15_roadmap.md) status, verified empirically 2026-07-31 at v135.\nPhase A (safety floor): COMPLETE. All 12 P0s fixed and re-probed. div-by-zero and OOB now trap via __jinn_trap with rc=134 + message; generator LLVM IR valid; map(v,$*2) runs; take parses; bare top-level expr, missing main rejected with diagnostics; keyword-methods parse; stack overflow prints diagnostic (needs a frame with locals to fault the guard page \u2014 pure tail-recursive shapes are TCO'd away); MIR verifier is src/mir/verify.rs (618 LOC); Type::canonical/eq_canonical exist; fuzz/{lexer,parser,typer} + ci/sanitize.sh wired into .github/workflows/ci.yml.\nPhase B: essentially complete. Zero warnings, clippy -D warnings clean, fmt clean. src/perceus and HIR-direct dead paths deleted. codegen 29k->21k LOC, typer 16k->20.6k (center of gravity moved upstream as intended). tuple returns, match guards, UTF-8 all work. LSP matrix documented + lsp_smoke test. EBNF roundtrip, WAL property, channel stress, bench regression all in CI. SIMD literal (P1-3) still unparsed.\nPhase C: docs consolidated (only CHANGELOG.md at root), stability.md + std.md + SECURITY.md exist, 87 tests/programs conformance corpus. Not cut: version still 0.0.0, no docs/book, no public reimplementation corpus.\nRemaining gap: tests/std_stable_subset.rs \u2014 13 of 51 std modules fail the frontend gate (argon, bangle, dataframe, date, event, http, logging, net, process, rational, sqlite, terminal, url). This is the ONLY failing test suite. Causes are a mix of real std source bugs and typer gaps (extern arg coercion i8/i32/string, &T vs T returns, `as` on Vec/string).",
+      "value": "docs/review roadmap (15_roadmap.md) status, verified empirically at v137 (2026-07-31).\nPhase A (safety floor): COMPLETE. All 12 P0s fixed and re-probed. div-by-zero/OOB trap via __jinn_trap rc=134; generator IR valid; map(v,$*2) runs; take parses; bare top-level expr + missing main rejected; keyword-methods parse; stack overflow diagnostic (needs a frame with locals \u2014 pure tail-recursion is TCO'd); MIR verifier src/mir/verify.rs; Type::canonical/eq_canonical; fuzz + sanitize in CI.\nPhase B: complete except SIMD literal (P1-3, still unparsed). Zero warnings, clippy -D warnings clean, fmt clean. src/perceus + HIR-direct path deleted. codegen 21k / typer 20.6k LOC. P1-6 fixed: mir-drops telemetry now behind --debug-drops only.\nPhase C: docs consolidated, stability.md/std.md/SECURITY.md, 87-program conformance corpus. NOT done: version still 0.0.0, no docs/book, no public reimplementation corpus.\nSTD GATE IS NOW GREEN \u2014 all 49 alpha-stable modules type-check; std/sqlite.jn was REMOVED (broken wrapper; runtime/sqlite.c kept as raw FFI). Full suite 2013/2013 passing, zero failing suites. apps 21/21, benchmarks 36/36.\nRemaining known gaps: SIMD literal syntax; version/book/public corpus for a real alpha tag.",
       "kind": "summary",
       "tags": [
         "review",
@@ -14,7 +14,7 @@
       "source": "agent",
       "pinned": false,
       "ts_created": "2026-08-02T17:37:48+00:00",
-      "ts_accessed": "2026-08-02T17:37:48+00:00",
+      "ts_accessed": "2026-08-02T18:25:24+00:00",
       "access_count": 0
     },
     "typer-move-tracking-two-passes": {
@@ -47,6 +47,22 @@
       "pinned": false,
       "ts_created": "2026-08-02T17:38:07+00:00",
       "ts_accessed": "2026-08-02T17:38:07+00:00",
+      "access_count": 0
+    },
+    "jinn-surface-conventions": {
+      "key": "jinn-surface-conventions",
+      "value": "Load-bearing Jinn surface rules, each learned by violating it:\n1. `\"\" + n` is NOT string conversion. The typer deliberately rejects mixed string/int `+` (typer/expr/op.rs). Use `to_string(n)`.\n2. Types are GLOBAL and UNQUALIFIED across modules (docs/std.md); functions are qualified. Write `! NetError`, never `! net.NetError` \u2014 the parser rejects a dot in a type position.\n3. `copy` / `take` / `const` are BINDING modifiers (access-semantics.md \u00a72), not expressions. `copy self` in tail position fails with \"Load of undefined variable `copy`\". Bind first (`c is copy x`) or write a clone helper.\n4. Option's empty variant is `Nothing`, not `None`. Result is `Ok`/`Err`.\n5. Errors are values: fallible functions declare `! E` (sugar for `Result of T, E`), raise with `err Variant`, and handle with the quaternary `e ? ok ! nothing !! err` or `match`. Do NOT use `return false` sentinels \u2014 that C-ism is what broke std/net.\n6. Quaternary arms must agree in type; `log()` returns void, so `r ? log($) !! log('x')` in a value position is a type error.\n7. extern `%i8`/`%u8`/`%void` params are C opaque handles \u2014 any raw pointer or String is accepted (typer/mod.rs check_extern_arg). Other pointees unify strictly.\n8. Empty typed vec: just `vec()` and let inference resolve from a later push. `[] as [T]` is invalid \u2014 `as` is only numeric/bool/enum-discriminant/raw-pointer.",
+      "kind": "convention",
+      "tags": [
+        "std",
+        "syntax",
+        "ffi"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-08-02T18:25:41+00:00",
+      "ts_accessed": "2026-08-02T18:25:41+00:00",
       "access_count": 0
     }
   }

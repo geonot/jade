@@ -214,7 +214,10 @@ fn deque_stress_harness_is_sanitizer_clean() {
             continue;
         }
         for round in 0..3 {
-            let out = Command::new(&bin).output().expect("run harness");
+            let out = Command::new(&bin)
+                .current_dir(dir.path())
+                .output()
+                .expect("run harness");
             let stderr = String::from_utf8_lossy(&out.stderr);
             assert!(
                 out.status.success()

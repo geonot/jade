@@ -72,6 +72,7 @@ fn compile_with_strict(src: &str) -> String {
         "jinnc --strict-types compilation failed for:\n{src}"
     );
     let output = Command::new(&out)
+        .current_dir(dir.path())
         .output()
         .expect("compiled binary failed to start");
     assert!(
@@ -138,6 +139,7 @@ fn compile_and_run_test_mode(src: &str) -> String {
         "jinnc --test compilation failed for:\n{src}"
     );
     let output = Command::new(&out)
+        .current_dir(dir.path())
         .output()
         .expect("compiled binary failed to start");
     assert!(
@@ -162,6 +164,7 @@ fn expect_runtime_fail(src: &str) {
         .expect("jinnc failed to start");
     assert!(status.success(), "jinnc compilation failed for:\n{src}");
     let output = Command::new(&out)
+        .current_dir(dir.path())
         .output()
         .expect("compiled binary failed to start");
     assert!(
@@ -185,6 +188,7 @@ fn compile_and_run_with_file(src: &str, extra_name: &str, extra_content: &str) -
         .expect("jinnc failed to start");
     assert!(status.success(), "jinnc compilation failed for:\n{src}");
     let output = Command::new(&out)
+        .current_dir(dir.path())
         .output()
         .expect("compiled binary failed to start");
     assert!(
@@ -1596,7 +1600,10 @@ fn b_module_import() {
         .status()
         .expect("jinnc failed to start");
     assert!(status.success(), "module import: compilation failed");
-    let output = Command::new(&out).output().expect("binary failed to start");
+    let output = Command::new(&out)
+        .current_dir(dir.path())
+        .output()
+        .expect("binary failed to start");
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert_eq!(stdout.trim(), "42");

@@ -34,6 +34,7 @@ fn compile_and_run_with_module(module_name: &str, module_src: &str, main_src: &s
         String::from_utf8_lossy(&output.stderr)
     );
     let run = Command::new(&out)
+        .current_dir(dir.path())
         .output()
         .expect("compiled binary failed to start");
     assert!(

@@ -32,6 +32,7 @@ fn durable_rewrite_survives_crash_injection() {
     let out = Command::new(&bin)
         .arg(dir.path())
         .arg("25")
+        .current_dir(dir.path())
         .output()
         .expect("run harness");
     assert!(

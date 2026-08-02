@@ -28,6 +28,7 @@ fn compile_and_run(src: &str) -> String {
         .expect("jinnc failed to start");
     assert!(status.success(), "jinnc compilation failed for:\n{src}");
     let output = Command::new(&out)
+        .current_dir(dir.path())
         .output()
         .expect("compiled binary failed to start");
     assert!(
