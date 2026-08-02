@@ -29,6 +29,14 @@ extern *jinn_recvfrom(fd as i32, buf as %i8, len as i64, flags as i32, addr as %
 extern *strlen(s as %i8) returns i64
 extern *shutdown(fd as i32, how as i32) returns i32
 
+err NetError
+    BadPort
+    SocketFailed
+    BindFailed
+    ListenFailed
+    ConnectFailed
+    AcceptFailed
+
 # Constants
 AF_INET is 2
 SOCK_STREAM is 1
@@ -44,10 +52,10 @@ type TcpListener @resource
     fd as i32
     port as i64
 
-    *accept_client
+    *accept_client returns TcpStream ! NetError
         client_fd is extern.accept(self.fd, 0 as %i8, 0 as %i32)
         if client_fd < 0
-            return false
+            err AcceptFailed
         TcpStream(fd is client_fd)
 
     *shut
@@ -135,36 +143,36 @@ type UdpSocket @resource
 
 # ── TCP factory functions ────────────────────────────────────
 
-*tcp_listen(host as String, port as i64)
+*tcp_listen(host as String, port as i64) returns TcpListener ! NetError
     if port < 0 or port > 65535
-        return false
+        err BadPort
     fd is extern.jinn_socket(AF_INET, SOCK_STREAM, 0)
     if fd < 0
-        return false
+        err SocketFailed
     one is 1
     extern.setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, %one as %i8, 4)
     addr is __make_sockaddr(host, port)
     if extern.bind(fd, addr, SOCKADDR_IN_SIZE) < 0
         extern.free(addr)
         extern.jinn_close(fd)
-        return false
+        err BindFailed
     extern.free(addr)
     if extern.listen_sock(fd, 128) < 0
         extern.jinn_close(fd)
-        return false
+        err ListenFailed
     TcpListener(fd is fd, port is port)
 
-*tcp_connect(host as String, port as i64)
+*tcp_connect(host as String, port as i64) returns TcpStream ! NetError
     if port < 0 or port > 65535
-        return false
+        err BadPort
     fd is extern.jinn_socket(AF_INET, SOCK_STREAM, 0)
     if fd < 0
-        return false
+        err SocketFailed
     addr is __make_sockaddr(host, port)
     if extern.connect(fd, addr, SOCKADDR_IN_SIZE) < 0
         extern.free(addr)
         extern.jinn_close(fd)
-        return false
+        err ConnectFailed
     extern.free(addr)
     TcpStream(fd is fd)
 
@@ -217,7 +225,7 @@ SOCKADDR_IN6_SIZE is 28
     host.find(":") >= 0
 
 # Connect to a host and port, auto-detecting IPv4 or IPv6.
-*tcp_connect_auto(host as String, port as i64)
+*tcp_connect_auto(host as String, port as i64) returns TcpStream ! NetError
     # Try DNS resolution first
     resolved is resolve(host)
     if resolved.length equals 0
@@ -225,32 +233,32 @@ SOCKADDR_IN6_SIZE is 28
     if __is_ipv6(resolved)
         fd is extern.jinn_socket(AF_INET6, SOCK_STREAM, 0)
         if fd < 0
-            return false
+            err SocketFailed
         addr is __make_sockaddr6(resolved, port)
         if extern.connect(fd, addr, SOCKADDR_IN6_SIZE) < 0
             extern.free(addr)
             extern.jinn_close(fd)
-            return false
+            err ConnectFailed
         extern.free(addr)
         return TcpStream(fd is fd)
     tcp_connect(resolved, port)
 
 # ── UDP factory functions ────────────────────────────────────
 
-*udp_bind(host as String, port as i64)
+*udp_bind(host as String, port as i64) returns UdpSocket ! NetError
     fd is extern.jinn_socket(AF_INET, SOCK_DGRAM, 0)
     if fd < 0
-        return false
+        err SocketFailed
     addr is __make_sockaddr(host, port)
     if extern.bind(fd, addr, SOCKADDR_IN_SIZE) < 0
         extern.free(addr)
         extern.jinn_close(fd)
-        return false
+        err BindFailed
     extern.free(addr)
     UdpSocket(fd is fd)
 
-*udp_open
+*udp_open returns UdpSocket ! NetError
     fd is extern.jinn_socket(AF_INET, SOCK_DGRAM, 0)
     if fd < 0
-        return false
+        err SocketFailed
     UdpSocket(fd is fd)

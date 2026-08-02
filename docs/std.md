@@ -42,7 +42,7 @@ Alpha-stable guarantees the module **type-checks against the current language**.
 It is not yet a guarantee of API stability across versions — that bar is raised
 post-alpha.
 
-## Alpha-stable modules (50)
+## Alpha-stable modules (49)
 
 | Domain | Modules |
 | --- | --- |
@@ -54,7 +54,6 @@ post-alpha.
 | I/O & OS | `io`, `fs`, `path`, `os`, `args`, `process`, `signal`, `terminal`, `logging` |
 | Networking | `net`, `http`, `url`, `bangle` |
 | Time | `time`, `date` |
-| Storage | `sqlite` |
 | Concurrency / systems | `event`, `raft` |
 
 ## Experimental modules (excluded)
@@ -66,6 +65,12 @@ list in [`tests/std_stable_subset.rs`](../tests/std_stable_subset.rs).
 | Module | Reason |
 | --- | --- |
 | `test` | Uses `try`/`rescue` exception handling, which has no lexer/parser/HIR support yet. |
+
+## Removed modules
+
+| Module | Disposition |
+| --- | --- |
+| `sqlite` | Removed. The wrapper never type-checked and shipping a broken binding is worse than shipping none. The C surface (`runtime/sqlite.c`) remains and is usable directly via `extern *jinn_sqlite_*` declarations when the toolchain finds `sqlite3`. |
 
 The gate is self-policing: the `std_experimental_list_is_accurate` test asserts
 that every excluded module *still fails* the frontend check. When the blocking

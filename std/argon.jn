@@ -70,7 +70,7 @@ DEFAULT_SALT_LEN is 16
         return ""
     salt_hex is __bytes_to_hex(salt)
     hash_hex is __bytes_to_hex(hash)
-    "$argon2id$v=19$m=" + DEFAULT_M_COST + ",t=" + DEFAULT_T_COST + ",p=" + DEFAULT_PARALLEL + "$" + salt_hex + "$" + hash_hex
+    "$argon2id$v=19$m=" + to_string(DEFAULT_M_COST) + ",t=" + to_string(DEFAULT_T_COST) + ",p=" + to_string(DEFAULT_PARALLEL) + "$" + salt_hex + "$" + hash_hex
 
 # Verify a password against a PHC-formatted string.
 # Constant-time comparison.

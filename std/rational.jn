@@ -14,7 +14,7 @@ type Rational
     den as i64
 
     *to_string returns String
-        self.den equals 1 ? "" + self.num ! "" + self.num + "/" + self.den
+        self.den equals 1 ? to_string(self.num) ! to_string(self.num) + "/" + to_string(self.den)
 
     *to_f64 returns f64
         (self.num as f64) / (self.den as f64)

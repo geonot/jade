@@ -184,7 +184,11 @@ impl Typer {
                     .collect::<Vec<_>>()
                     .join(" | ");
                 return Err(format!(
-                    "function `{fn_name}` at {span:?} declares error union `! {union}` but may produce `{src}`, and no conversion `{src} -> {union}` exists. Add `| {src}` to the union, or add `impl From of {src} for <one of {union}>` with `*from(e as {src}) returns <that type>`."
+                    "{}: function `{fn_name}` declares error union `! {union}` but may \
+                     produce `{src}`, and no conversion `{src} -> {union}` exists; add \
+                     `| {src}` to the union, or add `impl From of {src} for <one of \
+                     {union}>` with `*from(e as {src}) returns <that type>`",
+                    span.loc()
                 ));
             }
             if targets.len() > 1 && !declared.contains(src) {
@@ -194,7 +198,10 @@ impl Typer {
                     .collect::<Vec<_>>()
                     .join(", ");
                 return Err(format!(
-                    "ambiguous error conversion for `{src}` at {span:?} in function `{fn_name}`: it can convert into several declared error types ({opts}). Make the union unambiguous so only one target receives `{src}`."
+                    "{}: ambiguous error conversion for `{src}` in function `{fn_name}`: \
+                     it can convert into several declared error types ({opts}); make the \
+                     union unambiguous so only one target receives `{src}`",
+                    span.loc()
                 ));
             }
         }

@@ -143,7 +143,9 @@ fn main() {
         println!("cargo:rustc-env=JINN_HAS_SQLITE=1");
     } else {
         println!("cargo:rustc-env=JINN_HAS_SQLITE=0");
-        println!("cargo:warning=SQLite3 not found; std.sqlite will not be available");
+        println!(
+            "cargo:warning=SQLite3 not found; the jinn_sqlite_* FFI surface will not be available"
+        );
     }
 
     // std/regex.jn binds PCRE2 directly (`pcre2_*` externs); the helper

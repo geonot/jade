@@ -123,8 +123,13 @@ impl Typer {
                 return Ok(None);
             }
             return Err(format!(
-                "error propagation at {:?} is only valid inside a function whose result type is a `Result`/`Option`: the value here is fallible (`{}`) and bare use propagates its error, but the enclosing function is not fallible. Declare its error union with `! E` (e.g. `returns T ! E`), or handle the value with `? $ !! ...`.",
-                value.span, ty
+                "{}: error propagation is only valid inside a function whose result type \
+                 is a `Result`/`Option`: the value here is fallible (`{}`) and bare use \
+                 propagates its error, but the enclosing function is not fallible; declare \
+                 its error union with `! E` (e.g. `returns T ! E`), or handle the value \
+                 with `? $ !! ...`",
+                value.span.loc(),
+                ty
             ));
         }
         let span = value.span;

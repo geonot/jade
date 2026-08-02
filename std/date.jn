@@ -297,18 +297,18 @@ type DateTime
     out
 
 *format_pad2(n as i64) returns String
-    n < 10 and n >= 0 ? "0" + n ! "" + n
+    n < 10 and n >= 0 ? "0" + to_string(n) ! to_string(n)
 
 *format_pad4(n as i64) returns String
     if n < 0
-        return "" + n
+        return to_string(n)
     if n < 10
-        return "000" + n
+        return "000" + to_string(n)
     if n < 100
-        return "00" + n
+        return "00" + to_string(n)
     if n < 1000
-        return "0" + n
-    "" + n
+        return "0" + to_string(n)
+    to_string(n)
 
 # ── Internal ─────────────────────────────────────────────────
 

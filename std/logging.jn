@@ -278,13 +278,13 @@ extern *time(t as %i8) returns i64
     out
 
 *__pad2(n as i64) returns String
-    n < 10 ? "0" + n ! "" + n
+    n < 10 ? "0" + to_string(n) ! to_string(n)
 
 *__pad4(n as i64) returns String
     if n < 10
-        return "000" + n
+        return "000" + to_string(n)
     if n < 100
-        return "00" + n
+        return "00" + to_string(n)
     if n < 1000
-        return "0" + n
-    "" + n
+        return "0" + to_string(n)
+    to_string(n)

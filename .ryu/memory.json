@@ -1,0 +1,53 @@
+{
+  "version": 2,
+  "entries": {
+    "review-remediation-status-2026-07": {
+      "key": "review-remediation-status-2026-07",
+      "value": "docs/review roadmap (15_roadmap.md) status, verified empirically 2026-07-31 at v135.\nPhase A (safety floor): COMPLETE. All 12 P0s fixed and re-probed. div-by-zero and OOB now trap via __jinn_trap with rc=134 + message; generator LLVM IR valid; map(v,$*2) runs; take parses; bare top-level expr, missing main rejected with diagnostics; keyword-methods parse; stack overflow prints diagnostic (needs a frame with locals to fault the guard page \u2014 pure tail-recursive shapes are TCO'd away); MIR verifier is src/mir/verify.rs (618 LOC); Type::canonical/eq_canonical exist; fuzz/{lexer,parser,typer} + ci/sanitize.sh wired into .github/workflows/ci.yml.\nPhase B: essentially complete. Zero warnings, clippy -D warnings clean, fmt clean. src/perceus and HIR-direct dead paths deleted. codegen 29k->21k LOC, typer 16k->20.6k (center of gravity moved upstream as intended). tuple returns, match guards, UTF-8 all work. LSP matrix documented + lsp_smoke test. EBNF roundtrip, WAL property, channel stress, bench regression all in CI. SIMD literal (P1-3) still unparsed.\nPhase C: docs consolidated (only CHANGELOG.md at root), stability.md + std.md + SECURITY.md exist, 87 tests/programs conformance corpus. Not cut: version still 0.0.0, no docs/book, no public reimplementation corpus.\nRemaining gap: tests/std_stable_subset.rs \u2014 13 of 51 std modules fail the frontend gate (argon, bangle, dataframe, date, event, http, logging, net, process, rational, sqlite, terminal, url). This is the ONLY failing test suite. Causes are a mix of real std source bugs and typer gaps (extern arg coercion i8/i32/string, &T vs T returns, `as` on Vec/string).",
+      "kind": "summary",
+      "tags": [
+        "review",
+        "roadmap",
+        "alpha"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-08-02T17:37:48+00:00",
+      "ts_accessed": "2026-08-02T17:37:48+00:00",
+      "access_count": 0
+    },
+    "typer-move-tracking-two-passes": {
+      "key": "typer-move-tracking-two-passes",
+      "value": "Move tracking runs in TWO places that must agree. (1) During lowering, src/typer/stmt/dispatch.rs:~402 calls clear_all_moved_for(id) when a bind rebinds an existing name. (2) After each statement is lowered, src/typer/stmt/block.rs calls record_take_moves_in_stmt (src/typer/lower/block.rs), which marks consuming-call args / assignment sources as moved. Pass 2 runs AFTER pass 1, so if it marks the argument of `g is grow(g, x)` as moved it undoes pass 1's revival and rejects the canonical builder idiom. Fix (v133): record_take_moves_in_stmt clears the moved-state of the Bind target (b.def_id) and Assign target (*tid) at the END of handling that statement. Revival stays precise because clearing keys on the TARGET, so `h is grow(g,2)` still tombstones g. Any future move rule must be added to BOTH passes or the invariant breaks silently.",
+      "kind": "pitfall",
+      "tags": [
+        "typer",
+        "ownership",
+        "memory-model"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-08-02T17:37:57+00:00",
+      "ts_accessed": "2026-08-02T17:37:57+00:00",
+      "access_count": 0
+    },
+    "typer-constructor-fallthrough-hole": {
+      "key": "typer-constructor-fallthrough-hole",
+      "value": "src/typer/expr/construct.rs lower_struct_or_variant used to END with an unconditional Ok(Type::Struct(name)) \u2014 so ANY unresolved constructor name fabricated a struct type and compiled+ran (`x is Bogus()` exited 0). Fixed v134: guard on self.structs.contains_key before the fallthrough, else unknown_constructor_error(). That error does (a) a FOREIGN table mapping other languages' prelude spellings to Jinn's (None/Null/Nil->Nothing, Just->Some, Error->Err), then (b) Levenshtein over structs+variant_tags with budget (len/3).clamp(1,3), filtering out mangled `__G_` names. Lesson: any \"fall through to a default type\" in the typer is a soundness hole \u2014 unresolved names must be errors. The Option variant is spelled `Nothing`, NOT `None` (jinn.md was wrong and was corrected).",
+      "kind": "pitfall",
+      "tags": [
+        "typer",
+        "soundness",
+        "diagnostics"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-08-02T17:38:07+00:00",
+      "ts_accessed": "2026-08-02T17:38:07+00:00",
+      "access_count": 0
+    }
+  }
+}

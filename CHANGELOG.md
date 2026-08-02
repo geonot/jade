@@ -1,4 +1,13 @@
 # Changelog
+- **[135]** (2026-08-02 17:37) review eval: P1-6 — mir-drops summary is behind --debug-drops only
+
+The driver printed the mir-drops summary on any compile where the pass
+did useful work, so a clean user build leaked internal optimizer
+telemetry to stderr. The roadmap's B.3 requires internal info to sit
+behind an explicit flag. Gate solely on cli.debug_drops; tests/drops_debug
+already passes the flag explicitly, so coverage is unchanged.
+
+Tests 2008 passing, clippy clean, fmt clean.
 - **[134]** (2026-08-02 17:35) review eval: reject unknown constructors; restore fmt gate
 
 P0-class soundness hole found while auditing the std gate: the typer's

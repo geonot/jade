@@ -62,7 +62,12 @@ impl Typer {
                 }
             } else if self.err_enum_names.contains(&src) && self.err_enum_names.contains(&tgt) {
                 return Err(format!(
-                    "no conversion `{src} -> {tgt}` at {span:?}: propagation here yields an err `{src}`, but this function's error type is `{tgt}` and there is no `impl From of {src} for {tgt}`. Add `impl From of {src} for {tgt}` with `*from(e as {src}) returns {tgt}`, or add `| {src}` to the function's error union."
+                    "{}: no conversion `{src} -> {tgt}`: propagation here yields an err \
+                     `{src}`, but this function's error type is `{tgt}` and there is no \
+                     `impl From of {src} for {tgt}`; add that impl with \
+                     `*from(e as {src}) returns {tgt}`, or add `| {src}` to the function's \
+                     error union",
+                    span.loc()
                 ));
             } else {
                 return Ok(None);
@@ -176,7 +181,12 @@ impl Typer {
                 }
             } else if self.err_enum_names.contains(&src) && self.err_enum_names.contains(&tgt) {
                 return Err(format!(
-                    "no conversion `{src} -> {tgt}` at {span:?}: propagation here yields an err `{src}`, but this function's error type is `{tgt}` and there is no `impl From of {src} for {tgt}`. Add `impl From of {src} for {tgt}` with `*from(e as {src}) returns {tgt}`, or add `| {src}` to the function's error union."
+                    "{}: no conversion `{src} -> {tgt}`: propagation here yields an err \
+                     `{src}`, but this function's error type is `{tgt}` and there is no \
+                     `impl From of {src} for {tgt}`; add that impl with \
+                     `*from(e as {src}) returns {tgt}`, or add `| {src}` to the function's \
+                     error union",
+                    span.loc()
                 ));
             } else {
                 err_val
@@ -901,7 +911,10 @@ impl Typer {
                     };
                     if !is_result_ret {
                         return Err(format!(
-                            "error propagation at {span:?} is only valid inside a function whose result type is a `Result`/`Option`. Declare the enclosing function's error union with `! E` (e.g. `returns T ! E`)."
+                            "{}: error propagation is only valid inside a function whose \
+                             result type is a `Result`/`Option`; declare the enclosing \
+                             function's error union with `! E` (e.g. `returns T ! E`)",
+                            span.loc()
                         ));
                     }
                 }
@@ -947,8 +960,11 @@ impl Typer {
                         && !self.current_fn_declared_errors.contains(en)
                     {
                         return Err(format!(
-                            "`! {0}` returns a variant of err `{0}` at {1:?}, but the function's declared error union (`! ...`) does not list `{0}`. Add `! {0}` to the function signature, or use a different value.",
-                            en, span
+                            "{1}: `! {0}` raises a variant of err `{0}`, but this function's \
+                             declared error union does not list `{0}`; add `! {0}` to the \
+                             signature, or raise an error the signature declares",
+                            en,
+                            span.loc()
                         ));
                     }
                     self.current_fn_error_types.insert(*en);
@@ -978,8 +994,12 @@ impl Typer {
                     && let Some(en) = &enum_name
                 {
                     return Err(format!(
-                        "`! {0}` at {1:?} returns a value of err `{0}`, but this function returns `{2}`. In jinn, errors are values: either declare the function as `returns {0}` and pattern-match at the call site, or encode the error as a value of `{2}` (e.g., a sentinel like `! -1`).",
-                        en, span, resolved_ret
+                        "{1}: `err {0}` raises an error, but this function returns `{2}` with no \
+                         declared error union; add `! {0}` to the signature (making the result \
+                         `Result of {2}, {0}`), or return a value of `{2}`",
+                        en,
+                        span.loc(),
+                        resolved_ret
                     ));
                 }
                 self.collect_unify_error(unify_res);

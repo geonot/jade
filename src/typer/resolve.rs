@@ -189,6 +189,7 @@ impl Typer {
             .map(|p| p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()))
             .collect();
         let ret = m.ret.clone().unwrap_or_else(|| self.infer_ctx.fresh_var());
+        let ret = Self::desugar_bang_ret(&ret, &m.error_types);
         let id = self.fresh_id();
         self.fns.insert(method_name, (id, ptys, ret));
         let accs: Vec<Option<ast::AccessMod>> = m.params.iter().map(|p| p.access_mod).collect();
@@ -214,6 +215,7 @@ impl Typer {
             ptys.push(p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()));
         }
         let ret = m.ret.clone().unwrap_or_else(|| self.infer_ctx.fresh_var());
+        let ret = Self::desugar_bang_ret(&ret, &m.error_types);
         let id = self.fresh_id();
         self.fns.insert(method_name, (id, ptys, ret));
 

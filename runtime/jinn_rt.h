@@ -682,7 +682,8 @@ long           jinn_tls_protocol_version(jinn_tls_conn *conn, char *buf, long le
 int            jinn_dns_resolve(const char *host, char *out_buf, int out_len);
 int            jinn_dns_resolve_all(const char *host, char *out_buf, int out_len);
 
-/* runtime/sqlite.c (requires sqlite3) */
+/* runtime/sqlite.c (requires sqlite3) — raw FFI surface; bind it with
+ * `extern *jinn_sqlite_*` declarations. There is no std/ wrapper module. */
 void       *jinn_sqlite_open(const char *path);
 int         jinn_sqlite_close(void *db);
 int         jinn_sqlite_exec(void *db, const char *sql);
