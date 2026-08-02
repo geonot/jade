@@ -415,3 +415,44 @@ fn m8_copy_capture_is_legal() {
     assert!(c.ok(), "{}", c.stderr());
     assert_eq!(c.run_stdout(), "2\n2\n");
 }
+
+/// M2 — consume-and-rebind is the canonical builder idiom: passing an
+/// aggregate to a consuming call and rebinding the result to the same
+/// name re-initializes the binding, so the next iteration is legal.
+/// Regression: the post-lowering move pass re-marked the argument as
+/// moved without observing that the bind target was re-initialized,
+/// which rejected the shape six sample apps are written in.
+#[test]
+fn m2_consume_and_rebind_same_name_is_legal() {
+    let c = compile(
+        "*grow(v as [i64], x as i64) returns [i64]\n    v.push(x)\n    return v\n\n*main\n    g is [1]\n    g is grow(g, 2)\n    g is grow(g, 3)\n    log(g.length)\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    assert_eq!(c.run_stdout(), "3\n");
+}
+
+/// M2 — the revival holds across a loop body, which is the shape the
+/// sample apps use: consume the accumulator and rebind it each iteration.
+#[test]
+fn m2_consume_and_rebind_in_loop_is_legal() {
+    let c = compile(
+        "*grow(v as [i64], x as i64) returns [i64]\n    v.push(x)\n    return v\n\n*main\n    g is [0]\n    i is 1\n    while i < 4\n        g is grow(g, i)\n        i is i + 1\n    log(g.length)\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    assert_eq!(c.run_stdout(), "4\n");
+}
+
+/// M2 — revival is precise: rebinding a *different* name still leaves
+/// the consumed source tombstoned.
+#[test]
+fn m2_rebind_of_other_name_does_not_revive_source() {
+    let c = compile(
+        "*grow(v as [i64], x as i64) returns [i64]\n    v.push(x)\n    return v\n\n*main\n    g is [1]\n    h is grow(g, 2)\n    log(g.length)\n",
+    );
+    assert!(!c.ok());
+    assert!(
+        c.stderr().contains("use of moved value `g`"),
+        "{}",
+        c.stderr()
+    );
+}

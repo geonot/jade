@@ -281,7 +281,7 @@ impl Typer {
                     kind: hir::ExprKind::MapNew,
                     ty: Type::Map(
                         Box::new(Type::String),
-                        Box::new(self.infer_ctx.fresh_integer_var()),
+                        Box::new(self.infer_ctx.fresh_var()),
                     ),
                     span,
                 }))

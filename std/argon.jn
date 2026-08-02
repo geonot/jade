@@ -1,4 +1,5 @@
 # std.argon — Argon2id password hashing and key derivation
+use convert
 #
 # Argon2 is the winner of the Password Hashing Competition (2015) and the
 # recommended algorithm for password storage (RFC 9106). The `id` variant
@@ -108,7 +109,7 @@ DEFAULT_SALT_LEN is 16
         eq is $.find("=")
         if eq < 0
             return vec()
-        out.push($.slice(eq + 1, $.length) as i64)
+        out.push(convert.parse_int($.slice(eq + 1, $.length)))
     out
 
 *__bytes_to_hex(data as String) returns String

@@ -250,12 +250,15 @@ impl Typer {
                 let hi = self.lower_expr(inner)?;
 
                 // `%x : T` is `&T` — codegen materializes the value into a
-                // stack slot and passes that slot's address. `%s` on a String
-                // is the C-string marshal (`&i8`): extern call emission passes
-                // the string's data pointer, not the header struct.
+                // stack slot and passes that slot's address.
+                // Special cases for C-interop:
+                //   `%s : String`      → `%i8`  (data pointer, C-string marshal)
+                //   `%v : Vec of T`    → `%T`   (data pointer to first element)
+                //   `%v : [T]`         → `%T`   (same, list-literal sugar)
                 let resolved = self.infer_ctx.shallow_resolve(&hi.ty);
                 let ty = match resolved {
                     Type::String => Type::Ptr(Box::new(Type::I8)),
+                    Type::Vec(elem) => Type::Ptr(elem),
                     _ => Type::Ptr(Box::new(hi.ty.clone())),
                 };
                 Ok(hir::Expr {

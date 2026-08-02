@@ -604,6 +604,7 @@ impl Typer {
                     }
                 }
                 self.record_take_moves_in_expr(&b.value)?;
+                self.clear_all_moved_for(b.def_id);
             }
             hir::Stmt::Ret(Some(e), _, span) => {
                 let inner = Self::peel_move_wrappers(e);
@@ -645,6 +646,7 @@ impl Typer {
                             )?;
                         }
                     }
+                    self.clear_all_moved_for(*tid);
                 }
             }
             hir::Stmt::Defer(block, span) => {
