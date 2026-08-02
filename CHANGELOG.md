@@ -1,4 +1,25 @@
 # Changelog
+- **[134]** (2026-08-02 17:35) review eval: reject unknown constructors; restore fmt gate
+
+P0-class soundness hole found while auditing the std gate: the typer's
+struct-literal path fell through to Type::Struct(name) for ANY unresolved
+name, so `x is TotallyUndefinedThing()` compiled, linked, and ran. Every
+typo in a constructor position was silently accepted, and the resulting
+fabricated type is what produced the misleading "expected `None`, found
+`Option__G_i64`" cascade in std/collections.jn.
+
+- Reject constructor calls that name no declared type/actor/variant.
+- Levenshtein-based "did you mean" over known types and variants.
+- Name the Jinn spelling directly for foreign prelude words
+  (None/Null/Nil -> Nothing, Just -> Some, Error -> Err).
+- Fix spec divergence: jinn.md said `None`, implementation and
+  error-effects.md/fmt.md say `Nothing`. `Nothing` wins; jinn.md and
+  std/collections.jn corrected.
+- cargo fmt --all: 58 files were drifted at HEAD, so CI's fmt gate was
+  already red. Now clean.
+
+std gate 14 -> 13 failing modules. Tests 2004 -> 2008. clippy clean,
+fmt clean, apps 21/21, benchmarks 36/36.
 - **[133]** (2026-08-02 17:23) review eval: fix consume-and-rebind false positive in move tracking
 
 The post-lowering move pass (record_take_moves_in_stmt) re-marked a

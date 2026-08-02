@@ -576,12 +576,7 @@ pub fn run() {
         use crate::drops::mir_drops;
         comp.tune_empty_vec_growth_floor_from_mir(&mir_prog);
         let mir_hints = mir_drops::run(&mut mir_prog);
-        if cli.debug_drops
-            || mir_hints.stats.drops_elided > 0
-            || mir_hints.stats.reuse_sites > 0
-            || mir_hints.stats.drops_fused > 0
-            || mir_hints.stats.last_use_tracked > 0
-        {
+        if cli.debug_drops {
             eprintln!(
                 "mir-drops: {} drops elided, {} drops sunk, {} drops fused, {} reuse pairs ({} bindings)",
                 mir_hints.stats.drops_elided,
