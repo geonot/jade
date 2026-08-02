@@ -103,11 +103,7 @@ fn every_program_is_wired_and_matches_its_snapshot() {
             while let Some(c) = chars.next() {
                 if c == '0' && chars.peek() == Some(&'x') {
                     chars.next();
-                    while chars
-                        .peek()
-                        .map(|d| d.is_ascii_hexdigit())
-                        .unwrap_or(false)
-                    {
+                    while chars.peek().map(|d| d.is_ascii_hexdigit()).unwrap_or(false) {
                         chars.next();
                     }
                     out.push_str("0xADDR");
@@ -141,7 +137,10 @@ fn every_program_is_wired_and_matches_its_snapshot() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert!(checked > 80, "corpus scan looks wrong: only {checked} programs");
+    assert!(
+        checked > 80,
+        "corpus scan looks wrong: only {checked} programs"
+    );
 }
 
 /// The known ICE stays reproducible; when it starts compiling, promote

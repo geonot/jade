@@ -42,9 +42,9 @@ use inkwell::debug_info::{
     DICompileUnit, DIScope, DWARFEmissionKind, DWARFSourceLanguage, DebugInfoBuilder,
 };
 
+use crate::drops::DropHints;
 use crate::hir;
 use crate::mir;
-use crate::drops::DropHints;
 use crate::types::Type;
 
 macro_rules! b {

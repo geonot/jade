@@ -287,8 +287,7 @@ impl Typer {
                     .ok_or_else(|| format!("unknown store '{store}'"))?
                     .clone();
                 let hfilter = self.lower_store_filter(filter, &schema, &store.as_str())?;
-                let hfilter_exists =
-                    self.lower_store_filter(filter, &schema, &store.as_str())?;
+                let hfilter_exists = self.lower_store_filter(filter, &schema, &store.as_str())?;
 
                 /* D3 (task 8-25): a query that can match nothing has type
                  * `Result of <row>, StoreError` — reading a field of a miss

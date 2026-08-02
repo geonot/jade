@@ -236,6 +236,84 @@ impl Typer {
         self.lower_struct_or_variant(name, inits, span)
     }
 
+    /// Case-insensitive Levenshtein distance, used to turn a failed name
+    /// lookup into a suggestion instead of a dead end.
+    fn edit_distance(a: &str, b: &str) -> usize {
+        let a: Vec<char> = a.to_ascii_lowercase().chars().collect();
+        let b: Vec<char> = b.to_ascii_lowercase().chars().collect();
+        let mut prev: Vec<usize> = (0..=b.len()).collect();
+        let mut cur = vec![0usize; b.len() + 1];
+        for i in 1..=a.len() {
+            cur[0] = i;
+            for j in 1..=b.len() {
+                let sub = prev[j - 1] + usize::from(a[i - 1] != b[j - 1]);
+                cur[j] = sub.min(prev[j] + 1).min(cur[j - 1] + 1);
+            }
+            std::mem::swap(&mut prev, &mut cur);
+        }
+        prev[b.len()]
+    }
+
+    /// A constructor call named a type that does not exist. Offer the
+    /// nearest known type or enum variant so the common cause — a typo, a
+    /// missing `use`, or a variant spelled from another language's prelude
+    /// (`None` for `Nothing`) — is immediately visible.
+    fn unknown_constructor_error(&self, name: &str, span: Span) -> String {
+        let mut candidates: Vec<String> = self
+            .structs
+            .keys()
+            .map(|s| s.as_str())
+            .chain(self.variant_tags.keys().map(|s| s.as_str()))
+            .filter(|c| !c.contains("__G_"))
+            .collect();
+        candidates.sort();
+        candidates.dedup();
+        // Spellings users import from other languages' preludes. Jinn has
+        // exactly one name per concept; point at it rather than accreting
+        // aliases.
+        const FOREIGN: &[(&str, &str)] = &[
+            ("None", "Nothing"),
+            ("Null", "Nothing"),
+            ("Nil", "Nothing"),
+            ("Just", "Some"),
+            ("Error", "Err"),
+        ];
+        if let Some((_, jinn)) = FOREIGN.iter().find(|(foreign, _)| *foreign == name)
+            && candidates.iter().any(|c| c == jinn)
+        {
+            return format!(
+                "{}: unknown variant `{}` — Jinn spells this `{}`",
+                span.loc(),
+                name,
+                jinn,
+            );
+        }
+        let budget = (name.len() / 3).clamp(1, 3);
+        let near = candidates
+            .iter()
+            .map(|c| (Self::edit_distance(name, c), c))
+            .filter(|(d, _)| *d <= budget)
+            .min_by_key(|(d, c)| (*d, c.len()))
+            .map(|(_, c)| c);
+        match near {
+            Some(c) => format!(
+                "{}: unknown type or variant `{}` — did you mean `{}`? \
+                 (a constructor call must name a declared `type`, `actor`, or enum variant; \
+                 check for a missing `use`)",
+                span.loc(),
+                name,
+                c,
+            ),
+            None => format!(
+                "{}: unknown type or variant `{}`: a constructor call must name a declared \
+                 `type`, `actor`, or enum variant; declare it, or add the `use` that brings \
+                 it into scope",
+                span.loc(),
+                name,
+            ),
+        }
+    }
+
     pub(in crate::typer) fn lower_struct_or_variant(
         &mut self,
         name: &str,
@@ -552,6 +630,10 @@ impl Typer {
                     fi.value = self.maybe_coerce_to(taken, declared_ty);
                 }
             }
+        }
+
+        if !self.structs.contains_key(&Symbol::intern(name)) {
+            return Err(self.unknown_constructor_error(name, span));
         }
 
         Ok(hir::Expr {

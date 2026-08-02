@@ -350,9 +350,7 @@ impl Typer {
         let en_str = en.as_str();
         match resolved {
             Type::Enum(n) => base(&n.as_str()) == base(&en_str),
-            Type::Struct(n, _) if self.generic_enums.contains_key(n) => {
-                base(&en_str) == n.as_str()
-            }
+            Type::Struct(n, _) if self.generic_enums.contains_key(n) => base(&en_str) == n.as_str(),
             _ => false,
         }
     }

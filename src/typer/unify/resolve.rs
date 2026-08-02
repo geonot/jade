@@ -107,10 +107,9 @@ impl InferCtx {
             Type::Coroutine(inner) => Type::Coroutine(Box::new(self.canonicalize_type(inner))),
             Type::Generator(inner) => Type::Generator(Box::new(self.canonicalize_type(inner))),
             Type::Channel(inner) => Type::Channel(Box::new(self.canonicalize_type(inner))),
-            Type::Struct(n, args) => Type::Struct(
-                *n,
-                args.iter().map(|t| self.canonicalize_type(t)).collect(),
-            ),
+            Type::Struct(n, args) => {
+                Type::Struct(*n, args.iter().map(|t| self.canonicalize_type(t)).collect())
+            }
             _ => ty.clone(),
         }
     }

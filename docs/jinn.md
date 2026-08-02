@@ -659,7 +659,7 @@ type Pair of A, B
 
 enum Option of T
     Some(T)
-    None
+    Nothing
 ```
 
 Generic types appear in annotations with `of`, for example `Vec of Account`.

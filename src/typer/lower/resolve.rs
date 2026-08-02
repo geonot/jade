@@ -773,17 +773,13 @@ impl Typer {
 
     fn canonicalize_generic_enums(&mut self, ty: &Type) -> Type {
         match ty {
-            Type::Struct(n, args)
-                if !args.is_empty() && self.generic_enums.contains_key(n) =>
-            {
+            Type::Struct(n, args) if !args.is_empty() && self.generic_enums.contains_key(n) => {
                 let ge = self.generic_enums.get(n).cloned().unwrap();
                 let cargs: Vec<Type> = args
                     .iter()
                     .map(|a| self.canonicalize_generic_enums(a))
                     .collect();
-                if cargs.len() == ge.type_params.len()
-                    && cargs.iter().all(Self::is_concrete_type)
-                {
+                if cargs.len() == ge.type_params.len() && cargs.iter().all(Self::is_concrete_type) {
                     let mut m = std::collections::HashMap::new();
                     for (tp, ta) in ge.type_params.iter().zip(cargs.iter()) {
                         m.insert(*tp, ta.clone());
@@ -801,22 +797,20 @@ impl Typer {
                 Box::new(self.canonicalize_generic_enums(k)),
                 Box::new(self.canonicalize_generic_enums(v)),
             ),
-            Type::Array(i, n2) => {
-                Type::Array(Box::new(self.canonicalize_generic_enums(i)), *n2)
-            }
+            Type::Array(i, n2) => Type::Array(Box::new(self.canonicalize_generic_enums(i)), *n2),
             Type::Ptr(i) => Type::Ptr(Box::new(self.canonicalize_generic_enums(i))),
             Type::Channel(i) => Type::Channel(Box::new(self.canonicalize_generic_enums(i))),
-            Type::Coroutine(i) => {
-                Type::Coroutine(Box::new(self.canonicalize_generic_enums(i)))
-            }
-            Type::Generator(i) => {
-                Type::Generator(Box::new(self.canonicalize_generic_enums(i)))
-            }
+            Type::Coroutine(i) => Type::Coroutine(Box::new(self.canonicalize_generic_enums(i))),
+            Type::Generator(i) => Type::Generator(Box::new(self.canonicalize_generic_enums(i))),
             Type::Tuple(ts) => Type::Tuple(
-                ts.iter().map(|t| self.canonicalize_generic_enums(t)).collect(),
+                ts.iter()
+                    .map(|t| self.canonicalize_generic_enums(t))
+                    .collect(),
             ),
             Type::Fn(ps, r) => Type::Fn(
-                ps.iter().map(|t| self.canonicalize_generic_enums(t)).collect(),
+                ps.iter()
+                    .map(|t| self.canonicalize_generic_enums(t))
+                    .collect(),
                 Box::new(self.canonicalize_generic_enums(r)),
             ),
             _ => ty.clone(),

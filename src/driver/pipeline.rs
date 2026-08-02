@@ -185,7 +185,6 @@ pub(super) fn compile_and_link(
         print!("{}", crate::mir::printer::print_program(&mir_prog));
     }
 
-
     let ctx = Context::create();
     let name = input
         .file_stem()

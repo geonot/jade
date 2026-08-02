@@ -211,9 +211,7 @@ impl Typer {
 
                         candidates.sort_by(|(a, _, _), (b, _, _)| a.cmp(b));
 
-                        let recv_quantified = match self
-                            .infer_ctx
-                            .shallow_resolve(&dm.receiver_ty)
+                        let recv_quantified = match self.infer_ctx.shallow_resolve(&dm.receiver_ty)
                         {
                             Type::TypeVar(v) => self.infer_ctx.is_quantified(v),
                             _ => false,

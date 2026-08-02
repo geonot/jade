@@ -46,7 +46,8 @@ fn stdout_lines(o: &std::process::Output) -> Vec<String> {
 }
 
 const WRITER: &str = "store items\n    name as String\n    qty as i64\n\n*main\n    for i in 0 to 20\n        insert items 'w', i\n    log(count items)\n";
-const READER: &str = "store items\n    name as String\n    qty as i64\n\n*main\n    log(count items)\n";
+const READER: &str =
+    "store items\n    name as String\n    qty as i64\n\n*main\n    log(count items)\n";
 
 /// Probe: delete the `.store`, keep the `.wal` — every committed record
 /// is restored from the log (this yielded 0 rows before 8-23).
@@ -136,7 +137,10 @@ fn wal_corruption_is_detected_and_prefix_recovered() {
 
     let wal_path = dir.path().join("items.wal");
     let mut wal = std::fs::read(&wal_path).unwrap();
-    assert!(wal.len() > 2064, "need a WAL long enough to corrupt at 2000");
+    assert!(
+        wal.len() > 2064,
+        "need a WAL long enough to corrupt at 2000"
+    );
     for b in &mut wal[2000..2064] {
         *b ^= 0xA5;
     }

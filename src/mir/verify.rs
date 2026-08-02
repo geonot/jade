@@ -415,7 +415,7 @@ mod tests {
     use crate::ast::{FnAttrs, Span};
     use crate::hir::DefId;
     use crate::intern::Symbol;
-    use crate::mir::{BasicBlock, Function, Instruction, Param, DropMeta, Phi};
+    use crate::mir::{BasicBlock, DropMeta, Function, Instruction, Param, Phi};
 
     fn func(blocks: Vec<BasicBlock>, ret_ty: Type) -> Function {
         Function {

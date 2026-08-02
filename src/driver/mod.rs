@@ -25,9 +25,7 @@ use cmd_init::cmd_init;
 use cmd_pkg::{cmd_fetch, cmd_package, cmd_publish, cmd_update};
 use pipeline::compile_and_link;
 use project::ProjectConfig;
-use sources::{
-    find_project_entry, load_packages, resolve_modules,
-};
+use sources::{find_project_entry, load_packages, resolve_modules};
 
 /// Initialize the `tracing` subscriber based on CLI verbosity flags.
 ///
@@ -272,8 +270,7 @@ pub fn run() {
                  * strict as any compiling pipeline. */
                 match typer.lower_program(&prog) {
                     Ok(mut hir_prog) => {
-                        let hir_errors =
-                            crate::hir_validate::HirValidator::validate(&hir_prog);
+                        let hir_errors = crate::hir_validate::HirValidator::validate(&hir_prog);
                         for e in &hir_errors {
                             eprintln!("hir-validate: {e}");
                         }
@@ -446,7 +443,13 @@ pub fn run() {
      * --emit-interface nothing is dropped (modules distribute as source and
      * instantiate at user call sites — the std model), so the frontend
      * check passes; a real .o build would silently omit the function. */
-    if cli.lib && !cli.emit_hir && !cli.emit_llvm && !cli.emit_ir && !cli.emit_mir && !cli.emit_interface {
+    if cli.lib
+        && !cli.emit_hir
+        && !cli.emit_llvm
+        && !cli.emit_ir
+        && !cli.emit_mir
+        && !cli.emit_interface
+    {
         let unresolved = typer.unresolved_exported_generics();
         if !unresolved.is_empty() {
             for f in &unresolved {
@@ -540,7 +543,6 @@ pub fn run() {
         print!("{}", crate::mir::printer::print_program(&mir_prog));
         return;
     }
-
 
     let ctx = Context::create();
     let name = input

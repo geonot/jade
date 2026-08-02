@@ -62,9 +62,9 @@ impl Typer {
 
                 for (i, ha) in hargs.iter().enumerate() {
                     if let Some(pt) = inst_params.get(i) {
-                        let r = self
-                            .infer_ctx
-                            .unify_at_tolerant(pt, &ha.ty, span, "function argument");
+                        let r =
+                            self.infer_ctx
+                                .unify_at_tolerant(pt, &ha.ty, span, "function argument");
                         /* Hard error (task 8-17): a swallowed mismatch here
                          * reached codegen and printed raw LLVM verifier IR
                          * at the user. */
@@ -178,9 +178,9 @@ impl Typer {
                 }
                 for (i, ha) in hargs.iter().enumerate() {
                     if let Some(pt) = param_tys.get(i) {
-                        let r = self
-                            .infer_ctx
-                            .unify_at_tolerant(pt, &ha.ty, span, "function argument");
+                        let r =
+                            self.infer_ctx
+                                .unify_at_tolerant(pt, &ha.ty, span, "function argument");
                         if let Err(e) = r {
                             /* Numeric pairs coerce downstream (i64 -> f64,
                              * widening); everything else is a hard error. */

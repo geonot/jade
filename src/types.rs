@@ -125,7 +125,6 @@ impl Type {
             _ => crate::hir::Ownership::Owned,
         }
     }
-
 }
 
 impl std::fmt::Display for Type {

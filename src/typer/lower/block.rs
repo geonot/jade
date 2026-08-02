@@ -473,7 +473,8 @@ impl Typer {
                 }
                 let result = if let Some(variants) = self.enums.get(name) {
                     variants.iter().any(|(_vname, ftys)| {
-                        ftys.iter().any(|t| self.type_is_aggregate_inner(t, visiting))
+                        ftys.iter()
+                            .any(|t| self.type_is_aggregate_inner(t, visiting))
                     })
                 } else {
                     false
@@ -481,7 +482,9 @@ impl Typer {
                 visiting.remove(name);
                 result
             }
-            Type::Tuple(elts) => elts.iter().any(|t| self.type_is_aggregate_inner(t, visiting)),
+            Type::Tuple(elts) => elts
+                .iter()
+                .any(|t| self.type_is_aggregate_inner(t, visiting)),
             Type::Array(elem, _) => self.type_is_aggregate_inner(elem, visiting),
             Type::Alias(_, inner) | Type::Newtype(_, inner) => {
                 self.type_is_aggregate_inner(inner, visiting)
@@ -571,7 +574,10 @@ impl Typer {
     /// sends (M9). Each is rejected outright if a registered `defer`
     /// reads the source (M10), and a `return` of a reference to an owned
     /// local is rejected here too.
-    pub(in crate::typer) fn record_take_moves_in_stmt(&mut self, s: &hir::Stmt) -> Result<(), String> {
+    pub(in crate::typer) fn record_take_moves_in_stmt(
+        &mut self,
+        s: &hir::Stmt,
+    ) -> Result<(), String> {
         match s {
             hir::Stmt::Bind(b) => {
                 let src = Self::peel_move_wrappers(&b.value);
@@ -623,9 +629,7 @@ impl Typer {
                 }
                 self.record_take_moves_in_expr(e)?;
             }
-            hir::Stmt::Expr(e)
-            | hir::Stmt::ErrReturn(e, _, _)
-            | hir::Stmt::Break(Some(e), _) => {
+            hir::Stmt::Expr(e) | hir::Stmt::ErrReturn(e, _, _) | hir::Stmt::Break(Some(e), _) => {
                 self.record_take_moves_in_expr(e)?;
             }
             hir::Stmt::Assign(target, value, span) => {
@@ -1009,7 +1013,10 @@ impl Typer {
             hir::Stmt::Bind(b) => {
                 if shield_copies
                     && matches!(b.access_mod, Some(crate::ast::AccessMod::Copy))
-                    && matches!(Self::peel_move_wrappers(&b.value).kind, hir::ExprKind::Var(..))
+                    && matches!(
+                        Self::peel_move_wrappers(&b.value).kind,
+                        hir::ExprKind::Var(..)
+                    )
                 {
                     return;
                 }

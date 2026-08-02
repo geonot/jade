@@ -2192,7 +2192,10 @@ fn qualified_module_without_use_is_rejected() {
     // D4 (task 8-15): imports are explicit; the old auto-import silently
     // pulled in any std module named in x.y position.
     let err = expect_compile_fail("*main\n    log(fmt.hex(255))\n");
-    assert!(err.contains("not imported") && err.contains("`use fmt`"), "{err}");
+    assert!(
+        err.contains("not imported") && err.contains("`use fmt`"),
+        "{err}"
+    );
 }
 
 #[test]

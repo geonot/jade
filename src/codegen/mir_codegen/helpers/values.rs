@@ -397,8 +397,7 @@ impl<'ctx> Compiler<'ctx> {
                         return Ok(val.into());
                     }
 
-                    if let Some((vtag, idx)) = Self::parse_payload_field(field)
-                    {
+                    if let Some((vtag, idx)) = Self::parse_payload_field(field) {
                         let st = sv.get_type();
                         let alloca = self.entry_alloca(st.into(), "enum.tmp");
                         b!(self.bld.build_store(alloca, sv));
@@ -506,8 +505,7 @@ impl<'ctx> Compiler<'ctx> {
                         ));
                         return Ok(val.into());
                     }
-                    if let Some((vtag, idx)) = Self::parse_payload_field(field)
-                    {
+                    if let Some((vtag, idx)) = Self::parse_payload_field(field) {
                         let payload_gep = b!(self.bld.build_struct_gep(st, ptr, 1, "payload"));
                         let byte_offset = match vtag {
                             Some(t) => self.compute_variant_payload_offset(&name.as_str(), t, idx),

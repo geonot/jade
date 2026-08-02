@@ -126,7 +126,9 @@ fn d2_fixit_text_is_valid_jinn() {
     assert!(c.ok(), "{}", c.stderr());
     let stderr = c.stderr();
     assert!(
-        !stderr.contains("`: i64`") && !stderr.contains("`: f64`") && !stderr.contains("`: String`"),
+        !stderr.contains("`: i64`")
+            && !stderr.contains("`: f64`")
+            && !stderr.contains("`: String`"),
         "fix-it suggests invalid Jinn: {stderr}"
     );
 }

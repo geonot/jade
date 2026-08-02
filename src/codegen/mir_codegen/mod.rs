@@ -15,9 +15,9 @@ use inkwell::module::Linkage;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValue, BasicValueEnum};
 
+use crate::drops::DropHints;
 use crate::hir;
 use crate::mir;
-use crate::drops::DropHints;
 use crate::types::Type;
 
 use super::Compiler;

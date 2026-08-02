@@ -348,7 +348,9 @@ impl<'ctx> Compiler<'ctx> {
                 i64t.const_int(0, false),
                 "all.is_del"
             ));
-            b!(self.bld.build_conditional_branch(is_deleted, next_bb, push_bb));
+            b!(self
+                .bld
+                .build_conditional_branch(is_deleted, next_bb, push_bb));
         } else {
             b!(self.bld.build_unconditional_branch(push_bb));
         }

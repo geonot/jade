@@ -200,7 +200,11 @@ fn m1_move_in_branch_rejected_after_join() {
         "*main\n    a is vec(1)\n    x is 1\n    if x > 0\n        b is a\n        log(b.length)\n    log(a.length)\n",
     );
     assert!(!c.ok());
-    assert!(c.stderr().contains("use of moved value `a`"), "{}", c.stderr());
+    assert!(
+        c.stderr().contains("use of moved value `a`"),
+        "{}",
+        c.stderr()
+    );
 }
 
 /// M1 + loops — an aggregate assignment inside a loop body would re-move
@@ -208,9 +212,14 @@ fn m1_move_in_branch_rejected_after_join() {
 /// (including `while`, which previously skipped it).
 #[test]
 fn m1_move_in_while_loop_rejected() {
-    let c = compile("*main\n    a is vec(1)\n    while true\n        b is a\n        log(b.length)\n");
+    let c =
+        compile("*main\n    a is vec(1)\n    while true\n        b is a\n        log(b.length)\n");
     assert!(!c.ok());
-    assert!(c.stderr().contains("moved inside a loop body"), "{}", c.stderr());
+    assert!(
+        c.stderr().contains("moved inside a loop body"),
+        "{}",
+        c.stderr()
+    );
 }
 
 /// M3 — a plain bind of an aggregate struct field is a partial move, as
@@ -232,7 +241,9 @@ fn m3_field_bind_is_partial_move() {
 /// alias the container's memory); `copy` and `take` are the escapes.
 #[test]
 fn m4_aggregate_element_bind_rejected_with_escapes() {
-    let c = compile("*main\n    grid is vec()\n    grid.push(vec(1, 2))\n    row is grid.get(0)\n    log(row.length)\n");
+    let c = compile(
+        "*main\n    grid is vec()\n    grid.push(vec(1, 2))\n    row is grid.get(0)\n    log(row.length)\n",
+    );
     assert!(!c.ok());
     assert!(
         c.stderr().contains("cannot bind aggregate element"),
@@ -286,7 +297,8 @@ fn m10_defer_read_blocks_move() {
         "{stderr}"
     );
 
-    let c = compile("*main\n    buf is vec(1, 2)\n    defer\n        log(buf.length)\n    log(7)\n");
+    let c =
+        compile("*main\n    buf is vec(1, 2)\n    defer\n        log(buf.length)\n    log(7)\n");
     assert!(c.ok(), "{}", c.stderr());
     assert_eq!(c.run_stdout(), "7\n2\n");
 }
@@ -299,8 +311,7 @@ fn return_of_reference_to_local_rejected() {
     let c = compile("*f() returns %i64\n    x is 5\n    return %x\n\n*main\n    log(1)\n");
     assert!(!c.ok());
     assert!(
-        c.stderr()
-            .contains("returning reference to local variable"),
+        c.stderr().contains("returning reference to local variable"),
         "{}",
         c.stderr()
     );
@@ -365,7 +376,8 @@ fn m8_actor_owned_aggregate_runs() {
 /// aggregate is a hard error naming the alternatives.
 #[test]
 fn m8_sim_for_capture_rejected() {
-    let c = compile("*main\n    shared is vec()\n    sim for i in 0 to 4\n        shared.push(i)\n");
+    let c =
+        compile("*main\n    shared is vec()\n    sim for i in 0 to 4\n        shared.push(i)\n");
     assert!(!c.ok());
     assert!(
         c.stderr().contains("cannot be captured by `sim for`"),
@@ -455,4 +467,55 @@ fn m2_rebind_of_other_name_does_not_revive_source() {
         "{}",
         c.stderr()
     );
+}
+
+/// A constructor call naming a type that does not exist must be a
+/// diagnostic, not a silently-fabricated struct. Regression: the typer's
+/// struct-literal fallthrough invented `Type::Struct(name)` for any
+/// unknown name, so `x is Bogus()` compiled and ran.
+#[test]
+fn unknown_constructor_is_rejected() {
+    let c = compile("*main\n    x is TotallyUndefinedThing()\n    log('ok')\n");
+    assert!(!c.ok(), "unknown constructor must not compile");
+    assert!(
+        c.stderr().contains("unknown type or variant"),
+        "{}",
+        c.stderr()
+    );
+}
+
+/// The rejection carries a suggestion when a near-miss exists.
+#[test]
+fn unknown_constructor_suggests_nearest_type() {
+    let c = compile("type Point\n    a as i64\n\n*main\n    x is Poimt(a is 1)\n    log(x.a)\n");
+    assert!(!c.ok());
+    assert!(
+        c.stderr().contains("did you mean `Point`?"),
+        "{}",
+        c.stderr()
+    );
+}
+
+/// `None` is the prelude spelling in several other languages; Jinn's is
+/// `Nothing`. Say so directly instead of "unknown variant".
+#[test]
+fn foreign_prelude_spelling_names_the_jinn_one() {
+    let c = compile(
+        "*find(x as i64) returns Option of i64\n    if x < 0\n        return None()\n    Some(x)\n\n*main\n    log(1)\n",
+    );
+    assert!(!c.ok());
+    assert!(
+        c.stderr().contains("Jinn spells this `Nothing`"),
+        "{}",
+        c.stderr()
+    );
+}
+
+/// The canonical Option shape compiles once spelled correctly.
+#[test]
+fn option_nothing_and_some_typecheck() {
+    let c = compile(
+        "*find(x as i64) returns Option of i64\n    if x < 0\n        return Nothing()\n    Some(x)\n\n*main\n    r is find(5)\n    log(1)\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
 }

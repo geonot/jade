@@ -279,10 +279,7 @@ impl Typer {
                 }
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::MapNew,
-                    ty: Type::Map(
-                        Box::new(Type::String),
-                        Box::new(self.infer_ctx.fresh_var()),
-                    ),
+                    ty: Type::Map(Box::new(Type::String), Box::new(self.infer_ctx.fresh_var())),
                     span,
                 }))
             }

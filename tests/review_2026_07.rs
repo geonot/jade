@@ -173,11 +173,7 @@ fn review_3_3_vec_assignment_is_rejected_as_use_after_move() {
 fn review_4_6_cross_type_equals_is_rejected() {
     let c = compile("*main\n    if 'abc' equals 5\n        log('huh')\n");
     assert!(!c.ok(), "cross-type equals must be a type error");
-    assert!(
-        c.stderr().contains("type mismatch"),
-        "{}",
-        c.stderr()
-    );
+    assert!(c.stderr().contains("type mismatch"), "{}", c.stderr());
 }
 
 /// §4.6 — declared `returns String`, body returns i64: a source-level
@@ -220,11 +216,7 @@ fn review_4_6_string_plus_int() {
 fn review_4_6_heterogeneous_vec_is_rejected() {
     let c = compile("*main\n    v is vec()\n    v.push(1)\n    v.push('two')\n    log(v.get(1))\n");
     assert!(!c.ok(), "heterogeneous vec must be a type error");
-    assert!(
-        c.stderr().contains("type mismatch"),
-        "{}",
-        c.stderr()
-    );
+    assert!(c.stderr().contains("type mismatch"), "{}", c.stderr());
 }
 
 /// §4.7 — multi-clause arity mismatch is a normal span-carrying
@@ -253,10 +245,7 @@ fn top_level_reassignment_is_cleanly_diagnosed() {
     let c = compile("x is 41\nx is x + 1\nlog(x)\n");
     assert!(!c.ok(), "self-referential top-level const must be rejected");
     let stderr = c.stderr();
-    assert!(
-        stderr.contains("defined in terms of itself"),
-        "{stderr}"
-    );
+    assert!(stderr.contains("defined in terms of itself"), "{stderr}");
     assert!(
         !stderr.contains("stack overflow") && !stderr.contains("RUST_BACKTRACE"),
         "must be a diagnostic, not a crash: {stderr}"

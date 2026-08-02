@@ -94,7 +94,7 @@ type RingBuffer
 
     *pop
         if self.count equals 0
-            return None()
+            return Nothing()
         val is self.data.get(self.head)
         self.head is (self.head + 1) mod self.capacity
         self.count is self.count - 1
@@ -102,7 +102,7 @@ type RingBuffer
 
     *peek
         if self.count equals 0
-            return None()
+            return Nothing()
         Some(self.data.get(self.head))
 
     *size

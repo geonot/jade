@@ -157,7 +157,9 @@ impl<'ctx> Compiler<'ctx> {
                     && !st.get_field_types().is_empty()
                 {
                     self.type_store_size(st.into())
-                } else if let Some(fields) = self.structs.get(&crate::intern::Symbol::intern(&sname)) {
+                } else if let Some(fields) =
+                    self.structs.get(&crate::intern::Symbol::intern(&sname))
+                {
                     fields
                         .iter()
                         .map(|(_, t)| self.type_size_of(t).next_multiple_of(8))

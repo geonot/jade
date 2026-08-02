@@ -48,7 +48,8 @@ fn fmt_write_preserves_comments_and_is_idempotent() {
     assert!(once.contains("# standalone comment"), "{once}");
     // Trailing stays trailing (same line as its code).
     assert!(
-        once.lines().any(|l| l.contains("x is 1") && l.contains("# trailing comment")),
+        once.lines()
+            .any(|l| l.contains("x is 1") && l.contains("# trailing comment")),
         "trailing comment must stay on its statement's line: {once}"
     );
 
@@ -117,7 +118,11 @@ fn fmt_preserves_shebang() {
         .arg(&path)
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let after = std::fs::read_to_string(&path).unwrap();
     assert!(
         after.starts_with("#!/usr/bin/env jinn"),
@@ -151,9 +156,8 @@ fn fmt_roundtrip_over_snippets_corpus() {
                     Ok(o) => o,
                     Err(_) => continue, // unparseable corpus entries are out of scope
                 };
-                let twice = jinnc::fmt::format_source(&once).unwrap_or_else(|e| {
-                    panic!("reformat failed for {}: {e}", p.display())
-                });
+                let twice = jinnc::fmt::format_source(&once)
+                    .unwrap_or_else(|e| panic!("reformat failed for {}: {e}", p.display()));
                 assert_eq!(once, twice, "fmt not idempotent for {}", p.display());
                 let mut a = comments(&src);
                 let mut b = comments(&once);
@@ -164,5 +168,8 @@ fn fmt_roundtrip_over_snippets_corpus() {
             }
         }
     }
-    assert!(checked > 300, "corpus scan looks wrong: only {checked} files");
+    assert!(
+        checked > 300,
+        "corpus scan looks wrong: only {checked} files"
+    );
 }

@@ -180,9 +180,9 @@ impl<'ctx> Compiler<'ctx> {
                 None => return Ok(()), /* payload-less or undeclared: nothing to drop */
             };
             let ft = self.ctx.void_type().fn_type(&[st.into()], false);
-            let f = self
-                .module
-                .add_function(&fn_name, ft, Some(inkwell::module::Linkage::Internal));
+            let f =
+                self.module
+                    .add_function(&fn_name, ft, Some(inkwell::module::Linkage::Internal));
             self.tag_fn(f);
             let entry = self.ctx.append_basic_block(f, "entry");
             let old_fn = self.cur_fn;
@@ -292,20 +292,16 @@ impl<'ctx> Compiler<'ctx> {
                 } else {
                     let off = self.ctx.i64_type().const_int(byte_offset, false);
                     unsafe {
-                        b!(self.bld.build_gep(
-                            self.ctx.i8_type(),
-                            payload_gep,
-                            &[off],
-                            "de.vf"
-                        ))
+                        b!(self
+                            .bld
+                            .build_gep(self.ctx.i8_type(), payload_gep, &[off], "de.vf"))
                     }
                 };
                 if is_rec {
                     let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-                    let heap = b!(self.bld.build_load(ptr_ty, f_ptr, "de.box"))
-                        .into_pointer_value();
-                    let inner =
-                        b!(self.bld.build_load(self.llvm_ty(fty), heap, "de.boxv"));
+                    let heap =
+                        b!(self.bld.build_load(ptr_ty, f_ptr, "de.box")).into_pointer_value();
+                    let inner = b!(self.bld.build_load(self.llvm_ty(fty), heap, "de.boxv"));
                     self.drop_value(inner, fty)?;
                     let free_fn = self.ensure_free();
                     b!(self.bld.build_call(free_fn, &[heap.into()], ""));

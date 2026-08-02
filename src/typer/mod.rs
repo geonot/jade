@@ -559,7 +559,10 @@ impl Typer {
             for base in [
                 Some(exe_dir.to_path_buf()),
                 exe_dir.parent().map(|p| p.to_path_buf()),
-                exe_dir.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()),
+                exe_dir
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.to_path_buf()),
             ]
             .into_iter()
             .flatten()
@@ -570,7 +573,10 @@ impl Typer {
             }
         }
         if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR")
-            && std::path::PathBuf::from(manifest).join("std").join(&std_name).exists()
+            && std::path::PathBuf::from(manifest)
+                .join("std")
+                .join(&std_name)
+                .exists()
         {
             return true;
         }

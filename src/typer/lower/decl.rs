@@ -288,8 +288,8 @@ impl Typer {
          * call's concrete type arguments. Unsolved-variable reports from
          * the pre-pass are noise (the review's `*peek(v)` strict failure);
          * real ambiguity resurfaces at instantiation. */
-        let suppress = self.inferable_fns.contains_key(&f.name)
-            && !self.infer_ctx.suppress_unsolved_reports;
+        let suppress =
+            self.inferable_fns.contains_key(&f.name) && !self.infer_ctx.suppress_unsolved_reports;
         if suppress {
             self.infer_ctx.suppress_unsolved_reports = true;
         }
@@ -448,10 +448,8 @@ impl Typer {
                 let r = self
                     .infer_ctx
                     .unify_at(&ret, &tail_ty, f.span, "function tail expression");
-                let rt_lax =
-                    matches!(rt, Type::Ptr(_)) || self.infer_ctx.type_has_unresolved(&rt);
-                let tt_lax =
-                    matches!(tt, Type::Ptr(_)) || self.infer_ctx.type_has_unresolved(&tt);
+                let rt_lax = matches!(rt, Type::Ptr(_)) || self.infer_ctx.type_has_unresolved(&rt);
+                let tt_lax = matches!(tt, Type::Ptr(_)) || self.infer_ctx.type_has_unresolved(&tt);
                 if let Err(e) = r
                     && !rt_lax
                     && !tt_lax

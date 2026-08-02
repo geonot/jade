@@ -237,11 +237,7 @@ proptest! {
 /// fixes themselves.
 #[test]
 fn generator_emits_review_shapes() {
-    let src = emit(&[
-        Stmt::BindVec(0),
-        Stmt::ChainInto(0, 1),
-        Stmt::LenLog(1),
-    ]);
+    let src = emit(&[Stmt::BindVec(0), Stmt::ChainInto(0, 1), Stmt::LenLog(1)]);
     assert!(src.contains("v1 is chain(v0)"), "{src}");
     let dir = tempfile::tempdir().unwrap();
     let jinn = dir.path().join("t.jn");

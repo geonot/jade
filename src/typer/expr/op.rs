@@ -26,8 +26,8 @@ impl Typer {
                 let ptr_l = matches!(rl0, Type::Ptr(_));
                 let ptr_r = matches!(rr0, Type::Ptr(_));
                 let ptr_arith_op = match op {
-                    BinOp::Add => true,        // ptr + int, int + ptr
-                    BinOp::Sub => ptr_l,       // ptr - int only
+                    BinOp::Add => true,  // ptr + int, int + ptr
+                    BinOp::Sub => ptr_l, // ptr - int only
                     _ => false,
                 };
                 let is_ptr_arith =
