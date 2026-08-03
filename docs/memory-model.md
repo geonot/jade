@@ -1,11 +1,10 @@
 # Jinn Memory Model — aggregates, moves, and inferred borrows
 
-> The binding contract for decision **D1**
-> ([`remediation-2026-07.md`](remediation-2026-07.md) §0): heap aggregates
-> are **move-on-assign with compiler-inferred borrows**. This document is
-> what tasks 8-6 (drop discipline), 8-7 (one flow-sensitive ownership
-> analysis), and 8-8 (cross-task aliasing rejection) implement against; the
-> implementation is wrong wherever it disagrees with this file. It refines
+> The binding contract: heap aggregates are **move-on-assign with
+> compiler-inferred borrows**. This document is what the drop discipline,
+> the flow-sensitive ownership analysis, and cross-task aliasing rejection
+> implement against; the implementation is wrong wherever it disagrees
+> with this file. It refines
 > [`access-semantics.md`](access-semantics.md) — the modifier surface
 > (`copy`/`take`/`const`), the HIR tiers, and `@resource` linearity are
 > unchanged — and corrects it where the review showed its claims did not
@@ -21,7 +20,7 @@
 > into at most one task: `dispatch` capture, `sim for` bodies, actor
 > message payloads, and `spawn` initializers all enforced, with the
 > `copy`-capture snapshot pattern recognized). Every §7 row is now
-> enforced; the review pins in `tests/review_2026_07.rs` are flipped.
+> enforced and pinned by conformance tests.
 
 ## 1. Type categories
 
@@ -69,9 +68,9 @@ note: `a` moved here: `b is a` (m.jn:3:5) — aggregates move on assignment
 help: to keep both values, clone explicitly: `b is copy a`
 ```
 
-This is the §3.3 review program: it must **fail to compile** with exactly
-this diagnostic class. Today it compiles and aliases (pinned in
-`tests/review_2026_07.rs::review_3_3_vec_assignment_aliases`).
+This program must **fail to compile** with exactly this diagnostic class.
+Pinned by
+`tests/semantics_regression.rs::ownership_vec_assignment_is_rejected_as_use_after_move`.
 
 ### M2 — reassignment revives *(example `m2_reassign_revives`)*
 
@@ -296,9 +295,8 @@ dropped. `yield`ed aggregate values transfer ownership to the consumer of
 
 ## 7. Programs that must be rejected
 
-Each entry names its pinned test in `tests/review_2026_07.rs` (flipped
-from observed-bad to required-good by the owning task) or its conformance
-test to be added by 8-6..8-8.
+Each entry names the conformance test that pins it, in
+`tests/semantics_regression.rs` or `tests/memory_model.rs`.
 
 | Program | Outcome required | Diagnostic (lead line) | Owner |
 | --- | --- | --- | --- |
@@ -350,5 +348,4 @@ Every M-rule above gets a compile-or-run conformance test in
 enforceable; M6/M7 and the nested-scope drop discipline are pinned there
 now), following the `tests/access_semantics.rs` pattern: real programs
 through `jinnc`, asserting either exact runtime output or the diagnostic
-lead line. The §7 table is the checklist; the review pins in
-`tests/review_2026_07.rs` flip as their owners land.
+lead line. The §7 table is the checklist.

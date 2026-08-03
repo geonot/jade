@@ -1,4 +1,64 @@
 # Changelog
+- **[140]** (2026-08-02) test suite 65s -> 40.5s
+
+The edit-test loop was the bottleneck, not the build (an incremental
+`cargo build --release` is 1.8s). Measured first: nearly every test forks
+jinnc, and a two-line program costs ~90ms — ~16-22ms of process startup
+(mostly mapping the 157MB libLLVM.so), ~8ms of actual compilation, and
+35-50ms of `cc`/`ld`. The suite is process cost, not assertion logic.
+
+Four changes, each measured:
+
+- `scripts/test.sh` runs test *binaries* concurrently. `cargo test` walks
+  targets strictly one at a time, so any suite that cannot saturate the box
+  leaves cores idle — that was the single biggest waste. Same binaries, same
+  assertions, same exit semantics; failing suites' logs are printed.
+- Corpus harnesses that were one `#[test]` looping serially now fan out
+  through `tests/support/parallel.rs` (`std::thread::scope`, no new
+  dependency, input-order-preserving so failure output stays deterministic):
+  programs_harness 7.15s -> 1.85s, doc_examples 3.58s -> 1.31s. doc_examples
+  needed its sequential `doctest:file` state resolved into per-item state
+  before the map, not inside it.
+- ownership_fuzz's single 200-case proptest is now 8 shards of 25 so libtest
+  can schedule them: 9.38s -> 2.56s. Same total cases.
+- Compile-and-run property suites read their case count from
+  `tests/support/cases.rs` (`JINN_PROPTEST_CASES`). Local default is small;
+  CI and preflight set 64, so release gating keeps the full coverage and
+  `.proptest-regressions` seeds replay at any count.
+
+Rejected after measuring: swapping linkers (mold/lld absent, ld.gold is
+*slower* than default ld) and raising concurrency past nproc — the reference
+box is 4 real cores, and 8x8 oversubscription inflated CPU 207s -> 321s and
+made wall time *worse*.
+
+Fixed a bug in the new runner before trusting it: naming logs by basename
+collapsed the two binaries both named `jinnc` (from src/lib.rs and
+src/main.rs) into one file, silently dropping 309 lib tests. Test-count
+parity with `cargo test` is now exact (2019), and failure detection was
+verified with deliberate canaries in both an integration suite and
+src/lib.rs. Rationale and the cost model are written up in docs/testing.md.
+- **[139]** (2026-08-02 19:11) strip all code comments; reformat
+
+Removed every comment from Rust (src, tests, fuzz, build.rs), C (runtime,
+test harnesses), and Jinn (std, libjn, apps, examples, benchmarks,
+snippets, test programs) sources. ~8100 lines of comment removed.
+
+Used the existing scripts/strip_rust_comments.py for Rust — it is a real
+lexer (raw strings with arbitrary hash counts, byte strings, char literals
+vs lifetimes, nested block comments) and needed no changes. Added a
+companion scripts/strip_c_comments.py for C and Jinn, which also drops
+lines that held only a comment rather than leaving blank gaps. Verified
+both preserve string and char literal contents: `"https://"`, `b'#'`, and
+the printable-ASCII tables in std/binary|bytes|hex are all intact, and the
+one surviving `/*` is inside a format string in src/bind.rs.
+
+Reformatting then surfaced a collapsible_if in typer/lower/decl.rs that
+the comments had been padding out; folded it into the let-chain. Fixed a
+doubled-space run in the adjacent "declares returns X but its body
+produces a different type" diagnostic while there.
+
+Zero warnings, clippy clean, fmt clean, 2013/2013 tests, apps 21/21,
+benchmarks 36/36, std gate green.
 - **[138]** (2026-08-02 18:59) tests run in their own cwd; add gitignored .data/ for ad-hoc runs
 
 A store resolves its .store/.wal relative to the process cwd, so any test

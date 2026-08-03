@@ -3,6 +3,9 @@ use std::process::Command;
 
 use proptest::prelude::*;
 
+#[path = "support/cases.rs"]
+mod cases;
+
 fn jinnc() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jinnc"))
 }
@@ -151,46 +154,64 @@ fn aborted(code: Option<i32>) -> bool {
     matches!(code, Some(134) | Some(139))
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(200))]
+macro_rules! ownership_shard {
+    ($name:ident) => {
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(shard_cases()))]
 
-    #[test]
-    fn ownership_program_is_sound(stmts in proptest::collection::vec(stmt_strategy(), 1..14)) {
-        let src = emit(&stmts);
-        let dir = tempfile::tempdir().unwrap();
-        let jinn = dir.path().join("t.jn");
-        let out = dir.path().join("t_bin");
-        std::fs::write(&jinn, &src).unwrap();
-        let c = Command::new(jinnc())
-            .arg(&jinn)
-            .arg("-o")
-            .arg(&out)
-            .output()
-            .expect("jinnc failed to start");
-
-
-        let cerr = String::from_utf8_lossy(&c.stderr);
-        prop_assert!(
-            !cerr.contains("internal compiler error") && !cerr.contains("RUST_BACKTRACE"),
-            "compiler ICE on:\n{src}\nstderr: {cerr}"
-        );
-
-
-
-
-        if c.status.success() {
-            let r = Command::new(&out)
-                .current_dir(dir.path())
-                .output()
-                .expect("binary failed to start");
-            prop_assert!(
-                !aborted(r.status.code()),
-                "compiled program aborted ({:?}) — possible UAF/double-free for:\n{src}\nstderr: {}",
-                r.status.code(),
-                String::from_utf8_lossy(&r.stderr)
-            );
+            #[test]
+            fn $name(stmts in proptest::collection::vec(stmt_strategy(), 1..14)) {
+                check_ownership_program(&stmts)?;
+            }
         }
+    };
+}
+
+fn shard_cases() -> u32 {
+    cases::cases(25)
+}
+
+ownership_shard!(ownership_program_is_sound_s0);
+ownership_shard!(ownership_program_is_sound_s1);
+ownership_shard!(ownership_program_is_sound_s2);
+ownership_shard!(ownership_program_is_sound_s3);
+ownership_shard!(ownership_program_is_sound_s4);
+ownership_shard!(ownership_program_is_sound_s5);
+ownership_shard!(ownership_program_is_sound_s6);
+ownership_shard!(ownership_program_is_sound_s7);
+
+fn check_ownership_program(stmts: &[Stmt]) -> Result<(), TestCaseError> {
+    let src = emit(stmts);
+    let dir = tempfile::tempdir().unwrap();
+    let jinn = dir.path().join("t.jn");
+    let out = dir.path().join("t_bin");
+    std::fs::write(&jinn, &src).unwrap();
+    let c = Command::new(jinnc())
+        .arg(&jinn)
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .expect("jinnc failed to start");
+
+    let cerr = String::from_utf8_lossy(&c.stderr);
+    prop_assert!(
+        !cerr.contains("internal compiler error") && !cerr.contains("RUST_BACKTRACE"),
+        "compiler ICE on:\n{src}\nstderr: {cerr}"
+    );
+
+    if c.status.success() {
+        let r = Command::new(&out)
+            .current_dir(dir.path())
+            .output()
+            .expect("binary failed to start");
+        prop_assert!(
+            !aborted(r.status.code()),
+            "compiled program aborted ({:?}) — possible UAF/double-free for:\n{src}\nstderr: {}",
+            r.status.code(),
+            String::from_utf8_lossy(&r.stderr)
+        );
     }
+    Ok(())
 }
 
 #[test]

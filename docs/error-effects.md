@@ -2,9 +2,8 @@
 
 This document describes the error-effect system as implemented today, not
 aspiration. Its guarantees hold only as far as the conformance tests in
-`tests/error_effects.rs` pin them; known gaps found by the 2026-07 review
-(e.g. instantiation-site diagnostics, `From` resolution by name pattern) are
-tracked in [`remediation-2026-07.md`](remediation-2026-07.md).
+`tests/error_effects.rs` pin them. Known gaps: instantiation-site
+diagnostics, and `From` resolution by name pattern.
 
 Subsystems exercised by the conformance suite:
 - §2 canonical `Option`/`Result` prelude with combinator surfaces
@@ -22,8 +21,6 @@ Actor-supervision integration (§8, error propagation to supervision boundary)
 depends on structured concurrency — now designed in
 [docs/structured-concurrency.md](structured-concurrency.md) (§5 E5) — and is
 not yet implemented.
-
-*(Tracked: P1 item in JINN_LANGUAGE_REVIEW_2026_06 §4.5, resolved 2026-06)*
 
 This document specifies Jinn's error model: a canonical `Option`/`Result`
 prelude, error declarations and raising with `err`, a *quaternary* expression

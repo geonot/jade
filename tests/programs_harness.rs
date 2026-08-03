@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "support/parallel.rs"]
+mod parallel;
+
 fn jinnc() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jinnc"))
 }
@@ -61,43 +64,52 @@ fn every_program_is_wired_and_matches_its_snapshot() {
         .collect();
     names.sort();
 
-    for name in &names {
-        if KNOWN_ICE.contains(&name.as_str()) {
-            continue;
+    let scrub = |s: &str| -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut chars = s.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '0' && chars.peek() == Some(&'x') {
+                chars.next();
+                while chars.peek().map(|d| d.is_ascii_hexdigit()).unwrap_or(false) {
+                    chars.next();
+                }
+                out.push_str("0xADDR");
+            } else {
+                out.push(c);
+            }
         }
+        out
+    };
+
+    let todo: Vec<String> = names
+        .iter()
+        .filter(|n| !KNOWN_ICE.contains(&n.as_str()))
+        .cloned()
+        .collect();
+
+    let results = parallel::par_map(todo, |name| {
         let snap = expected_dir.join(format!("{name}.out"));
         let Ok(want) = std::fs::read_to_string(&snap) else {
-            failures.push(format!(
+            return Err(format!(
                 "{name}.jn has no expected-output snapshot — add \
                  tests/programs/expected/{name}.out or delete the program \
                  with a reason"
             ));
-            continue;
-        };
-
-        let scrub = |s: &str| -> String {
-            let mut out = String::with_capacity(s.len());
-            let mut chars = s.chars().peekable();
-            while let Some(c) = chars.next() {
-                if c == '0' && chars.peek() == Some(&'x') {
-                    chars.next();
-                    while chars.peek().map(|d| d.is_ascii_hexdigit()).unwrap_or(false) {
-                        chars.next();
-                    }
-                    out.push_str("0xADDR");
-                } else {
-                    out.push(c);
-                }
-            }
-            out
         };
         let want = scrub(&want);
         match run_program(&progs_dir.join(format!("{name}.jn"))).map(|g| scrub(&g)) {
-            Ok(got) if got == want => checked += 1,
-            Ok(got) => failures.push(format!(
+            Ok(got) if got == want => Ok(()),
+            Ok(got) => Err(format!(
                 "{name}.jn output drifted from its snapshot:\n--- want ---\n{want}\n--- got ---\n{got}"
             )),
-            Err(e) => failures.push(format!("{name}.jn: {e}")),
+            Err(e) => Err(format!("{name}.jn: {e}")),
+        }
+    });
+
+    for r in results {
+        match r {
+            Ok(()) => checked += 1,
+            Err(e) => failures.push(e),
         }
     }
 

@@ -13,8 +13,8 @@ cyan "1/7 cargo build --release"
 cargo build --release 2>&1 | tail -3
 green "build OK"
 
-cyan "2/7 cargo test --release"
-cargo test --release --quiet 2>&1 | tail -10
+cyan "2/7 tests (full proptest coverage)"
+JINN_PROPTEST_CASES=64 bash scripts/test.sh
 green "tests OK"
 
 cyan "3/7 cargo fmt --check"

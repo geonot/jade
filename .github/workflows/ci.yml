@@ -43,8 +43,13 @@ jobs:
       # --no-fail-fast: a red test must fail CI with the FULL failure list,
       # not stop at the first failing binary — commit f82402f shipped two red
       # tests (the grammar-drift detector) because the local run stopped early.
+      # JINN_PROPTEST_CASES: the compile-and-run property suites default to a
+      # small case count so the local edit-test loop stays fast. CI is the
+      # place that buys the coverage back.
       - name: Tests
         run: cargo test --all-targets --no-fail-fast
+        env:
+          JINN_PROPTEST_CASES: 64
 
   ebnf-roundtrip:
     # EBNF ↔ implementation drift detector (P1-13). The Rust half

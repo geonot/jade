@@ -1,4 +1,0 @@
-# Defer
-*main
-    defer log('defer ran')
-    log('main body')

@@ -1200,8 +1200,8 @@ allocation or free calls: scalars and strings are values (assignment copies),
 and each heap aggregate (`Vec`, `Map`, aggregate-containing structs) has a
 single owner whose scope exit releases it.
 
-**The target model** (decision D1 in
-[`remediation-2026-07.md`](remediation-2026-07.md), specified by task 8-5) is
+**The target model** (specified in
+[`memory-model.md`](memory-model.md)) is
 move-on-assign with compiler-inferred borrows for heap aggregates: `b is a`
 moves ownership — `a` is unusable until reassigned — reads borrow without
 copying, and a program that would corrupt memory does not compile. No
@@ -1212,14 +1212,9 @@ lifetime annotations, no `&`, no explicit `clone()`.
 > **inferred consuming** — the call moves the argument, sorts/filters/
 > transform helpers run with exactly one drop, and using the argument
 > afterwards is a compile error that names the consuming call (clone first
-> with `a2 is copy a` to keep both). Still open, pinned in
-> `tests/review_2026_07.rs`:
->
-> - two `dispatch` tasks mutating one `Vec` corrupt the allocator instead
->   of being rejected at compile time (task 8-8);
-> - `b is a; b.push(4)` on a `Vec` is still silent shared mutable
->   aliasing — the mutation is visible through `a` (task 8-7 makes it
->   "use of moved value `a`").
+> with `a2 is copy a` to keep both). Two `dispatch` tasks mutating one
+> `Vec`, and `b is a` followed by a read of `a`, are both rejected at
+> compile time.
 >
 > Until 8-7/8-8 land, share data across tasks only through channels or
 > actors. Strings are unaffected — they already have value semantics.

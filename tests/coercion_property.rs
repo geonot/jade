@@ -3,6 +3,9 @@ use std::process::Command;
 
 use proptest::prelude::*;
 
+#[path = "support/cases.rs"]
+mod cases;
+
 fn jinnc() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jinnc"))
 }
@@ -49,7 +52,7 @@ fn fmt_f64(v: f64) -> String {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(64))]
+    #![proptest_config(ProptestConfig::with_cases(cases::cases(24)))]
 
 
     #[test]

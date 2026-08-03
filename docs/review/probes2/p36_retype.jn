@@ -1,6 +1,0 @@
-# Reassign with different type — should be type error?
-*main
-    x is 1
-    log(x)
-    x is 'now-a-string'
-    log(x)

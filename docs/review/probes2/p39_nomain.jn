@@ -1,3 +1,0 @@
-# No main — should be error
-*helper()
-    log(1)

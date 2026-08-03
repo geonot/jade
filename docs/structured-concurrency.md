@@ -5,10 +5,9 @@
 This document specifies Jinn's structured-concurrency model: a lexical
 **scope** construct that owns the concurrent work started inside it, joins
 that work on exit, propagates errors from children to the scope owner, and
-gives cancellation a precise, cooperative meaning. It is the design that
-closes review item §4.4 of `JINN_LANGUAGE_REVIEW_2026_06.md` ("no structured
-concurrency; actors are fire-and-forget") and unblocks the actor-supervision
-integration deferred from the error model (`docs/error-effects.md` §8).
+gives cancellation a precise, cooperative meaning. It replaces
+fire-and-forget actors and unblocks the actor-supervision integration
+deferred from the error model (`docs/error-effects.md` §8).
 
 It is layered *on top of* — and changes nothing in — the canonical shutdown
 contract in [docs/concurrency.md](concurrency.md). Every rule there

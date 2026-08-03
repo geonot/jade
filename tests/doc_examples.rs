@@ -1,6 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "support/parallel.rs"]
+mod parallel;
+
+type Unit = (usize, String, Vec<(String, String)>);
+
 fn jinnc() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jinnc"))
 }
@@ -219,9 +224,8 @@ fn every_jinn_block_in_docs_compiles() {
     );
 
     let mut pending_files: Vec<(String, String)> = Vec::new();
-    let mut failures: Vec<String> = Vec::new();
-    let mut compiled = 0usize;
     let mut skipped = 0usize;
+    let mut units: Vec<Unit> = Vec::new();
 
     for block in &blocks {
         if let Some(reason) = &block.markers.skip {
@@ -237,25 +241,32 @@ fn every_jinn_block_in_docs_compiles() {
             pending_files.push((name.clone(), block.code.clone()));
             continue;
         }
+        units.push((
+            block.line,
+            assemble(block),
+            std::mem::take(&mut pending_files),
+        ));
+    }
 
+    let compiled = units.len();
+    let failures: Vec<String> = parallel::par_map(units, |(line, source, files)| {
         let dir = tempfile::tempdir().expect("tempdir");
-        for (name, content) in pending_files.drain(..) {
-            let path = dir.path().join(&name);
+        for (name, content) in files {
+            let path = dir.path().join(name);
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).unwrap();
             }
             std::fs::write(path, content).unwrap();
         }
-
-        let source = assemble(block);
-        if let Err(e) = compile_in(dir.path(), &source) {
-            failures.push(format!(
-                "docs/jinn.md line {}: block failed to compile: {e}\n--- assembled source ---\n{source}",
-                block.line
-            ));
-        }
-        compiled += 1;
-    }
+        compile_in(dir.path(), source).err().map(|e| {
+            format!(
+                "docs/jinn.md line {line}: block failed to compile: {e}\n--- assembled source ---\n{source}"
+            )
+        })
+    })
+    .into_iter()
+    .flatten()
+    .collect();
 
     eprintln!("doc_examples: {compiled} blocks compiled, {skipped} skipped");
     assert!(

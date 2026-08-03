@@ -64,6 +64,38 @@
       "ts_created": "2026-08-02T18:25:41+00:00",
       "ts_accessed": "2026-08-02T18:25:41+00:00",
       "access_count": 0
+    },
+    "test-suite-cost-model-2026-08": {
+      "key": "test-suite-cost-model-2026-08",
+      "value": "Measured on 8-core box. `cargo test --release` = 66s wall / 4m30s CPU. Incremental rebuild after touching src/main.rs = 1.8s (NOT the bottleneck; tests are).\nPer-jinnc-invocation cost (2-line program): process startup before any work 22ms, of which ~14ms is dynamic-loading /usr/lib/libLLVM.so.21.1 (157MB) \u2014 proven by empty C main linked -lLLVM (14.3ms) vs /bin/true (1.8ms). Frontend+MIR+codegen ~8ms. cc link ~20-50ms. Full compile+link ~85ms.\n~1600 tests each fork jinnc => startup alone ~35s CPU.\nSuite wall times (--test-threads=8), serial sum ~100s: bulk_tests 19.3s (912 tests, parallel), ownership_fuzz 18.3s (1 proptest, 200 cases, SERIAL), coercion_property 14.0s (6 proptests x64 cases x2 compiles O0+O3), programs_harness 12.2s (1 test looping 87 programs SERIALLY), integration 9.5s (446 tests), doc_examples 7.7s (1 test looping ~50 blocks SERIALLY). Rest <1.8s.\nBiggest structural waste: single-#[test] harnesses loop serially, pinning ONE core while cargo runs test binaries one target at a time.\nmold/lld NOT installed; ld.gold exists but is SLOWER (54ms vs 14ms) \u2014 do not switch linkers.",
+      "kind": "fact",
+      "tags": [
+        "testing",
+        "performance",
+        "build"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-08-03T00:24:04+00:00",
+      "ts_accessed": "2026-08-03T00:24:04+00:00",
+      "access_count": 0
+    },
+    "test-runtime-optimization-2026-08": {
+      "key": "test-runtime-optimization-2026-08",
+      "value": "Test suite sped up 65s -> 40.5s (2019 tests, parity verified against cargo).\nWhat worked (in order of payoff):\n1. scripts/test.sh \u2014 runs test BINARIES concurrently. `cargo test` runs targets strictly one at a time, so idle cores are the single biggest waste. JOBS defaults to nproc/2, INNER=2 (product ~= nproc).\n2. Parallelized single-#[test] corpus harnesses via tests/support/parallel.rs par_map (std::thread::scope, no new deps, order-preserving): programs_harness 7.15->1.85s, doc_examples 3.58->1.31s.\n3. Sharded ownership_fuzz's 200-case proptest into 8 x 25-case #[test]s so libtest parallelizes: 9.38->2.56s.\n4. tests/support/cases.rs: JINN_PROPTEST_CASES env knob; coercion_property default 64->24 locally, CI + preflight set 64 to keep coverage.\nHARDWARE REALITY (do not re-litigate): reference box is 4-core/8-thread i7-8650U @1.9GHz running at 37% freq scaling. nproc=8 overcommits REAL cores. Past ~nproc in-flight compiles total CPU inflates and wall time gets WORSE (measured 8x8 oversubscription: 207s->321s CPU, 58->68s wall). Wall-clock A/B swings 2x from thermal throttling \u2014 always re-measure on an idle box, interleave repeats.\nPer-compile cost: 16-22ms jinnc startup (mostly mapping 157MB libLLVM.so) + ~8ms compile + 35-50ms cc/ld link = ~90ms. LINK IS THE BIGGEST SINGLE COST -> prefer --emit-hir/--emit-mir assertions over compile-and-run for frontend tests.\nLinker swap evaluated and REJECTED: mold/lld not installed; ld.gold measured SLOWER (54ms vs 14ms) than default ld.\nPITFALL fixed in runner: basename without the compiler-hash suffix collapses src/lib.rs and src/main.rs test binaries (both named `jinnc`) into ONE log file, silently dropping 309 lib tests and masking their failures. Keep the hash in log filenames. Verified failure detection with deliberate canaries in both a tests/*.rs suite and src/lib.rs.\nDocs: docs/testing.md.",
+      "kind": "decision",
+      "tags": [
+        "testing",
+        "performance",
+        "build"
+      ],
+      "confidence": 0.9,
+      "source": "agent",
+      "pinned": false,
+      "ts_created": "2026-08-03T01:21:27+00:00",
+      "ts_accessed": "2026-08-03T01:21:27+00:00",
+      "access_count": 0
     }
   }
 }

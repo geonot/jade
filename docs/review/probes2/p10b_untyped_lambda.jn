@@ -1,4 +1,0 @@
-# Untyped lambda — does inference work?
-*main
-    f is |x| x * 2
-    log(f(21))

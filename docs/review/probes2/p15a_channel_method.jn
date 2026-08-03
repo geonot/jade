@@ -1,5 +1,0 @@
-# Channel using real method names if any
-*main
-    ch is channel of i64 (4)
-    ch.send(1)
-    log(ch.recv())

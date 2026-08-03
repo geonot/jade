@@ -5,10 +5,6 @@ fn jinnc() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jinnc"))
 }
 
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
-
 struct Compiled {
     dir: tempfile::TempDir,
     out: Output,
@@ -53,7 +49,7 @@ fn exit_desc(o: &Output) -> String {
 }
 
 #[test]
-fn review_3_1_returning_vec_parameter_runs_clean() {
+fn ownership_returning_vec_parameter_runs_clean() {
     let c = compile(
         "*ident(v) returns Vec of i64\n    return v\n\n*main\n    a is vec(1, 2, 3)\n    s is ident(a)\n    log(s.length)\n",
     );
@@ -64,7 +60,7 @@ fn review_3_1_returning_vec_parameter_runs_clean() {
 }
 
 #[test]
-fn review_3_1_use_after_consuming_call_is_rejected() {
+fn ownership_use_after_consuming_call_is_rejected() {
     let c = compile(
         "*ident(v) returns Vec of i64\n    return v\n\n*main\n    a is vec(1, 2, 3)\n    s is ident(a)\n    log(a.length)\n",
     );
@@ -89,7 +85,7 @@ fn review_3_1_use_after_consuming_call_is_rejected() {
 }
 
 #[test]
-fn review_3_1_nested_scope_bind_single_drop() {
+fn ownership_nested_scope_bind_single_drop() {
     let c = compile(
         "*main\n    a is vec(1, 2, 3)\n    if true\n        b is a\n        log(b.length)\n    log(7)\n",
     );
@@ -100,7 +96,7 @@ fn review_3_1_nested_scope_bind_single_drop() {
 }
 
 #[test]
-fn review_3_2_cross_task_shared_vec_is_rejected() {
+fn ownership_cross_task_shared_vec_is_rejected() {
     let c = compile(
         "*pusher(v, base)\n    for i in 0 to 20000\n        v.push(base + i)\n\n*main\n    shared is vec()\n    together\n        dispatch\n            pusher(shared, 0)\n        dispatch\n            pusher(shared, 1000000)\n    log(shared.length)\n",
     );
@@ -115,7 +111,7 @@ fn review_3_2_cross_task_shared_vec_is_rejected() {
 }
 
 #[test]
-fn review_3_3_vec_assignment_is_rejected_as_use_after_move() {
+fn ownership_vec_assignment_is_rejected_as_use_after_move() {
     let c = compile(
         "*main\n    a is vec(1,2,3)\n    b is a\n    b.push(4)\n    log(a.length)\n    log(b.length)\n",
     );
@@ -137,14 +133,14 @@ fn review_3_3_vec_assignment_is_rejected_as_use_after_move() {
 }
 
 #[test]
-fn review_4_6_cross_type_equals_is_rejected() {
+fn typing_cross_type_equals_is_rejected() {
     let c = compile("*main\n    if 'abc' equals 5\n        log('huh')\n");
     assert!(!c.ok(), "cross-type equals must be a type error");
     assert!(c.stderr().contains("type mismatch"), "{}", c.stderr());
 }
 
 #[test]
-fn review_4_6_declared_string_returns_i64() {
+fn typing_declared_string_returns_i64() {
     let c = compile("*f(x as i64) returns String\n    x + 1\n\n*main\n    log(f(1))\n");
     assert!(!c.ok(), "must not compile");
     let stderr = c.stderr();
@@ -159,7 +155,7 @@ fn review_4_6_declared_string_returns_i64() {
 }
 
 #[test]
-fn review_4_6_string_plus_int() {
+fn typing_string_plus_int() {
     let c = compile("*main\n    x is 'abc' + 1\n    log(x)\n");
     assert!(!c.ok(), "must not compile");
     let stderr = c.stderr();
@@ -171,14 +167,14 @@ fn review_4_6_string_plus_int() {
 }
 
 #[test]
-fn review_4_6_heterogeneous_vec_is_rejected() {
+fn typing_heterogeneous_vec_is_rejected() {
     let c = compile("*main\n    v is vec()\n    v.push(1)\n    v.push('two')\n    log(v.get(1))\n");
     assert!(!c.ok(), "heterogeneous vec must be a type error");
     assert!(c.stderr().contains("type mismatch"), "{}", c.stderr());
 }
 
 #[test]
-fn review_4_7_multi_clause_arity_is_a_diagnostic() {
+fn typing_multi_clause_arity_is_a_diagnostic() {
     let c = compile("*f(0) is 0\n*f a, b is a + b\n\n*main\n    log(f(1, 2))\n");
     assert!(!c.ok(), "must not compile (and must exit non-zero)");
     let stderr = c.stderr();
@@ -205,7 +201,7 @@ fn top_level_reassignment_is_cleanly_diagnosed() {
 }
 
 #[test]
-fn review_5_4_all_store_iteration_works() {
+fn store_all_iteration_works() {
     let c = compile(
         "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    for u in all users\n        log(u.name)\n    rows is all users\n    log(rows.length)\n",
     );
@@ -216,7 +212,7 @@ fn review_5_4_all_store_iteration_works() {
 }
 
 #[test]
-fn review_5_4_query_miss_is_a_value_not_a_zero_row() {
+fn store_query_miss_is_a_value_not_a_zero_row() {
     let c = compile(
         "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    match users where name equals 'Alice'\n        Ok(r) ?\n            log(r.name)\n            log(r.age)\n        Err(e) ? log('hit expected')\n    match users where age > 100\n        Ok(r) ? log(r.name)\n        Err(e) ? log('miss is a miss')\n    q is users where age > 100 ? $.age ! 0 - 1\n    log(q)\n",
     );
@@ -230,7 +226,7 @@ fn review_5_4_query_miss_is_a_value_not_a_zero_row() {
 }
 
 #[test]
-fn review_5_4_unhandled_query_is_a_compile_error() {
+fn store_unhandled_query_is_a_compile_error() {
     let c = compile(
         "store users\n    name as String\n    age as i64\n\n*main\n    missing is users where age > 100\n    log('name=[{missing.name}] age={missing.age}')\n",
     );
@@ -252,7 +248,7 @@ fn review_5_4_unhandled_query_is_a_compile_error() {
 }
 
 #[test]
-fn review_5_4_query_miss_propagates_in_fallible_fn() {
+fn store_query_miss_propagates_in_fallible_fn() {
     let c = compile(
         "store users\n    name as String\n    age as i64\n\n*find(n as String) returns i64 ! StoreError\n    r is users where name equals n\n    r.age\n\n*main\n    insert users 'Alice', 30\n    match find('Alice')\n        Ok(a) ? log(a)\n        Err(e) ? log('unexpected miss')\n    match find('Zed')\n        Ok(a) ? log(a)\n        Err(e) ? log('propagated')\n",
     );
@@ -260,37 +256,6 @@ fn review_5_4_query_miss_propagates_in_fallible_fn() {
     let run = c.run();
     assert!(run.status.success(), "{}", exit_desc(&run));
     assert_eq!(String::from_utf8_lossy(&run.stdout), "30\npropagated\n");
-}
-
-#[test]
-fn fixme_markers_do_not_outlive_their_tasks() {
-    let this = repo_root().join("tests").join("review_2026_07.rs");
-    let src = std::fs::read_to_string(&this).unwrap();
-    let mut stale: Vec<String> = Vec::new();
-    for (idx, line) in src.lines().enumerate() {
-        let Some(pos) = line.find("FIXME(8-") else {
-            continue;
-        };
-        let rest = &line[pos + "FIXME(".len()..];
-        let Some(end) = rest.find(')') else { continue };
-        let task_id = &rest[..end];
-        let task_file = repo_root()
-            .join(".ryu")
-            .join("tasks")
-            .join(format!("{task_id}.task"));
-        let status_complete = std::fs::read_to_string(&task_file)
-            .map(|t| t.lines().any(|l| l.trim() == "status: complete"))
-            .unwrap_or(false);
-        if status_complete {
-            stale.push(format!(
-                "tests/review_2026_07.rs:{}: FIXME({task_id}) but {} is complete — \
-                 flip the test to assert the fixed behavior and drop the marker",
-                idx + 1,
-                task_file.display()
-            ));
-        }
-    }
-    assert!(stale.is_empty(), "{}", stale.join("\n"));
 }
 
 #[test]
