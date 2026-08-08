@@ -1,3 +1,4 @@
+use inkwell::types::BasicTypeEnum;
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
 
@@ -5,6 +6,18 @@ use super::Compiler;
 use super::b;
 
 impl<'ctx> Compiler<'ctx> {
+    fn zero_of(&self, ty: BasicTypeEnum<'ctx>) -> BasicValueEnum<'ctx> {
+        match ty {
+            BasicTypeEnum::IntType(t) => t.const_zero().into(),
+            BasicTypeEnum::FloatType(t) => t.const_zero().into(),
+            BasicTypeEnum::PointerType(t) => t.const_null().into(),
+            BasicTypeEnum::StructType(t) => t.const_zero().into(),
+            BasicTypeEnum::ArrayType(t) => t.const_zero().into(),
+            BasicTypeEnum::VectorType(t) => t.const_zero().into(),
+            BasicTypeEnum::ScalableVectorType(t) => t.const_zero().into(),
+        }
+    }
+
     pub(crate) fn compile_map_new(&mut self) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let header_ty = self.vec_header_type();
@@ -20,7 +33,7 @@ impl<'ctx> Compiler<'ctx> {
         .into_pointer_value();
 
         let init_cap = 16u64;
-        let entry_size = 48u64;
+        let entry_size = 64u64;
         let calloc = self.ensure_calloc();
         let buf = b!(self.bld.build_call(
             calloc,
@@ -90,7 +103,7 @@ impl<'ctx> Compiler<'ctx> {
             "mp.entries"
         ))
         .into_pointer_value();
-        let entry_size = i64t.const_int(48, false);
+        let entry_size = i64t.const_int(64, false);
 
         let loop_bb = self.ctx.append_basic_block(fv, "mp.loop");
         let check_bb = self.ctx.append_basic_block(fv, "mp.check");
@@ -107,7 +120,7 @@ impl<'ctx> Compiler<'ctx> {
         let occ_ptr = unsafe {
             b!(self
                 .bld
-                .build_gep(i8t, entry_ptr, &[i64t.const_int(40, false)], "mp.occp"))
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(56, false)], "mp.occp"))
         };
         let occ = b!(self.bld.build_load(i8t, occ_ptr, "mp.occ")).into_int_value();
         let is_occ =
@@ -217,6 +230,7 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
         key_val: BasicValueEnum<'ctx>,
+        val_ty: BasicTypeEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
@@ -234,15 +248,16 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_gep(i8t, entry_ptr, &[i64t.const_int(32, false)], "mg.vp"))
         };
-        let found_val = b!(self.bld.build_load(i64t, val_ptr, "mg.fv"));
+        let found_val = b!(self.bld.build_load(val_ty, val_ptr, "mg.fv"));
         b!(self.bld.build_unconditional_branch(merge_bb));
 
         self.bld.position_at_end(nf_bb);
         b!(self.bld.build_unconditional_branch(merge_bb));
 
         self.bld.position_at_end(merge_bb);
-        let phi = b!(self.bld.build_phi(i64t, "mg.v"));
-        phi.add_incoming(&[(&found_val, found_bb), (&i64t.const_int(0, false), nf_bb)]);
+        let phi = b!(self.bld.build_phi(val_ty, "mg.v"));
+        let missing = self.zero_of(val_ty);
+        phi.add_incoming(&[(&found_val, found_bb), (&missing, nf_bb)]);
         Ok(phi.as_basic_value())
     }
 
@@ -328,7 +343,7 @@ impl<'ctx> Compiler<'ctx> {
         let cap = b!(self.bld.build_load(i64t, cap_gep, "mc.cap")).into_int_value();
         let total = b!(self
             .bld
-            .build_int_nsw_mul(cap, i64t.const_int(48, false), "mc.total"));
+            .build_int_nsw_mul(cap, i64t.const_int(64, false), "mc.total"));
         let memset = self.ensure_memset();
         let zero_i32 = self.ctx.i32_type().const_int(0, false);
         b!(self
@@ -389,7 +404,7 @@ impl<'ctx> Compiler<'ctx> {
         let out_hdr = self.vec_alloc_empty()?;
         let idx_ptr = self.entry_alloca(i64t.into(), "mk.idx");
         b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
-        let entry_size = i64t.const_int(48, false);
+        let entry_size = i64t.const_int(64, false);
 
         let loop_bb = self.ctx.append_basic_block(fv, "mk.loop");
         let body_bb = self.ctx.append_basic_block(fv, "mk.body");
@@ -411,7 +426,7 @@ impl<'ctx> Compiler<'ctx> {
         let occ_ptr = unsafe {
             b!(self
                 .bld
-                .build_gep(i8t, entry_ptr, &[i64t.const_int(40, false)], "mk.occp"))
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(56, false)], "mk.occp"))
         };
         let occ = b!(self.bld.build_load(i8t, occ_ptr, "mk.occ")).into_int_value();
         let is_occ =

@@ -100,7 +100,7 @@ impl HirValidator {
                 hir::Stmt::Ret(..) | hir::Stmt::Break(..) | hir::Stmt::Continue(..)
             ) {
                 let remaining = &block[i + 1..];
-                if remaining.iter().any(|s| !matches!(s, hir::Stmt::Drop(..))) {
+                if remaining.iter().any(|s| !is_post_terminator_filler(s)) {
                     saw_terminator = true;
                 }
             }
@@ -521,6 +521,14 @@ impl HirValidator {
                 self.validate_expr(hi);
             }
         }
+    }
+}
+
+fn is_post_terminator_filler(s: &hir::Stmt) -> bool {
+    match s {
+        hir::Stmt::Drop(..) => true,
+        hir::Stmt::Expr(e) => matches!(e.kind, hir::ExprKind::Unreachable),
+        _ => false,
     }
 }
 

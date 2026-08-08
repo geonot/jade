@@ -24,7 +24,7 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
         }
         let (sd, st, rec_size, fp) = self.setup_store_access(store_name)?;
-        self.store_lock(fp)?;
+        self.store_lock(store_name, fp)?;
         self.txn_track_store(store_name, fp)?;
 
         for dec in &sd.decorators {
@@ -181,7 +181,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_call(free_fn, &[buf.into()], ""));
         let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
         b!(self.bld.build_call(fflush_fn, &[fp.into()], ""));
-        self.store_unlock(fp)?;
+        self.store_unlock(store_name, fp)?;
 
         if let Some(&crate::ast::StoreDecorator::Compact(threshold)) = sd
             .decorators
@@ -220,7 +220,7 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         let (sd, st, rec_size, fp) = self.setup_store_access(store_name)?;
-        self.store_lock(fp)?;
+        self.store_lock(store_name, fp)?;
         self.txn_track_store(store_name, fp)?;
 
         for dec in &sd.decorators {
@@ -247,28 +247,25 @@ impl<'ctx> Compiler<'ctx> {
         let count = self.store_read_count(fp)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
 
-        let fclose_fn = crate::codegen::fn_or_die(&self.module, "fclose");
-        b!(self.bld.build_call(fclose_fn, &[fp.into()], ""));
-
         let filename = format!("{store_name}.store\0");
         let file_str = b!(self.bld.build_global_string_ptr(&filename, "del.path"));
-        let mode_wb = b!(self.bld.build_global_string_ptr("w+b\0", "del.mode"));
-        let fopen_fn = crate::codegen::fn_or_die(&self.module, "fopen");
-        let new_fp = self
+
+        let rewrite_begin_fn = crate::codegen::fn_or_die(&self.module, "jinn_rewrite_begin");
+        let rw = self
             .call_result(b!(self.bld.build_call(
-                fopen_fn,
-                &[
-                    file_str.as_pointer_value().into(),
-                    mode_wb.as_pointer_value().into()
-                ],
-                "del.fp"
+                rewrite_begin_fn,
+                &[file_str.as_pointer_value().into()],
+                "del.rw"
             )))
             .into_pointer_value();
-
-        let global_name = format!("__store_{store_name}_fp");
-        let global = self.module.get_global(&global_name).unwrap();
-        b!(self.bld.build_store(global.as_pointer_value(), new_fp));
-        self.txn_swap_fp(fp, new_fp)?;
+        let rewrite_file_fn = crate::codegen::fn_or_die(&self.module, "jinn_rewrite_file");
+        let new_fp = self
+            .call_result(b!(self.bld.build_call(
+                rewrite_file_fn,
+                &[rw.into()],
+                "del.tmpfp"
+            )))
+            .into_pointer_value();
 
         let fwrite_fn = crate::codegen::fn_or_die(&self.module, "fwrite");
         let magic = b!(self.bld.build_global_string_ptr("JADESTR\0", "del.magic"));
@@ -486,10 +483,29 @@ impl<'ctx> Compiler<'ctx> {
         let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[buf.into()], ""));
 
-        let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
-        b!(self.bld.build_call(fflush_fn, &[new_fp.into()], ""));
+        let rewrite_commit_fn = crate::codegen::fn_or_die(&self.module, "jinn_rewrite_commit");
+        let committed_fp = self
+            .call_result(b!(self.bld.build_call(
+                rewrite_commit_fn,
+                &[rw.into(), fp.into()],
+                "del.commit"
+            )))
+            .into_pointer_value();
 
-        self.store_unlock(fp)?;
+        let global_name = format!("__store_{store_name}_fp");
+        let global = self.module.get_global(&global_name).unwrap();
+        b!(self
+            .bld
+            .build_store(global.as_pointer_value(), committed_fp));
+        self.txn_swap_fp(fp, committed_fp)?;
+
+        let drop_idx_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_drop_indexes");
+        b!(self
+            .bld
+            .build_call(drop_idx_fn, &[file_str.as_pointer_value().into()], ""));
+        self.invalidate_store_indexes(store_name)?;
+
+        self.store_unlock(store_name, committed_fp)?;
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 }

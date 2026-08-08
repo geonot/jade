@@ -20,6 +20,14 @@ use super::sources::{
     flatten_workspace, load_packages_with_ids, resolve_modules, resolve_scoped_pkg_ids,
 };
 
+fn mir_verify_enabled() -> bool {
+    match std::env::var("JINN_MIR_VERIFY").as_deref() {
+        Ok("0") => false,
+        Ok(_) => true,
+        Err(_) => true,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn compile_and_link(
     input: &std::path::Path,
@@ -129,12 +137,12 @@ pub(super) fn compile_and_link(
     }
     let mut hir_prog = match typer.lower_program(&prog) {
         Ok(p) => p,
-        Err(e) => die(&format!("hir: {e}")),
+        Err(e) => die(&e),
     };
 
     let hir_errors = crate::hir_validate::HirValidator::validate(&hir_prog);
     for e in &hir_errors {
-        eprintln!("hir-validate: {e}");
+        eprintln!("{e}");
     }
     if !hir_errors.is_empty() {
         die("compilation aborted due to HIR validation errors");
@@ -148,8 +156,9 @@ pub(super) fn compile_and_link(
         _ => crate::mir::opt::OptLevel::Full,
     };
     let mut mir_prog = crate::mir::lower::lower_program(&hir_prog);
-    #[cfg(debug_assertions)]
-    if let Err(errs) = crate::mir::verify::verify_program(&mir_prog) {
+    if mir_verify_enabled()
+        && let Err(errs) = crate::mir::verify::verify_program(&mir_prog)
+    {
         for e in &errs {
             eprintln!("MIR verify (post-lower): {e}");
         }
@@ -160,8 +169,9 @@ pub(super) fn compile_and_link(
     for func in &mut mir_prog.functions {
         crate::mir::opt::optimize(func, mir_opt_level);
     }
-    #[cfg(debug_assertions)]
-    if let Err(errs) = crate::mir::verify::verify_program(&mir_prog) {
+    if mir_verify_enabled()
+        && let Err(errs) = crate::mir::verify::verify_program(&mir_prog)
+    {
         for e in &errs {
             eprintln!("MIR verify (post-opt): {e}");
         }

@@ -97,6 +97,21 @@ impl Typer {
         &mut self,
         value: hir::Expr,
     ) -> Result<Option<hir::Expr>, String> {
+        self.implicit_propagate_inner(value, false)
+    }
+
+    pub(in crate::typer) fn implicit_propagate_bind(
+        &mut self,
+        value: hir::Expr,
+    ) -> Result<Option<hir::Expr>, String> {
+        self.implicit_propagate_inner(value, true)
+    }
+
+    fn implicit_propagate_inner(
+        &mut self,
+        value: hir::Expr,
+        is_bind: bool,
+    ) -> Result<Option<hir::Expr>, String> {
         let ty = self.infer_ctx.shallow_resolve(&value.ty);
         let is_fallible = match &ty {
             Type::Enum(n) => {
@@ -120,7 +135,12 @@ impl Typer {
         }
         if !self.enclosing_fn_is_fallible() {
             if self.current_fn_is_main {
-                return Ok(None);
+                if is_bind {
+                    return Ok(None);
+                }
+                let span = value.span;
+                let r = self.build_main_propagate(value, span)?;
+                return Ok(Some(r));
             }
             return Err(format!(
                 "{}: error propagation is only valid inside a function whose result type \
@@ -135,6 +155,123 @@ impl Typer {
         let span = value.span;
         let r = self.build_quaternary(value, None, None, None, span, None)?;
         Ok(Some(r))
+    }
+
+    fn build_main_propagate(
+        &mut self,
+        hsubj: hir::Expr,
+        span: ast::Span,
+    ) -> Result<hir::Expr, String> {
+        let subj_ty = self.infer_ctx.shallow_resolve(&hsubj.ty);
+        let enum_name = match &subj_ty {
+            Type::Enum(n) => *n,
+            Type::Struct(n, _) => *n,
+            _ => return Err(format!("{}: not a fallible value", span.loc())),
+        };
+        let ename = enum_name.as_str();
+        let is_option = ename.starts_with("Option_") || ename == "Option";
+        let ok_variant = if is_option { "Some" } else { "Ok" };
+        let bad_variant = if is_option { "Nothing" } else { "Err" };
+        let ok_tag = self
+            .enums
+            .get(&enum_name)
+            .and_then(|vs| vs.iter().position(|(n, _)| n.as_str() == ok_variant))
+            .unwrap_or(0) as u32;
+        let bad_tag = self
+            .enums
+            .get(&enum_name)
+            .and_then(|vs| vs.iter().position(|(n, _)| n.as_str() == bad_variant))
+            .unwrap_or(1) as u32;
+        let ok_inner = self.ok_inner_ty_pub(enum_name);
+
+        let subj_id = self.fresh_id();
+        let subj_bind = hir::Stmt::Bind(hir::Bind {
+            def_id: subj_id,
+            name: "__q_subj".into(),
+            value: hsubj,
+            ty: subj_ty.clone(),
+            ownership: Ownership::Owned,
+            atomic: false,
+            access_mod: None,
+            span,
+        });
+        let subj_ref = hir::Expr {
+            kind: hir::ExprKind::Var(subj_id, "__q_subj".into()),
+            ty: subj_ty.clone(),
+            span,
+        };
+        let is_ok = hir::Expr {
+            kind: hir::ExprKind::EnumIs(Box::new(subj_ref.clone()), ok_tag),
+            ty: Type::Bool,
+            span,
+        };
+        let ok_unwrap = hir::Expr {
+            kind: hir::ExprKind::EnumUnwrap(Box::new(subj_ref.clone()), enum_name, ok_tag),
+            ty: ok_inner.clone(),
+            span,
+        };
+
+        let msg = if is_option {
+            format!(
+                "{}: `main` stopped: a value that can be missing was empty here",
+                span.loc()
+            )
+        } else {
+            format!(
+                "{}: `main` stopped with an unhandled error here",
+                span.loc()
+            )
+        };
+        let note = hir::Expr {
+            kind: hir::ExprKind::Str(msg),
+            ty: Type::String,
+            span,
+        };
+        let eprint = hir::Stmt::Expr(hir::Expr {
+            kind: hir::ExprKind::Builtin(hir::BuiltinFn::Eprint, vec![note]),
+            ty: Type::Void,
+            span,
+        });
+        let ret_ty = self
+            .current_fn_ret_ty
+            .clone()
+            .map(|t| self.infer_ctx.shallow_resolve(&t))
+            .unwrap_or(Type::I32);
+        let one = hir::Expr {
+            kind: hir::ExprKind::Int(1),
+            ty: ret_ty.clone(),
+            span,
+        };
+        let bail = hir::Stmt::Ret(Some(one), ret_ty, span);
+        let bad_branch = hir::Expr {
+            kind: hir::ExprKind::Block(vec![
+                eprint,
+                bail,
+                hir::Stmt::Expr(hir::Expr {
+                    kind: hir::ExprKind::Unreachable,
+                    ty: ok_inner.clone(),
+                    span,
+                }),
+            ]),
+            ty: ok_inner.clone(),
+            span,
+        };
+        let _ = bad_tag;
+
+        let ternary = hir::Expr {
+            kind: hir::ExprKind::Ternary(
+                Box::new(is_ok),
+                Box::new(ok_unwrap),
+                Box::new(bad_branch),
+            ),
+            ty: ok_inner.clone(),
+            span,
+        };
+        Ok(hir::Expr {
+            kind: hir::ExprKind::Block(vec![subj_bind, hir::Stmt::Expr(ternary)]),
+            ty: ok_inner,
+            span,
+        })
     }
 
     pub(in crate::typer) fn enclosing_fn_is_fallible(&mut self) -> bool {

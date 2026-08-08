@@ -508,9 +508,11 @@ impl<'ctx> Compiler<'ctx> {
             self.gen_field_ptr(gen_mem, Compiler::GEN_CORO_PTR_OFF, "task.coro_ptr")?;
         b!(self.bld.build_store(coro_ptr_field, coro));
 
-        let _ = scope_val;
-        let register = crate::codegen::fn_or_die(&self.module, "jinn_scope_register_child");
-        b!(self.bld.build_call(register, &[coro.into()], ""));
+        let scope_ptr = self.val(scope_val);
+        let register = crate::codegen::fn_or_die(&self.module, "jinn_scope_register_child_in");
+        b!(self
+            .bld
+            .build_call(register, &[scope_ptr.into(), coro.into()], ""));
 
         let sched_spawn = crate::codegen::fn_or_die(&self.module, "jinn_sched_spawn");
         b!(self.bld.build_call(sched_spawn, &[coro.into()], ""));

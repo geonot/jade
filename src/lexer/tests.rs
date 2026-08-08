@@ -135,9 +135,14 @@ fn string_escapes() {
 }
 
 #[test]
-fn raw_string() {
-    let t = lex(r#""no \n escapes""#);
-    assert_eq!(t[0], Token::Str(r"no \n escapes".into()));
+fn double_quoted_strings_take_escapes_like_single_quoted() {
+    let t = lex(r#""a\nb""#);
+    assert_eq!(t[0], Token::Str("a\nb".into()));
+    let t = lex(r#""\x1b[31m""#);
+    assert_eq!(t[0], Token::Str("\x1b[31m".into()));
+    let single = lex(r"'a\tb'");
+    let double = lex(r#""a\tb""#);
+    assert_eq!(single[0], double[0]);
 }
 
 #[test]

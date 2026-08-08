@@ -1,6 +1,8 @@
 # Structured concurrency: the `together` scope
 
-**Status: design (task 2-5). Not yet implemented.**
+**Status: implemented.** The runtime lives in `runtime/scope.c`; the
+`together` construct, cancellation, and error propagation all work. This
+document is the specification they are checked against.
 
 This document specifies Jinn's structured-concurrency model: a lexical
 **scope** construct that owns the concurrent work started inside it, joins

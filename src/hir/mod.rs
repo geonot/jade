@@ -632,6 +632,7 @@ pub struct If {
     pub then: Block,
     pub elifs: Vec<(Expr, Block)>,
     pub els: Option<Block>,
+    pub ty: Type,
     pub span: Span,
 }
 

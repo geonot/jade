@@ -44,6 +44,23 @@ stdout, jinn vs C) as of the 2026-07-30 baseline. That check caught
 `array_ops` running 30× more iterations on the C side than the Jinn side
 — see below.
 
+### Two rows corrected on 2026-08-06
+
+`coroutine_spawn` ran 100,000 iterations in Jinn against 1,000,000 in C, so the
+published ratio was wrong by a factor of ten before the paradigm difference was
+even considered. The counts now match; see the note at the top of
+`comparison/coroutine_spawn.c` for what the remaining gap actually measures.
+
+`sim_for` remains **not comparable** and no ratio should be quoted from it: the
+Jinn side iterates dead arithmetic whose result is never read, the C side spawns
+1,000 pthreads running live `fib(28..32)`, and `sim for` currently lowers to a
+sequential loop — so the row measures neither parallelism nor equivalent work.
+
+`run_benchmarks.py` now captures stdout for **every** language, not just Jinn,
+and prints a `NOT comparable` warning naming any benchmark whose languages
+disagree on output. Both defects above would have been caught for free by that
+check.
+
 ## State of the comparable set (2026-07-30 baseline)
 
 Median comparable ratio ≈ **1.00×** (range 0.38×–24.66×, 20 rows). The

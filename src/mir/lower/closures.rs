@@ -45,6 +45,7 @@ impl Lowerer {
                 value: val,
                 name: *cap_name,
                 ty: cap_ty.clone(),
+                by_ref: false,
             });
             lambda_lowerer.var_types.insert(*cap_name, cap_ty.clone());
             let entry = lambda_lowerer.func.entry;
@@ -61,6 +62,7 @@ impl Lowerer {
                 value: val,
                 name: p.name,
                 ty: p.ty.clone(),
+                by_ref: false,
             });
             lambda_lowerer.var_types.insert(p.name, p.ty.clone());
             let entry = lambda_lowerer.func.entry;

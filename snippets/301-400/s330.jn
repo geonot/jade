@@ -13,7 +13,7 @@
     total is 0
     i is 0
     while i < m.length
-        row is m.get(i)
+        row is copy m.get(i)
         j is 0
         while j < row.length
             total is total + row.get(j) + k

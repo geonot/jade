@@ -1,9 +1,11 @@
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -102,6 +104,185 @@ int jinn_atomic_rewrite_reopen(const char *path, jinn_fill_fn fill, void *arg,
         *fpp = nf;
     }
     return 0;
+}
+struct JinnRewrite {
+    char *tmp_path;
+    char *path;
+    FILE *tmp;
+};
+JinnRewrite *jinn_rewrite_begin(const char *path) {
+    if (!path) return NULL;
+    JinnRewrite *rw = (JinnRewrite *)calloc(1, sizeof(JinnRewrite));
+    if (!rw) return NULL;
+    size_t plen = strlen(path);
+    rw->path = (char *)malloc(plen + 1);
+    rw->tmp_path = (char *)malloc(plen + 12);
+    if (!rw->path || !rw->tmp_path) {
+        free(rw->path);
+        free(rw->tmp_path);
+        free(rw);
+        return NULL;
+    }
+    memcpy(rw->path, path, plen + 1);
+    memcpy(rw->tmp_path, path, plen);
+    memcpy(rw->tmp_path + plen, ".tmpXXXXXX", 11);
+    int tfd = mkstemp(rw->tmp_path);
+    if (tfd < 0) {
+        fprintf(stderr, "jinn: cannot create temp file for %s: %s\n", path, strerror(errno));
+        free(rw->path);
+        free(rw->tmp_path);
+        free(rw);
+        return NULL;
+    }
+    rw->tmp = fdopen(tfd, "w+b");
+    if (!rw->tmp) {
+        close(tfd);
+        unlink(rw->tmp_path);
+        free(rw->path);
+        free(rw->tmp_path);
+        free(rw);
+        return NULL;
+    }
+    return rw;
+}
+FILE *jinn_rewrite_file(JinnRewrite *rw) { return rw ? rw->tmp : NULL; }
+static void rewrite_free(JinnRewrite *rw) {
+    free(rw->path);
+    free(rw->tmp_path);
+    free(rw);
+}
+void jinn_rewrite_abort(JinnRewrite *rw) {
+    if (!rw) return;
+    if (rw->tmp) fclose(rw->tmp);
+    unlink(rw->tmp_path);
+    rewrite_free(rw);
+}
+FILE *jinn_rewrite_commit(JinnRewrite *rw, FILE *old_fp) {
+    if (!rw) return NULL;
+    int rc = 0;
+    if (fflush(rw->tmp) != 0) {
+        fprintf(stderr, "jinn: write to temp for %s failed: %s\n", rw->path, strerror(errno));
+        rc = -1;
+    }
+    if (rc == 0) rc = jinn_fsync_checked(fileno(rw->tmp), rw->tmp_path);
+    if (fclose(rw->tmp) != 0 && rc == 0) {
+        fprintf(stderr, "jinn: closing temp for %s failed: %s\n", rw->path, strerror(errno));
+        rc = -1;
+    }
+    rw->tmp = NULL;
+    if (rc == 0 && rename(rw->tmp_path, rw->path) != 0) {
+        fprintf(stderr, "jinn: rename %s -> %s failed: %s\n", rw->tmp_path, rw->path,
+                strerror(errno));
+        rc = -1;
+    }
+    if (rc != 0) {
+        unlink(rw->tmp_path);
+        rewrite_free(rw);
+        return NULL;
+    }
+    jinn_dir_fsync(rw->path);
+    if (old_fp) fclose(old_fp);
+    FILE *nf = fopen(rw->path, "r+b");
+    if (!nf) {
+        fprintf(stderr, "jinn: reopen after rewrite of %s failed: %s\n", rw->path,
+                strerror(errno));
+        rewrite_free(rw);
+        return NULL;
+    }
+    fseek(nf, 0, SEEK_END);
+    rewrite_free(rw);
+    return nf;
+}
+void jinn_store_drop_indexes(const char *store_path) {
+    if (!store_path) return;
+    char dirbuf[4096];
+    const char *slash = strrchr(store_path, '/');
+    const char *dir = ".";
+    const char *base = store_path;
+    if (slash) {
+        size_t n = (size_t)(slash - store_path);
+        if (n == 0 || n >= sizeof(dirbuf)) return;
+        memcpy(dirbuf, store_path, n);
+        dirbuf[n] = '\0';
+        dir = dirbuf;
+        base = slash + 1;
+    }
+    size_t blen = strlen(base);
+    if (blen > 6 && strcmp(base + blen - 6, ".store") == 0) blen -= 6;
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        size_t nlen = strlen(e->d_name);
+        if (nlen > blen + 5 && strncmp(e->d_name, base, blen) == 0 && e->d_name[blen] == '.' &&
+            (strcmp(e->d_name + nlen - 4, ".idx") == 0 ||
+             strcmp(e->d_name + nlen - 4, ".fts") == 0)) {
+            char full[4600];
+            snprintf(full, sizeof full, "%s/%s", dir, e->d_name);
+            unlink(full);
+        }
+    }
+    closedir(d);
+}
+#define JINN_STORE_LOCK_MAX 64
+static struct {
+    char             path[256];
+    _Atomic(int32_t) held;
+    int              used;
+} g_store_locks[JINN_STORE_LOCK_MAX];
+static pthread_mutex_t g_store_lock_table = PTHREAD_MUTEX_INITIALIZER;
+
+static _Atomic(int32_t) *store_lock_slot(const char *path) {
+    if (!path) return NULL;
+    pthread_mutex_lock(&g_store_lock_table);
+    for (int i = 0; i < JINN_STORE_LOCK_MAX; i++) {
+        if (g_store_locks[i].used && strcmp(g_store_locks[i].path, path) == 0) {
+            pthread_mutex_unlock(&g_store_lock_table);
+            return &g_store_locks[i].held;
+        }
+    }
+    for (int i = 0; i < JINN_STORE_LOCK_MAX; i++) {
+        if (!g_store_locks[i].used) {
+            snprintf(g_store_locks[i].path, sizeof g_store_locks[i].path, "%s", path);
+            g_store_locks[i].used = 1;
+            atomic_store(&g_store_locks[i].held, 0);
+            pthread_mutex_unlock(&g_store_lock_table);
+            return &g_store_locks[i].held;
+        }
+    }
+    pthread_mutex_unlock(&g_store_lock_table);
+    fprintf(stderr,
+            "jinn: more than %d distinct stores opened for writing; the writer lock "
+            "table is full and writes to '%s' are no longer serialised\n",
+            JINN_STORE_LOCK_MAX, path);
+    return NULL;
+}
+__attribute__((weak)) void jinn_sched_yield(void);
+
+static void store_lock_backoff(void) {
+    if (jinn_sched_yield) {
+        jinn_sched_yield();
+        return;
+    }
+    struct timespec ns = {0, 10000};
+    nanosleep(&ns, NULL);
+}
+void jinn_store_wlock(const char *path) {
+    _Atomic(int32_t) *slot = store_lock_slot(path);
+    if (!slot) return;
+    for (;;) {
+        int32_t expected = 0;
+        if (atomic_compare_exchange_weak_explicit(slot, &expected, 1, memory_order_acquire,
+                                                  memory_order_relaxed)) {
+            return;
+        }
+        store_lock_backoff();
+    }
+}
+void jinn_store_wunlock(const char *path) {
+    _Atomic(int32_t) *slot = store_lock_slot(path);
+    if (!slot) return;
+    atomic_store_explicit(slot, 0, memory_order_release);
 }
 int jinn_writer_lock(const char *path) {
     if (!path) return -1;

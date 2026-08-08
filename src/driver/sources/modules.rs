@@ -113,24 +113,19 @@ pub(in crate::driver) fn resolve_modules(
             .unwrap_or_else(|| die(&format!("module not found: {key}")));
 
         let jni_path = candidate.with_extension("jni");
-        if jni_path.exists() {
-            let src_meta = fs::metadata(&candidate).ok();
-            let iface_meta = fs::metadata(&jni_path).ok();
-            let use_cache = match (src_meta, iface_meta) {
-                (Some(sm), Some(im)) => im.modified().ok() >= sm.modified().ok(),
-                _ => false,
-            };
-            if use_cache && let Ok(iface) = crate::interface::InterfaceFile::read_from(&jni_path) {
-                let importable: Vec<Decl> = iface
-                    .to_decls()
-                    .into_iter()
-                    .filter(|d| should_import_decl(d, &imports))
-                    .collect();
-                for pd in flatten_module(importable, &name.as_str()) {
-                    prog.decls.push(pd);
-                }
-                continue;
+        if jni_path.exists()
+            && interface_reuse_enabled()
+            && let Ok(iface) = crate::interface::InterfaceFile::read_from(&jni_path)
+        {
+            let importable: Vec<Decl> = iface
+                .to_decls()
+                .into_iter()
+                .filter(|d| should_import_decl(d, &imports))
+                .collect();
+            for pd in flatten_module(importable, &name.as_str()) {
+                prog.decls.push(pd);
             }
+            continue;
         }
 
         let src = fs::read_to_string(&candidate)
@@ -219,4 +214,8 @@ pub(in crate::driver) fn find_project_entry() -> PathBuf {
     die(
         "no entry file found: create project.jn with `entry is 'source/main.jn'` or add source/main.jn",
     );
+}
+
+fn interface_reuse_enabled() -> bool {
+    std::env::var("JINN_USE_INTERFACE_FILES").as_deref() == Ok("1")
 }

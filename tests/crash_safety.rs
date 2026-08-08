@@ -298,10 +298,10 @@ fn rebinding_after_take_clears_tombstone() {
 }
 
 #[test]
-fn aliased_heap_write_is_visible_through_both_names() {
+fn value_struct_bind_is_an_independent_copy() {
     expect(
-        "type P\n    x as i64\n\n*main\n    p is P(x is 1)\n    q is p\n    q.x is 99\n    log(p.x)\n",
-        "99",
+        "type P\n    x as i64\n\n*main\n    p is P(x is 1)\n    q is p\n    q.x is 99\n    log(p.x)\n    log(q.x)\n",
+        "1\n99",
     );
 }
 

@@ -175,6 +175,29 @@ impl Typer {
         self.restore_moved_fields(pre_if);
         self.merge_moved_fields_union(&branch_ends);
 
+        let mut result_ty = Type::Void;
+        if tail_expected.is_some() && els.is_some() {
+            let mut join_ty: Option<Type> = self.join_branch_type(&then);
+            let mut rest: Vec<&hir::Block> = elifs.iter().map(|(_, b)| b).collect();
+            if let Some(ref e) = els {
+                rest.push(e);
+            }
+            let arms: Vec<Option<Type>> = rest.iter().map(|b| self.join_branch_type(b)).collect();
+            for arm_ty in arms {
+                match (&join_ty, arm_ty) {
+                    (Some(j), Some(a)) => {
+                        let j = j.clone();
+                        self.unify_join_arm(&j, &a, i.span, "if");
+                    }
+                    (None, Some(a)) => join_ty = Some(a),
+                    _ => {}
+                }
+            }
+            if let Some(j) = join_ty {
+                result_ty = self.infer_ctx.shallow_resolve(&j);
+            }
+        }
+
         if let Some(ref else_block) = els {
             let mut common = Self::collect_block_new_binds(&then);
             for (_, elif_block) in &elifs {
@@ -203,6 +226,7 @@ impl Typer {
             then,
             elifs,
             els,
+            ty: result_ty,
             span: i.span,
         })
     }
@@ -298,14 +322,10 @@ impl Typer {
                 .transpose()?;
             let arm_expected = first_arm_ty.as_ref().or(tail_expected);
             let mut body = self.lower_block_no_scope_with_tail(&a.body, ret_ty, arm_expected)?;
-            if let Some(tail_ty) = self.hir_tail_type(&body) {
+            if let Some(tail_ty) = self.join_branch_type(&body) {
                 if let Some(ref first_ty) = first_arm_ty {
-                    let _ = self.infer_ctx.unify_at(
-                        first_ty,
-                        &tail_ty,
-                        a.span,
-                        "match arm result type",
-                    );
+                    let first_ty = first_ty.clone();
+                    self.unify_join_arm(&first_ty, &tail_ty, a.span, "match");
                 } else {
                     first_arm_ty = Some(tail_ty);
                 }
@@ -371,6 +391,12 @@ impl Typer {
                         );
                     }
                     return Ok(hir::Pat::Ctor(name.as_str(), tag, vec![], *span));
+                }
+                if self.find_var(&name.as_str()).is_none()
+                    && let Some(const_expr) = self.consts.get(name).cloned()
+                {
+                    let he = self.lower_expr_expected(&const_expr, Some(expected_ty))?;
+                    return Ok(hir::Pat::Lit(he));
                 }
                 let id = self.fresh_id();
                 let ty = expected_ty.clone();

@@ -399,6 +399,9 @@ impl<'ctx> Compiler<'ctx> {
         let alive_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 1, "alive_ptr"));
         b!(self.bld.build_store(alive_ptr, i32t.const_int(1, false)));
 
+        let reg_live = crate::codegen::fn_or_die(&self.module, "jinn_actor_register_live");
+        b!(self.bld.build_call(reg_live, &[mb_ptr_v.into()], ""));
+
         if let Some(ad) = self.actor_defs.get(actor_name).cloned() {
             let state_name = format!("{actor_name}_state");
             if let Some(state_st) = self.module.get_struct_type(&state_name) {

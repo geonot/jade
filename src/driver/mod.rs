@@ -181,6 +181,10 @@ pub fn run() {
                     src_bytes.hash(&mut h);
                     env!("CARGO_PKG_VERSION").hash(&mut h);
                     compiler_fp.hash(&mut h);
+                    for (path, bytes) in collect_sibling_sources(&entry) {
+                        path.hash(&mut h);
+                        bytes.hash(&mut h);
+                    }
                     h.finish()
                 };
                 let cache_dir = dirs_cache();
@@ -256,7 +260,7 @@ pub fn run() {
                     Ok(mut hir_prog) => {
                         let hir_errors = crate::hir_validate::HirValidator::validate(&hir_prog);
                         for e in &hir_errors {
-                            eprintln!("hir-validate: {e}");
+                            eprintln!("{e}");
                         }
                         if !hir_errors.is_empty() {
                             die("check failed: HIR validation errors");
@@ -414,7 +418,7 @@ pub fn run() {
     }
     let mut hir_prog = match typer.lower_program(&prog) {
         Ok(hir_prog) => hir_prog,
-        Err(e) => die(&format!("hir: {e}")),
+        Err(e) => die(&e),
     };
 
     if cli.lib
@@ -449,12 +453,19 @@ pub fn run() {
 
     if cli.emit_hir {
         print!("{}", crate::hir::pretty_print(&hir_prog));
+        let hir_errors = crate::hir_validate::HirValidator::validate(&hir_prog);
+        for e in &hir_errors {
+            eprintln!("{e}");
+        }
+        if !hir_errors.is_empty() {
+            die("compilation aborted due to HIR validation errors");
+        }
         return;
     }
 
     let hir_errors = crate::hir_validate::HirValidator::validate(&hir_prog);
     for e in &hir_errors {
-        eprintln!("hir-validate: {e}");
+        eprintln!("{e}");
     }
     if !hir_errors.is_empty() {
         die("compilation aborted due to HIR validation errors");
@@ -719,4 +730,38 @@ fn resolve_project_input(input: PathBuf) -> PathBuf {
         "{} has no `entry is …` declaration and no source/main.jn or src/main.jn fallback",
         project_jinn.display()
     ));
+}
+
+fn collect_sibling_sources(entry: &std::path::Path) -> Vec<(String, Vec<u8>)> {
+    let root = match entry.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    let mut out: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut stack = vec![root];
+    let mut visited = 0usize;
+    while let Some(dir) = stack.pop() {
+        if visited > 4096 {
+            break;
+        }
+        let Ok(rd) = fs::read_dir(&dir) else { continue };
+        for ent in rd.flatten() {
+            let path = ent.path();
+            let name = ent.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') || name == "target" || name == "node_modules" {
+                continue;
+            }
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("jn") {
+                visited += 1;
+                if let Ok(bytes) = fs::read(&path) {
+                    out.push((path.display().to_string(), bytes));
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
 }

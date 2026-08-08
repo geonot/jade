@@ -131,6 +131,22 @@ impl<'a> Renamer<'a> {
         *self.shadowed.entry(name).or_insert(0) += 1;
     }
 
+    fn rewrite_pat(&mut self, pat: &mut Pat) {
+        match pat {
+            Pat::Ident(s, _) => {
+                if let Some(new) = self.lookup(*s) {
+                    *s = new;
+                }
+            }
+            Pat::Ctor(_, ps, _) | Pat::Or(ps, _) | Pat::Tuple(ps, _) | Pat::Array(ps, _) => {
+                for p in ps {
+                    self.rewrite_pat(p);
+                }
+            }
+            Pat::Wild(_) | Pat::Lit(_) | Pat::Range(_, _, _) => {}
+        }
+    }
+
     fn lookup(&self, name: Symbol) -> Option<Symbol> {
         if self.shadowed.contains_key(&name) {
             return None;
@@ -208,6 +224,7 @@ impl<'a> Renamer<'a> {
                 self.rewrite_expr(&mut m.subject);
                 for arm in &mut m.arms {
                     self.push_scope();
+                    self.rewrite_pat(&mut arm.pat);
                     let mut binders = Vec::new();
                     collect_pat_binders(&arm.pat, &mut binders);
                     for b in binders {

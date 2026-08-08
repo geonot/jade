@@ -62,10 +62,14 @@ jinn_scope_t *jinn_scope_create(void) {
     s->actor_count = 0;
     s->actor_cap = 0;
     tl_scope = s;
+    jinn_coro_t *cur = jinn_current_coro();
+    if (cur) cur->scope = s;
     return s;
 }
 void jinn_scope_register_child(jinn_coro_t *child) {
-    jinn_scope_t *s = tl_scope;
+    jinn_scope_register_child_in(jinn_scope_current(), child);
+}
+void jinn_scope_register_child_in(jinn_scope_t *s, jinn_coro_t *child) {
     if (!s || !child) return;
     child->scope = s;
     atomic_fetch_add(&s->live_children, 1);
@@ -244,6 +248,8 @@ void jinn_scope_join(jinn_scope_t *s) {
     if (!s) return;
     jinn_scope_join_no_free(s);
     jinn_scope_set_current(s->prev);
+    jinn_coro_t *cur = jinn_current_coro();
+    if (cur && cur->scope == s) cur->scope = s->prev;
     free(s->children);
     free(s->actors);
     free(s);
@@ -254,6 +260,8 @@ int64_t jinn_scope_join_take_error(jinn_scope_t *s) {
     int64_t word = had ? atomic_load_explicit(&s->error_val, memory_order_acquire)
                        : INT64_MIN;
     jinn_scope_set_current(s->prev);
+    jinn_coro_t *cur = jinn_current_coro();
+    if (cur && cur->scope == s) cur->scope = s->prev;
     free(s->children);
     free(s->actors);
     free(s);

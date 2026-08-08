@@ -8,7 +8,7 @@
     s is 0
     i is 0
     while i < pts.length
-        p is pts.get(i)
+        p is copy pts.get(i)
         s is s + p.get(0)
         i is i + 1
     s / pts.length

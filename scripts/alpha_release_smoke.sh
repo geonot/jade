@@ -17,7 +17,7 @@ if [[ ! -x "$BIN" ]]; then
 fi
 
 log "validating moderate multi-module project with stdlib + actors + store"
-pushd "$ROOT_DIR/examples/alpha_release_demo" >/dev/null
+pushd "$ROOT_DIR/apps/alpha_release_demo" >/dev/null
 "$BIN" test
 "$BIN" build -o alpha_demo
 DEMO_OUT="$(./alpha_demo)"
@@ -82,7 +82,7 @@ fi
 popd >/dev/null
 
 log "checking cross-target command path"
-pushd "$ROOT_DIR/examples/alpha_release_demo" >/dev/null
+pushd "$ROOT_DIR/apps/alpha_release_demo" >/dev/null
 if "$BIN" build --target wasm32-wasi --standalone -o alpha_demo.wasm >/dev/null 2>&1; then
   log "cross-target build succeeded (wasm32-wasi)"
 else

@@ -57,6 +57,8 @@ pub(crate) enum MoveReason {
     Sent(crate::ast::Span),
 
     TaskCapture(crate::ast::Span),
+
+    ContainerInsert(Symbol, crate::ast::Span),
 }
 
 #[allow(clippy::type_complexity)]
@@ -121,6 +123,10 @@ pub struct Typer {
     pub(crate) moved_fields: std::collections::HashMap<DefId, std::collections::HashSet<Symbol>>,
 
     pub(crate) moved_vars: std::collections::HashMap<DefId, MoveReason>,
+
+    pub(crate) current_fn_param_ids: std::collections::HashSet<DefId>,
+
+    pub(crate) suppress_whole_struct_check: u32,
 
     pub(crate) const_vars: std::collections::HashSet<DefId>,
 
@@ -225,6 +231,8 @@ impl Typer {
             fn_param_access: IndexMap::new(),
             moved_fields: std::collections::HashMap::new(),
             moved_vars: std::collections::HashMap::new(),
+            current_fn_param_ids: std::collections::HashSet::new(),
+            suppress_whole_struct_check: 0,
             declared_type_names: std::collections::HashSet::new(),
             const_expansion_stack: Vec::new(),
             instantiated_generics: std::collections::HashSet::new(),

@@ -281,7 +281,7 @@ impl Parser {
                 self.advance();
 
                 if name.with_str(|s| s == "take")
-                    && matches!(self.peek(), Token::Ident(_) | Token::LParen | Token::Star)
+                    && matches!(self.peek(), Token::Ident(_) | Token::Star)
                 {
                     return self.parse_unary();
                 }

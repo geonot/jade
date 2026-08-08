@@ -627,20 +627,31 @@ fn format_if(out: &mut String, i: &If, level: usize, sink: &mut CommentSink) {
     }
 }
 
+fn escape_string_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\'' => out.push_str("\\'"),
+            '{' => out.push_str("\\{"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\0' => out.push_str("\\0"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\x{:02x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 fn format_expr(e: &Expr) -> String {
     match e {
         Expr::None(_) => "none".into(),
         Expr::Void(_) => "void".into(),
         Expr::Int(n, _) => n.to_string(),
         Expr::Float(f, _) => format!("{f}"),
-        Expr::Str(s, _) => {
-            let braceish = s.contains('{') || s.contains('}') || s.contains('\'');
-            if braceish && !s.contains('"') {
-                format!("\"{s}\"")
-            } else {
-                format!("'{s}'")
-            }
-        }
+        Expr::Str(s, _) => format!("'{}'", escape_string_literal(s)),
         Expr::Bool(true, _) => "true".into(),
         Expr::Bool(false, _) => "false".into(),
         Expr::Ident(name, _) => name.to_string(),

@@ -90,6 +90,14 @@ pub fn verify_function(f: &Function) -> Result<(), Vec<String>> {
                     &value_ty,
                     &mut errors,
                 );
+                if let Some(ty) = value_ty.get(val)
+                    && !ty_compatible(ty, &phi.ty)
+                {
+                    errors.push(format!(
+                        "phi {} in {} has type {:?} but its incoming value {} from {} has type {:?}",
+                        phi.dest, bb_label, phi.ty, val, pred_bb, ty
+                    ));
+                }
             }
         }
 
@@ -363,6 +371,7 @@ mod tests {
                 value: ValueId(0),
                 name: Symbol::intern("p"),
                 ty: Type::I64,
+                by_ref: false,
             }],
             ret_ty,
             blocks,
@@ -518,6 +527,34 @@ mod tests {
         );
         let errs = verify_function(&f).unwrap_err();
         assert!(errs.iter().any(|e| e.contains("not a predecessor")));
+    }
+
+    #[test]
+    fn rejects_phi_incoming_type_mismatch() {
+        let entry = block(
+            0,
+            vec![inst(1, InstKind::IntConst(1), Type::I64)],
+            Terminator::Branch(ValueId(1), BlockId(1), BlockId(2)),
+        );
+        let then_bb = block(
+            1,
+            vec![inst(3, InstKind::IntConst(7), Type::I64)],
+            Terminator::Goto(BlockId(3)),
+        );
+        let else_bb = block(
+            2,
+            vec![inst(4, InstKind::StringConst("x".into()), Type::String)],
+            Terminator::Goto(BlockId(3)),
+        );
+        let mut join = block(3, vec![], Terminator::Return(Some(ValueId(5))));
+        join.phis = vec![Phi {
+            dest: ValueId(5),
+            ty: Type::I64,
+            incoming: vec![(BlockId(1), ValueId(3)), (BlockId(2), ValueId(4))],
+        }];
+        let f = func(vec![entry, then_bb, else_bb, join], Type::I64);
+        let errs = verify_function(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("incoming value")));
     }
 
     #[test]

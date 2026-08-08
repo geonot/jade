@@ -58,7 +58,9 @@ static void recover_cb(uint8_t op, const void *payload, uint32_t payload_len,
 
     if (r->count == r->cap) {
         int64_t ncap = r->cap ? r->cap * 2 : 64;
-        uint8_t *n = (uint8_t *)realloc(r->rows, (size_t)(ncap * r->rec_size));
+        size_t nbytes = jinn_safe_mul(ncap, r->rec_size);
+        if (nbytes == 0) { r->skipped++; free(heap_rec); return; }
+        uint8_t *n = (uint8_t *)realloc(r->rows, nbytes);
         if (!n) { r->skipped++; free(heap_rec); return; }
         r->rows = n;
         r->cap = ncap;
@@ -146,6 +148,26 @@ int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
         jinn_wal_close(wal);
         return 0;
     }
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        jinn_wal_close(wal);
+        return -1;
+    }
+    long file_bytes = ftell(fp);
+    if (file_bytes < REC_HEADER) {
+        fprintf(stderr, "jinn: recover: %s: file is shorter than its header\n", store_path);
+        jinn_wal_close(wal);
+        return -1;
+    }
+    int64_t max_records = ((int64_t)file_bytes - REC_HEADER) / rec_size;
+    if (count > max_records) {
+        fprintf(stderr,
+                "jinn: recover: %s: header claims %lld records but the file holds at "
+                "most %lld; refusing to read past the end of the file\n",
+                store_path, (long long)count, (long long)max_records);
+        jinn_wal_close(wal);
+        return -1;
+    }
+
     Recover r = {0};
     r.rec_size = rec_size;
     r.sid_off = sid_offset;
@@ -153,7 +175,14 @@ int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
     r.count = count;
     r.cap = count > 0 ? count : 0;
     if (count > 0) {
-        r.rows = (uint8_t *)malloc((size_t)(count * rec_size));
+        size_t bytes = jinn_safe_mul(count, rec_size);
+        if (bytes == 0) {
+            fprintf(stderr, "jinn: recover: %s: record count %lld overflows\n", store_path,
+                    (long long)count);
+            jinn_wal_close(wal);
+            return -1;
+        }
+        r.rows = (uint8_t *)malloc(bytes);
         if (!r.rows) {
             jinn_wal_close(wal);
             return -1;

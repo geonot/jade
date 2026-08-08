@@ -458,6 +458,9 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self.bld.build_call(*mig_fn, &[], ""));
             }
             let call_result = b!(self.bld.build_call(user_fv, &[], "user_main"));
+            if let Some(stop_all) = self.module.get_function("jinn_actor_stop_all") {
+                b!(self.bld.build_call(stop_all, &[], ""));
+            }
             if let Some(sched_run) = self.module.get_function("jinn_sched_run") {
                 b!(self.bld.build_call(sched_run, &[], ""));
             }
@@ -523,6 +526,8 @@ impl<'ctx> Compiler<'ctx> {
         self.var_allocs.clear();
         self.value_types.clear();
         self.self_allocs.clear();
+        self.by_ref_values.clear();
+        self.local_struct_values.clear();
         self.vec_growth_floor_by_value = Self::compute_vec_growth_floors(func);
         self.current_drop_meta = func.drops.clone();
         self.current_reuse_slots.clear();
@@ -561,10 +566,14 @@ impl<'ctx> Compiler<'ctx> {
                 self.value_types.insert(param.value, param.ty.clone());
             }
         } else {
+            self.bld.position_at_end(self.block_map[&func.entry]);
             for (i, param) in func.params.iter().enumerate() {
                 let llvm_val = fv.get_nth_param(i as u32).unwrap();
                 self.value_map.insert(param.value, llvm_val);
                 self.value_types.insert(param.value, param.ty.clone());
+                if param.by_ref || matches!(param.ty, Type::Ptr(_)) {
+                    self.by_ref_values.insert(param.value);
+                }
 
                 let effective_ty = match &param.ty {
                     Type::Ptr(inner)
@@ -582,10 +591,23 @@ impl<'ctx> Compiler<'ctx> {
                     Type::Struct(_, _) | Type::Tuple(_) | Type::Enum(_)
                 ) && llvm_val.is_pointer_value()
                 {
-                    let ptr = llvm_val.into_pointer_value();
                     let lt = self.llvm_ty(&effective_ty);
+                    let incoming = llvm_val.into_pointer_value();
+                    let ptr = if param.by_ref
+                        || matches!(param.ty, Type::Ptr(_))
+                        || !self.struct_is_pod(&effective_ty)
+                    {
+                        incoming
+                    } else {
+                        let name = format!("{}.own", param.name.as_str());
+                        let local = self.entry_alloca(lt, &name);
+                        let loaded = b!(self.bld.build_load(lt, incoming, &name));
+                        b!(self.bld.build_store(local, loaded));
+                        local
+                    };
                     self.self_allocs.insert(param.value, ptr);
                     self.self_alloc_types.insert(param.value, lt);
+                    self.value_map.insert(param.value, ptr.into());
 
                     self.value_types.insert(param.value, effective_ty);
                 }
@@ -630,70 +652,71 @@ impl<'ctx> Compiler<'ctx> {
             self.emit_terminator(&bb.terminator, &func.ret_ty)?;
         }
 
+        self.phi_shape_error = None;
         for pp in &self.pending_phis {
             let phi_ty = pp.phi.as_basic_value().get_type();
-            let incoming: Vec<(BasicValueEnum<'ctx>, LLVMBlock<'ctx>)> = pp
-                .incoming
-                .iter()
-                .filter_map(|(block_id, val_id)| {
+            let incoming: Vec<(BasicValueEnum<'ctx>, LLVMBlock<'ctx>)> =
+                pp.incoming
+                    .iter()
+                    .filter_map(|(block_id, val_id)| {
+                        let llvm_bb = self
+                            .block_exit_map
+                            .get(block_id)
+                            .or_else(|| self.block_map.get(block_id))?;
+                        let llvm_val = self.value_map.get(val_id)?;
 
-
-                    let llvm_bb = self
-                        .block_exit_map
-                        .get(block_id)
-                        .or_else(|| self.block_map.get(block_id))?;
-                    let llvm_val = self.value_map.get(val_id)?;
-
-                    let v = if llvm_val.get_type() != phi_ty {
-                        if phi_ty.is_struct_type() && llvm_val.is_pointer_value() {
-
-
-
-
-
-
-
-                            let ptr = (*llvm_val).into_pointer_value();
-                            match llvm_bb.get_terminator() {
-                                Some(t) => self.bld.position_before(&t),
-                                None => self.bld.position_at_end(*llvm_bb),
-                            }
-                            self.bld
-                                .build_load(phi_ty, ptr, "phi.load")
-                                .expect("ICE: failed to load phi coercion")
-                        } else {
-                            let is_void_sentinel = llvm_val.get_type().is_int_type()
-                                && llvm_val.get_type().into_int_type().get_bit_width() == 8;
-                            if !is_void_sentinel {
-                                panic!(
-                                    "ICE: phi node type mismatch: incoming {:?} vs phi {:?} (block {:?}, val {:?})",
-                                    llvm_val.get_type(),
-                                    phi_ty,
-                                    block_id,
-                                    val_id,
-                                );
-                            }
-                            if phi_ty.is_int_type() {
-                                phi_ty.into_int_type().const_int(0, false).into()
-                            } else if phi_ty.is_float_type() {
-                                phi_ty.into_float_type().const_float(0.0).into()
-                            } else if phi_ty.is_pointer_type() {
-                                phi_ty.into_pointer_type().const_null().into()
-                            } else if phi_ty.is_struct_type() {
-                                phi_ty.into_struct_type().const_zero().into()
+                        let v = if llvm_val.get_type() != phi_ty {
+                            if phi_ty.is_struct_type() && llvm_val.is_pointer_value() {
+                                let ptr = (*llvm_val).into_pointer_value();
+                                match llvm_bb.get_terminator() {
+                                    Some(t) => self.bld.position_before(&t),
+                                    None => self.bld.position_at_end(*llvm_bb),
+                                }
+                                self.bld
+                                    .build_load(phi_ty, ptr, "phi.load")
+                                    .expect("ICE: failed to load phi coercion")
                             } else {
-                                panic!(
-                                    "ICE: cannot coerce void sentinel to phi type {:?}",
-                                    phi_ty,
-                                );
+                                let is_void_sentinel = llvm_val.get_type().is_int_type()
+                                    && llvm_val.get_type().into_int_type().get_bit_width() == 8;
+                                if !is_void_sentinel {
+                                    self.phi_shape_error.get_or_insert_with(|| {
+                                        format!(
+                                            "{}: this function joins values of different \
+                                     shapes at a control-flow merge, which the code \
+                                     generator cannot represent (one path yields {}, \
+                                     another yields {}). This is a compiler limitation, \
+                                     not a mistake in your program — recursive enum \
+                                     payloads rebound inside a loop are the known \
+                                     trigger. Bind the branches to separate names, or \
+                                     lift the loop body into its own function.",
+                                            func.name.as_str(),
+                                            Compiler::describe_llvm_ty(llvm_val.get_type()),
+                                            Compiler::describe_llvm_ty(phi_ty),
+                                        )
+                                    });
+                                    return None;
+                                }
+                                if phi_ty.is_int_type() {
+                                    phi_ty.into_int_type().const_int(0, false).into()
+                                } else if phi_ty.is_float_type() {
+                                    phi_ty.into_float_type().const_float(0.0).into()
+                                } else if phi_ty.is_pointer_type() {
+                                    phi_ty.into_pointer_type().const_null().into()
+                                } else if phi_ty.is_struct_type() {
+                                    phi_ty.into_struct_type().const_zero().into()
+                                } else {
+                                    panic!(
+                                        "ICE: cannot coerce void sentinel to phi type {:?}",
+                                        phi_ty,
+                                    );
+                                }
                             }
-                        }
-                    } else {
-                        *llvm_val
-                    };
-                    Some((v, *llvm_bb))
-                })
-                .collect();
+                        } else {
+                            *llvm_val
+                        };
+                        Some((v, *llvm_bb))
+                    })
+                    .collect();
             let refs: Vec<(&dyn BasicValue<'ctx>, LLVMBlock<'ctx>)> = incoming
                 .iter()
                 .map(|(v, bb)| (v as &dyn BasicValue<'ctx>, *bb))
@@ -701,6 +724,9 @@ impl<'ctx> Compiler<'ctx> {
             for (val, bb) in &refs {
                 pp.phi.add_incoming(&[(*val, *bb)]);
             }
+        }
+        if let Some(msg) = self.phi_shape_error.take() {
+            return Err(msg);
         }
 
         self.pop_debug_scope();

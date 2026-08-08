@@ -15,13 +15,13 @@
         row is vec()
         r is 0
         while r < 3
-            inner is m.get(r)
+            inner is copy m.get(r)
             row.push(inner.get(c))
             r is r + 1
         t.push(row)
         c is c + 1
     log t.length
-    inner0 is t.get(0)
+    inner0 is copy t.get(0)
     log inner0.length
     log inner0.get(0)
     log inner0.get(2)

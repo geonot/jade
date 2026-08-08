@@ -23,7 +23,7 @@ impl<'ctx> Compiler<'ctx> {
         let extra_count = extra_conds.len();
 
         let (sd, st, rec_size, fp) = self.setup_store_access(store_name)?;
-        self.store_lock(fp)?;
+        self.store_lock(store_name, fp)?;
         self.txn_track_store(store_name, fp)?;
         let i64t = self.ctx.i64_type();
         let i32t = self.ctx.i32_type();
@@ -267,7 +267,7 @@ impl<'ctx> Compiler<'ctx> {
         let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
         b!(self.bld.build_call(fflush_fn, &[fp.into()], ""));
 
-        self.store_unlock(fp)?;
+        self.store_unlock(store_name, fp)?;
         if statusful {
             let updated =
                 b!(self.bld.build_load(i64t, upd_count_ptr, "set.updated")).into_int_value();

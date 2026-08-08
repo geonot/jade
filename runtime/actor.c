@@ -1,3 +1,4 @@
+#include <time.h>
 #include "jinn_rt.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -102,6 +103,76 @@ void jinn_actor_join(void *join_slot_ptr) {
 
     }
 }
+typedef struct jinn_live_mb {
+    void                *mailbox;
+    struct jinn_live_mb *next;
+} jinn_live_mb_t;
+static jinn_live_mb_t  *g_live_mailboxes = NULL;
+static pthread_mutex_t  g_live_mb_lock = PTHREAD_MUTEX_INITIALIZER;
+
+void jinn_actor_register_live(void *mailbox_ptr) {
+    if (!mailbox_ptr) return;
+    jinn_live_mb_t *n = (jinn_live_mb_t *)jinn_xmalloc(sizeof(jinn_live_mb_t));
+    n->mailbox = mailbox_ptr;
+    pthread_mutex_lock(&g_live_mb_lock);
+    n->next = g_live_mailboxes;
+    g_live_mailboxes = n;
+    pthread_mutex_unlock(&g_live_mb_lock);
+}
+void jinn_actor_unregister_live(void *mailbox_ptr) {
+    if (!mailbox_ptr) return;
+    pthread_mutex_lock(&g_live_mb_lock);
+    jinn_live_mb_t **cur = &g_live_mailboxes;
+    while (*cur) {
+        if ((*cur)->mailbox == mailbox_ptr) {
+            jinn_live_mb_t *dead = *cur;
+            *cur = dead->next;
+            free(dead);
+            break;
+        }
+        cur = &(*cur)->next;
+    }
+    pthread_mutex_unlock(&g_live_mb_lock);
+}
+void jinn_actor_stop_all(void) {
+    pthread_mutex_lock(&g_live_mb_lock);
+    jinn_live_mb_t *list = g_live_mailboxes;
+    g_live_mailboxes = NULL;
+    int n_chans = 0;
+    for (jinn_live_mb_t *n = list; n; n = n->next) n_chans++;
+    jinn_chan_t **chans = NULL;
+    if (n_chans > 0) {
+        chans = (jinn_chan_t **)jinn_xmalloc((size_t)n_chans * sizeof(*chans));
+        int i = 0;
+        for (jinn_live_mb_t *n = list; n; n = n->next) {
+            chans[i++] = *(jinn_chan_t **)n->mailbox;
+        }
+    }
+    pthread_mutex_unlock(&g_live_mb_lock);
+
+    while (list) {
+        jinn_live_mb_t *next = list->next;
+        free(list);
+        list = next;
+    }
+
+    for (int i = 0; i < n_chans; i++) {
+        if (chans[i]) jinn_chan_close(chans[i]);
+    }
+
+    const int64_t max_spins = 500000;
+    for (int64_t spin = 0; spin < max_spins; spin++) {
+        int64_t pending = 0;
+        for (int i = 0; i < n_chans; i++) {
+            pending += jinn_chan_pending(chans[i]);
+        }
+        if (pending == 0) break;
+        struct timespec ns = {0, 10000};
+        nanosleep(&ns, NULL);
+    }
+    free(chans);
+}
+
 typedef struct jinn_retired_mb {
     void                   *mailbox;
     void                   *chan;
@@ -132,14 +203,19 @@ void jinn_actor_retire_flush(void) {
 }
 void jinn_actor_destroy(void *mailbox_ptr) {
     if (!mailbox_ptr) return;
+    jinn_actor_unregister_live(mailbox_ptr);
     jinn_worker_t *w = jinn_worker_self();
     if (w && w->current && w->current->scope) {
         jinn_scope_unregister_actor((jinn_scope_t *)w->current->scope, mailbox_ptr);
     }
+    pthread_mutex_lock(&g_live_mb_lock);
     jinn_chan_t *ch = *(jinn_chan_t **)mailbox_ptr;
     if (ch) {
-        jinn_chan_close(ch);
         *(jinn_chan_t **)mailbox_ptr = NULL;
+    }
+    pthread_mutex_unlock(&g_live_mb_lock);
+    if (ch) {
+        jinn_chan_close(ch);
     }
     *(int32_t *)((char *)mailbox_ptr + sizeof(void *)) = 0;
     jinn_actor_retire_mailbox(mailbox_ptr, ch);

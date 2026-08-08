@@ -276,14 +276,14 @@ annotation.
 | Cross-thread enforcement               | [src/typer/mod.rs](src/typer/mod.rs) (`enforce_cross_thread_safe`)              |
 | Escape analysis                        | [src/escape/mod.rs](src/escape/mod.rs)                                          |
 | Drop emission                          | [src/codegen/drop/aggregates.rs](src/codegen/drop/aggregates.rs)                |
-| Perceus use-counting pass              | [src/perceus/mir_perceus.rs](src/perceus/mir_perceus.rs)                        |
+| Perceus use-counting pass              | [src/drops/mir_drops.rs](src/drops/mir_drops.rs)                        |
 
 ## 9. What this document deliberately does not cover
 
 - Detailed MIR lowering of moves (`InstKind::Move`, drop hoisting,
   field-tombstone tracking) — see source.
 - The Perceus heuristics for `Vec` reuse pairing — see
-  [src/perceus/mir_perceus.rs](src/perceus/mir_perceus.rs).
+  [src/drops/mir_drops.rs](src/drops/mir_drops.rs).
 - LLVM-level parameter attributes (`nocapture`, `readonly`,
   `dereferenceable`) — see
   [src/codegen/support/runtime.rs](src/codegen/support/runtime.rs)

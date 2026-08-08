@@ -2,7 +2,7 @@
 extern *c_opendir(path as %i8) returns %i8
 extern *c_readdir_name(d as %i8) returns %i8
 extern *c_closedir(d as %i8)
-extern *c_is_dir(path as %i8) returns i32
+extern *jinn_is_dir(path as %i8) returns i32
 extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
 extern *strlen(s as %i8) returns i64
@@ -110,7 +110,7 @@ extern *jinn_dirent_name(ent as %i8) returns %i8
         name is __string_from_ptr(name_ptr)
         if name neq "." and name neq ".."
             full is dir + "/" + name
-            if extern.c_is_dir(%full) equals 1
+            if extern.jinn_is_dir(%full) equals 1
                 __walk(full, result)
             else
                 result.push(full)

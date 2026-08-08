@@ -6,6 +6,17 @@ use crate::types::Type;
 use std::collections::HashSet;
 
 impl Lowerer {
+    fn phi_incoming_is_uniform(&self, incoming: &[(BlockId, ValueId)]) -> bool {
+        let Some(&(_, first)) = incoming.first() else {
+            return false;
+        };
+        let ty = self.value_type(first);
+        if matches!(ty, Type::Void) {
+            return false;
+        }
+        incoming.iter().all(|&(_, v)| self.value_type(v) == ty)
+    }
+
     pub(super) fn lower_stmt_control(&mut self, stmt: &hir::Stmt) -> ValueId {
         match stmt {
             hir::Stmt::If(if_stmt) => {
@@ -83,28 +94,24 @@ impl Lowerer {
                 self.switch_to(merge_bb);
                 self.seal_block(merge_bb);
 
-                let then_ty = self.value_type(then_val);
-                if !matches!(then_ty, Type::Void) && else_val_info.is_some() {
-                    let mut incoming = vec![(then_end, then_val)];
-                    for &(bb, v) in &elif_vals {
-                        incoming.push((bb, v));
-                    }
-                    if let Some((eb, ev)) = else_val_info {
-                        incoming.push((eb, ev));
-                    }
+                let mut incoming = vec![(then_end, then_val)];
+                for &(bb, v) in &elif_vals {
+                    incoming.push((bb, v));
+                }
+                if let Some((eb, ev)) = else_val_info {
+                    incoming.push((eb, ev));
+                }
+                incoming.retain(|(bb, _)| !self.unreachable_blocks.contains(bb));
 
-                    incoming.retain(|(bb, _)| !self.unreachable_blocks.contains(bb));
-                    if incoming.is_empty() {
-                        self.emit(InstKind::Void, Type::Void, if_stmt.span)
-                    } else {
-                        let result = self.new_value();
-                        self.func.block_mut(merge_bb).phis.push(Phi {
-                            dest: result,
-                            ty: then_ty,
-                            incoming,
-                        });
-                        result
-                    }
+                if else_val_info.is_some() && self.phi_incoming_is_uniform(&incoming) {
+                    let ty = self.value_type(incoming[0].1);
+                    let result = self.new_value();
+                    self.func.block_mut(merge_bb).phis.push(Phi {
+                        dest: result,
+                        ty,
+                        incoming,
+                    });
+                    result
                 } else {
                     self.emit(InstKind::Void, Type::Void, if_stmt.span)
                 }
@@ -527,15 +534,19 @@ impl Lowerer {
                         .filter(|(_, blk)| !self.unreachable_blocks.contains(blk))
                         .map(|(val, blk)| (*blk, *val))
                         .collect();
-                    if incoming.is_empty() {
+                    if !self.phi_incoming_is_uniform(&incoming) {
                         self.emit(InstKind::Void, Type::Void, m.span)
                     } else {
                         let dest = self.new_value();
-                        self.func.block_mut(merge_bb).phis.push(Phi {
-                            dest,
-                            ty: result_ty,
-                            incoming,
-                        });
+                        let ty = if matches!(result_ty, Type::Void) {
+                            self.value_type(incoming[0].1)
+                        } else {
+                            result_ty
+                        };
+                        self.func
+                            .block_mut(merge_bb)
+                            .phis
+                            .push(Phi { dest, ty, incoming });
                         dest
                     }
                 } else {

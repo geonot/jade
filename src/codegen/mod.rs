@@ -150,6 +150,12 @@ pub struct Compiler<'ctx> {
 
     pub(crate) self_alloc_types: std::collections::HashMap<mir::ValueId, BasicTypeEnum<'ctx>>,
 
+    pub(crate) by_ref_values: std::collections::HashSet<mir::ValueId>,
+
+    pub(crate) local_struct_values: std::collections::HashSet<mir::ValueId>,
+
+    pub(crate) phi_shape_error: Option<String>,
+
     pub(crate) block_exit_map: std::collections::HashMap<mir::BlockId, BasicBlock<'ctx>>,
 
     pub(crate) migration_fns: Vec<FunctionValue<'ctx>>,

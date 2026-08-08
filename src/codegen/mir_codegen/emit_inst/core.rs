@@ -535,7 +535,8 @@ impl<'ctx> Compiler<'ctx> {
                                 MapMethod::Get => {
                                     if !args.is_empty() {
                                         let k = self.val(args[0]);
-                                        return Ok(Some((self.map_get_val(header_ptr, k))?));
+                                        let vt = self.llvm_ty(&val_ty);
+                                        return Ok(Some((self.map_get_val(header_ptr, k, vt))?));
                                     }
                                     return Err("map.get() requires a key".into());
                                 }
@@ -635,6 +636,15 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 mir::InstKind::IndirectCall(callee, args) => {
                     let callee_val = self.val(*callee);
+                    if !callee_val.is_struct_value() {
+                        return Err(format!(
+                            "this value is called like a function but is not one \
+                             (it is {}); if you meant to pipe into a method, write \
+                             `value.method(...)` or `value ~ helper(...)` with a \
+                             named function",
+                            Compiler::describe_llvm_ty(callee_val.get_type())
+                        ));
+                    }
 
                     let _closure_ty = self.closure_type();
                     let ptr_ty = self.ctx.ptr_type(AddressSpace::default());

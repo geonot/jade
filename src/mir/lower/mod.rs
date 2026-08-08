@@ -93,12 +93,21 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
 
     for p in &f.params {
         let val = lowerer.new_value();
+        let by_ref = matches!(p.ty, Type::Ptr(_))
+            || (matches!(
+                p.ownership,
+                crate::hir::Ownership::Borrowed | crate::hir::Ownership::BorrowMut
+            ) && matches!(p.ty, Type::Struct(..) | Type::Enum(_) | Type::Tuple(_)));
         lowerer.func.params.push(Param {
             value: val,
             name: p.name,
             ty: p.ty.clone(),
+            by_ref,
         });
         lowerer.var_types.insert(p.name, p.ty.clone());
+        if by_ref {
+            lowerer.borrowed_params.insert(p.name);
+        }
 
         let entry = lowerer.func.entry;
         lowerer
@@ -262,6 +271,7 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
         value: self_val,
         name: self_name,
         ty: state_ptr_ty.clone(),
+        by_ref: false,
     });
     let entry = lowerer.func.entry;
     lowerer.var_types.insert(self_name, state_ptr_ty.clone());
@@ -282,6 +292,7 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
             value: val,
             name: p.name,
             ty: p.ty.clone(),
+            by_ref: false,
         });
         lowerer.var_types.insert(p.name, p.ty.clone());
         lowerer
@@ -326,6 +337,7 @@ fn actor_state_lowerer(actor: &hir::ActorDef, fn_name: &str) -> Lowerer {
         value: self_val,
         name: self_name,
         ty: state_ptr_ty,
+        by_ref: false,
     });
     let entry = lowerer.func.entry;
     let self_ty = lowerer.func.params.last().unwrap().ty.clone();

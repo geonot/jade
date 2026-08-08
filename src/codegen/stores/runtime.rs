@@ -92,6 +92,38 @@ impl<'ctx> Compiler<'ctx> {
             self.module
                 .add_function("jinn_store_recover", ft, Some(Linkage::External));
         }
+        for name in ["jinn_store_wlock", "jinn_store_wunlock"] {
+            if self.module.get_function(name).is_none() {
+                let void_ty = self.ctx.void_type();
+                let ft = void_ty.fn_type(&[ptr.into()], false);
+                self.module.add_function(name, ft, Some(Linkage::External));
+            }
+        }
+        if self.module.get_function("jinn_rewrite_begin").is_none() {
+            let ft = ptr.fn_type(&[ptr.into()], false);
+            self.module
+                .add_function("jinn_rewrite_begin", ft, Some(Linkage::External));
+        }
+        if self.module.get_function("jinn_rewrite_file").is_none() {
+            let ft = ptr.fn_type(&[ptr.into()], false);
+            self.module
+                .add_function("jinn_rewrite_file", ft, Some(Linkage::External));
+        }
+        if self.module.get_function("jinn_rewrite_commit").is_none() {
+            let ft = ptr.fn_type(&[ptr.into(), ptr.into()], false);
+            self.module
+                .add_function("jinn_rewrite_commit", ft, Some(Linkage::External));
+        }
+        if self
+            .module
+            .get_function("jinn_store_drop_indexes")
+            .is_none()
+        {
+            let void_ty = self.ctx.void_type();
+            let ft = void_ty.fn_type(&[ptr.into()], false);
+            self.module
+                .add_function("jinn_store_drop_indexes", ft, Some(Linkage::External));
+        }
         if self.module.get_function("jinn_wal_write_must").is_none() {
             let void_ty = self.ctx.void_type();
             let u8t = self.ctx.i8_type();

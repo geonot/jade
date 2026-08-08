@@ -343,7 +343,7 @@ impl<'s> Lexer<'s> {
             return self.lex_string();
         }
         if ch == b'"' {
-            return self.lex_raw_string();
+            return self.lex_quoted(b'"');
         }
         if ch.is_ascii_alphabetic() || ch == b'_' {
             return self.lex_ident();

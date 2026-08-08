@@ -294,7 +294,10 @@ impl Typer {
                     let callee = ast::Expr::Ident(qualified_name, *span);
                     return self.lower_expr_expected(&callee, expected);
                 }
-                let hobj = self.lower_expr(obj)?;
+                self.suppress_whole_struct_check += 1;
+                let hobj_res = self.lower_expr(obj);
+                self.suppress_whole_struct_check -= 1;
+                let hobj = hobj_res?;
 
                 if let hir::ExprKind::Var(parent_id, parent_name) = &hobj.kind
                     && self.suppress_moved_field_check == 0

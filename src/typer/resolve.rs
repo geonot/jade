@@ -257,7 +257,8 @@ impl Typer {
         let mut variants = Vec::new();
         for (tag, v) in ed.variants.iter().enumerate() {
             let ftys: Vec<Type> = v.fields.iter().map(|f| f.ty.clone()).collect();
-            self.variant_tags.insert(v.name, (ed.name, tag as u32));
+            let tag = v.discriminant.map(|d| d as u32).unwrap_or(tag as u32);
+            self.variant_tags.insert(v.name, (ed.name, tag));
             variants.push((v.name, ftys));
         }
         self.enums.insert(ed.name, variants);

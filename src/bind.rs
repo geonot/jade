@@ -8,7 +8,9 @@ pub fn bind_header(path: &Path) -> Result<String, String> {
     let cleaned = strip_preprocessor(&strip_comments(&src));
     let mut out = String::new();
     out.push_str(&format!(
-        "// Auto-generated Jinn bindings from {}\n\n",
+        "# Auto-generated Jinn bindings from {}\n\
+         # Review before use: a C header carries information (ownership, \
+         nullability, array lengths)\n# that does not survive the translation.\n\n",
         path.display()
     ));
 
@@ -19,7 +21,7 @@ pub fn bind_header(path: &Path) -> Result<String, String> {
                 out.push('\n');
             }
             CDecl::Struct(name) => {
-                out.push_str(&format!("// struct {name} (opaque)\n"));
+                out.push_str(&format!("# struct {name} (opaque)\n"));
             }
             CDecl::Typedef(_) => {}
         }
@@ -39,11 +41,15 @@ fn strip_comments(src: &str) -> String {
             }
         } else if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
             i += 2;
+            let mut spanned_lines = false;
             while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                if bytes[i] == b'\n' {
+                    spanned_lines = true;
+                }
                 i += 1;
             }
             i += 2;
-            out.push(' ');
+            out.push(if spanned_lines { '\n' } else { ' ' });
         } else {
             out.push(bytes[i] as char);
             i += 1;
@@ -54,9 +60,16 @@ fn strip_comments(src: &str) -> String {
 
 fn strip_preprocessor(src: &str) -> String {
     let mut out = String::new();
+    let mut in_continuation = false;
     for line in src.lines() {
         let trimmed = line.trim();
+        let continues = trimmed.ends_with('\\');
+        if in_continuation {
+            in_continuation = continues;
+            continue;
+        }
         if trimmed.starts_with('#') {
+            in_continuation = continues;
             continue;
         }
         out.push_str(line);
@@ -438,19 +451,70 @@ fn ctype_to_jinn(ty: &CType) -> String {
         CType::Float => "f32".to_string(),
         CType::Double => "f64".to_string(),
         CType::Ptr(inner) => format!("%{}", ctype_to_jinn(inner)),
-        CType::Named(n) => format!("%void /* {n} */"),
+        CType::Named(_) => "void".to_string(),
     }
 }
 
+fn collect_opaque(ty: &CType, out: &mut Vec<String>) {
+    match ty {
+        CType::Named(n) => out.push(n.clone()),
+        CType::Ptr(inner) => collect_opaque(inner, out),
+        _ => {}
+    }
+}
+
+fn is_jinn_ident(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 fn emit_extern(f: &CFn) -> String {
-    let mut out = String::from("extern *");
+    if !is_jinn_ident(&f.name) {
+        return format!("# skipped `{}`: not a usable Jinn identifier\n", f.name);
+    }
+    let by_value_named = |ty: &CType| matches!(ty, CType::Named(_));
+    if by_value_named(&f.ret) || f.params.iter().any(|p| by_value_named(&p.ty)) {
+        return format!(
+            "# skipped `{}`: it passes or returns a named C type by value, which has \
+             no Jinn spelling\n",
+            f.name
+        );
+    }
+
+    let mut opaque: Vec<String> = Vec::new();
+    collect_opaque(&f.ret, &mut opaque);
+    for p in &f.params {
+        collect_opaque(&p.ty, &mut opaque);
+    }
+    opaque.sort();
+    opaque.dedup();
+
+    let mut out = String::new();
+    if !opaque.is_empty() {
+        out.push_str(&format!(
+            "# `{}`: {} came through as an opaque pointer; confirm the real layout \
+             before relying on it\n",
+            f.name,
+            opaque.join("`, `")
+        ));
+    }
+    out.push_str("extern *");
     out.push_str(&f.name);
     out.push('(');
     for (i, p) in f.params.iter().enumerate() {
         if i > 0 {
             out.push_str(", ");
         }
-        out.push_str(&p.name);
+        let pname = if is_jinn_ident(&p.name) {
+            p.name.clone()
+        } else {
+            format!("arg{i}")
+        };
+        out.push_str(&pname);
         out.push_str(" as ");
         out.push_str(&ctype_to_jinn(&p.ty));
     }

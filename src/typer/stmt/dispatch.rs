@@ -288,7 +288,7 @@ impl Typer {
                 let value = if b.ty.is_none()
                     && !matches!(&b.value, ast::Expr::Quaternary(..) | ast::Expr::Ternary(..))
                 {
-                    match self.implicit_propagate(value.clone())? {
+                    match self.implicit_propagate_bind(value.clone())? {
                         Some(v) => v,
                         None => value,
                     }
@@ -499,7 +499,10 @@ impl Typer {
                 if let ast::Expr::Field(obj, field, fspan) = target
                     && let ast::Expr::Ident(row_name, _) = obj.as_ref()
                 {
-                    let probe = self.lower_expr(obj.as_ref())?;
+                    self.suppress_whole_struct_check += 1;
+                    let probe_res = self.lower_expr(obj.as_ref());
+                    self.suppress_whole_struct_check -= 1;
+                    let probe = probe_res?;
                     let probe_ty = self.infer_ctx.shallow_resolve(&probe.ty);
                     if let Type::Row(store) = &probe_ty {
                         let store = *store;

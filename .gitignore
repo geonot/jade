@@ -26,3 +26,9 @@ a.out
 # scratch.
 benchmarks/_build/
 benchmarks/results*.json
+
+# Compiled demo/app binaries and packaged tarballs. `jinn build` and
+# `jinn package` write these next to the sources; they are build outputs,
+# not source, and shipping an ELF in the repo makes review harder.
+apps/*/dist/
+apps/alpha_release_demo/alpha_demo

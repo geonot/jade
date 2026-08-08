@@ -206,6 +206,12 @@ int jinn_chan_send(jinn_chan_t *ch, const void *data) {
         jinn_context_swap(&self->ctx, &w->sched_ctx);
     }
 }
+int64_t jinn_chan_pending(jinn_chan_t *ch) {
+    if (!ch) return 0;
+    uint64_t head = atomic_load_explicit(&ch->head, memory_order_acquire);
+    uint64_t tail = atomic_load_explicit(&ch->tail, memory_order_acquire);
+    return tail > head ? (int64_t)(tail - head) : 0;
+}
 int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
     if (!ch) return 0;
     for (;;) {

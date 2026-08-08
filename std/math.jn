@@ -83,13 +83,13 @@ extern *fabs(x as f64) returns f64
         return -1.0
     0.0
 
-*is_nan(x)
+*is_nan(x as f64) returns bool
     x neq x
 
-*is_finite(x)
+*is_finite(x as f64) returns bool
     x equals x and extern.fabs(x) neq INF
 
-*is_inf(x)
+*is_inf(x as f64) returns bool
     extern.fabs(x) equals INF
 
 

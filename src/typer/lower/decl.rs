@@ -349,6 +349,10 @@ impl Typer {
                 span: p.span,
             });
         }
+        let prev_param_ids = std::mem::replace(
+            &mut self.current_fn_param_ids,
+            params.iter().map(|p| p.def_id).collect(),
+        );
         let prev_fn_ret = self.current_fn_ret_ty.replace(ret.clone());
         let prev_is_main = self.current_fn_is_main;
         self.current_fn_is_main = f.name.as_str() == "main";
@@ -385,6 +389,52 @@ impl Typer {
         let mut body = self.lower_block_no_scope_with_tail(&f.body, &ret, Some(&ret))?;
         self.finalize_block_drops(&mut body);
 
+        for (i, p) in params.iter_mut().enumerate() {
+            if !matches!(p.ownership, Ownership::Owned) || p.access_mod.is_some() {
+                continue;
+            }
+            let resolved = self.infer_ctx.resolve(&p.ty);
+            if resolved == p.ty {
+                continue;
+            }
+            let eff_mod = self
+                .fn_param_access
+                .get(&f.name)
+                .and_then(|a| a.get(i).copied())
+                .flatten()
+                .or(p.access_mod);
+            if eff_mod.is_some() {
+                continue;
+            }
+            if matches!(
+                self.param_ownership_with_mod(&resolved, None),
+                Ok(Ownership::Borrowed) | Ok(Ownership::BorrowMut)
+            ) {
+                p.ownership = Ownership::Borrowed;
+            }
+        }
+
+        let borrowed_param_ids: std::collections::HashSet<crate::hir::DefId> = params
+            .iter()
+            .filter(|p| {
+                matches!(
+                    p.ownership,
+                    Ownership::Borrowed | Ownership::BorrowMut | Ownership::Raw
+                )
+            })
+            .map(|p| p.def_id)
+            .collect();
+        if !borrowed_param_ids.is_empty() {
+            Self::strip_drops_for(&mut body, &borrowed_param_ids);
+        }
+
+        {
+            let mut locals: std::collections::HashMap<crate::hir::DefId, (Symbol, Type)> =
+                std::collections::HashMap::new();
+            Self::collect_local_binds(&body, &mut locals);
+            self.check_escaping_lambda_captures(&body, &locals)?;
+        }
+
         let inferred_err: Vec<Symbol> = self.current_fn_error_types.iter().cloned().collect();
         self.last_inferred_errors = self.current_fn_error_types.clone();
         if !declared_err_names.is_empty() {
@@ -404,6 +454,7 @@ impl Typer {
             }
         }
 
+        self.current_fn_param_ids = prev_param_ids;
         self.current_fn_ret_ty = prev_fn_ret;
         self.current_fn_is_main = prev_is_main;
         self.current_fn_error_types = prev_inferred;

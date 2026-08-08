@@ -341,6 +341,7 @@ def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
         print(f"CPU: {hw['model']}  |  Cores: {hw['cores']}  |  Governor: {hw['governor']}")
         print(f"Runs: {runs}  |  Warmup: {warmup}  |  Timeout: {timeout}s")
 
+    any_mismatch = []
     for opt in opt_levels:
         active = [l for l in langs if l != "python"]
         cols = [l.upper() for l in active]
@@ -371,6 +372,7 @@ def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
         raw_level = {}
         totals = {l: 0.0 for l in langs}
         rows_for_sort = []
+        mismatches = []
 
         for name in benchmarks:
             print(f"[bench] O{opt} start {name}", file=sys.stderr, flush=True)
@@ -400,8 +402,24 @@ def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
                     lang_stats_map[lang] = st
                     if raw_times:
                         raw_entry[lang] = [round(t * 1000, 3) for t in raw_times]
+                    if out is not None:
+                        entry.setdefault("_outputs", {})[lang] = (out or "").strip()
                     if lang == "jinn" and out:
                         entry["output"] = (out or "")[:50]
+
+            # A cross-language row only means something if every language
+            # computed the same answer. Comparability is asserted in
+            # benchmarks/README.md; this checks it.
+            outs = entry.pop("_outputs", {})
+            distinct = {v for v in outs.values() if v}
+            if len(distinct) > 1:
+                entry["output_mismatch"] = {k: v[:60] for k, v in outs.items() if v}
+                print(
+                    f"  !! {name}: languages disagree on output; this row is not "
+                    f"comparable: "
+                    + "; ".join(f"{k}={v[:30]!r}" for k, v in outs.items() if v)
+                )
+                mismatches.append(name)
 
             # Build display row
             row = f"{name:<18}"
@@ -470,6 +488,14 @@ def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
             row += f" {ratio_str(jt, ot):>{w}}"
         print(row)
 
+        if mismatches:
+            print(
+                f"\n  {len(mismatches)} benchmark(s) are NOT comparable at O{opt} "
+                f"— the languages produced different output: "
+                + ", ".join(mismatches)
+            )
+            any_mismatch.extend(mismatches)
+
         all_results[f"O{opt}"] = level
         all_raw[f"O{opt}"] = raw_level
 
@@ -480,6 +506,12 @@ def run_suite(opt_levels, runs, langs, timeout, save_tag, warmup, bench_filter,
     with open(out_path, "w") as f:
         json.dump(all_results, f, indent=2)
     print(f"\nResults -> {out_path}")
+    if any_mismatch:
+        print(
+            "\nWARNING: the rows above marked NOT comparable measure different "
+            "work in different languages. Fix the benchmark or drop the row "
+            "before quoting a ratio from it."
+        )
 
     # JSON export with raw per-run data
     if emit_json:

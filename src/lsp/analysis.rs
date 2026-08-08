@@ -182,9 +182,28 @@ pub fn analyze(src: &str) -> FileAnalysis {
     }
 }
 
+pub fn utf16_col_to_byte(line_text: &str, utf16_col: u32) -> usize {
+    let mut units = 0u32;
+    for (byte_idx, ch) in line_text.char_indices() {
+        if units >= utf16_col {
+            return byte_idx;
+        }
+        units += ch.len_utf16() as u32;
+    }
+    line_text.len()
+}
+
+pub fn byte_col_to_utf16(line_text: &str, byte_col: usize) -> u32 {
+    let capped = byte_col.min(line_text.len());
+    line_text[..capped]
+        .chars()
+        .map(|c| c.len_utf16() as u32)
+        .sum()
+}
+
 pub fn find_ident_at(src: &str, line: u32, col: u32) -> Option<String> {
     let target_line = src.lines().nth((line.saturating_sub(1)) as usize)?;
-    let col0 = (col.saturating_sub(1)) as usize;
+    let col0 = utf16_col_to_byte(target_line, col.saturating_sub(1));
     if col0 >= target_line.len() {
         return None;
     }
@@ -582,6 +601,26 @@ mod tests {
         assert_eq!(a.symbols.len(), 1);
         assert_eq!(a.symbols[0].name, "Point");
         assert_eq!(a.symbols[0].children.len(), 2);
+    }
+
+    #[test]
+    fn utf16_columns_map_past_astral_characters() {
+        let line = "x is '😀' + name";
+        assert_eq!(utf16_col_to_byte(line, 0), 0);
+        let emoji_utf16 = line.find("' + name").unwrap();
+        assert_eq!(byte_col_to_utf16(line, emoji_utf16), 8);
+        let name_byte = line.find("name").unwrap();
+        let name_utf16 = byte_col_to_utf16(line, name_byte);
+        assert_eq!(utf16_col_to_byte(line, name_utf16), name_byte);
+    }
+
+    #[test]
+    fn find_ident_at_uses_utf16_columns() {
+        let src = "*main\n    a is '😀'\n    log(a)\n";
+        let line = src.lines().nth(1).unwrap();
+        let after = byte_col_to_utf16(line, line.len());
+        assert!(after < line.len() as u32, "emoji should shrink the column");
+        assert_eq!(find_ident_at(src, 2, 5), Some("a".into()));
     }
 
     #[test]

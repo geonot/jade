@@ -31,6 +31,82 @@ impl Typer {
         }
     }
 
+    pub(in crate::typer) fn block_diverges(body: &[hir::Stmt]) -> bool {
+        let Some(last) = body
+            .iter()
+            .rev()
+            .find(|s| !matches!(s, hir::Stmt::Drop(..)))
+        else {
+            return false;
+        };
+        match last {
+            hir::Stmt::Ret(..)
+            | hir::Stmt::Break(..)
+            | hir::Stmt::Continue(..)
+            | hir::Stmt::ErrReturn(..) => true,
+            hir::Stmt::If(i) => match &i.els {
+                Some(els) => {
+                    Self::block_diverges(&i.then)
+                        && Self::block_diverges(els)
+                        && i.elifs.iter().all(|(_, b)| Self::block_diverges(b))
+                }
+                None => false,
+            },
+            hir::Stmt::Match(m) => {
+                !m.arms.is_empty() && m.arms.iter().all(|a| Self::block_diverges(&a.body))
+            }
+            _ => false,
+        }
+    }
+
+    pub(in crate::typer) fn join_branch_type(&self, body: &[hir::Stmt]) -> Option<Type> {
+        if Self::block_diverges(body) {
+            return None;
+        }
+        self.hir_tail_type(body)
+    }
+
+    pub(in crate::typer) fn unify_join_arm(
+        &mut self,
+        join_ty: &Type,
+        arm_ty: &Type,
+        span: crate::ast::Span,
+        construct: &'static str,
+    ) {
+        let reason: &'static str = if construct == "match" {
+            "match arm result type"
+        } else {
+            "if branches"
+        };
+        if self
+            .infer_ctx
+            .unify_at_tolerant(join_ty, arm_ty, span, reason)
+            .is_err()
+        {
+            let want = self.infer_ctx.resolve(join_ty);
+            let got = self.infer_ctx.resolve(arm_ty);
+            let (first, this) = if construct == "match" {
+                ("the first arm", "this arm")
+            } else {
+                ("the first branch", "this branch")
+            };
+            let help = match (&want, &got) {
+                (Type::String, t) | (t, Type::String) if t.is_num() => {
+                    "\n  help: use `to_string(value)` so both produce a string"
+                }
+                _ => {
+                    "\n  help: every branch used as a value must produce the same type; \
+                     make them agree, or bind each branch separately"
+                }
+            };
+            self.type_errors.push(format!(
+                "{}: `{construct}` branches produce different types: {first} produces `{want}`, \
+                 but {this} produces `{got}`{help}",
+                span.loc(),
+            ));
+        }
+    }
+
     pub(in crate::typer) fn lower_block(
         &mut self,
         block: &ast::Block,
@@ -641,6 +717,49 @@ impl Typer {
                     self.record_take_moves_in_expr(a)?;
                 }
             }
+            hir::ExprKind::VecMethod(recv, meth, args)
+            | hir::ExprKind::MapMethod(recv, meth, args) => {
+                let m_owned = meth.as_str();
+                let m: &str = m_owned.as_ref();
+                if matches!(
+                    m,
+                    "push"
+                        | "push_back"
+                        | "push_front"
+                        | "insert"
+                        | "append"
+                        | "add"
+                        | "put"
+                        | "set"
+                        | "enqueue"
+                ) {
+                    for a in args {
+                        if let hir::ExprKind::Var(id, vname) = &a.kind {
+                            let resolved = self.infer_ctx.resolve(&a.ty);
+                            let owned = !self.current_fn_param_ids.contains(id)
+                                && self
+                                    .find_var(&vname.as_str())
+                                    .map(|v| matches!(v.ownership, crate::hir::Ownership::Owned))
+                                    .unwrap_or(false);
+                            if owned
+                                && Self::expr_type_needs_drop(&resolved)
+                                && !matches!(resolved, Type::String)
+                            {
+                                self.mark_var_moved_checked(
+                                    *id,
+                                    *vname,
+                                    crate::typer::MoveReason::ContainerInsert(*meth, a.span),
+                                    a.span,
+                                )?;
+                            }
+                        }
+                    }
+                }
+                self.record_take_moves_in_expr(recv)?;
+                for a in args {
+                    self.record_take_moves_in_expr(a)?;
+                }
+            }
             hir::ExprKind::Method(recv, ty_name, m_name, args) => {
                 let mangled: crate::intern::Symbol =
                     format!("{}_{}", ty_name.as_str(), m_name.as_str()).into();
@@ -768,6 +887,35 @@ impl Typer {
             _ => {}
         }
         Ok(())
+    }
+
+    pub(in crate::typer) fn strip_drops_for(
+        body: &mut Vec<hir::Stmt>,
+        ids: &std::collections::HashSet<crate::hir::DefId>,
+    ) {
+        body.retain(|s| !matches!(s, hir::Stmt::Drop(id, _, _, _) if ids.contains(id)));
+        for s in body.iter_mut() {
+            match s {
+                hir::Stmt::If(i) => {
+                    Self::strip_drops_for(&mut i.then, ids);
+                    for (_, b) in i.elifs.iter_mut() {
+                        Self::strip_drops_for(b, ids);
+                    }
+                    if let Some(b) = i.els.as_mut() {
+                        Self::strip_drops_for(b, ids);
+                    }
+                }
+                hir::Stmt::Match(m) => {
+                    for a in m.arms.iter_mut() {
+                        Self::strip_drops_for(&mut a.body, ids);
+                    }
+                }
+                hir::Stmt::While(w) => Self::strip_drops_for(&mut w.body, ids),
+                hir::Stmt::For(f) => Self::strip_drops_for(&mut f.body, ids),
+                hir::Stmt::Loop(l) => Self::strip_drops_for(&mut l.body, ids),
+                _ => {}
+            }
+        }
     }
 
     pub(in crate::typer) fn emit_scope_drops_excluding(
@@ -934,6 +1082,162 @@ impl Typer {
             hir::ExprKind::ChannelSend(ch, v) => {
                 Self::collect_hir_var_ids_expr(ch, out);
                 Self::collect_hir_var_ids_expr(v, out);
+            }
+            _ => {}
+        }
+    }
+
+    pub(in crate::typer) fn collect_local_binds(
+        body: &[hir::Stmt],
+        out: &mut std::collections::HashMap<crate::hir::DefId, (crate::intern::Symbol, Type)>,
+    ) {
+        for st in body {
+            match st {
+                hir::Stmt::Bind(b) => {
+                    out.insert(b.def_id, (b.name, b.ty.clone()));
+                }
+                hir::Stmt::If(i) => {
+                    Self::collect_local_binds(&i.then, out);
+                    for (_, b) in &i.elifs {
+                        Self::collect_local_binds(b, out);
+                    }
+                    if let Some(b) = &i.els {
+                        Self::collect_local_binds(b, out);
+                    }
+                }
+                hir::Stmt::Match(m) => {
+                    for a in &m.arms {
+                        Self::collect_local_binds(&a.body, out);
+                    }
+                }
+                hir::Stmt::While(w) => Self::collect_local_binds(&w.body, out),
+                hir::Stmt::For(f) => Self::collect_local_binds(&f.body, out),
+                hir::Stmt::Loop(l) => Self::collect_local_binds(&l.body, out),
+                _ => {}
+            }
+        }
+    }
+
+    pub(in crate::typer) fn check_escaping_lambda_captures(
+        &mut self,
+        body: &[hir::Stmt],
+        local_ids: &std::collections::HashMap<crate::hir::DefId, (crate::intern::Symbol, Type)>,
+    ) -> Result<(), String> {
+        let mut lambda_binds: std::collections::HashMap<crate::hir::DefId, &hir::Expr> =
+            std::collections::HashMap::new();
+        Self::collect_lambda_binds(body, &mut lambda_binds);
+        let mut escaping: Vec<(&hir::Expr, crate::ast::Span)> = Vec::new();
+        Self::collect_escaping_lambdas(body, &lambda_binds, &mut escaping);
+        for (lam, at) in escaping {
+            let hir::ExprKind::Lambda(params, lbody) = &lam.kind else {
+                continue;
+            };
+            let mut ids = std::collections::HashSet::new();
+            for st in lbody {
+                Self::collect_hir_var_ids_stmt(st, &mut ids);
+            }
+            for p in params {
+                ids.remove(&p.def_id);
+            }
+            for id in ids {
+                if let Some((vname, vty)) = local_ids.get(&id) {
+                    let resolved = self.infer_ctx.resolve(vty);
+                    if Self::expr_type_needs_drop(&resolved) && !matches!(resolved, Type::String) {
+                        return Err(format!(
+                            "{}: this function returns a lambda that captures the local \
+                             `{}` (a `{}`), whose storage is freed when the function \
+                             returns — calling the lambda later would read freed memory; \
+                             capture a clone (`{}2 is copy {}` before the lambda), return \
+                             the value alongside the lambda, or move ownership into a \
+                             struct that outlives the call",
+                            at.loc(),
+                            vname,
+                            resolved,
+                            vname,
+                            vname,
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_lambda_binds<'a>(
+        body: &'a [hir::Stmt],
+        out: &mut std::collections::HashMap<crate::hir::DefId, &'a hir::Expr>,
+    ) {
+        for st in body {
+            match st {
+                hir::Stmt::Bind(b) => {
+                    if matches!(b.value.kind, hir::ExprKind::Lambda(..)) {
+                        out.insert(b.def_id, &b.value);
+                    }
+                }
+                hir::Stmt::If(i) => {
+                    Self::collect_lambda_binds(&i.then, out);
+                    for (_, blk) in &i.elifs {
+                        Self::collect_lambda_binds(blk, out);
+                    }
+                    if let Some(blk) = &i.els {
+                        Self::collect_lambda_binds(blk, out);
+                    }
+                }
+                hir::Stmt::Match(m) => {
+                    for a in &m.arms {
+                        Self::collect_lambda_binds(&a.body, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn collect_escaping_lambdas<'a>(
+        body: &'a [hir::Stmt],
+        binds: &std::collections::HashMap<crate::hir::DefId, &'a hir::Expr>,
+        out: &mut Vec<(&'a hir::Expr, crate::ast::Span)>,
+    ) {
+        for st in body {
+            match st {
+                hir::Stmt::Ret(Some(e), _, sp) => Self::collect_lambda_values(e, *sp, binds, out),
+                hir::Stmt::Expr(e) => Self::collect_lambda_values(e, e.span, binds, out),
+                hir::Stmt::If(i) => {
+                    Self::collect_escaping_lambdas(&i.then, binds, out);
+                    for (_, b) in &i.elifs {
+                        Self::collect_escaping_lambdas(b, binds, out);
+                    }
+                    if let Some(b) = &i.els {
+                        Self::collect_escaping_lambdas(b, binds, out);
+                    }
+                }
+                hir::Stmt::Match(m) => {
+                    for a in &m.arms {
+                        Self::collect_escaping_lambdas(&a.body, binds, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn collect_lambda_values<'a>(
+        e: &'a hir::Expr,
+        at: crate::ast::Span,
+        binds: &std::collections::HashMap<crate::hir::DefId, &'a hir::Expr>,
+        out: &mut Vec<(&'a hir::Expr, crate::ast::Span)>,
+    ) {
+        match &e.kind {
+            hir::ExprKind::Lambda(..) => out.push((e, at)),
+            hir::ExprKind::Var(id, _) => {
+                if let Some(lam) = binds.get(id) {
+                    out.push((lam, at));
+                }
+            }
+            hir::ExprKind::Block(stmts) => Self::collect_escaping_lambdas(stmts, binds, out),
+            hir::ExprKind::Ternary(_, a, b) => {
+                Self::collect_lambda_values(a, at, binds, out);
+                Self::collect_lambda_values(b, at, binds, out);
             }
             _ => {}
         }

@@ -30,4 +30,4 @@
 *main
     log balanced("(()[])")
     log balanced("(]")
-    log balanced("{[()]}")
+    log balanced("\{[()]}")

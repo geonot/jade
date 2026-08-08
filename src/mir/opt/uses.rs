@@ -167,6 +167,17 @@ fn collect_term_uses(term: &Terminator, s: &mut HashSet<ValueId>) {
     }
 }
 
+pub(super) fn may_trap(kind: &InstKind) -> bool {
+    match kind {
+        InstKind::StrictCast(..) => true,
+        InstKind::BinOp(op, _, _) => matches!(
+            op,
+            BinOp::Div | BinOp::Mod | BinOp::Shl | BinOp::Shr | BinOp::Ushr
+        ),
+        _ => false,
+    }
+}
+
 pub(super) fn is_pure(kind: &InstKind) -> bool {
     matches!(
         kind,

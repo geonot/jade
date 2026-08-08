@@ -179,3 +179,12 @@ int64_t __jinn_deque_len(void *handle) {
     jinn_udeque_t *dq = (jinn_udeque_t *)handle;
     return (dq->tail - dq->head + dq->cap) % dq->cap;
 }
+
+int32_t __jinn_str_cmp(const char *a, int64_t alen, const char *b, int64_t blen) {
+    int64_t n = alen < blen ? alen : blen;
+    int r = 0;
+    if (n > 0 && a && b) r = memcmp(a, b, (size_t)n);
+    if (r != 0) return r < 0 ? -1 : 1;
+    if (alen == blen) return 0;
+    return alen < blen ? -1 : 1;
+}

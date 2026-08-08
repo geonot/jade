@@ -11,7 +11,7 @@
         r is r + 1
     i is 0
     while i < g.length
-        row is g.get(i)
+        row is copy g.get(i)
         s is 0
         j is 0
         while j < row.length

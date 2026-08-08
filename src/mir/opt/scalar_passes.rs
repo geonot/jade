@@ -1,5 +1,5 @@
 use super::subst::{subst_inst, subst_term};
-use super::uses::{collect_used, is_pure};
+use super::uses::{collect_used, is_pure, may_trap};
 
 use super::super::*;
 use std::collections::{HashMap, HashSet};
@@ -66,7 +66,7 @@ pub fn dead_code_elimination(func: &mut Function) -> bool {
         let before = bb.insts.len();
         bb.insts.retain(|inst| {
             inst.dest
-                .is_none_or(|d| used.contains(&d) || !is_pure(&inst.kind))
+                .is_none_or(|d| used.contains(&d) || !is_pure(&inst.kind) || may_trap(&inst.kind))
         });
         if bb.insts.len() != before {
             changed = true;

@@ -593,12 +593,67 @@ impl<'ctx> Compiler<'ctx> {
     const LOCK_EX: u64 = 2;
     const LOCK_UN: u64 = 8;
 
-    pub(crate) fn store_lock(&mut self, fp: PointerValue<'ctx>) -> Result<(), String> {
+    pub(in crate::codegen) fn invalidate_store_indexes(
+        &mut self,
+        store_name: &str,
+    ) -> Result<(), String> {
+        let Some(sd) = self.store_defs.get(store_name).cloned() else {
+            return Ok(());
+        };
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let close_fn = crate::codegen::fn_or_die(&self.module, "jinn_idx_close");
+        for field in &sd.fields {
+            let has_index = field.decorators.iter().any(|d| {
+                matches!(
+                    d,
+                    crate::ast::FieldDecorator::Index | crate::ast::FieldDecorator::Unique
+                )
+            });
+            if !has_index {
+                continue;
+            }
+            let gname = format!("__store_{}_idx_{}", sd.name, field.name);
+            let Some(global) = self.module.get_global(&gname) else {
+                continue;
+            };
+            let cur = b!(self
+                .bld
+                .build_load(ptr_ty, global.as_pointer_value(), "idx.stale"))
+            .into_pointer_value();
+            b!(self.bld.build_call(close_fn, &[cur.into()], ""));
+            b!(self
+                .bld
+                .build_store(global.as_pointer_value(), ptr_ty.const_null()));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn store_lock(
+        &mut self,
+        store_name: &str,
+        fp: PointerValue<'ctx>,
+    ) -> Result<(), String> {
+        self.store_wlock_call(store_name, "jinn_store_wlock")?;
         self.store_flock(fp, Self::LOCK_EX)
     }
 
-    pub(crate) fn store_unlock(&mut self, fp: PointerValue<'ctx>) -> Result<(), String> {
-        self.store_flock(fp, Self::LOCK_UN)
+    pub(crate) fn store_unlock(
+        &mut self,
+        store_name: &str,
+        fp: PointerValue<'ctx>,
+    ) -> Result<(), String> {
+        self.store_flock(fp, Self::LOCK_UN)?;
+        self.store_wlock_call(store_name, "jinn_store_wunlock")
+    }
+
+    fn store_wlock_call(&mut self, store_name: &str, fname: &str) -> Result<(), String> {
+        let path = format!("{store_name}.store\0");
+        let path_str = b!(self.bld.build_global_string_ptr(&path, "wlock.path"));
+        let f = crate::codegen::fn_or_die(&self.module, fname);
+        b!(self
+            .bld
+            .build_call(f, &[path_str.as_pointer_value().into()], ""));
+        Ok(())
     }
 
     pub(in crate::codegen) fn store_flock(

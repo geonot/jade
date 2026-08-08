@@ -22,7 +22,7 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         let fp = self.load_store_fp(store_name)?;
-        self.store_lock(fp)?;
+        self.store_lock(store_name, fp)?;
         self.txn_track_store(store_name, fp)?;
 
         for dec in &sd.decorators {
@@ -179,10 +179,10 @@ impl<'ctx> Compiler<'ctx> {
                         b!(self
                             .bld
                             .build_store(status_ptr, i64t.const_int(-2i64 as u64, true)));
-                        self.store_unlock(fp)?;
+                        self.store_unlock(store_name, fp)?;
                         b!(self.bld.build_unconditional_branch(insert_done_bb));
                     } else {
-                        self.store_unlock(fp)?;
+                        self.store_unlock(store_name, fp)?;
                         self.emit_trap(&format!(
                             "store '{store_name}': missing @required field '{}'",
                             field_def.name
@@ -230,10 +230,10 @@ impl<'ctx> Compiler<'ctx> {
                         b!(self
                             .bld
                             .build_store(status_ptr, i64t.const_int(-1i64 as u64, true)));
-                        self.store_unlock(fp)?;
+                        self.store_unlock(store_name, fp)?;
                         b!(self.bld.build_unconditional_branch(insert_done_bb));
                     } else {
-                        self.store_unlock(fp)?;
+                        self.store_unlock(store_name, fp)?;
                         self.emit_trap(&format!(
                             "store '{store_name}': duplicate value for @unique field '{}'",
                             field_def.name
@@ -471,7 +471,7 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        self.store_unlock(fp)?;
+        self.store_unlock(store_name, fp)?;
 
         b!(self.bld.build_unconditional_branch(insert_done_bb));
         self.bld.position_at_end(insert_done_bb);

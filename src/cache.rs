@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn ensure_allowed_dep_url(url: &str) -> Result<(), String> {
+    ensure_safe_dep_url(url)?;
     if url.starts_with("https://") {
         return Ok(());
     }
@@ -55,6 +56,17 @@ impl Cache {
         self.root.join(url_to_dir(url)).join(version.to_string())
     }
 
+    fn ensure_inside_root(&self, dir: &std::path::Path) -> Result<(), String> {
+        if !dir.starts_with(&self.root) {
+            return Err(format!(
+                "refusing to use package cache path {} — it escapes the cache root {}",
+                dir.display(),
+                self.root.display()
+            ));
+        }
+        Ok(())
+    }
+
     pub fn is_cached(&self, dep: &Dependency) -> bool {
         self.package_path(dep).exists()
     }
@@ -71,6 +83,7 @@ impl Cache {
 
     fn fetch_tag(&self, dep: &Dependency, tag: &str) -> Result<String, String> {
         let dir = self.package_path(dep);
+        self.ensure_inside_root(&dir)?;
         if dir.exists() {
             std::fs::remove_dir_all(&dir)
                 .map_err(|e| format!("cannot clear cache dir {}: {e}", dir.display()))?;
@@ -94,6 +107,7 @@ impl Cache {
     fn fetch_pinned_commit(&self, dep: &Dependency, commit: &str) -> Result<String, String> {
         ensure_allowed_dep_url(&dep.url)?;
         let dir = self.package_path(dep);
+        self.ensure_inside_root(&dir)?;
         if dir.exists() {
             std::fs::remove_dir_all(&dir)
                 .map_err(|e| format!("cannot clear cache dir {}: {e}", dir.display()))?;
@@ -232,10 +246,48 @@ fn collect_paths(cache: &Cache, entry: &LockEntry, map: &mut HashMap<Symbol, Pat
     }
 }
 
+fn strip_scheme(url: &str) -> &str {
+    match url.find("://") {
+        Some(i) => &url[i + 3..],
+        None => url.strip_prefix("git@").unwrap_or(url),
+    }
+}
+
 fn url_to_dir(url: &str) -> String {
-    url.trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .replace(':', "_")
+    let stripped = strip_scheme(url);
+    let mut out = String::with_capacity(stripped.len());
+    for seg in stripped.split('/') {
+        if seg.is_empty() || seg == "." || seg == ".." {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push('/');
+        }
+        for ch in seg.chars() {
+            match ch {
+                'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '-' | '_' => out.push(ch),
+                _ => out.push('_'),
+            }
+        }
+    }
+    if out.is_empty() {
+        out.push('_');
+    }
+    out
+}
+
+fn ensure_safe_dep_url(url: &str) -> Result<(), String> {
+    // The cache directory is derived from the URL, so a `..` segment would
+    // place the clone outside the cache root. An absolute remainder is normal
+    // for file:// URLs and is harmless: url_to_dir rewrites every segment and
+    // ensure_inside_root re-checks the result.
+    if strip_scheme(url).split('/').any(|seg| seg == "..") {
+        return Err(format!(
+            "dependency URL '{url}' contains a `..` path segment; package cache \
+             paths must stay inside the cache root"
+        ));
+    }
+    Ok(())
 }
 
 fn dirs_cache() -> PathBuf {

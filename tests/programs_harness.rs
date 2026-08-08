@@ -12,7 +12,10 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-const KNOWN_ICE: &[&str] = &["compiler_pipeline"];
+const UNSUPPORTED: &[(&str, &str)] = &[(
+    "compiler_pipeline",
+    "joins values of different shapes at a control-flow merge",
+)];
 
 fn run_program(src: &Path) -> Result<String, String> {
     let dir = tempfile::tempdir().unwrap();
@@ -83,7 +86,7 @@ fn every_program_is_wired_and_matches_its_snapshot() {
 
     let todo: Vec<String> = names
         .iter()
-        .filter(|n| !KNOWN_ICE.contains(&n.as_str()))
+        .filter(|n| !UNSUPPORTED.iter().any(|(u, _)| u == n))
         .cloned()
         .collect();
 
@@ -113,9 +116,37 @@ fn every_program_is_wired_and_matches_its_snapshot() {
         }
     }
 
+    for (name, want_diag) in UNSUPPORTED {
+        let src = root().join(format!("tests/programs/{name}.jn"));
+        let dir = tempfile::tempdir().unwrap();
+        let c = Command::new(jinnc())
+            .arg(&src)
+            .arg("-o")
+            .arg(dir.path().join("p.bin"))
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&c.stderr);
+        if c.status.success() {
+            failures.push(format!(
+                "{name}.jn now compiles — give it a snapshot in \
+                 tests/programs/expected/ and drop it from UNSUPPORTED"
+            ));
+        } else if stderr.contains("panicked at") {
+            failures.push(format!(
+                "{name}.jn panics the compiler; it must fail with a diagnostic, \
+                 not an ICE:\n{stderr}"
+            ));
+        } else if !stderr.contains(want_diag) {
+            failures.push(format!(
+                "{name}.jn failed for a different reason than recorded \
+                 ({want_diag:?}):\n{stderr}"
+            ));
+        }
+    }
+
     for e in std::fs::read_dir(&expected_dir).unwrap().flatten() {
         let stem = e.path().file_stem().unwrap().to_string_lossy().into_owned();
-        if !names.contains(&stem) {
+        if !names.contains(&stem) && !UNSUPPORTED.iter().any(|(u, _)| *u == stem) {
             failures.push(format!("orphaned snapshot expected/{stem}.out"));
         }
     }
@@ -130,23 +161,4 @@ fn every_program_is_wired_and_matches_its_snapshot() {
         checked > 80,
         "corpus scan looks wrong: only {checked} programs"
     );
-}
-
-#[test]
-fn known_ice_still_reproduces() {
-    for name in KNOWN_ICE {
-        let src = root().join(format!("tests/programs/{name}.jn"));
-        let dir = tempfile::tempdir().unwrap();
-        let c = Command::new(jinnc())
-            .arg(&src)
-            .arg("-o")
-            .arg(dir.path().join("p.bin"))
-            .output()
-            .unwrap();
-        assert!(
-            !c.status.success(),
-            "{name}.jn now compiles — wire it into the snapshot corpus and \
-             remove it from KNOWN_ICE"
-        );
-    }
 }

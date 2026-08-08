@@ -82,6 +82,7 @@ impl<'ctx> Compiler<'ctx> {
                         let _ = self.bld.build_store(alloca, agg);
                         self.self_allocs.insert(dest, alloca);
                         self.self_alloc_types.insert(dest, st.into());
+                        self.local_struct_values.insert(dest);
                         return Ok(Some(alloca.into()));
                     }
                     Ok(agg)
@@ -192,6 +193,27 @@ impl<'ctx> Compiler<'ctx> {
                         self.val(*obj)
                     };
                     let v = self.val(*val);
+
+                    let writes_through_pointer = !self.local_struct_values.contains(obj);
+                    if obj_val.is_pointer_value()
+                        && !writes_through_pointer
+                        && let Some(name) = self.struct_name_from_type(&inst.ty)
+                        && let Some(st) = self.module.get_struct_type(&name)
+                    {
+                        let loaded = b!(self.bld.build_load(
+                            st,
+                            obj_val.into_pointer_value(),
+                            "fieldset.copy"
+                        ))
+                        .into_struct_value();
+                        let field_idx = self.field_index(&name, &field.as_str());
+                        let updated =
+                            b!(self
+                                .bld
+                                .build_insert_value(loaded, v, field_idx, &field.as_str()));
+                        return Ok(Some(updated.into_struct_value().into()));
+                    }
+
                     if obj_val.is_pointer_value() {
                         let struct_name = self.struct_name_from_type(&inst.ty).or_else(|| {
                             self.var_allocs
@@ -213,6 +235,15 @@ impl<'ctx> Compiler<'ctx> {
                                 &field.as_str()
                             ));
                             b!(self.bld.build_store(gep, v));
+
+                            if self.struct_name_from_type(&inst.ty).is_some() {
+                                let reloaded = b!(self.bld.build_load(
+                                    st,
+                                    obj_val.into_pointer_value(),
+                                    "fieldset.reload"
+                                ));
+                                return Ok(Some(reloaded));
+                            }
                         }
 
                         return Ok(Some(obj_val));
@@ -230,6 +261,11 @@ impl<'ctx> Compiler<'ctx> {
                                     .build_insert_value(sv, v, field_idx, &field.as_str()));
                             return Ok(Some(updated.into_struct_value().into()));
                         }
+                    }
+                    if let Some(name) = self.struct_name_from_type(&inst.ty)
+                        && let Some(st) = self.module.get_struct_type(&name)
+                    {
+                        return Ok(Some(st.get_undef().into()));
                     }
                     Ok(self.ctx.i8_type().const_int(0, false).into())
                 }
@@ -612,6 +648,9 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 mir::InstKind::Ref(val) => {
                     let v = self.val(*val);
+                    if v.get_type() == self.string_type().into() {
+                        return self.string_data(v).map(Some);
+                    }
                     let alloca = self.entry_alloca(v.get_type(), "ref");
                     b!(self.bld.build_store(alloca, v));
                     Ok(alloca.into())

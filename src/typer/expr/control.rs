@@ -16,32 +16,31 @@ impl Typer {
                 let result_ty = expected
                     .cloned()
                     .unwrap_or_else(|| self.infer_ctx.fresh_var());
-                let hi = self.lower_if(i, &result_ty)?;
-                let ty = match hi.then.last() {
-                    Some(hir::Stmt::Expr(e)) => {
-                        let r = self.infer_ctx.unify_at(
-                            &result_ty,
-                            &e.ty,
-                            i.span,
-                            "if-expression then branch",
-                        );
-                        self.collect_unify_error(r);
-                        e.ty.clone()
-                    }
-                    _ => Type::Void,
-                };
-                if let Some(ref els) = hi.els
-                    && let Some(hir::Stmt::Expr(e)) = els.last()
-                {
-                    let r = self
-                        .infer_ctx
-                        .unify_at(&ty, &e.ty, i.span, "if-expression branches");
+                let hi = self.lower_if_with_tail(i, &result_ty, Some(&result_ty))?;
+                let mut ty = self.join_branch_type(&hi.then).unwrap_or(Type::Void);
+                if ty != Type::Void {
+                    let r = self.infer_ctx.unify_at(
+                        &result_ty,
+                        &ty,
+                        i.span,
+                        "if-expression then branch",
+                    );
                     self.collect_unify_error(r);
                 }
-                for (_, branch) in &hi.elifs {
-                    if let Some(hir::Stmt::Expr(e)) = branch.last() {
-                        let r = self.infer_ctx.unify_at(&ty, &e.ty, i.span, "elif branch");
-                        self.collect_unify_error(r);
+                let mut rest: Vec<&hir::Block> = hi.elifs.iter().map(|(_, b)| b).collect();
+                if let Some(ref els) = hi.els {
+                    rest.push(els);
+                }
+                let arms: Vec<Option<Type>> =
+                    rest.iter().map(|b| self.join_branch_type(b)).collect();
+                for arm_ty in arms {
+                    match (&ty, arm_ty) {
+                        (Type::Void, Some(a)) => ty = a,
+                        (j, Some(a)) => {
+                            let j = j.clone();
+                            self.unify_join_arm(&j, &a, i.span, "if");
+                        }
+                        _ => {}
                     }
                 }
                 Ok(hir::Expr {

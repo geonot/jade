@@ -134,6 +134,7 @@ pub struct Param {
     pub value: ValueId,
     pub name: Symbol,
     pub ty: Type,
+    pub by_ref: bool,
 }
 
 #[derive(Debug, Clone)]

@@ -132,12 +132,16 @@ impl<'s> Lexer<'s> {
     }
 
     pub(in crate::lexer) fn lex_string(&mut self) -> Result<Spanned, LexError> {
+        self.lex_quoted(b'\'')
+    }
+
+    pub(in crate::lexer) fn lex_quoted(&mut self, quote: u8) -> Result<Spanned, LexError> {
         let (start, sc) = (self.pos, self.col);
         self.advance();
 
         if self.pos + 1 < self.src.len()
-            && self.src[self.pos] == b'\''
-            && self.src[self.pos + 1] == b'\''
+            && self.src[self.pos] == quote
+            && self.src[self.pos + 1] == quote
         {
             self.advance();
             self.advance();
@@ -149,10 +153,10 @@ impl<'s> Lexer<'s> {
             }
             let mut val = String::new();
             while self.pos < self.src.len() {
-                if self.src[self.pos] == b'\''
+                if self.src[self.pos] == quote
                     && self.pos + 2 < self.src.len()
-                    && self.src[self.pos + 1] == b'\''
-                    && self.src[self.pos + 2] == b'\''
+                    && self.src[self.pos + 1] == quote
+                    && self.src[self.pos + 2] == quote
                 {
                     self.advance();
                     self.advance();
@@ -175,7 +179,7 @@ impl<'s> Lexer<'s> {
         }
         let mut val = String::new();
         let mut has_interp = false;
-        while self.pos < self.src.len() && self.src[self.pos] != b'\'' {
+        while self.pos < self.src.len() && self.src[self.pos] != quote {
             if self.src[self.pos] == b'\n' {
                 return self.err("unterminated string");
             }
@@ -305,26 +309,6 @@ impl<'s> Lexer<'s> {
             });
             return Ok(self.pending.remove(0));
         }
-        Ok(Spanned {
-            token: Token::Str(val),
-            span: Span::new(start, self.pos, self.line, sc),
-        })
-    }
-
-    pub(in crate::lexer) fn lex_raw_string(&mut self) -> Result<Spanned, LexError> {
-        let (start, sc) = (self.pos, self.col);
-        self.advance();
-        let mut val = String::new();
-        while self.pos < self.src.len() && self.src[self.pos] != b'"' {
-            if self.src[self.pos] == b'\n' {
-                return self.err("unterminated raw string");
-            }
-            push_utf8_at(&mut val, self.src, &mut self.pos, &mut self.col);
-        }
-        if self.pos >= self.src.len() {
-            return self.err("unterminated raw string");
-        }
-        self.advance();
         Ok(Spanned {
             token: Token::Str(val),
             span: Span::new(start, self.pos, self.line, sc),

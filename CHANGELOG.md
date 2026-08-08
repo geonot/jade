@@ -1,4 +1,122 @@
 # Changelog
+- **[141]** (2026-08-06) alpha review remediation: 24 findings fixed, three more found by the new gates
+
+The 2026-08-06 alpha readiness review is written up in
+docs/alpha-review-findings.md; per-finding remediation state is in
+docs/alpha-review-status.md. This entry records what was decided, because
+several of the fixes turned on which of two documents was right rather than
+on which code was wrong.
+
+**The gates measured a narrower surface than their names implied, and that
+is what let everything else drift.** `docs/std.md` defined "alpha-stable" as
+`--emit-hir` exiting 0 — type-checks, nothing more. All 49 modules passed it
+while 10 could not be imported at all by a five-line program. Of 546 corpus
+programs only the 87 in tests/programs were ever compiled and run; snippets/
+was parsed and formatted, apps/ and benchmarks/ were referenced by no test.
+MIR verify was behind `#[cfg(debug_assertions)]`, so it was absent from the
+compiler users run, and it did not check phi/edge type agreement anyway. A
+`KNOWN_ICE` whitelist asserted that a program still crashed.
+
+So the gates came first. `tests/corpus_differential.rs` compiles **and runs**
+snippets/ and tests/programs/ at `--opt 0` and `--opt 3` and diffs stdout and
+exit code. MIR verify checks phi types and runs in release (`JINN_MIR_VERIFY=0`
+opts out). The whitelist is replaced by a list that asserts the *specific*
+diagnostic, so it fails both if the program regresses to a panic and if it
+starts compiling. `scripts/alpha_release_smoke.sh` pointed at a directory that
+moved to apps/, which had been aborting preflight at step 5 of 7 — so steps 6
+and 7 had not run in the gate at all.
+
+That paid for itself immediately. The differential harness found a miscompile
+in snippets/201-300/s298.jn that was flaky at *both* optimisation levels: an
+actor's queued messages were dropped at process exit. Actor coroutines are
+daemons, so `jinn_sched_run` returned without waiting and nothing closed the
+mailboxes. Actors now register in a live list, and exit closes and drains
+them. Two further defects the review had not found came out of neighbouring
+fixes: passing a struct that owns a Vec double-freed it (parameter ownership
+was decided before inference resolved the type, so an unannotated parameter
+defaulted to Owned and the callee emitted drop glue for a value the caller
+still owned), and Map values were stored in an 8-byte slot, which made
+`Map of String` structurally impossible and was the real cause of the
+`logging` and `url` LLVM-verification failures.
+
+**Where the spec and the implementation disagreed, the spec won.** Two
+findings were framed backwards in the review and are worth recording as
+decisions:
+
+- `q is p` on a struct of scalars aliased. docs/memory-model.md §1 puts such a
+  struct in category Value — "deep copy; both live, independent" — so the
+  binding now copies. `tests/crash_safety.rs` had a passing test asserting the
+  aliasing; it now pins value semantics.
+- Writes through a struct *parameter* were reported as "lost inside a loop".
+  docs/access-semantics.md §4.1 makes a POD-struct parameter `Owned`, i.e. an
+  independent copy, so the mutation *reaching* the caller was the defect. The
+  callee now copies POD struct parameters on entry and borrows drop-needing
+  ones, which is what the document says and what makes the loop and non-loop
+  cases agree.
+
+**Double-quoted strings now take escapes and interpolation.** They were raw,
+which docs/jinn.md never said and which quietly broke 16 std modules that
+write `"\n"`, `"\r\n"` or `"\x1b["`. Sixteen call sites across terminal,
+signal and the tour were already written assuming interpolation, so making it
+work fixed more than it changed; one snippet wanting a literal brace now
+escapes it. `jinn fmt` was emitting string contents unescaped, which made this
+non-idempotent — it now escapes properly.
+
+**Other P0s, each verified by re-running the original reproduction:** join
+points are unified in the typer with a diagnostic naming both branches
+(this one defect was behind eight of the ten unimportable std modules);
+MIR DCE no longer deletes trapping instructions, so `as strict` aborts at
+every optimisation level; enum→int reads only the discriminant instead of
+four bytes past the object, float→int saturates instead of emitting poison,
+and explicit enum discriminants are carried through instead of being parsed
+and discarded; `destroy` builds survivors in a temp file and renames instead
+of truncating the live data file, and invalidates indexes that its offset
+shift would otherwise leave pointing at the wrong row; the store has a real
+intra-process writer lock (flock on a shared fd is a no-op between
+coroutines); `together` inside a coroutine joins its children, by threading
+the scope pointer through spawn rather than reading TLS that a context swap
+has already invalidated; `%String` passes the data pointer rather than the
+24-byte header, which was silently corrupting every hash and file path over
+23 bytes; a constant in pattern position compares instead of binding, which
+is why `json.parse` could not parse anything; `main` binds the success value
+of a fallible call and exits non-zero on an unhandled error; four
+use-after-free constructions in safe code are compile errors; dependency URLs
+cannot escape the package cache, and a corrupt store header cannot overflow
+the heap.
+
+**ci/sanitize.sh is usable again.** It ran `cargo clean` and then the whole
+suite twice, destroying the shared release build and taking about an hour, so
+nobody ran it — which is why the review's memory findings rested on crash
+signatures rather than an instrumented sweep. It now builds an instrumented
+runtime into its own target directory and sweeps nine targeted programs under
+ASan+UBSan and TSan in about two minutes. On its first run it caught a data
+race in the actor-drain code added earlier in this same change.
+
+**Benchmarks.** `coroutine_spawn` ran 100,000 iterations in Jinn against
+1,000,000 in C, so the published ratio was wrong by 10x before the paradigm
+difference was even considered. Counts realigned; the remaining gap is
+ucontext's per-switch sigprocmask against a syscall-free context switch, and
+says so at the top of the file. `run_benchmarks.py` now captures stdout for
+every language, not just Jinn, and names any benchmark whose languages
+disagree — which would have caught this for free.
+
+**Tooling.** `jinn bind` emitted `//` comments, inlined C block comments into
+signatures and bound macros as functions, so its output was rejected at line
+1; it now produces parseable Jinn from real system headers and honestly skips
+what it cannot represent, with a reason. The LSP treated UTF-16 positions as
+byte offsets, so hover and goto-definition stopped working to the right of any
+emoji. `jinn run` hashes dependency sources instead of trusting the entry
+file alone; `.jni` interface reuse is off by default, since `to_decls()` never
+reconstructed the functions list.
+
+Regression coverage is in tests/alpha_review_regressions.rs and the corpus
+differential harness. Still open, and recorded as such in the status document:
+capabilities remain inert, generics remain narrow, transaction atomicity is
+unchanged, and the fmt printer's grammar drift is untouched — the standing
+recommendation for capabilities, `fmt --write`, `jinn bind` and `.jni` is
+demotion rather than repair.
+
+- **[140]** (2026-08-03 01:23) test suite 65s -> 40.5s: parallel test runner, fan-out corpus harnesses, sharded proptests
 - **[140]** (2026-08-02) test suite 65s -> 40.5s
 
 The edit-test loop was the bottleneck, not the build (an incremental

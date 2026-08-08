@@ -55,6 +55,35 @@ impl Typer {
                     let mono_ty = v.ty.clone();
                     let scheme_clone = v.scheme.clone();
                     if self.suppress_moved_field_check == 0
+                        && self.suppress_whole_struct_check == 0
+                        && let Some(moved) = self.moved_fields.get(&def_id)
+                        && !moved.is_empty()
+                    {
+                        let mut fields: Vec<String> =
+                            moved.iter().map(|f| f.as_str().to_string()).collect();
+                        fields.sort();
+                        return Err(format!(
+                            "{}: `{}` cannot be read as a whole: its field{} {} {} moved out \
+                             earlier, so the struct is only partly initialised; read the \
+                             remaining fields individually, clone at the move site \
+                             (`copy {}.{}`), or reassign `{}.{}` before reading `{}`",
+                            span.loc(),
+                            name,
+                            if fields.len() == 1 { "" } else { "s" },
+                            fields
+                                .iter()
+                                .map(|f| format!("`{f}`"))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            if fields.len() == 1 { "was" } else { "were" },
+                            name,
+                            fields[0],
+                            name,
+                            fields[0],
+                            name,
+                        ));
+                    }
+                    if self.suppress_moved_field_check == 0
                         && let Some(reason) = self.moved_vars.get(&def_id)
                     {
                         return Err(match reason {
@@ -76,6 +105,19 @@ impl Typer {
                                 callee,
                                 callee,
                                 name,
+                                name,
+                                name,
+                            ),
+                            crate::typer::MoveReason::ContainerInsert(meth, at) => format!(
+                                "{}: use of moved value `{}`: it was moved into a container \
+                                 by the `{}` at {} — the container now owns it, so the \
+                                 original name is empty; insert a clone instead \
+                                 (`copy {}` at the call), read it back out of the \
+                                 container, or reassign `{}` before reading it",
+                                span.loc(),
+                                name,
+                                meth,
+                                at.loc(),
                                 name,
                                 name,
                             ),

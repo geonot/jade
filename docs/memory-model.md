@@ -19,8 +19,8 @@
 > is deleted, and `jinn check`/`build` agree); 8-8 (M8 — aggregates move
 > into at most one task: `dispatch` capture, `sim for` bodies, actor
 > message payloads, and `spawn` initializers all enforced, with the
-> `copy`-capture snapshot pattern recognized). Every §7 row is now
-> enforced and pinned by conformance tests.
+> `copy`-capture snapshot pattern recognized). Every §7 row is enforced;
+> the conformance tests for each live in `tests/memory_model.rs`.
 
 ## 1. Type categories
 
@@ -189,7 +189,7 @@ would:
 
 The first six lines are the §3.1 review program: it must **compile and run
 cleanly, printing 3**, under ASan, at `--opt 0` and `--opt 3` (today it
-double-frees; pinned as `review_3_1_returning_vec_parameter_corrupts_heap`).
+double-frees).
 Consumingness is inferred per parameter from the callee body, computed
 bottom-up over the call graph (SCCs conservatively treat in-cycle calls as
 consuming only if any member consumes). Explicit `take`/`copy` annotations
@@ -241,7 +241,7 @@ help: give each task its own vector and merge the results over a channel,
 
 This is the §3.2 review program: it must **fail to compile** with this
 diagnostic (today it corrupts the allocator; pinned as
-`review_3_2_cross_task_shared_vec_races`). The diagnostic must name the
+the cross-task aliasing rejection tests). The diagnostic must name the
 alternative — "use of moved value" alone reads as a limitation instead of
 a caught race. The equivalent correct programs (per-task vectors merged
 over a channel; an actor owning the vector) compile and run.
@@ -322,7 +322,7 @@ Each entry names the conformance test that pins it, in
   both pipelines (8-7); a program `check` passes must not corrupt memory
   when built.
 - Drop *placement* (Perceus elision/sinking/fusion/reuse in
-  `src/perceus/mir_perceus.rs`) remains a pure optimization over this
+  `src/drops/mir_drops.rs`) remains a pure optimization over this
   model: it may elide or sink the one drop, never add a second.
 
 ## 9. Corrections to `access-semantics.md`

@@ -176,6 +176,77 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
+    fn emit_string_order_cmp(
+        &mut self,
+        op: mir::CmpOp,
+        l: BasicValueEnum<'ctx>,
+        r: BasicValueEnum<'ctx>,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let i32t = self.ctx.i32_type();
+        let i64t = self.ctx.i64_type();
+        let ptr = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        if self.module.get_function("__jinn_str_cmp").is_none() {
+            let ft = i32t.fn_type(&[ptr.into(), i64t.into(), ptr.into(), i64t.into()], false);
+            self.module.add_function(
+                "__jinn_str_cmp",
+                ft,
+                Some(inkwell::module::Linkage::External),
+            );
+        }
+        let ld = self.string_data(l)?;
+        let ll = self.string_len(l)?;
+        let rd = self.string_data(r)?;
+        let rl = self.string_len(r)?;
+        let f = crate::codegen::fn_or_die(&self.module, "__jinn_str_cmp");
+        let res = self
+            .call_result(b!(self.bld.build_call(
+                f,
+                &[ld.into(), ll.into(), rd.into(), rl.into()],
+                "str.cmp"
+            )))
+            .into_int_value();
+        let pred = match op {
+            mir::CmpOp::Lt => inkwell::IntPredicate::SLT,
+            mir::CmpOp::Gt => inkwell::IntPredicate::SGT,
+            mir::CmpOp::Le => inkwell::IntPredicate::SLE,
+            mir::CmpOp::Ge => inkwell::IntPredicate::SGE,
+            mir::CmpOp::Eq => inkwell::IntPredicate::EQ,
+            mir::CmpOp::Ne => inkwell::IntPredicate::NE,
+        };
+        Ok(b!(self
+            .bld
+            .build_int_compare(pred, res, i32t.const_zero(), "str.ord"))
+        .into())
+    }
+
+    pub(in crate::codegen) fn describe_llvm_ty(ty: inkwell::types::BasicTypeEnum<'ctx>) -> String {
+        use inkwell::types::BasicTypeEnum::*;
+        match ty {
+            IntType(t) => format!("an integer of {} bits", t.get_bit_width()),
+            FloatType(_) => "a floating-point number".into(),
+            PointerType(_) => "a pointer".into(),
+            StructType(t) => match t.get_name() {
+                Some(n) => format!("a `{}` value", n.to_str().unwrap_or("struct")),
+                None => "an anonymous struct (a tuple)".into(),
+            },
+            ArrayType(_) => "an array".into(),
+            VectorType(_) | ScalableVectorType(_) => "a SIMD vector".into(),
+        }
+    }
+
+    pub(in crate::codegen) fn struct_is_pod(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Struct(name, _) => match self.structs.get(name) {
+                Some(fields) => fields.iter().all(|(_, fty)| self.struct_is_pod(fty)),
+                None => false,
+            },
+            Type::Tuple(elems) => elems.iter().all(|t| self.struct_is_pod(t)),
+            Type::Array(inner, _) => self.struct_is_pod(inner),
+            Type::Enum(_) => false,
+            other => other.is_trivially_droppable() && !matches!(other, Type::TypeVar(_)),
+        }
+    }
+
     pub(in crate::codegen) fn emit_cmp(
         &mut self,
         op: mir::CmpOp,
@@ -217,8 +288,11 @@ impl<'ctx> Compiler<'ctx> {
         let is_string_type = matches!(operand_ty, Type::String)
             || matches!(operand_ty, Type::Struct(n, _) if n == "String");
         if l.is_struct_value() && is_string_type {
-            let negate = matches!(op, mir::CmpOp::Ne);
-            return self.string_eq(l, r, negate);
+            if matches!(op, mir::CmpOp::Eq | mir::CmpOp::Ne) {
+                let negate = matches!(op, mir::CmpOp::Ne);
+                return self.string_eq(l, r, negate);
+            }
+            return self.emit_string_order_cmp(op, l, r);
         }
 
         if l.get_type().is_float_type() {
@@ -288,21 +362,11 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         if val.is_float_value() && target_ty.is_int() {
-            return if !target_ty.is_signed() {
-                Ok(b!(self.bld.build_float_to_unsigned_int(
-                    val.into_float_value(),
-                    target_llvm.into_int_type(),
-                    "f2u"
-                ))
-                .into())
-            } else {
-                Ok(b!(self.bld.build_float_to_signed_int(
-                    val.into_float_value(),
-                    target_llvm.into_int_type(),
-                    "f2i"
-                ))
-                .into())
-            };
+            return self.emit_float_to_int_saturating(
+                val.into_float_value(),
+                target_llvm.into_int_type(),
+                target_ty.is_signed(),
+            );
         }
 
         if val.is_int_value() && target_llvm.is_int_type() {
@@ -349,9 +413,112 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(val);
         }
 
-        let alloca = self.entry_alloca(val.get_type(), "cast.tmp");
+        if val.is_struct_value() && target_llvm.is_int_type() {
+            let sv = val.into_struct_value();
+            let is_enum = sv
+                .get_type()
+                .get_name()
+                .map(|n| n.to_str().unwrap_or("").to_string())
+                .map(|n| self.enums.contains_key(&n))
+                .unwrap_or(false);
+            if is_enum && sv.get_type().count_fields() > 0 {
+                let tag = b!(self.bld.build_extract_value(sv, 0, "enum.tag")).into_int_value();
+                let dst = target_llvm.into_int_type();
+                let src_bits = tag.get_type().get_bit_width();
+                let dst_bits = dst.get_bit_width();
+                let out = if dst_bits > src_bits {
+                    b!(self.bld.build_int_z_extend(tag, dst, "tag.zext"))
+                } else if dst_bits < src_bits {
+                    b!(self.bld.build_int_truncate(tag, dst, "tag.trunc"))
+                } else {
+                    tag
+                };
+                return Ok(out.into());
+            }
+        }
+
+        let src_size = self.type_store_size(val.get_type());
+        let dst_size = self.type_store_size(target_llvm);
+        let slot_ty: BasicTypeEnum<'ctx> = if dst_size > src_size {
+            self.ctx
+                .i8_type()
+                .array_type(dst_size as u32)
+                .as_basic_type_enum()
+        } else {
+            val.get_type()
+        };
+        let alloca = self.entry_alloca(slot_ty, "cast.tmp");
+        if dst_size > src_size {
+            let memset_size = self.ctx.i64_type().const_int(dst_size, false);
+            b!(self
+                .bld
+                .build_memset(alloca, 1, self.ctx.i8_type().const_zero(), memset_size));
+        }
         b!(self.bld.build_store(alloca, val));
         Ok(b!(self.bld.build_load(target_llvm, alloca, "cast")))
+    }
+
+    fn emit_float_to_int_saturating(
+        &mut self,
+        f: inkwell::values::FloatValue<'ctx>,
+        dst: inkwell::types::IntType<'ctx>,
+        signed: bool,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let bits = dst.get_bit_width();
+        let ft = f.get_type();
+        let (lo_f, hi_f, lo_i, hi_i) = if signed {
+            let hi = if bits >= 64 {
+                i64::MAX as f64
+            } else {
+                ((1u64 << (bits - 1)) - 1) as f64
+            };
+            let lo = -hi - 1.0;
+            (
+                ft.const_float(lo),
+                ft.const_float(hi),
+                dst.const_int(1u64 << (bits - 1), false),
+                dst.const_int(u64::MAX >> (64 - bits + 1), false),
+            )
+        } else {
+            let hi = if bits >= 64 {
+                u64::MAX as f64
+            } else {
+                ((1u128 << bits) - 1) as f64
+            };
+            (
+                ft.const_float(0.0),
+                ft.const_float(hi),
+                dst.const_zero(),
+                dst.const_all_ones(),
+            )
+        };
+
+        let raw = if signed {
+            b!(self.bld.build_float_to_signed_int(f, dst, "f2i"))
+        } else {
+            b!(self.bld.build_float_to_unsigned_int(f, dst, "f2u"))
+        };
+
+        let too_lo =
+            b!(self
+                .bld
+                .build_float_compare(inkwell::FloatPredicate::OLT, f, lo_f, "f2i.lo"));
+        let too_hi =
+            b!(self
+                .bld
+                .build_float_compare(inkwell::FloatPredicate::OGT, f, hi_f, "f2i.hi"));
+        let is_nan =
+            b!(self
+                .bld
+                .build_float_compare(inkwell::FloatPredicate::UNO, f, f, "f2i.nan"));
+
+        let r = b!(self.bld.build_select(too_hi, hi_i, raw, "f2i.clamphi")).into_int_value();
+        let r = b!(self.bld.build_select(too_lo, lo_i, r, "f2i.clamplo")).into_int_value();
+        let r = b!(self
+            .bld
+            .build_select(is_nan, dst.const_zero(), r, "f2i.nan0"))
+        .into_int_value();
+        Ok(r.into())
     }
 
     pub(in crate::codegen) fn emit_field_get(
@@ -442,7 +609,9 @@ impl<'ctx> Compiler<'ctx> {
                 "FieldGet on unknown struct type for field `{field}`"
             ))
         } else if obj_val.is_pointer_value() {
-            if matches!(field, "length") && matches!(&obj_ty, Some(Type::Vec(_))) {
+            if matches!(field, "length" | "count")
+                && matches!(&obj_ty, Some(Type::Vec(_)) | Some(Type::Map(_, _)))
+            {
                 let header_ptr = obj_val.into_pointer_value();
                 let header_ty = self.vec_header_type();
                 let i64t = self.ctx.i64_type();

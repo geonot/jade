@@ -6,6 +6,24 @@ use super::analysis::{self, DiagSeverity, FileAnalysis, SymbolKind};
 use super::protocol::*;
 use crate::ast;
 
+fn utf16_range(src: &str, line1: u32, col1: u32, len: u32) -> Range {
+    let line0 = line1.saturating_sub(1);
+    let line_text = src.lines().nth(line0 as usize).unwrap_or("");
+    let start_byte = (col1.saturating_sub(1)) as usize;
+    let start = analysis::byte_col_to_utf16(line_text, start_byte);
+    let end = analysis::byte_col_to_utf16(line_text, start_byte + len as usize);
+    Range {
+        start: PositionOut {
+            line: line0,
+            character: start,
+        },
+        end: PositionOut {
+            line: line0,
+            character: end,
+        },
+    }
+}
+
 pub struct ServerState {
     pub files: HashMap<String, String>,
     pub workspace_index: HashMap<String, Vec<WorkspaceSymbol>>,
@@ -272,16 +290,7 @@ pub fn handle_references(state: &ServerState, params: Value) -> Value {
     for r in analysis::find_references(src, &ident) {
         locations.push(Location {
             uri: p.text_document.uri.clone(),
-            range: Range {
-                start: PositionOut {
-                    line: r.line.saturating_sub(1),
-                    character: r.col.saturating_sub(1),
-                },
-                end: PositionOut {
-                    line: r.line.saturating_sub(1),
-                    character: r.col.saturating_sub(1) + r.len,
-                },
-            },
+            range: utf16_range(src, r.line, r.col, r.len),
         });
     }
 
@@ -292,16 +301,7 @@ pub fn handle_references(state: &ServerState, params: Value) -> Value {
         for r in analysis::find_references(src, &ident) {
             locations.push(Location {
                 uri: uri.clone(),
-                range: Range {
-                    start: PositionOut {
-                        line: r.line.saturating_sub(1),
-                        character: r.col.saturating_sub(1),
-                    },
-                    end: PositionOut {
-                        line: r.line.saturating_sub(1),
-                        character: r.col.saturating_sub(1) + r.len,
-                    },
-                },
+                range: utf16_range(src, r.line, r.col, r.len),
             });
         }
     }
@@ -332,16 +332,7 @@ pub fn handle_rename(state: &ServerState, params: Value) -> Value {
         let edits: Vec<TextEdit> = refs
             .iter()
             .map(|r| TextEdit {
-                range: Range {
-                    start: PositionOut {
-                        line: r.line.saturating_sub(1),
-                        character: r.col.saturating_sub(1),
-                    },
-                    end: PositionOut {
-                        line: r.line.saturating_sub(1),
-                        character: r.col.saturating_sub(1) + r.len,
-                    },
-                },
+                range: utf16_range(src, r.line, r.col, r.len),
                 new_text: p.new_name.clone(),
             })
             .collect();

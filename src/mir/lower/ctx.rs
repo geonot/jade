@@ -40,6 +40,8 @@ pub(super) struct Lowerer {
 
     pub(super) scope_stack: Vec<ValueId>,
     pub(super) scope_named: Vec<(crate::intern::Symbol, ValueId)>,
+
+    pub(super) borrowed_params: HashSet<Symbol>,
 }
 
 impl Lowerer {
@@ -97,6 +99,7 @@ impl Lowerer {
             value_subst: HashMap::new(),
             unreachable_blocks: HashSet::new(),
             field_ctx: None,
+            borrowed_params: HashSet::new(),
             scope_stack: Vec::new(),
             scope_named: Vec::new(),
         }
@@ -200,6 +203,9 @@ impl Lowerer {
         }
         match &obj.kind {
             ExprKind::Var(_, name) => {
+                if self.borrowed_params.contains(name) {
+                    return;
+                }
                 self.write_var(*name, self.current_block, updated);
             }
             ExprKind::Field(parent, parent_field, _) => {

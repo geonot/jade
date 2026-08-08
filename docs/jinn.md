@@ -187,7 +187,7 @@ sub is 'b'
 n is 2
 -->
 ```jinn
-s.length              # number of bytes
+s.length              # number of Unicode scalars (use .byte_count for bytes)
 s.contains('sub')
 s.starts_with('pre')
 s.ends_with('suf')
@@ -668,7 +668,10 @@ Generic types appear in annotations with `of`, for example `Vec of Account`.
 
 ## Aliases and newtypes
 
-An `alias` is a second name for an existing type — interchangeable with it.
+An `alias` is a second name for an existing type. It is a *distinct* type
+to the checker: passing an `f64` where a `Seconds` is expected is a type
+error, exactly as for a newtype below. Use one when you want the name to
+carry meaning at call sites.
 
 ```jinn
 alias Seconds is f64
@@ -1216,8 +1219,9 @@ lifetime annotations, no `&`, no explicit `clone()`.
 > `Vec`, and `b is a` followed by a read of `a`, are both rejected at
 > compile time.
 >
-> Until 8-7/8-8 land, share data across tasks only through channels or
-> actors. Strings are unaffected — they already have value semantics.
+> Cross-task sharing of one aggregate is rejected at compile time, so
+> channels and actors are the way to hand data between tasks. Strings are
+> unaffected — they already have value semantics.
 
 One property that holds by construction: there are no shared reference
 counts, so reference cycles cannot be constructed and cycle leaks are

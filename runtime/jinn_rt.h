@@ -9,6 +9,13 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+static inline size_t jinn_safe_mul(int64_t a, int64_t b) {
+    if (a <= 0 || b <= 0) return 0;
+    if (a > (int64_t)(SIZE_MAX / (uint64_t)b)) return 0;
+    return (size_t)a * (size_t)b;
+}
+
 typedef struct jinn_coro    jinn_coro_t;
 typedef struct jinn_sched   jinn_sched_t;
 typedef struct jinn_chan     jinn_chan_t;
@@ -174,6 +181,7 @@ jinn_chan_t *jinn_chan_create(size_t elem_size, size_t capacity);
 int         jinn_chan_send(jinn_chan_t *ch, const void *data);
 int         jinn_chan_recv(jinn_chan_t *ch, void *data_out);
 int         jinn_chan_try_recv(jinn_chan_t *ch, void *data_out);
+int64_t     jinn_chan_pending(jinn_chan_t *ch);
 void        jinn_chan_close(jinn_chan_t *ch);
 void        jinn_chan_wake_coro(jinn_chan_t *ch, jinn_coro_t *c);
 void        jinn_chan_destroy(jinn_chan_t *ch);
@@ -194,6 +202,9 @@ void jinn_actor_park(void *mailbox_ptr);
 void jinn_actor_wake(void *mailbox_ptr);
 void jinn_actor_stop(void *mailbox_ptr);
 void jinn_actor_retire_flush(void);
+void jinn_actor_register_live(void *mailbox_ptr);
+void jinn_actor_unregister_live(void *mailbox_ptr);
+void jinn_actor_stop_all(void);
 void jinn_actor_destroy(void *mailbox_ptr);
 
 typedef struct jinn_join jinn_join_t;
@@ -206,6 +217,7 @@ typedef struct jinn_scope jinn_scope_t;
 jinn_scope_t *jinn_scope_create(void);
 jinn_scope_t *jinn_scope_current(void);
 void jinn_scope_register_child(jinn_coro_t *child);
+void jinn_scope_register_child_in(jinn_scope_t *s, jinn_coro_t *child);
 void jinn_scope_add_actor(jinn_scope_t *s, void *mailbox_ptr);
 
 void jinn_scope_unregister_child(jinn_scope_t *s, jinn_coro_t *child);
@@ -379,6 +391,7 @@ int jinn_terminal_size(int32_t *out_cols, int32_t *out_rows);
 void *__jinn_vec_slice(void *hdr, int64_t start, int64_t end, int64_t elem_size);
 void *__jinn_vec_clone_pod(void *hdr, int64_t elem_size);
 jinn_sso_t __jinn_str_slice(jinn_sso_t str, int64_t start, int64_t end);
+int32_t __jinn_str_cmp(const char *a, int64_t alen, const char *b, int64_t blen);
 void __jinn_str_clone(jinn_sso_t *out, const jinn_sso_t *src);
 void *__jinn_deque_new(void);
 void __jinn_deque_push_back(void *handle, int64_t val);
@@ -424,6 +437,14 @@ int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
                            const char *wal_path, int64_t rec_size,
                            int64_t sid_offset, int64_t deleted_offset);
 int  jinn_writer_lock(const char *path);
+typedef struct JinnRewrite JinnRewrite;
+JinnRewrite *jinn_rewrite_begin(const char *path);
+FILE        *jinn_rewrite_file(JinnRewrite *rw);
+FILE        *jinn_rewrite_commit(JinnRewrite *rw, FILE *old_fp);
+void         jinn_rewrite_abort(JinnRewrite *rw);
+void         jinn_store_drop_indexes(const char *store_path);
+void         jinn_store_wlock(const char *path);
+void         jinn_store_wunlock(const char *path);
 void jinn_writer_unlock(int lock_fd);
 int  jinn_sha256(const unsigned char *data, long len, unsigned char *out);
 int  jinn_sha512(const unsigned char *data, long len, unsigned char *out);

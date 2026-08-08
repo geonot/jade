@@ -219,13 +219,30 @@ impl<'ctx> Compiler<'ctx> {
                     return Ok(None);
                 }
                 let ptr = self.val(args[0]);
-                let len = self.val(args[1]);
-                let cap = if args.len() > 2 {
-                    self.val(args[2])
-                } else {
-                    len
+                let len = self.val(args[1]).into_int_value();
+                let i64t = self.ctx.i64_type();
+                let size = b!(self
+                    .bld
+                    .build_int_nsw_add(len, i64t.const_int(1, false), "sfr.sz"));
+                let malloc = self.ensure_malloc();
+                let buf = b!(self.bld.build_call(malloc, &[size.into()], "sfr.buf"))
+                    .try_as_basic_value()
+                    .basic()
+                    .expect("ICE: call returned void");
+                let memcpy = self.ensure_memcpy();
+                b!(self
+                    .bld
+                    .build_call(memcpy, &[buf.into(), ptr.into(), len.into()], ""));
+                let nul = unsafe {
+                    b!(self.bld.build_gep(
+                        self.ctx.i8_type(),
+                        buf.into_pointer_value(),
+                        &[len],
+                        "sfr.nul"
+                    ))
                 };
-                return Ok(Some(self.build_string(ptr, len, cap, "sfr")?));
+                b!(self.bld.build_store(nul, self.ctx.i8_type().const_zero()));
+                return Ok(Some(self.build_string(buf, len, size, "sfr")?));
             }
             "StringFromPtr" => {
                 if args.is_empty() {

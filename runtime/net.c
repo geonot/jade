@@ -32,3 +32,39 @@ long jinn_recvfrom(int fd, void *buf, long len, int flags,
     if (addrlen) *addrlen = (int)slen;
     return r;
 }
+int jinn_dns_resolve(const char *host, char *out_buf, int out_len) {
+    struct addrinfo hints, *result;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, NULL, &hints, &result) != 0) return -1;
+    int ret = getnameinfo(result->ai_addr, result->ai_addrlen,
+                          out_buf, out_len, NULL, 0, NI_NUMERICHOST);
+    freeaddrinfo(result);
+    return ret == 0 ? 0 : -1;
+}
+int jinn_dns_resolve_all(const char *host, char *out_buf, int out_len) {
+    struct addrinfo hints, *result, *rp;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, NULL, &hints, &result) != 0) return 0;
+    int count = 0;
+    int pos = 0;
+    char addr_str[INET6_ADDRSTRLEN];
+    for (rp = result; rp != NULL; rp = rp->ai_next) {
+        if (getnameinfo(rp->ai_addr, rp->ai_addrlen,
+                        addr_str, sizeof(addr_str), NULL, 0, NI_NUMERICHOST) == 0) {
+            int slen = (int)strlen(addr_str);
+            if (pos + slen + 1 < out_len) {
+                if (pos > 0) { out_buf[pos++] = '\n'; }
+                memcpy(out_buf + pos, addr_str, slen);
+                pos += slen;
+                count++;
+            }
+        }
+    }
+    out_buf[pos] = '\0';
+    freeaddrinfo(result);
+    return count;
+}

@@ -1,5 +1,13 @@
 // Coroutine spawn benchmark — C comparison using ucontext
-// 100K coroutine spawns, each yields a value then returns
+// 100K coroutine spawns, each yields a value then returns.
+//
+// Comparability: tagged cross-paradigm, and the reason matters. ucontext's
+// swapcontext() calls sigprocmask on every switch; Jinn's context switch is
+// the assembly in runtime/sched.c with no syscall at all. The ratio therefore
+// measures "syscall per switch vs none", not code quality on either side.
+// Iteration counts were realigned to 100K on 2026-08-06 — the C side had been
+// running 1,000,000, which made the published ratio wrong by 10x on top of
+// the paradigm difference.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,7 +24,7 @@ static void coro_body(void) {
 }
 
 int main() {
-    long n = 1000000;
+    long n = 100000;
     long total = 0;
     char *stack = malloc(STACK_SIZE);
     for (long i = 0; i < n; i++) {

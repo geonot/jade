@@ -20,7 +20,7 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
         }
         let (sd, st, rec_size, fp) = self.setup_store_access(store_name)?;
-        self.store_lock(fp)?;
+        self.store_lock(store_name, fp)?;
         self.txn_track_store(store_name, fp)?;
         let i64t = self.ctx.i64_type();
         let i32t = self.ctx.i32_type();
@@ -175,7 +175,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_call(free_fn, &[buf.into()], ""));
         let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
         b!(self.bld.build_call(fflush_fn, &[fp.into()], ""));
-        self.store_unlock(fp)?;
+        self.store_unlock(store_name, fp)?;
 
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
