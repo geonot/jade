@@ -19,8 +19,8 @@ use chain
     loop(0, $ < 4, $ + 1)
         batch is mempool.pick_top(pool, 5)
         b is miner.mine(prev, batch, $, 8)
-        chn.push(b)
         prev is b.hash
+        chn.push(b)
         pool is mempool.remove_first(pool, 5)
 
     log 'chain_height'

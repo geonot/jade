@@ -1,4 +1,40 @@
 # Changelog
+- **[142]** (2026-08-07) the std gate now means what its name says; apps/ enters the gates and two of them were broken
+
+[141] argued that the gates measuring a narrower surface than their names
+implied is what let everything else drift, and then did not change the
+definition that caused it. `docs/std.md` still defined **alpha-stable** as
+`jinnc std/<m>.jn --lib --emit-hir` exiting 0, and
+`tests/std_stable_subset.rs` still ran only that. All 49 modules do import and
+link today — that was verified by hand while fixing AR-F1 — but nothing pinned
+it, so the exact drift the entry diagnosed could recur silently.
+
+The tier is now defined by two bars and both are enforced.
+`std_stable_subset_imports_and_links` writes a five-line `use std/<m>` program
+per module, compiles it through codegen, links it against the runtime and runs
+it. The frontend check stays, because it covers functions no importer reaches;
+the link check catches what lives entirely past the frontend, which is where
+AR-F1's ten failures were — missing runtime C symbols and codegen ICEs. Both
+gates were checked against a deliberately broken `std/math.jn` to confirm they
+are not vacuous.
+
+**`apps/` was in no test at all, and two of the 21 had stopped compiling.**
+Only `alpha_release_demo` was ever built, by the smoke script. Sweeping the
+rest by hand found `blockchain_node` reading a `Block` after pushing it into a
+`Vec`, and `lattice_crypto` reading an `Sk` whole after moving out its `pk`
+field. Both are *correct* rejections by the use-after-free diagnostics [141]
+added under AR-F3 — the corpus was never updated to match the language it
+documents. Fixed where the defect is: read `b.hash` before the push rather
+than after it, and `copy sk_a.pk` out instead of moving it. Both apps are
+self-checking and now report `invalid_blocks 0` and `key.match 1` /
+`roundtrip.ok 1` / `mac.ok 1`. `tests/apps_build.rs` builds and runs all 21 in
+1.5s, fanned out through `par_map`, so this cannot recur quietly. Recorded as
+AR-F33.
+
+The 36 `benchmarks/` programs were swept the same way and all compile at
+`--opt 3`; they are left out of the gates because they are timing harnesses,
+not assertions.
+
 - **[141]** (2026-08-06) alpha review remediation: 24 findings fixed, three more found by the new gates
 
 The 2026-08-06 alpha readiness review is written up in

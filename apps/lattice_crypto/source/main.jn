@@ -15,8 +15,8 @@ use aead
     sk_a is lwe.keygen(0x11111111, a)
     sk_b is lwe.keygen(0x22222222, a)
 
-    pk_a is sk_a.pk
-    pk_b is sk_b.pk
+    pk_a is copy sk_a.pk
+    pk_b is copy sk_b.pk
 
     ss_a is lwe.shared(sk_a, pk_b)
     ss_b is lwe.shared(sk_b, pk_a)

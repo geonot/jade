@@ -14,7 +14,7 @@ Regression coverage lives in `tests/alpha_review_regressions.rs` and
 
 | Finding | Verification |
 | --- | --- |
-| AR-F1 std gate | all 49 std modules import and link (was 39) |
+| AR-F1 std gate | all 49 std modules import and link (was 39), and the tier is now *defined* that way: `std_stable_subset_imports_and_links` compiles, links and runs a `use std/<m>` program per module, alongside the frontend check. `docs/std.md` §"What alpha-stable means" states both bars |
 | AR-F2 phi ICE | diagnostic naming both branches; MIR verify now checks phi/edge types **and runs in release** |
 | AR-F3 UAF ×4 | (1)(2)(3) are compile errors with fix-naming diagnostics; (4) `Map.get` round-trips |
 | AR-F4 destroy crash | 40 kill points, 0 total-loss outcomes (was 5) |
@@ -37,6 +37,7 @@ Regression coverage lives in `tests/alpha_review_regressions.rs` and
 | AR-22 constant patterns | constants compare instead of binding; `json.parse` works |
 | AR-23 double-quoted strings | escapes and interpolation, matching the docs; 16 std modules unbroken |
 | AR-24 `together` scope | nested `together` inside `dispatch` joins its children, 0/20 failures (was 30/30) |
+| AR-F33 apps broken by AR-F3 | `blockchain_node` read a `Block` after pushing it into a `Vec`; `lattice_crypto` read an `Sk` whole after moving out its `pk` field. Both are correct rejections by the diagnostics AR-F3 added — the corpus was never updated to match, and no gate covered `apps/`. Fixed at the call sites (read the field before the move; `copy` the field out) and pinned by `tests/apps_build.rs` |
 
 ### Gates
 
@@ -44,6 +45,7 @@ Regression coverage lives in `tests/alpha_review_regressions.rs` and
 | --- | --- |
 | `scripts/alpha_release_smoke.sh` | path repaired (`examples/` → `apps/`); preflight can reach steps 6 and 7 again |
 | Corpus execution | `tests/corpus_differential.rs` compiles **and runs** `snippets/` and `tests/programs/` at `--opt 0` and `--opt 3`, diffing stdout and exit code |
+| `apps/` execution | `tests/apps_build.rs` builds and runs all 21 projects. Previously only `alpha_release_demo` was touched by any gate, via the smoke script |
 | `KNOWN_ICE` whitelist | replaced by a list that asserts the *specific* diagnostic and fails if the program starts compiling or starts panicking |
 | MIR verify | out from behind `#[cfg(debug_assertions)]`; `JINN_MIR_VERIFY=0` opts out |
 
@@ -82,7 +84,7 @@ working feature).
 
 ## Gate state after remediation
 
-`scripts/test.sh` — 2042 passed, 0 failed.
+`scripts/test.sh` — 2044 passed, 0 failed (47 binaries).
 `cargo fmt --check`, `cargo clippy --release --all-targets -- -D warnings` — clean.
 `ci/sanitize.sh` — both sweeps green.
 `scripts/preflight.sh` — reaches all seven steps for the first time since the

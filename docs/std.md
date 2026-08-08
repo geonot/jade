@@ -26,21 +26,37 @@ subset of `std/` and the policy that governs it.
 
 ## What "alpha-stable" means
 
-A module is **alpha-stable** when it passes the compiler frontend
-(lex → parse → type-check → HIR lowering) in library mode:
+A module is **alpha-stable** when it clears two bars. First, it passes the
+compiler frontend (lex → parse → type-check → HIR lowering) in library mode,
+which covers every function in the module including ones no caller reaches:
 
 ```sh
 jinnc std/<module>.jn --lib --emit-hir
 ```
 
-This contract is enforced automatically by the
-`std_stable_subset_frontend_checks` test in
-[`tests/std_stable_subset.rs`](../tests/std_stable_subset.rs), which runs as
+Second, a program that imports it compiles all the way through codegen, links
+against the runtime, and runs:
+
+```sh
+printf 'use std/<module>\n\n*main\n    log(1)\n    0\n' > importer.jn
+jinnc importer.jn -o importer && ./importer
+```
+
+Both contracts are enforced automatically, by
+`std_stable_subset_frontend_checks` and `std_stable_subset_imports_and_links`
+in [`tests/std_stable_subset.rs`](../tests/std_stable_subset.rs), which run as
 part of `cargo test` in CI. A regression in any stable module fails the build.
 
-Alpha-stable guarantees the module **type-checks against the current language**.
-It is not yet a guarantee of API stability across versions — that bar is raised
-post-alpha.
+The second bar exists because the first one alone is not what the tier name
+suggests. Under the frontend-only definition all 49 modules passed while 10 of
+them could not be imported by a five-line program at all — missing runtime C
+symbols and codegen ICEs live entirely past the frontend. That gap is
+`AR-F1` in [`alpha-review-findings.md`](alpha-review-findings.md).
+
+Alpha-stable guarantees the module **type-checks against the current language
+and is usable from a real program**. It is not a guarantee that every function
+in it returns the right answer, and not yet a guarantee of API stability across
+versions — that bar is raised post-alpha.
 
 ## Alpha-stable modules (49)
 

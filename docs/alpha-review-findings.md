@@ -213,6 +213,14 @@ emits `//` comments (Jinn uses `#`), inlines C block comments into signatures,
 and binds macros as functions. Output is rejected by `jinnc` at line 1, so there
 is no path from a real C header to usable externs.
 
+**AR-F33 [found during remediation] — two of the 21 shipped apps stopped
+compiling, and no gate noticed.** `apps/blockchain_node` read a `Block` after
+pushing it into a `Vec`; `apps/lattice_crypto` read an `Sk` as a whole after
+moving out its `pk` field. Both are correct rejections by the use-after-free
+diagnostics AR-F3 added — the corpus was simply never updated to match. They
+went undetected because `apps/` was referenced by no test: only
+`alpha_release_demo` was built, by `scripts/alpha_release_smoke.sh`.
+
 **AR-F27 — LSP UTF-16 positions are treated as byte offsets.** Hover and
 goto-definition silently stop working to the right of any emoji or accented
 character in every real editor.
