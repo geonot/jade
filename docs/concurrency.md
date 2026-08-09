@@ -1,118 +1,103 @@
-# Jinn Concurrency & Shutdown Semantics
+# Concurrency — tasks, channels, actors, scopes, and shutdown
 
-This document is the canonical contract for how Jinn programs run
-concurrently and — more importantly — how they *stop*. Shutdown is the
-part of a concurrency model that is easiest to get subtly wrong, so the
-rules below are stated precisely and each one is exercised by a passing
-test in [tests/concurrency_shutdown.rs](tests/concurrency_shutdown.rs).
+The canonical contract for how Jinn programs run concurrently and — more
+importantly — how they *stop*. Shutdown is the part of a concurrency model that
+is easiest to get subtly wrong, so the rules below are stated precisely and each
+one is exercised by a passing test in
+[`../tests/concurrency_shutdown.rs`](../tests/concurrency_shutdown.rs).
 
-Everything here is derived from the runtime and codegen as they actually
-exist today, not from aspiration:
+Everything here is derived from the runtime and codegen as they exist, not from
+aspiration:
 
-- Scheduler — [runtime/sched.c](runtime/sched.c)
-- Channels — [runtime/channel.c](runtime/channel.c)
-- Actor helpers — [runtime/actor.c](runtime/actor.c)
-- Actor lowering — [src/codegen/actors.rs](src/codegen/actors.rs)
-- `close` / `stop` lowering — [src/codegen/mir_codegen/magic.rs](src/codegen/mir_codegen/magic.rs)
-- `*main` epilogue — [src/codegen/mir_codegen/mod.rs](src/codegen/mir_codegen/mod.rs)
+| Concern | Source |
+| --- | --- |
+| Scheduler | [`../runtime/sched.c`](../runtime/sched.c) |
+| Channels | [`../runtime/channel.c`](../runtime/channel.c) |
+| Actors | [`../runtime/actor.c`](../runtime/actor.c), [`../src/codegen/actors.rs`](../src/codegen/actors.rs) |
+| Scopes | [`../runtime/scope.c`](../runtime/scope.c) |
+| `close` / `stop` lowering | [`../src/codegen/mir_codegen/magic.rs`](../src/codegen/mir_codegen/magic.rs) |
+| `*main` epilogue | [`../src/codegen/mir_codegen/mod.rs`](../src/codegen/mir_codegen/mod.rs) |
+
+Data that crosses a task boundary obeys the ownership rules in
+[`memory-model.md`](memory-model.md) §5: aggregates **move** into a task or a
+message, and a second capture is a compile error.
 
 ## Execution model
 
-Jinn runs on an **M:N work-stealing scheduler**: a small pool of OS
-worker threads (one per CPU, capped at 8) multiplexes an unbounded number
-of lightweight **coroutines**. A coroutine is a stackful green thread; it
-runs until it returns, yields, or *parks* (blocks on a channel), at which
-point control swaps back to the worker, which finds other work.
+Jinn runs on an **M:N work-stealing scheduler**: a small pool of OS worker
+threads (one per CPU, capped at 8) multiplexes an unbounded number of
+lightweight **coroutines**. A coroutine is a stackful green thread; it runs
+until it returns, yields, or *parks* (blocks on a channel), at which point
+control swaps back to the worker, which finds other work.
 
 ```
 *main thread ──► jinn_sched_init ──► run *main body ──► jinn_sched_run ──► jinn_sched_shutdown
                                           │
-                                          ├─ spawn ──► coroutine ──► worker pool ◄─► work-stealing deques
-                                          └─ actor  ──► daemon coroutine + mailbox channel
+                                          ├─ dispatch ──► coroutine ──► worker pool ◄─► work-stealing deques
+                                          └─ spawn    ──► actor coroutine + mailbox channel
 ```
 
 Two kinds of work land on the scheduler:
 
-| Surface construct        | Coroutine kind | Counts toward `active_coros`? |
-| ------------------------ | -------------- | ----------------------------- |
+| Construct | Coroutine kind | Counts toward `active_coros`? |
+| --- | --- | --- |
 | `dispatch` / parallel block | **non-daemon** | **yes** |
-| `spawn Actor`            | **daemon**     | **no** |
+| `spawn Actor` inside a `together` scope | **non-daemon** (scope-owned) | **yes** |
+| `spawn Actor` outside any scope | **daemon** | **no** |
 
-This distinction is the single most important fact about Jinn shutdown,
-and it is covered next.
+This distinction is the single most important fact about Jinn shutdown.
 
-## Coroutine lifecycle and `active_coros`
+### Coroutine lifecycle and `active_coros`
 
-The scheduler keeps a global count, `active_coros`, of *non-daemon*
-coroutines that have been spawned but not yet finished
-(see [runtime/sched.c](runtime/sched.c)). When a non-daemon coroutine
-completes, the count is decremented; when it reaches zero the scheduler
-signals that the program's concurrent work is done.
+The scheduler keeps a global count, `active_coros`, of *non-daemon* coroutines
+that have been spawned but not yet finished. Non-daemon coroutines increment it
+on spawn and decrement it on completion; `jinn_sched_run()` blocks `*main` until
+the count reaches zero.
 
-- **Non-daemon** coroutines (ordinary `spawn` of a dispatch block /
-  parallel work) increment `active_coros` on spawn and decrement it on
-  completion. `jinn_sched_run()` blocks `*main` until this count hits
-  zero — i.e. it **waits for all non-daemon work to finish**.
-- **Daemon** coroutines do *not* touch `active_coros`. They are
-  fire-and-forget: the program may exit while they are still running or
-  parked. **Every actor is spawned as a daemon**
-  (`jinn_coro_set_daemon` is called on the actor coroutine in
-  [src/codegen/actors.rs](src/codegen/actors.rs)).
-
-The practical consequence: `jinn_sched_run()` does **not** wait for
-actors. An actor that is parked waiting for its next message never blocks
-program exit, and conversely the program will *not* automatically linger
-to let an actor finish draining its mailbox.
+Daemon coroutines never touch the count. They are fire-and-forget: the program
+may exit while they are running or parked. `jinn_sched_run()` therefore does
+**not** wait for a top-level actor, and the program will not linger to let one
+drain its mailbox.
 
 ## Channels
 
-A channel is a **bounded multi-producer / multi-consumer FIFO**
-([runtime/channel.c](runtime/channel.c)). Capacity is rounded up to a
-power of two (a capacity of `0` becomes the default, 64). All buffer
-access happens under a small atomic spinlock, so channels are safe to
-drive both from coroutines (which park when full/empty) and from raw OS
-threads (which spin).
+A channel is a **bounded MPMC FIFO**. Capacity is rounded up to a power of two
+(a capacity of `0` becomes the default, 64). All buffer access happens under a
+small atomic spinlock, so channels are safe to drive both from coroutines (which
+park when full or empty) and from raw OS threads (which spin).
 
 ```jinn
 ch is channel(4)            # untyped, capacity 4
 ch is channel of i64(1024)  # typed element, capacity 1024
 
-send ch, value              # blocks/parks while the buffer is full
-v is receive ch             # blocks/parks while the buffer is empty
+send ch, value              # parks while the buffer is full
+v is receive ch             # parks while the buffer is empty
 close ch                    # mark the channel closed
 ```
 
-| Operation        | Runtime symbol        | Blocking behaviour                                              |
-| ---------------- | --------------------- | -------------------------------------------------------------- |
-| `send ch, v`     | `jinn_chan_send`      | Parks while full. **Yields `false` and drops `v` if the channel is closed; `true` once delivered.** |
-| `receive ch`     | `jinn_chan_recv`      | Parks while empty. Drains buffered values even after close.     |
-| `close ch`       | `jinn_chan_close`     | Idempotent; sets the closed flag and wakes all parked waiters.  |
+| Operation | Runtime symbol | Blocking behaviour |
+| --- | --- | --- |
+| `send ch, v` | `jinn_chan_send` | Parks while full. Yields `false` and drops `v` if the channel is closed; `true` once delivered. |
+| `receive ch` | `jinn_chan_recv` | Parks while empty. Drains buffered values even after close. |
+| `close ch` | `jinn_chan_close` | Idempotent; sets the closed flag and wakes all parked waiters. |
 
-The two closed-channel behaviours are deliberate and load-bearing for
-clean shutdown:
+The two closed-channel behaviours are load-bearing for clean shutdown:
 
-1. **Send after close is observable, never fatal.** `send` is an
-   expression that yields a `bool`: `true` when the value was enqueued,
-   `false` when the channel was already closed and the value was dropped.
-   There is no panic and no lost-value ambiguity — a producer can branch
-   on the result to learn that the consumer is gone. Used as a bare
-   statement (`send ch, v`), the boolean is simply ignored, so
-   fire-and-forget producers — including actor async-sends — need no
-   ceremony and keep their old, never-throws behaviour. Once a channel is
-   closed, every `send` reports `false` and has no effect.
-2. **Receive drains, then signals end-of-stream.** `jinn_chan_recv`
-   keeps returning buffered values until the buffer is empty, and only
-   *then* — when the channel is both empty and closed — does it report
-   end-of-stream (a `0` return at the C ABI; the non-blocking
-   `jinn_chan_try_recv` reports the same condition with a `-1`/`u32::MAX`
-   sentinel). No message that was enqueued before the close is lost.
+1. **Send after close is observable, never fatal.** `send` is an expression
+   yielding a `bool`: `true` when the value was enqueued, `false` when the
+   channel was already closed and the value dropped. No panic, no lost-value
+   ambiguity — a producer can branch on the result to learn the consumer is
+   gone. Used as a bare statement the boolean is ignored, so fire-and-forget
+   producers need no ceremony.
+2. **Receive drains, then signals end-of-stream.** `receive` keeps returning
+   buffered values until the buffer is empty, and only then — empty *and* closed
+   — reports end-of-stream. No message enqueued before the close is lost.
 
 ## Actors
 
-An actor is a daemon coroutine plus a **typed mailbox channel**. The
-channel pointer lives at offset 0 of the actor's mailbox struct
-([runtime/actor.c](runtime/actor.c)), so "the actor" and "its mailbox
-channel" are interchangeable for shutdown purposes.
+An actor is a coroutine plus a **typed mailbox channel**. The channel pointer
+lives at offset 0 of the mailbox struct, so "the actor" and "its mailbox" are
+interchangeable for shutdown purposes.
 
 ```jinn
 actor Worker
@@ -122,230 +107,323 @@ actor Worker
         sum is sum + n
 
 *main
-    w is spawn Worker       # daemon coroutine + mailbox channel
+    w is spawn Worker       # coroutine + mailbox channel
     w.work(10)              # enqueue a `work` message (async send)
     w.work(32)
-    stop w                  # close the mailbox channel
+    stop w                  # close the mailbox; the actor drains, then exits
+    join w                  # wait for the handler loop to finish
+    0
 ```
 
-- `spawn Actor(...)` allocates the mailbox, binds initial state fields,
-  creates the coroutine, marks it **daemon**, and enqueues it on the
-  scheduler ([src/codegen/actors.rs](src/codegen/actors.rs)).
-- `handle.method(args)` is an **asynchronous send**: it packs the
-  arguments into a message and enqueues it on the mailbox channel. It
-  does not wait for the handler to run.
-- `stop handle` lowers to `jinn_chan_close` on the mailbox channel
-  (`__stop` in [src/codegen/mir_codegen/magic.rs](src/codegen/mir_codegen/magic.rs)).
-  It is exactly "close the actor's mailbox". For a **message actor**
-  this is **stop-and-drain**: closing the mailbox lets the blocking
-  receive loop deliver every message enqueued before `stop`, *then*
-  exit (see *Message actors vs loop actors* below). `stop` is graceful,
-  not a hard kill — no enqueued message is dropped.
-- `join handle` parks the caller until the target actor's mailbox is
-  closed **and** its handler loop has fully exited. It lowers to
-  `jinn_actor_join` (`__join` in
-  [src/codegen/mir_codegen/magic.rs](src/codegen/mir_codegen/magic.rs)),
-  which waits on a one-shot completion latch stored at the tail of the
-  mailbox struct. The actor loop signals that latch in its exit block
-  (`jinn_join_signal`) before tearing down. `join` is idempotent: once
-  the actor is done the latch stays set, so repeated joins return
-  immediately. A typical graceful shutdown is `stop w` followed by
-  `join w` — drain the queued work, then wait for the actor to finish.
+- `spawn Actor(...)` allocates the mailbox, binds initial state fields, creates
+  the coroutine, and enqueues it. Outside a scope it is marked **daemon**;
+  inside a `together` scope it is a scope-owned non-daemon child.
+- `handle.method(args)` is an **asynchronous send**: it packs the arguments into
+  a message and enqueues it. It does not wait for the handler to run.
+- `stop handle` closes the mailbox. For a message actor this is
+  **stop-and-drain**: the receive loop delivers every message enqueued before
+  the `stop`, *then* exits. `stop` is graceful, not a hard kill — no enqueued
+  message is dropped.
+- `join handle` parks the caller until the mailbox is closed **and** the handler
+  loop has fully exited, waiting on a one-shot completion latch at the tail of
+  the mailbox struct. It is idempotent: once the actor is done the latch stays
+  set. The usual graceful shutdown is `stop w` then `join w`.
 
-  > **Footgun:** never `join` an actor from inside one of *its own*
-  > handlers — the handler is part of the very loop `join` waits to
-  > exit, so it deadlocks. This is not statically detected; keep `join`
-  > on the owning side (usually `*main` or a parent actor).
+  > **Footgun:** never `join` an actor from inside one of *its own* handlers —
+  > the handler is part of the loop `join` waits to exit, so it deadlocks. This
+  > is not statically detected; keep `join` on the owning side.
 
-### Message actors vs loop actors
+### Message actors versus loop actors
 
-The actor loop is generated in
-[src/codegen/actors.rs](src/codegen/actors.rs) in one of two shapes:
+The actor loop is generated in one of two shapes:
 
-- **Message actor** (no `*loop` handler): a **blocking** receive loop.
-  Each iteration calls `jinn_chan_recv`; a received message is dispatched
-  on its tag; an end-of-stream result (channel closed *and* drained)
-  exits the loop. Because receive drains first, **a message actor
-  processes every message that was enqueued before `stop`, then exits
-  cleanly.**
-- **Loop actor** (`*loop` handler, with optional `*loop <ms>` sleep): a
-  **polling** loop. Each iteration runs the `*loop` body, yields (or
-  sleeps `ms`), then does a **non-blocking** `jinn_chan_try_recv`:
-  `got` → dispatch, `empty-but-open` → loop again, `closed` → exit. A
-  loop actor performs periodic work *and* services messages, and exits
-  when its mailbox is closed.
+- **Message actor** (no `*loop` handler): a **blocking** receive loop. Each
+  iteration receives, dispatches on the message tag, and exits on end-of-stream.
+  Because receive drains first, a message actor processes every message enqueued
+  before `stop`, then exits cleanly.
+- **Loop actor** (`*loop` handler, optionally `*loop <ms>`): a **polling** loop.
+  Each iteration runs the `*loop` body, yields or sleeps, then does a
+  non-blocking receive — got a message, dispatch; empty but open, loop again;
+  closed, exit. A loop actor does periodic work *and* services messages.
 
-Both shapes converge on the same exit path: when the loop ends they
-signal the actor's completion latch (`jinn_join_signal`, so any pending
-`join` wakes) and then call `jinn_actor_destroy(mailbox)` (close +
-destroy the channel + free the mailbox), and the coroutine returns.
+Both shapes converge on the same exit path: signal the completion latch so any
+pending `join` wakes, then close and destroy the mailbox channel, free the
+mailbox, and return.
 
-### `stop` is stop-and-drain; cancellation is the fast path
+## Structured concurrency — the `together` scope
 
-Both actor shapes implement **stop-and-drain**: `stop` closes the
-mailbox, the receive/poll loop continues delivering every message that
-was already enqueued, and only once the mailbox is empty *and* closed
-does the loop exit. **No enqueued message is lost on `stop`.** This is
-the graceful shutdown primitive and is the one you almost always want.
+`together` opens a lexical scope that owns the concurrent work started inside
+it. It layers on top of everything above without changing any of it: code that
+never writes a scope behaves byte-for-byte as before.
 
-Fast, *drop-the-queue* termination is deliberately **not** what `stop`
-does. That belongs to cooperative **cancellation** under a structured
-`together` scope (see [structured-concurrency.md](structured-concurrency.md)):
-a cancelled actor skips the drain and tears down at its next suspension
-point. The distinction is intentional — `stop` = graceful drain,
-cancel = fast abort.
+```jinn
+together
+    dispatch
+        index(files)
+    dispatch
+        fetch(remote)
+log('both done')            # statically true: the scope joined
+```
+
+The indented body runs on the current coroutine. Every `dispatch` and `spawn`
+executed while the scope is the innermost enclosing scope — dynamically,
+including inside functions called from the body — registers its coroutine as a
+**child**. When the body falls off the end, the scope **joins**: the parent
+parks until every child has completed.
+
+A scope may be named, and the name's only operation is `stop`:
+
+```jinn
+together workers
+    for shard in shards
+        dispatch
+            crunch(shard)
+    if overload()
+        stop workers       # cancel
+```
+
+Scopes nest; children belong to the innermost scope.
+
+### Actors inside a scope
+
+```jinn
+together
+    w is spawn Worker      # scope-owned: NOT a daemon
+    w.work(10)
+    w.work(32)
+# scope exit: mailbox auto-closed, actor drains, then joins
+```
+
+A scope-owned actor is a non-daemon child whose mailbox the scope closes at body
+end. Because a message actor drains before exiting, scope exit *is* a
+first-class stop-and-drain: every message sent before the end of the block is
+processed before control passes the block. An explicit `stop w` inside the body
+still means "close the mailbox now"; the scope's auto-stop is idempotent.
+
+### Child lifetime rules
+
+- **L1 — Registration.** A coroutine created by `dispatch`/`spawn` while a scope
+  is current becomes a child of the innermost current scope. The current scope
+  is carried on the coroutine, so helper functions register their dispatches
+  too.
+- **L2 — Join on exit.** Control leaves a `together` block only after every
+  child has completed — normally, with a propagated error, or by cancellation
+  unwind.
+- **L3 — No escape.** A child cannot be moved out of its scope. Binding a
+  dispatch inside a scope and returning it from the enclosing function is a
+  compile error.
+- **L4 — Actor teardown.** At normal body exit the scope first `stop`s every
+  scope-owned actor, then joins all children, so actors drain in parallel with
+  other children finishing.
+- **L5 — Nesting.** A child that opens its own scope joins its own children
+  before it completes; lifetimes form a tree, and the outer scope never observes
+  a half-finished inner scope.
+- **L6 — `*main`.** Unchanged. The `*main` epilogue is the implicit root join
+  for non-daemon work; the scope join merely happens earlier and lexically.
+
+### Cancellation
+
+A scope becomes **cancelled** when a child completes with an error, or when
+`stop <scope-name>` executes from the body or from any child. Cancellation
+propagates **down** the scope tree, marking every live child and, transitively,
+the children of their nested scopes.
+
+- **C1 — Cancellation points.** A cancelled coroutine unwinds at its next
+  suspension point: a channel park (`send` on full, `receive` on empty), a
+  `yield`, a scheduler yield in an actor `*loop` tick, a sleep, or a loop
+  back-edge in a scheduler task. Already-parked coroutines are woken
+  immediately. Channel `send`/`receive` check the cancelled flag at the top of
+  their park loop *and* just before committing to park, which closes the
+  lost-wakeup race under the channel lock.
+- **C2 — Unwind semantics.** Unwinding reuses the error model's early-return
+  path: `defer`s run, drops are emitted, the coroutine returns. It behaves as if
+  a built-in `Cancelled` error were raised at the suspension point. `Cancelled`
+  is not catchable and never enters a function's inferred error union — it is
+  the runtime tearing the child down, not a value the program handles. Cleanup
+  belongs in `defer`.
+- **C3 — Actors under cancellation.** Cancellation closes the mailbox *and*
+  marks the actor cancelled: unlike a plain `stop`, a cancelled message actor
+  does **not** drain — it unwinds at its next receive.
+- **C4 — Channels are untouched.** A channel is ordinary user data with its own
+  `close`; cancellation does not reach into it. Parked operations are woken with
+  closed-style results only for the unwinding coroutine.
+- **C5 — The non-yielding child.** Cancellation cannot interrupt a child that
+  never reaches a suspension point. A cancelled scope whose child spins forever
+  joins forever.
+- **C6 — Idempotent and monotone.** Cancelling an already-cancelled scope, or
+  stopping an already-stopped actor, is a no-op.
+
+Two limitations are documented rather than silently mishandled: `defer`s whose
+cleanup references values defined inside a loop are not materialised at the
+synthesized cleanup block, and a coroutine parent parked in the scope join
+relies on the direct wake from cancel (the join-loop re-wake only runs when the
+parent is `*main`). Neither affects the common
+`together`/`dispatch`/`stop` shape; both are tracked as `N-1` and `N-2` in
+[`roadmap.md`](roadmap.md#concurrency).
+
+### Error propagation from children
+
+This composes with the error model in [`error-effects.md`](error-effects.md);
+none of its rules change.
+
+- **E1 — A failing child cancels its siblings and re-raises at the scope.** The
+  scope records the error, cancels, joins the remaining children, and then the
+  `together` block itself produces that error.
+- **E2 — First error wins.** Errors from siblings that fail *while unwinding
+  from cancellation* are dropped. This matches Trio and Kotlin and keeps the
+  error type a single union rather than a list.
+- **E3 — The scope is a fallible expression.** Its error union is the union of
+  the error unions of all lexically reachable child bodies, computed with the
+  same SCC least-fixpoint machinery as function inference. With no handler, a
+  failing scope makes the enclosing function fallible and re-raises, with `From`
+  conversion applied as usual.
+- **E4 — Local handling is the standard quaternary**, in its multiline form with
+  the block as subject:
+
+  ```jinn
+  together
+      dispatch
+          fetch(a)           # ! NetError
+      dispatch
+          save(b)            # ! FileError
+      !! log(err)            # siblings already cancelled and joined
+  ```
+
+  The `!!` arm runs after the join with `err` bound to the first error. A `?`
+  arm is permitted (`$` is Unit) but rarely useful; the `!` arm is meaningless
+  for scopes and is rejected.
+- **E5 — Actor handlers propagate to their scope.** A fallible handler in a
+  *scope-owned* actor that propagates an error completes the actor child with
+  that error, triggering E1 — this is the supervision boundary. A *daemon* actor
+  with a fallible handler keeps today's behaviour: the error terminates that
+  coroutine silently, since it has no parent to inform, and the compiler emits a
+  warning suggesting a scope.
+
+### How `stop` and `close` compose
+
+| Statement | Target | Meaning |
+| --- | --- | --- |
+| `close ch` | channel | Close, wake waiters, drain then end-of-stream. |
+| `stop w` | actor handle | Close the mailbox; the actor drains and exits. |
+| `stop workers` | scope name | Cancel the scope. |
+
+One family, one mental model: a one-way "no more input" valve. `stop` on a
+scope-owned actor inside its scope is graceful early shutdown with drain
+semantics. Scope cancellation overrides drain. Closing a channel that scope
+children are parked on is the normal way to let children finish. `stop` of an
+outer scope from inside an inner one cancels the outer, which transitively
+cancels the inner.
+
+`supervisor` is parsed but dormant — it is the *restart* layer, and will be
+specified as sugar over scopes (`N-4`).
+
+### Worked example
+
+```jinn
+err FetchError
+    Timeout
+
+*mirror(urls as Vec of String) returns i64 ! FetchError
+    done is channel of i64(64)
+    together pool
+        agg is spawn Counter            # scope-owned, auto stop-and-drain
+        for u in urls
+            dispatch
+                b is fetch(u)           # failure cancels the pool
+                agg.add(b.length)
+                send done, 1
+        dispatch
+            n is 0
+            for _ in urls
+                receive done
+                n is n + 1
+                if n equals limit
+                    stop pool           # enough: cancel the rest
+    total()                             # statically: all work settled
+```
+
+One block expresses bounded parallel fetches, a scope-owned aggregating actor
+with a guaranteed drain, early cancellation on quota, and typed error
+propagation.
 
 ## Program termination
 
-`*main` is compiled with a fixed epilogue
-([src/codegen/mir_codegen/mod.rs](src/codegen/mir_codegen/mod.rs)):
+`*main` is compiled with a fixed epilogue:
 
-1. `jinn_sched_init` — start the scheduler (lazily; workers spin up on the
-   first spawn).
+1. `jinn_sched_init` — start the scheduler lazily; workers spin up on the first
+   spawn.
 2. Run the user `*main` body.
-3. `jinn_sched_run()` — **block until `active_coros == 0`**, i.e. until
-   every *non-daemon* coroutine has finished. Daemon actors are not
-   awaited here.
-4. `jinn_sched_shutdown()` — set the shutdown flag, wake all workers, and
+3. `jinn_sched_run()` — block until `active_coros == 0`, i.e. until every
+   non-daemon coroutine has finished. Daemon actors are not awaited.
+4. `jinn_sched_shutdown()` — set the shutdown flag, wake all workers,
    `pthread_join` them.
 5. Return `*main`'s exit code.
 
-Each worker loop checks the shutdown flag at the top of every iteration
-([runtime/sched.c](runtime/sched.c)). When a daemon actor is parked on
-its mailbox at shutdown, control has already swapped back to the worker;
-the worker observes the flag and exits, abandoning the parked actor
-(process teardown reclaims it). This is correct and intended: a parked
-actor blocked on `receive` does **not** prevent the program from exiting.
+Each worker loop checks the shutdown flag at the top of every iteration. When a
+daemon actor is parked on its mailbox at shutdown, control has already swapped
+back to the worker; the worker observes the flag and exits, abandoning the
+parked actor, and process teardown reclaims it. A parked daemon actor does not
+prevent the program from exiting.
 
-## Structured concurrency
+## Sharp edges
 
-The rules in this document describe the unscoped base layer. A lexical
-scope construct (`together`) that joins children on exit, propagates child
-errors, and gives `stop` a cancellation meaning is specified in
-[docs/structured-concurrency.md](structured-concurrency.md); it layers on
-top of this contract without changing anything specified here.
+These follow from the rules above. They are sharp, not bugs — but they bite.
 
-### Cancellation: `stop <scope>`
-
-A `together` block may be named, and `stop <name>` **cancels** that scope:
-
-```jinn
-together s
-    dispatch
-        for i in 0 to 1000000
-            send out, i      # would run forever
-    stop s                   # cancel: the dispatch unwinds at its next park
-```
-
-Cancellation is **cooperative**. `jinn_scope_cancel`
-([runtime/scope.c](../runtime/scope.c)) marks the scope and every live child
-`cancelled`, closes scope-owned actor mailboxes, and wakes any child parked
-on a channel. A cancelled coroutine observes cancellation at a *cancellation
-point* and unwinds:
-
-- **Channel `send`/`recv`** check the running coroutine's `cancelled` flag at
-  the top of their park loop and just before committing to park (closing the
-  lost-wakeup race under the channel lock), returning early (as if closed)
-  when set.
-- **Loop back-edges** in a scheduler task are cancellation points too: the
-  `inject_yields` pass also injects a `jinn_scope_check_cancelled` test
-  (`inject_cancel_checks` in
-  [src/mir/opt/yield_passes.rs](../src/mir/opt/yield_passes.rs)). If the task
-  has `defer`s, the check branches to a synthesized `cancel.cleanup` block
-  that runs the body's defers and returns — so **`defer` runs on
-  cancellation**, exactly like an early return.
-
-Cancellation contrasts with actor `stop` (stop-and-drain, §Actors): `stop
-<scope>` is the fast abort — the cancelled task drops its remaining work
-instead of draining it.
-
-**Bounded scope (current implementation).** Cancellation unwinds through
-*function-level* `defer`s of a scheduler task. Two cases are deferred and
-documented rather than silently mis-handled: (1) `defer`s whose cleanup code
-references values defined inside a loop (block-scoped defers under
-cancellation) are not specially materialised at the cleanup block; (2) a
-coroutine *parent* that has parked in `jinn_scope_join` relies on the direct
-wake from `jinn_scope_cancel` (the join-loop re-wake only runs when the
-parent is `*main`). Neither affects the common `together`/`dispatch`/`stop`
-shape; both are tracked for the structured-concurrency error-propagation
-work.
-
-## Sharp edges (read this before shipping a concurrent program)
-
-These follow directly from the rules above. They are sharp, not bugs —
-but they are the things that bite.
-
-1. **Actors are not awaited.** Because actors are daemon coroutines,
-   `*main` returning will tear the program down *without* waiting for an
-   actor to finish processing its mailbox. If you need an actor's work to
-   be observable, you must synchronize — typically by having the actor
-   send results back on a channel that `*main` `receive`s, or by closing
-   the mailbox (`stop`) and giving the daemon a chance to drain before
-   `*main` returns. Sprinkling `usleep` to "let the actor catch up" (as
-   several example apps do) is a smell, not a contract.
-2. **Long loops yield automatically (cooperative preemption).** A
-   coroutine swaps back to its worker only at a yield/park point. To stop
-   a tight loop from monopolising a worker and starving sibling
-   coroutines, the compiler inserts a `jinn_sched_yield` at every loop
-   **back-edge** inside coroutine/actor contexts — the `inject_yields`
-   MIR pass ([src/mir/opt/yield_passes.rs](src/mir/opt/yield_passes.rs)).
-   This is a *correctness* pass (it runs at every opt level, including
-   `None`) and is justified at the MIR level because LLVM has no notion of
-   our scheduler. A handler with a long counting loop therefore no longer
-   wedges its worker; siblings make progress and shutdown is bounded.
-
-   The injection only adds a yield at back-edges — it cannot rescue a
-   genuinely *infinite* loop (`while true` with no exit). A truly endless
-   handler still never returns to dispatch the next message; that is a
-   logic bug, not a scheduler footgun. Opt out of injection for a
-   function whose hot loop must run uninterrupted with `@no_yield`:
+1. **Top-level actors are not awaited.** A daemon actor's work is not
+   guaranteed to be observable when `*main` returns. Synchronize deliberately:
+   put the actor in a `together` scope, or `stop` then `join` it, or have it
+   send results back on a channel that `*main` receives. Sprinkling `usleep` to
+   "let the actor catch up" is a smell, not a contract.
+2. **Long loops yield automatically.** A coroutine swaps back to its worker only
+   at a yield or park point, so the compiler inserts a scheduler yield at every
+   loop **back-edge** inside coroutine and actor contexts (the `inject_yields`
+   MIR pass). This is a *correctness* pass — it runs at every optimization
+   level, including none — and is justified at MIR level because LLVM has no
+   notion of the scheduler. Injection only covers back-edges; it cannot rescue a
+   genuinely infinite loop, which is a logic bug. Opt a hot kernel out with
+   `@no_yield`:
 
    ```jinn
    @no_yield
    *crunch xs
        # tight numeric kernel; no scheduler yields inserted
    ```
-3. **The all-parked deadlock.** `jinn_sched_run` only returns when
-   `active_coros` reaches zero. If every *non-daemon* coroutine parks on a
-   channel that will never receive a value (e.g. mutually waiting
-   producers/consumers), `active_coros` never decrements and `*main`
-   hangs at `jinn_sched_run`. Close channels you are done with, and make
-   sure some non-daemon coroutine can always make progress.
-4. **Send after close drops the value — but tells you.** Sending to a
-   closed channel (or a stopped actor) drops the value and the `send`
-   expression yields `false`. Treat `close`/`stop` as a one-way valve:
-   once shut, producers have no effect. Fire-and-forget sends (bare
-   `send` statements, actor async-sends) ignore the result and never
-   fail; if you need to know whether your value landed, bind the result
-   (`delivered is send ch, v`) and branch on it.
+3. **The all-parked deadlock.** `jinn_sched_run` returns only when
+   `active_coros` reaches zero. If every non-daemon coroutine parks on a channel
+   that will never receive, `*main` hangs. Close channels you are done with, and
+   make sure some non-daemon coroutine can always make progress. Inside a scope
+   the same hang becomes lexically attributable to one block.
+4. **Send after close drops the value — but tells you.** Treat `close`/`stop` as
+   a one-way valve: once shut, producers have no effect. Bind the result
+   (`delivered is send ch, v`) if you need to know whether your value landed.
 
-## Testing
+## Conformance
 
-Every rule above is backed by an end-to-end test that compiles and runs a
-real Jinn program through `jinnc`, in
-[tests/concurrency_shutdown.rs](tests/concurrency_shutdown.rs):
+Every rule above is backed by an end-to-end test that compiles and runs a real
+program through `jinnc`, in
+[`../tests/concurrency_shutdown.rs`](../tests/concurrency_shutdown.rs):
 
-| Test                                | Asserts                                                                 |
-| ----------------------------------- | ----------------------------------------------------------------------- |
-| `channel_fifo_roundtrip`            | `send`/`receive` preserve FIFO order and lose nothing.                  |
-| `channel_capacity_one_interleaved`  | A capacity-1 channel forces strict ping-pong without loss.              |
-| `channel_receive_drains_buffer`     | Every value enqueued before `close` is still delivered by `receive`.    |
-| `send_after_close_is_observable`    | `send` yields `true` on an open channel and `false` after `close`.      |
-| `bare_send_ignores_result`          | A bare `send` statement stays fire-and-forget, even after `close`.      |
-| `actor_processes_then_stops`        | After `stop`, the program joins its workers and exits 0 — no hang.      |
-| `loop_actor_stop_drains_all_messages` | `stop` is stop-and-drain for a loop actor: every queued message runs.  |
-| `join_after_stop_completes`         | `join` parks the caller until the actor's loop has fully exited.        |
-| `join_twice_is_idempotent`          | A second `join` on a finished actor returns immediately (no deadlock).  |
-| `tight_loop_actor_does_not_starve_siblings` | Injected back-edge yields keep a spinning actor from starving siblings. |
-| `actor_without_stop_still_exits`    | A daemon actor parked on `receive` does not block program exit.         |
-| `scope_joins_all_dispatches`        | `together` joins every `dispatch`ed child before control leaves the block. |
-| `scope_owned_actor_drains_on_exit`  | A `spawn` inside `together` is scope-owned: its mailbox drains at block exit. |
-| `daemon_spawn_outside_scope_unchanged` | `spawn` outside any scope stays a fire-and-forget daemon.            |
-| `stop_scope_cancels_without_drain`  | `stop <scope>` cancels a child task at its next park; the infinite tail never runs. |
-| `defer_runs_on_cancellation`        | A `defer` inside a cancelled task still runs as the task unwinds.       |
+| Test | Asserts |
+| --- | --- |
+| `channel_fifo_roundtrip` | `send`/`receive` preserve FIFO order and lose nothing. |
+| `channel_capacity_one_interleaved` | A capacity-1 channel forces strict ping-pong without loss. |
+| `channel_receive_drains_buffer` | Every value enqueued before `close` is still delivered. |
+| `send_after_close_is_observable` | `send` yields `true` open, `false` after `close`. |
+| `bare_send_ignores_result` | A bare `send` statement stays fire-and-forget. |
+| `actor_processes_then_stops` | After `stop`, the program joins its workers and exits 0. |
+| `loop_actor_stop_drains_all_messages` | `stop` is stop-and-drain for a loop actor. |
+| `join_after_stop_completes` | `join` parks until the handler loop has fully exited. |
+| `join_twice_is_idempotent` | A second `join` on a finished actor returns immediately. |
+| `tight_loop_actor_does_not_starve_siblings` | Injected back-edge yields prevent starvation. |
+| `actor_without_stop_still_exits` | A parked daemon actor does not block program exit. |
+| `scope_joins_all_dispatches` | `together` joins every child before control leaves the block. |
+| `scope_owned_actor_drains_on_exit` | A `spawn` inside `together` drains at block exit. |
+| `daemon_spawn_outside_scope_unchanged` | `spawn` outside any scope stays a daemon. |
+| `stop_scope_cancels_without_drain` | `stop <scope>` cancels a child at its next park. |
+| `defer_runs_on_cancellation` | A `defer` inside a cancelled task still runs. |
 
-The multithreaded MPMC stress, crash-consistency, and tail-latency
-characterization for channels lives separately in
-[tests/channel_stress.rs](tests/channel_stress.rs); under the `sanitize`
-CI job the C runtime is TSan-instrumented, so those tests double as the
-channel's data-race check.
+Multithreaded MPMC stress, crash consistency, and tail-latency characterization
+live in [`../tests/channel_stress.rs`](../tests/channel_stress.rs). Under the
+sanitize job the C runtime is TSan-instrumented, so those tests double as the
+channel's data-race check — with the caveat in `N-5` that whole-program TSan
+needs fiber annotations before its results can be trusted.

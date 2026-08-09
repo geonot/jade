@@ -6,7 +6,7 @@ slicing, and iteration, and the boundary between the *character* view and the
 *byte* view. The semantics here are exercised by the conformance suite in
 [`tests/string_unicode.rs`](../tests/string_unicode.rs); a regression in any of
 them fails CI. `String` is a **stable** surface (see
-[`docs/stability.md`](stability.md)).
+[`stdlib.md`](stdlib.md#stability-tiers)).
 
 ## Encoding: UTF-8
 

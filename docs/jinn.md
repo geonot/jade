@@ -12,9 +12,17 @@ ownership.
 
 This document is a tour of the language, from the basics to the more advanced
 features. It describes the language **as implemented today**, not as aspired
-to; where a feature is incomplete, the gap is stated inline. Every fenced
-example is extracted and compiled against the current compiler by
-`tests/doc_examples.rs`, so an example that stops compiling fails CI.
+to; where a feature is incomplete, the gap is stated inline and carries an id
+into [`roadmap.md`](roadmap.md). Every fenced `jinn` example is extracted and
+compiled against the current compiler by `tests/doc_examples.rs`, so an example
+that stops compiling fails CI.
+
+The tour is the starting point. The normative specifications live alongside it:
+[`memory-model.md`](memory-model.md) for ownership,
+[`concurrency.md`](concurrency.md) for tasks and shutdown,
+[`error-effects.md`](error-effects.md) for the error model,
+[`strings.md`](strings.md) for text, and [`jinn.ebnf`](jinn.ebnf) for the
+grammar. [`README.md`](README.md) maps the rest.
 
 ---
 
@@ -73,6 +81,8 @@ example is extracted and compiled against the current compiler by
     - [Regular expressions](#regular-expressions)
     - [Built-ins](#built-ins)
   - [Memory and ownership](#memory-and-ownership)
+  - [Idiomatic Jinn](#idiomatic-jinn)
+  - [Reserved words](#reserved-words)
 
 ---
 
@@ -1198,31 +1208,122 @@ assert(cond)      # check a condition at runtime
 
 ## Memory and ownership
 
-Jinn manages memory for you, without a garbage collector. You do not write
-allocation or free calls: scalars and strings are values (assignment copies),
-and each heap aggregate (`Vec`, `Map`, aggregate-containing structs) has a
-single owner whose scope exit releases it.
+Jinn manages memory for you, without a garbage collector. You never write
+allocation or free calls. The rule you need is three words: **numbers and text
+copy; containers move; reads borrow.**
 
-**The target model** (specified in
-[`memory-model.md`](memory-model.md)) is
-move-on-assign with compiler-inferred borrows for heap aggregates: `b is a`
-moves ownership — `a` is unusable until reassigned — reads borrow without
-copying, and a program that would corrupt memory does not compile. No
-lifetime annotations, no `&`, no explicit `clone()`.
+- Scalars and `String` are values: assignment copies, and both names stay
+  usable.
+- Heap aggregates — `Vec`, `Map`, and any struct or enum containing one — have
+  a single owner. `b is a` **moves** ownership, and `a` is unusable until it is
+  reassigned. Reading a moved value is a compile error that names the move site
+  and the fix.
+- Reads borrow. Method calls, field reads, and argument passing take a borrow
+  that ends with the statement, so there is nothing to annotate: no lifetimes,
+  no `&`, no `clone()`, no `Box`/`Rc`/`Arc`.
+- An unannotated parameter borrows, unless the callee's body consumes it — by
+  returning it, storing it, or sending it — in which case the call moves the
+  argument. That is inferred from the body, not declared.
+- `copy a` clones explicitly; `take a` moves explicitly. Every ownership
+  diagnostic names whichever one you wanted.
 
-> **Current status — partially enforced.** Landed (task 8-6): a parameter
-> whose value escapes through the callee (returned, stored, sent) is
-> **inferred consuming** — the call moves the argument, sorts/filters/
-> transform helpers run with exactly one drop, and using the argument
-> afterwards is a compile error that names the consuming call (clone first
-> with `a2 is copy a` to keep both). Two `dispatch` tasks mutating one
-> `Vec`, and `b is a` followed by a read of `a`, are both rejected at
-> compile time.
->
-> Cross-task sharing of one aggregate is rejected at compile time, so
-> channels and actors are the way to hand data between tasks. Strings are
-> unaffected — they already have value semantics.
+An aggregate moves into at most one task, so two `dispatch` blocks cannot share
+one `Vec` — that is a compile error, not a data race. Channels and actors are
+how data moves between tasks.
 
-One property that holds by construction: there are no shared reference
-counts, so reference cycles cannot be constructed and cycle leaks are
-impossible.
+Two properties hold by construction: there are no shared reference counts, so
+reference cycles cannot be constructed and cycle leaks are impossible; and every
+owned value has exactly one drop site, so cleanup is deterministic.
+
+The full contract — the rules, the exact diagnostics, the tiers, and where the
+implementation does not yet meet the contract — is
+[`memory-model.md`](memory-model.md).
+
+---
+
+## Idiomatic Jinn
+
+Jinn's premise is that the programmer expresses intent and the compiler does the
+mechanism. Code that spells out mechanism the compiler already handles reads as
+a transliteration from another language. The idioms below are what the corpus
+converges on; the formatter's design ([`design/fmt-and-lint.md`](design/fmt-and-lint.md))
+is built to move code toward them mechanically.
+
+**Iterate collections; do not drive an index.** `loop xs` binds `$` to each
+element and `$$` to its index. A counted loop over a pure integer range is
+`for i in 0 to n`.
+
+```
+# avoid                                  # prefer
+loop(0, $ < xs.len(), $ + 1)             loop xs
+    a is xs.get($)                           use($)
+    use(a)
+```
+
+**Do not accumulate strings with `+` in a loop.** It is O(n²) and noisy. Use
+`join` when the concatenation is uniform, or a builder when it is not.
+
+```
+# avoid                                  # prefer
+out is ''                                items.map(stringify).join(',')
+loop items
+    out is out + stringify($)
+```
+
+**Use `bool`, not an integer flag.** A variable only ever set to `0` or `1` and
+only ever compared against `0` or `1` is a `bool` wearing a costume. A function
+whose body is `if cond` / `return 1` / `return 0` is just `cond`.
+
+**Collapse `else` containing a lone `if` into `elif`,** and turn a chain that
+tests one scrutinee for equality into a `match`.
+
+**Drop `self.` inside methods** where the name unambiguously resolves to a field
+of the receiver and nothing shadows it. Field access inside a method resolves to
+the receiver automatically.
+
+```
+# avoid                                  # prefer
+*write(s as String)                      *write(s as String)
+    self.parts.push(s)                       parts.push(s)
+    self.total is self.total + s.length      total is total + s.length
+```
+
+**Drop the tail `return`.** A function returns its last expression.
+
+**Drop casts and annotations the inferencer supplies.** Write the type when it
+documents intent or pins a choice, not to restate what inference already knows.
+
+**Use the collection literal.** `vec()` followed by repeated `.push` of known
+values is a list literal or a comprehension.
+
+**Prefer the scalar string APIs over byte loops.** `char_at` with magic numeric
+constants is fast and unreadable, and it ties behaviour to ASCII. Reach for it
+only when you genuinely mean bytes — and when you do, read
+[`strings.md`](strings.md) first, because the byte and scalar views are
+deliberately distinct.
+
+---
+
+## Reserved words
+
+**90 spellings, 85 distinct tokens** — the five extras are the comparison
+aliases. The list is the `KEYWORDS` table in `src/lexer/mod.rs`; the grammar
+itself is [`jinn.ebnf`](jinn.ebnf), which `tests/ebnf_roundtrip.rs` keeps honest.
+
+| Group | Keywords |
+| --- | --- |
+| Comparison and boolean | `is`, `eq`/`equals`, `neq`, `lt`/`ngte`, `gt`/`nlte`, `lte`/`ngt`, `gte`/`nlt`, `and`, `or`, `not`, `xor`, `in`, `pow`, `mod` |
+| Control flow | `if`, `elif`, `else`, `unless`, `until`, `while`, `for`, `loop`, `break`, `continue`, `return`, `match`, `when`, `do`, `end`, `defer`, `yield` |
+| Declarations and types | `type`, `enum`, `trait`, `impl`, `dispatch`, `pub`, `use`, `as`, `from`, `to`, `by`, `of`, `extern`, `asm`, `embed`, `alias`, `global`, `atomic`, `strict`, `returns`, `at`, `nop` |
+| Concurrency | `actor`, `spawn`, `send`, `receive`, `channel`, `close`, `select`, `sim`, `supervisor`, `stop`, `default`, `together` |
+| Stores | `store`, `migration`, `insert`, `delete`, `set`, `transaction`, `view`, `query`, `err` |
+| Diagnostics and meta | `test`, `assert`, `log`, `unreachable`, `build`, `syscall`, `grad`, `einsum` |
+| Literals | `true`, `false`, `none` |
+
+The five comparison aliases (`ngte`, `nlte`, `ngt`, `nlt`) are double negatives
+— `ngte` is "not greater-than-or-equal", i.e. `lt`. They parse, and the
+formatter rewrites them to the positive spelling.
+
+The access modifiers `copy`, `take`, and `const` are **not** reserved words:
+they are recognized in modifier position and are ordinary identifiers
+everywhere else.

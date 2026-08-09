@@ -1,35 +1,28 @@
 # Checked error-effect system
 
-This document describes the error-effect system as implemented today, not
-aspiration. Its guarantees hold only as far as the conformance tests in
-`tests/error_effects.rs` pin them. Known gaps: instantiation-site
-diagnostics, and `From` resolution by name pattern.
+Jinn's error model: a canonical `Option`/`Result` prelude, error declarations
+and raising with `err`, a *quaternary* expression extending the ternary with
+success, empty, and error arms, implicit propagation with inferred fallibility,
+and the inference and conversion rules that make values-as-errors ergonomic
+without exceptions. Error-type conversion is expressed through the `From` trait,
+so propagation across layers is type-directed.
 
-Subsystems exercised by the conformance suite:
-- §2 canonical `Option`/`Result` prelude with combinator surfaces
-- §3 `err` declaration + raise
-- §4 quaternary `e ? ok ! nothing !! err` with `$` / `err` bindings
-- §5 implicit propagation, inferred fallibility (SCC least-fixpoint), checked R1-R6
-- §6 `From` conversion graph (C1-C4)
-- Codegen: quaternary lowering, err-raise early-return, auto-wrap/unwrap, defer on error exits
+This describes the system **as implemented**, and its guarantees hold as far as
+the conformance suite in `tests/error_effects.rs` pins them: the prelude and its
+combinators (§2), `err` declaration and raise (§3), the quaternary with its `$`
+and `err` bindings (§4), implicit propagation and inferred fallibility as an SCC
+least fixpoint with rules R1–R6 checked (§5), the `From` conversion graph (§6),
+and the codegen half — quaternary lowering, err-raise early return, auto-wrap
+and unwrap, and `defer` on error exits.
 
-The deprecated prefix-`!` raise and `?>` operator are removed; the full corpus
-is migrated to `err <Variant>` + implicit propagation / quaternary.
-27/27 `tests/error_effects.rs` conformance tests pass; full cargo test suite green.
+Error propagation from a child task to its enclosing scope (§8) is implemented
+and specified in [`concurrency.md`](concurrency.md#error-propagation-from-children).
 
-Actor-supervision integration (§8, error propagation to supervision boundary)
-depends on structured concurrency — now designed in
-[docs/structured-concurrency.md](structured-concurrency.md) (§5 E5) — and is
-not yet implemented.
-
-This document specifies Jinn's error model: a canonical `Option`/`Result`
-prelude, error declarations and raising with `err`, a *quaternary* expression
-that extends the ternary with success/empty/error arms, implicit error
-propagation with inferred fallibility, and the inference and conversion rules
-that make values-as-errors ergonomic without exceptions.
-
-The design builds on the trait system (task 1-4): error-type conversion is
-expressed as a trait (`From`), so propagation across layers is type-directed.
+Open gaps, tracked in [`roadmap.md`](roadmap.md#types-inference-and-diagnostics):
+instantiation-site diagnostics; `From` resolution by name pattern; `! E` is a
+parse error in a trait method signature, so no trait method can be fallible
+(`T-5`); and a bare `! E` whose body yields a non-unit value reaches codegen and
+panics instead of being diagnosed in the typer (`T-4`).
 
 ---
 
@@ -252,8 +245,8 @@ During HIR lowering of a function body (extends `current_fn_error_types`):
   are emitted on the propagation early-exit path.
 - **Generators** may be fallible; `err`-raise / propagation returns from the
   generator.
-- **Actors/channels**: a fallible handler propagates to the supervision
-  boundary (designed: [docs/structured-concurrency.md](structured-concurrency.md) §5 E5).
+- **Actors/channels**: a fallible handler in a scope-owned actor propagates to
+  the supervision boundary — [`concurrency.md`](concurrency.md#error-propagation-from-children) E5.
 - **Value semantics:** `Option`/`Result` are by-value enums; no GC implications.
 
 ---
