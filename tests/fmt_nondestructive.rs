@@ -161,3 +161,90 @@ fn fmt_roundtrip_over_snippets_corpus() {
         "corpus scan looks wrong: only {checked} files"
     );
 }
+
+#[path = "support/parallel.rs"]
+mod parallel;
+
+fn jinnc_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_jinnc"))
+}
+
+#[test]
+fn fmt_output_still_frontend_checks_over_corpus() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut files: Vec<(PathBuf, bool)> = Vec::new();
+    for (sub, is_lib) in [
+        ("snippets", false),
+        ("tests/programs", false),
+        ("benchmarks", false),
+        ("std", true),
+    ] {
+        let mut stack = vec![root.join(sub)];
+        while let Some(dir) = stack.pop() {
+            for e in std::fs::read_dir(&dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().map(|x| x == "jn").unwrap_or(false) {
+                    files.push((p, is_lib));
+                }
+            }
+        }
+    }
+    assert!(
+        files.len() > 500,
+        "corpus scan looks wrong: {}",
+        files.len()
+    );
+
+    let failures: Vec<String> = parallel::par_map(files, |(p, is_lib)| {
+        let src = std::fs::read_to_string(p).unwrap();
+        let mut base = Command::new(jinnc_bin());
+        base.arg(p).arg("--emit-hir");
+        if *is_lib {
+            base.arg("--lib");
+        }
+        let before = base.output().expect("invoke jinnc");
+        if !before.status.success() {
+            return None;
+        }
+        if src.contains("embed '") {
+            return None;
+        }
+        let formatted = match jinnc::fmt::format_source(&src) {
+            Ok(f) => f,
+            Err(e) => return Some(format!("{}: fmt failed: {e}", p.display())),
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let tmp = dir.path().join("fmtgate.jn");
+        std::fs::write(&tmp, &formatted).unwrap();
+        let mut chk = Command::new(jinnc_bin());
+        chk.arg(&tmp).arg("--emit-hir");
+        if *is_lib {
+            chk.arg("--lib");
+        }
+        let after = chk.output().expect("invoke jinnc");
+        if after.status.success() {
+            None
+        } else {
+            Some(format!(
+                "{}: compiled before fmt but not after: {}",
+                p.display(),
+                String::from_utf8_lossy(&after.stderr)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+            ))
+        }
+    })
+    .into_iter()
+    .flatten()
+    .collect();
+
+    assert!(
+        failures.is_empty(),
+        "{} file(s) no longer frontend-check after formatting:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}

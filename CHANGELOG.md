@@ -1,4 +1,51 @@
 # Changelog
+- **[144]** (2026-08-10) `jinn fmt` no longer destroys code: printer rebuilt against the real grammar, gated by compile-after-format
+
+X-1 measured 164 of 688 corpus files that compiled before `jinnc fmt` and not
+after, applied silently by `--write`. The damage was printer grammar drift —
+the printer had never been held to the grammar the parser actually accepts.
+Measuring by damage class and fixing each:
+
+- **Invented grammar.** Extern printed without `*`, parens, or `as`
+  (`extern usleep us i32`); store statements printed SQL (`insert into`,
+  `delete from`) with every filter dropped; store headers lost their
+  decorators and fields lost theirs (`@search`, `@index`, `@default`,
+  relations, store methods — all silently deleted, i.e. reformatting a store
+  changed its schema); actors lost their state fields entirely and printed
+  handlers in a form the parser rejects.
+- **Dropped semantics.** Bind access modifiers (`row is copy t.get(i)` →
+  `row is t.get(i)`) and bind type annotations vanished — reformatting changed
+  ownership semantics. Generic `of T` clauses disappeared from types, enums,
+  and functions; `! E` error rows disappeared from function signatures; layout
+  attributes (`@packed`, `@align`) disappeared from types; the implicit `self`
+  parameter was printed explicitly.
+- **Wrong surface forms.** Float literals printed `0.0` as `0` (silently
+  changing arithmetic types), `&`/`*` for the `%`/`@` pointer operators,
+  `use std.time` for `use std/time`, `Tree<T>` for `Tree of T`,
+  `Map of String, String` in positions where only the value-sugar
+  `Map of String` parses, `err` variants with `of` instead of parens, and
+  `not equals` for `neq`.
+- **Structure loss.** Multi-clause functions desugared to statement-position
+  if-expressions printed as `cond ? x ! ...` — now printed as real `if`
+  blocks. Query blocks, `select`, and `dispatch` printed as `...` — now
+  printed in their block forms. `for` loops lost their `to`/`by` bounds and
+  index binders; desugared `if x is pat` matches printed empty arms — now
+  `nop`. Precedence was never parenthesized (`(n & (n-1)) equals 0`
+  reformatted into a parse error); binary operands, postfix receivers, and
+  cast operands now get parens when compound.
+
+Two enforcement changes make the class stay dead.
+`fmt_output_still_frontend_checks_over_corpus` formats all 574 files of
+`snippets/`, `tests/programs/`, `benchmarks/`, and `std/` and fails if any
+file that frontend-checked before formatting stops afterward — the gate X-1
+said was missing by construction (the old gate checked idempotence only, and
+only over snippets/). And `fmt --write` now re-parses its own output before
+writing, refusing with a formatter-bug message instead of damaging the file —
+so the next printer regression is a refusal, not silent corruption. X-1 drops
+to minor: `apps/` stay ungated (per-file checks need project context) and a
+few expression-position fallbacks (`asm`, block expressions) survive behind
+the guard.
+
 - **[143]** (2026-08-10) roadmap remediation: 21 items closed — the ownership seams, the verified type-system defects, embed gating, and the store residue
 
 The five memory-model blockers all lived at the same seam — moves of

@@ -301,11 +301,21 @@ pub fn run() {
                             Ok(formatted) => {
                                 if write {
                                     if formatted != src {
-                                        fs::write(path, &formatted).unwrap_or_else(|e| {
-                                            eprintln!("cannot write {}: {e}", path.display());
+                                        if let Err(e) = crate::fmt::format_source(&formatted) {
+                                            eprintln!(
+                                                "refusing to write {}: the formatted output no \
+                                                 longer parses ({e}); this is a formatter bug — \
+                                                 the file is unchanged",
+                                                path.display()
+                                            );
                                             failed = true;
-                                        });
-                                        println!("formatted {}", path.display());
+                                        } else {
+                                            fs::write(path, &formatted).unwrap_or_else(|e| {
+                                                eprintln!("cannot write {}: {e}", path.display());
+                                                failed = true;
+                                            });
+                                            println!("formatted {}", path.display());
+                                        }
                                     }
                                 } else {
                                     print!("{formatted}");

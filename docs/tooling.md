@@ -33,7 +33,7 @@ spot-checked.
 | `run` | Compile and run, with a hash-keyed binary cache. Dependency edits invalidate the cache. |
 | `test` | Run a program's tests. |
 | `check` | Type-check without emitting an object. Runs the same ownership analysis as `build`. |
-| `fmt` | Format source — **read the warning below**. |
+| `fmt` | Format source (prints to stdout; `--write` rewrites in place). |
 | `init` | Scaffold a project (`project.jn` + `source/`). |
 | `bind` | Generate Jinn `extern` declarations from a C header. |
 | `fetch`, `update`, `build`, `package`, `publish` | Package commands. Only `fetch` has been exercised (`V-3`). |
@@ -51,17 +51,15 @@ undefined variable compiles to HIR with exit 0 and fails at codegen with no span
 
 `jinn fmt` lexes, parses to an AST, and pretty-prints it back to source.
 
-> **Do not use `--write` on code you care about.** Sweeping the 688-file corpus
-> through `fmt` leaves **164 files that no longer compile** — including 41 of
-> the 50 modules in `std/`. `--write` applies this silently and exits 0. The
-> damage is printer grammar drift: store, extern, actor and query forms, the
-> `...` placeholder, and parenthesization precedence. Tracked as `X-1`.
-
-String literals escape correctly and formatting is idempotent; the printer's
-coverage of the rest of the grammar is what fails. The existing gate checks
-idempotence and comment preservation but never that the output still compiles,
-which is why this went unnoticed. Until `X-1` closes, use `jinn fmt` to read
-formatted output, not to rewrite files.
+Formatting is idempotent, preserves comments, and is held to the grammar by a
+CI gate: every file in `snippets/`, `tests/programs/`, `benchmarks/`, and
+`std/` must still frontend-check after formatting
+(`fmt_output_still_frontend_checks_over_corpus`, [144]). As a second line of
+defense, `--write` re-parses its own output before touching the file and
+refuses — with a formatter-bug message and a non-zero exit — if the result no
+longer parses. Multi-module `apps/` projects are not yet in the gate, and a
+few expression forms that never appear in expression position in the corpus
+still print as placeholders; the residue is tracked as `X-1`.
 
 The intended end state — a behaviour-preserving idiomatic rewriter and linter —
 is specified in [`design/fmt-and-lint.md`](design/fmt-and-lint.md). The style it

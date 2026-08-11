@@ -295,36 +295,26 @@ the store-open codegen path assumes success.
 
 ## Tooling
 
-### X-1 (B) `jinn fmt` destroys code — *verified*
+### X-1 (m) `jinn fmt`: apps are ungated and expression fallbacks remain
 
-Sweeping all 688 corpus files through `jinnc fmt` and re-checking each output:
+[144] rebuilt the printer against the real grammar — extern, actor, store
+(decorators, field decorators, relations, methods, filters), query blocks,
+select, dispatch, generic `of` clauses on types/enums/functions, `! E` rows,
+bind access modifiers and annotations, layout attributes, `%`/`@`
+pointer forms, float literals, `nop` bodies, and precedence parenthesization —
+and the gate now asserts what X-1 demanded:
+`fmt_output_still_frontend_checks_over_corpus` formats every file in
+`snippets/`, `tests/programs/`, `benchmarks/`, and `std/` (574 files) and
+fails if any file that frontend-checked before formatting stops doing so.
+`--write` additionally refuses to write output that no longer parses, so a
+future printer regression degrades to a refusal instead of silent damage.
 
-| Corpus | Files | Compiled before, not after |
-| --- | ---: | ---: |
-| `snippets/` | 402 | 17 |
-| `tests/programs/` | 87 | 41 |
-| `apps/` | 113 | 53 |
-| `std/` | 50 | 41 |
-| `benchmarks/` | 36 | 12 |
-| **total** | **688** | **164** |
-
-`--write` applies this silently and exits 0. String literals escape and
-round-trip correctly, and formatting is idempotent (one non-idempotent file, one
-file `fmt` refuses outright); the damage is printer grammar drift — store,
-extern, actor and query forms, the `...` placeholder, and parenthesization
-precedence.
-
-**The gate misses it by construction.** `fmt_roundtrip_over_snippets_corpus`
-checks idempotence and comment preservation, and it passes. It never checks that
-the output still *compiles*, and it covers only `snippets/` — the corpus with
-the lowest damage rate. `std/`, where 41 of 50 files break, is not in any fmt
-gate at all.
-
-**Done when** one of: the printer is rebuilt against the real grammar and a
-compile-after-format sweep over all 688 files reports 0, gated in CI; or `fmt`
-becomes print-only, `--write` is removed, and the design in
-[`design/fmt-and-lint.md`](design/fmt-and-lint.md) is what gets built instead.
-Either way the gate must assert compilation, not just idempotence.
+Residue: multi-module `apps/` are not in the gate (a per-file frontend check
+needs the project context); `format_expr` still has `...`/`do ... end`
+fallbacks for expression forms that never appear in expression position in the
+corpus (`asm`, block expressions) — the corpus proves their absence, the
+`--write` guard covers their appearance; and the design in
+[`design/fmt-and-lint.md`](design/fmt-and-lint.md) remains the long-term shape.
 
 ### X-3 (M) The LSP has no type-aware analysis
 

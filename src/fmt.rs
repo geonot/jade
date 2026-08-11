@@ -161,19 +161,46 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize, sink: &mut CommentSi
         Decl::Fn(f) => format_fn(out, f, level, sink),
         Decl::Type(t) => {
             indent(out, level);
-            out.push_str(&format!("type {}\n", t.name));
+            out.push_str(&format!("type {}", t.name));
+            if !t.type_params.is_empty() {
+                out.push_str(&format!(" of {}", Symbol::join_vec(&t.type_params, ", ")));
+            }
+            if t.layout.packed {
+                out.push_str(" @packed");
+            }
+            if t.layout.strict {
+                out.push_str(" @strict");
+            }
+            if let Some(a) = t.layout.align {
+                out.push_str(&format!(" @align({a})"));
+            }
+            if t.layout.resource {
+                out.push_str(" @resource");
+            }
+            out.push('\n');
             for field in &t.fields {
                 indent(out, level + 1);
                 out.push_str(&field.name.to_string());
                 if let Some(ref ty) = field.ty {
                     out.push_str(&format!(" as {}", format_type(ty)));
                 }
+                if let Some(ref default) = field.default {
+                    out.push_str(&format!(" is {}", format_expr(default)));
+                }
                 out.push('\n');
+            }
+            for m in &t.methods {
+                out.push('\n');
+                format_fn(out, m, level + 1, sink);
             }
         }
         Decl::Enum(e) => {
             indent(out, level);
-            out.push_str(&format!("enum {}\n", e.name));
+            out.push_str(&format!("enum {}", e.name));
+            if !e.type_params.is_empty() {
+                out.push_str(&format!(" of {}", Symbol::join_vec(&e.type_params, ", ")));
+            }
+            out.push('\n');
             for v in &e.variants {
                 indent(out, level + 1);
                 out.push_str(&v.name.as_str());
@@ -198,21 +225,26 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize, sink: &mut CommentSi
         }
         Decl::Extern(e) => {
             indent(out, level);
-            out.push_str(&format!("extern {}", e.name));
-            if !e.params.is_empty() {
-                let params: Vec<String> = e
-                    .params
-                    .iter()
-                    .map(|(name, ty)| format!("{name} {}", format_type(ty)))
-                    .collect();
-                out.push_str(&format!(" {}", params.join(", ")));
+            out.push_str(&format!("extern *{}(", e.name));
+            let mut params: Vec<String> = e
+                .params
+                .iter()
+                .map(|(name, ty)| format!("{name} as {}", format_type(ty)))
+                .collect();
+            if e.variadic {
+                params.push("...".into());
             }
-            out.push_str(&format!(" returns {}\n", format_type(&e.ret)));
+            out.push_str(&params.join(", "));
+            out.push(')');
+            if e.ret != crate::types::Type::Void {
+                out.push_str(&format!(" returns {}", format_type(&e.ret)));
+            }
+            out.push('\n');
         }
         Decl::Use(u) => {
             indent(out, level);
             out.push_str("use ");
-            out.push_str(&Symbol::join_vec(&u.path, "."));
+            out.push_str(&Symbol::join_vec(&u.path, "/"));
             if let Some(ref imports) = u.imports {
                 out.push_str(" import ");
                 out.push_str(&Symbol::join_vec(imports, ", "));
@@ -273,6 +305,17 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize, sink: &mut CommentSi
         Decl::Actor(a) => {
             indent(out, level);
             out.push_str(&format!("actor {}\n", a.name));
+            for f in &a.fields {
+                indent(out, level + 1);
+                out.push_str(&f.name.to_string());
+                if let Some(ref ty) = f.ty {
+                    out.push_str(&format!(" as {}", format_type(ty)));
+                }
+                if let Some(ref default) = f.default {
+                    out.push_str(&format!(" is {}", format_expr(default)));
+                }
+                out.push('\n');
+            }
             for h in &a.handlers {
                 indent(out, level + 1);
                 if h.is_loop {
@@ -282,12 +325,17 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize, sink: &mut CommentSi
                         out.push_str(&format_expr(sleep_ms));
                     }
                 } else {
-                    out.push_str(&format!("*{}", h.name));
-                    for p in &h.params {
-                        out.push_str(&format!(" {}", p.name));
-                        if let Some(ref ty) = p.ty {
-                            out.push_str(&format!(" {}", format_type(ty)));
-                        }
+                    out.push_str(&format!("@{}", h.name));
+                    let ps: Vec<String> = h
+                        .params
+                        .iter()
+                        .map(|p| match &p.ty {
+                            Some(ty) => format!("{} as {}", p.name, format_type(ty)),
+                            None => p.name.to_string(),
+                        })
+                        .collect();
+                    if !ps.is_empty() {
+                        out.push_str(&format!(" {}", ps.join(", ")));
                     }
                 }
                 out.push('\n');
@@ -296,14 +344,33 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize, sink: &mut CommentSi
         }
         Decl::Store(s) => {
             indent(out, level);
-            out.push_str(&format!("store {}\n", s.name));
+            out.push_str(&format!("store {}", s.name));
+            for d in &s.decorators {
+                out.push(' ');
+                out.push_str(&format_store_decorator(d));
+            }
+            out.push('\n');
             for field in &s.fields {
                 indent(out, level + 1);
+                if field.is_relation {
+                    out.push('&');
+                }
                 out.push_str(&field.name.to_string());
                 if let Some(ref ty) = field.ty {
-                    out.push_str(&format!(" is {}", format_type(ty)));
+                    if field.is_has_many {
+                        out.push_str(&format!(" as [{}]", format_type(ty)));
+                    } else {
+                        out.push_str(&format!(" as {}", format_type(ty)));
+                    }
+                }
+                for d in &field.decorators {
+                    out.push(' ');
+                    out.push_str(&format_field_decorator(d));
                 }
                 out.push('\n');
+            }
+            for m in &s.methods {
+                format_fn(out, m, level + 1, sink);
             }
         }
         Decl::ErrDef(e) => {
@@ -314,7 +381,7 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize, sink: &mut CommentSi
                 out.push_str(&v.name.to_string());
                 if !v.fields.is_empty() {
                     let ts: Vec<String> = v.fields.iter().map(format_type).collect();
-                    out.push_str(&format!(" of {}", ts.join(", ")));
+                    out.push_str(&format!("({})", ts.join(", ")));
                 }
                 out.push('\n');
             }
@@ -343,9 +410,17 @@ fn format_fn(out: &mut String, f: &Fn, level: usize, sink: &mut CommentSink) {
     indent(out, level);
     out.push('*');
     out.push_str(&f.name.to_string());
-    if !f.params.is_empty() {
+    if !f.type_params.is_empty() {
+        out.push_str(&format!(" of {}", Symbol::join_vec(&f.type_params, ", ")));
+    }
+    let visible_params: Vec<&Param> = f
+        .params
+        .iter()
+        .filter(|p| p.name.as_str() != "self")
+        .collect();
+    if !visible_params.is_empty() {
         out.push('(');
-        for (i, p) in f.params.iter().enumerate() {
+        for (i, p) in visible_params.iter().enumerate() {
             if i > 0 {
                 out.push_str(", ");
             }
@@ -376,6 +451,9 @@ fn format_fn(out: &mut String, f: &Fn, level: usize, sink: &mut CommentSink) {
     if let Some(ref ret) = f.ret {
         out.push_str(&format!(" returns {}", format_type(ret)));
     }
+    for et in &f.error_types {
+        out.push_str(&format!(" ! {}", format_type(et)));
+    }
     out.push('\n');
     format_block(out, &f.body, level + 1, sink);
 }
@@ -404,14 +482,145 @@ fn format_block(out: &mut String, stmts: &[Stmt], level: usize, sink: &mut Comme
     }
 }
 
+fn format_postfix_recv(e: &Expr) -> String {
+    match e {
+        Expr::BinOp(..) | Expr::Ternary(..) | Expr::As(..) | Expr::UnaryOp(..) => {
+            format!("({})", format_expr(e))
+        }
+        _ => format_expr(e),
+    }
+}
+
+fn format_query_block(out: &mut String, src: &Expr, clauses: &[QueryClause], level: usize) {
+    out.push_str(&format!("{} query\n", format_expr(src)));
+    for c in clauses {
+        indent(out, level + 1);
+        match c {
+            QueryClause::Where(e, _) => out.push_str(&format!("where {}", format_expr(e))),
+            QueryClause::Limit(e, _) => out.push_str(&format!("limit {}", format_expr(e))),
+            QueryClause::Sort(f, asc, _) => {
+                if *asc {
+                    out.push_str(&format!("sort {f}"));
+                } else {
+                    out.push_str(&format!("sort {f} desc"));
+                }
+            }
+            QueryClause::Take(e, _) => out.push_str(&format!("take {}", format_expr(e))),
+            QueryClause::Skip(e, _) => out.push_str(&format!("skip {}", format_expr(e))),
+            QueryClause::Set(f, e, _) => out.push_str(&format!("set {f} is {}", format_expr(e))),
+            QueryClause::Delete(_) => out.push_str("delete"),
+        }
+        out.push('\n');
+    }
+}
+
+fn format_filter_cond(field: &Symbol, op: &BinOp, pred: &FilterPred, value: &Expr) -> String {
+    match pred {
+        FilterPred::Contains => format!("{field} contains {}", format_expr(value)),
+        FilterPred::StartsWith => format!("{field} starts_with {}", format_expr(value)),
+        FilterPred::EndsWith => format!("{field} ends_with {}", format_expr(value)),
+        FilterPred::Cmp => {
+            let op_s = match op {
+                BinOp::Eq => "equals",
+                BinOp::Ne => "neq",
+                BinOp::Lt => "<",
+                BinOp::Gt => ">",
+                BinOp::Le => "<=",
+                BinOp::Ge => ">=",
+                _ => "equals",
+            };
+            format!("{field} {op_s} {}", format_expr(value))
+        }
+    }
+}
+
+fn format_store_filter(f: &StoreFilter) -> String {
+    let mut out = format!(
+        " where {}",
+        format_filter_cond(&f.field, &f.op, &f.pred, &f.value)
+    );
+    for (lop, c) in &f.extra {
+        let l = match lop {
+            LogicalOp::And => "and",
+            LogicalOp::Or => "or",
+        };
+        out.push_str(&format!(
+            " {l} {}",
+            format_filter_cond(&c.field, &c.op, &c.pred, &c.value)
+        ));
+    }
+    out
+}
+
+fn format_store_decorator(d: &StoreDecorator) -> String {
+    match d {
+        StoreDecorator::Simple => "@simple".into(),
+        StoreDecorator::Mem => "@mem".into(),
+        StoreDecorator::Transient => "@transient".into(),
+        StoreDecorator::Versioned => "@versioned".into(),
+        StoreDecorator::Vector(n) => format!("@vector({n})"),
+        StoreDecorator::Compact(n) => format!("@compact({n})"),
+        StoreDecorator::Graph => "@graph".into(),
+        StoreDecorator::TimeSeries(f) => format!("@timeseries({f})"),
+        StoreDecorator::Kv => "@kv".into(),
+        StoreDecorator::BeforeInsert(f) => format!("@before_insert({f})"),
+        StoreDecorator::AfterInsert(f) => format!("@after_insert({f})"),
+        StoreDecorator::BeforeDelete(f) => format!("@before_delete({f})"),
+        StoreDecorator::AfterDelete(f) => format!("@after_delete({f})"),
+        StoreDecorator::Column => "@column".into(),
+    }
+}
+
+fn format_field_decorator(d: &FieldDecorator) -> String {
+    match d {
+        FieldDecorator::Index => "@index".into(),
+        FieldDecorator::Unique => "@unique".into(),
+        FieldDecorator::Sorted => "@sorted".into(),
+        FieldDecorator::Transient => "@transient".into(),
+        FieldDecorator::Increment => "@increment".into(),
+        FieldDecorator::Required => "@required".into(),
+        FieldDecorator::Versioned => "@versioned".into(),
+        FieldDecorator::Default(v) => {
+            if v.chars()
+                .all(|c| c.is_ascii_digit() || c == '-' || c == '.')
+                && !v.is_empty()
+            {
+                format!("@default({v})")
+            } else {
+                format!("@default('{v}')")
+            }
+        }
+        FieldDecorator::Cascade => "@cascade".into(),
+        FieldDecorator::Lazy => "@lazy".into(),
+        FieldDecorator::Bloom => "@bloom".into(),
+        FieldDecorator::Search => "@search".into(),
+    }
+}
+
 fn format_stmt(out: &mut String, stmt: &Stmt, level: usize, sink: &mut CommentSink) {
     match stmt {
         Stmt::Bind(b) => {
             indent(out, level);
             out.push_str(&b.name.to_string());
+            if let Some(ref ty) = b.ty {
+                out.push_str(&format!(" as {}", format_type(ty)));
+            }
             out.push_str(" is ");
-            out.push_str(&format_expr(&b.value));
-            out.push('\n');
+            match b.access_mod {
+                Some(AccessMod::Take) => out.push_str("take "),
+                Some(AccessMod::Copy) => out.push_str("copy "),
+                Some(AccessMod::Const) => out.push_str("const "),
+                None => {}
+            }
+            if let Expr::DispatchBlock(_, body, _) = &b.value {
+                out.push_str("dispatch\n");
+                format_block(out, body, level + 1, sink);
+            } else if let Expr::Query(src, clauses, _) = &b.value {
+                format_query_block(out, src, clauses, level);
+            } else {
+                out.push_str(&format_expr(&b.value));
+                out.push('\n');
+            }
         }
         Stmt::Assign(lhs, rhs, _) => {
             indent(out, level);
@@ -419,6 +628,36 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize, sink: &mut CommentSi
             out.push_str(" is ");
             out.push_str(&format_expr(rhs));
             out.push('\n');
+        }
+        Stmt::Expr(Expr::IfExpr(i)) => format_if(out, i, level, sink),
+        Stmt::Expr(Expr::Query(src, clauses, _)) => {
+            indent(out, level);
+            format_query_block(out, src, clauses, level);
+        }
+        Stmt::Expr(Expr::Select(arms, default_body, _)) => {
+            indent(out, level);
+            out.push_str("select\n");
+            for arm in arms {
+                indent(out, level + 1);
+                if arm.is_send {
+                    out.push_str(&format!("send {}", format_expr(&arm.chan)));
+                    if let Some(ref v) = arm.value {
+                        out.push_str(&format!(", {}", format_expr(v)));
+                    }
+                } else {
+                    out.push_str(&format!("receive {}", format_expr(&arm.chan)));
+                    if let Some(ref b) = arm.binding {
+                        out.push_str(&format!(" as {b}"));
+                    }
+                }
+                out.push('\n');
+                format_block(out, &arm.body, level + 2, sink);
+            }
+            if let Some(body) = default_body {
+                indent(out, level + 1);
+                out.push_str("default\n");
+                format_block(out, body, level + 2, sink);
+            }
         }
         Stmt::Expr(e) => {
             indent(out, level);
@@ -449,8 +688,17 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize, sink: &mut CommentSi
             }
             out.push_str("for ");
             out.push_str(&f.bind.to_string());
+            if let Some(ref b2) = f.bind2 {
+                out.push_str(&format!(", {b2}"));
+            }
             out.push_str(" in ");
             out.push_str(&format_expr(&f.iter));
+            if let Some(ref end) = f.end {
+                out.push_str(&format!(" to {}", format_expr(end)));
+            }
+            if let Some(ref step) = f.step {
+                out.push_str(&format!(" by {}", format_expr(step)));
+            }
             out.push('\n');
             format_block(out, &f.body, level + 1, sink);
         }
@@ -499,7 +747,9 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize, sink: &mut CommentSi
                 }
                 out.push_str(" ?");
 
-                if arm.body.len() == 1
+                if arm.body.is_empty() {
+                    out.push_str(" nop\n");
+                } else if arm.body.len() == 1
                     && let Stmt::Expr(e) = &arm.body[0]
                 {
                     out.push(' ');
@@ -521,27 +771,28 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize, sink: &mut CommentSi
         }
         Stmt::StoreInsert(name, exprs, _) => {
             indent(out, level);
-            out.push_str(&format!("insert into {name}"));
-            for fi in exprs {
-                out.push(' ');
-                if let Some(fname) = &fi.name {
-                    out.push_str(&format!("{fname} is "));
-                }
-                out.push_str(&format_expr(&fi.value));
-            }
+            out.push_str(&format!("insert {name} "));
+            let vals: Vec<String> = exprs
+                .iter()
+                .map(|fi| match &fi.name {
+                    Some(fname) => format!("{fname} is {}", format_expr(&fi.value)),
+                    None => format_expr(&fi.value),
+                })
+                .collect();
+            out.push_str(&vals.join(", "));
             out.push('\n');
         }
-        Stmt::StoreDelete(name, _filter, _) => {
+        Stmt::StoreDelete(name, filter, _) => {
             indent(out, level);
-            out.push_str(&format!("delete from {name}\n"));
+            out.push_str(&format!("delete {name}{}\n", format_store_filter(filter)));
         }
-        Stmt::StoreDestroy(name, _filter, _) => {
+        Stmt::StoreDestroy(name, filter, _) => {
             indent(out, level);
-            out.push_str(&format!("destroy from {name}\n"));
+            out.push_str(&format!("destroy {name}{}\n", format_store_filter(filter)));
         }
-        Stmt::StoreRestore(name, _filter, _) => {
+        Stmt::StoreRestore(name, filter, _) => {
             indent(out, level);
-            out.push_str(&format!("restore from {name}\n"));
+            out.push_str(&format!("restore {name}{}\n", format_store_filter(filter)));
         }
         Stmt::StoreSave(name, _) => {
             indent(out, level);
@@ -551,13 +802,14 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize, sink: &mut CommentSi
             indent(out, level);
             out.push_str(&format!("compact {name}\n"));
         }
-        Stmt::StoreSet(name, assignments, _filter, _) => {
+        Stmt::StoreSet(name, assignments, filter, _) => {
             indent(out, level);
-            out.push_str(&format!("set {name}"));
-            for (k, v) in assignments {
-                out.push_str(&format!(" {k} is {}", format_expr(v)));
-            }
-            out.push('\n');
+            out.push_str(&format!("set {name}{}", format_store_filter(filter)));
+            let assigns: Vec<String> = assignments
+                .iter()
+                .map(|(k, v)| format!("{k} {}", format_expr(v)))
+                .collect();
+            out.push_str(&format!(" {}\n", assigns.join(", ")));
         }
         Stmt::Asm(_) => {
             indent(out, level);
@@ -600,7 +852,7 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize, sink: &mut CommentSi
         Stmt::UseLocal(u) => {
             indent(out, level);
             out.push_str("use ");
-            out.push_str(&Symbol::join_vec(&u.path, "."));
+            out.push_str(&Symbol::join_vec(&u.path, "/"));
             if let Some(ref imports) = u.imports {
                 out.push_str(" import ");
                 out.push_str(&Symbol::join_vec(imports, ", "));
@@ -653,7 +905,14 @@ fn format_expr(e: &Expr) -> String {
         Expr::None(_) => "none".into(),
         Expr::Void(_) => "void".into(),
         Expr::Int(n, _) => n.to_string(),
-        Expr::Float(f, _) => format!("{f}"),
+        Expr::Float(f, _) => {
+            let t = format!("{f}");
+            if t.chars().all(|c| c.is_ascii_digit() || c == '-') {
+                format!("{t}.0")
+            } else {
+                t
+            }
+        }
         Expr::Str(s, _) => format!("'{}'", escape_string_literal(s)),
         Expr::Bool(true, _) => "true".into(),
         Expr::Bool(false, _) => "false".into(),
@@ -666,7 +925,7 @@ fn format_expr(e: &Expr) -> String {
                 BinOp::Div => "/",
                 BinOp::Mod => "%",
                 BinOp::Eq => "equals",
-                BinOp::Ne => "not equals",
+                BinOp::Ne => "neq",
                 BinOp::Lt => "<",
                 BinOp::Le => "<=",
                 BinOp::Gt => ">",
@@ -681,7 +940,16 @@ fn format_expr(e: &Expr) -> String {
                 BinOp::Ushr => ">>>",
                 BinOp::Exp => "pow",
             };
-            format!("{} {} {}", format_expr(l), ops, format_expr(r))
+            let wrap = |e: &Expr| -> String {
+                match e {
+                    Expr::BinOp(_, sub_op, _, _) if sub_op != op => {
+                        format!("({})", format_expr(e))
+                    }
+                    Expr::Ternary(..) => format!("({})", format_expr(e)),
+                    _ => format_expr(e),
+                }
+            };
+            format!("{} {} {}", wrap(l), ops, wrap(r))
         }
         Expr::UnaryOp(op, e, _) => {
             let ops = match op {
@@ -697,17 +965,29 @@ fn format_expr(e: &Expr) -> String {
         }
         Expr::Method(obj, method, args, _) => {
             let arg_strs: Vec<String> = args.iter().map(format_expr).collect();
-            format!("{}.{method}({})", format_expr(obj), arg_strs.join(", "))
-        }
-        Expr::Field(obj, field, _) => format!("{}.{field}", format_expr(obj)),
-        Expr::Index(arr, idx, _) => format!("{}[{}]", format_expr(arr), format_expr(idx)),
-        Expr::Ternary(c, t, f, _) => {
             format!(
-                "{} ? {} ! {}",
-                format_expr(c),
-                format_expr(t),
-                format_expr(f)
+                "{}.{method}({})",
+                format_postfix_recv(obj),
+                arg_strs.join(", ")
             )
+        }
+        Expr::Field(obj, field, _) => format!("{}.{field}", format_postfix_recv(obj)),
+        Expr::Index(arr, idx, _) => {
+            format!("{}[{}]", format_postfix_recv(arr), format_expr(idx))
+        }
+        Expr::Ternary(c, t, f, _) => {
+            if matches!(**f, Expr::Void(_)) {
+                format!("{} ? {}", format_expr(c), format_expr(t))
+            } else if matches!(**t, Expr::Void(_)) {
+                format!("{} ?! {}", format_expr(c), format_expr(f))
+            } else {
+                format!(
+                    "{} ? {} ! {}",
+                    format_expr(c),
+                    format_expr(t),
+                    format_expr(f)
+                )
+            }
         }
         Expr::Quaternary(subj, ok, nothing, err, _) => {
             let mut s = format_expr(subj);
@@ -722,7 +1002,12 @@ fn format_expr(e: &Expr) -> String {
             }
             s
         }
-        Expr::As(e, ty, _) => format!("{} as {}", format_expr(e), format_type(ty)),
+        Expr::As(e, ty, _) => match **e {
+            Expr::BinOp(..) | Expr::Ternary(..) => {
+                format!("({}) as {}", format_expr(e), format_type(ty))
+            }
+            _ => format!("{} as {}", format_expr(e), format_type(ty)),
+        },
         Expr::Array(elems, _) => {
             let es: Vec<String> = elems.iter().map(format_expr).collect();
             format!("[{}]", es.join(", "))
@@ -745,24 +1030,22 @@ fn format_expr(e: &Expr) -> String {
             format!("{name}({})", fs.join(", "))
         }
         Expr::IfExpr(i) => {
-            format!(
-                "{} ? {} ! {}",
-                format_expr(&i.cond),
-                if i.then.len() == 1 {
-                    format_expr_from_stmt(&i.then[0])
-                } else {
-                    "...".into()
-                },
-                if let Some(ref els) = i.els {
-                    if els.len() == 1 {
+            let then_txt = if i.then.len() == 1 {
+                format_expr_from_stmt(&i.then[0])
+            } else {
+                "...".into()
+            };
+            match &i.els {
+                Some(els) => {
+                    let els_txt = if els.len() == 1 {
                         format_expr_from_stmt(&els[0])
                     } else {
                         "...".into()
-                    }
-                } else {
-                    "none".into()
+                    };
+                    format!("{} ? {} ! {}", format_expr(&i.cond), then_txt, els_txt)
                 }
-            )
+                None => format!("{} ? {}", format_expr(&i.cond), then_txt),
+            }
         }
         Expr::Pipe(l, r, rest, _) => {
             let mut out = format!("{} ~ {}", format_expr(l), format_expr(r));
@@ -784,8 +1067,8 @@ fn format_expr(e: &Expr) -> String {
         }
         Expr::Placeholder(_) => "$".into(),
         Expr::IndexPlaceholder(_) => "$$".into(),
-        Expr::Ref(e, _) => format!("&{}", format_expr(e)),
-        Expr::Deref(e, _) => format!("*{}", format_expr(e)),
+        Expr::Ref(e, _) => format!("%{}", format_expr(e)),
+        Expr::Deref(e, _) => format!("@{}", format_expr(e)),
         Expr::Embed(path, _) => format!("embed '{path}'"),
         Expr::ListComp(body, bind, iter, _, _, _) => {
             format!(
@@ -830,6 +1113,43 @@ fn format_expr(e: &Expr) -> String {
         }
         Expr::OfCall(f, arg, _) => {
             format!("{} of {}", format_expr(f), format_expr(arg))
+        }
+        Expr::StoreQuery(store, filter, _) => {
+            format!("{store}{}", format_store_filter(filter))
+        }
+        Expr::StoreCount(store, filter, _) => match filter {
+            Some(f) => format!("count {store}{}", format_store_filter(f)),
+            None => format!("count {store}"),
+        },
+        Expr::StoreAll(store, _) => format!("all {store}"),
+        Expr::StoreGet(store, key, _) => format!("get {store} {}", format_expr(key)),
+        Expr::StoreFirst(store, filter, _) => {
+            format!("first {store}{}", format_store_filter(filter))
+        }
+        Expr::StoreExists(store, filter, _) => {
+            format!("exists {store}{}", format_store_filter(filter))
+        }
+        Expr::StoreDistinct(store, field, _) => format!("distinct {store} {field}"),
+        Expr::StoreInsert(store, exprs, _) => {
+            let vals: Vec<String> = exprs
+                .iter()
+                .map(|fi| match &fi.name {
+                    Some(fname) => format!("{fname} is {}", format_expr(&fi.value)),
+                    None => format_expr(&fi.value),
+                })
+                .collect();
+            format!("insert {store} {}", vals.join(", "))
+        }
+        Expr::StoreUpdate(store, assignments, filter, _) => {
+            let assigns: Vec<String> = assignments
+                .iter()
+                .map(|(k, v)| format!("{k} {}", format_expr(v)))
+                .collect();
+            format!(
+                "set {store}{} {}",
+                format_store_filter(filter),
+                assigns.join(", ")
+            )
         }
         _ => "...".into(),
     }
@@ -881,7 +1201,15 @@ fn format_type(ty: &crate::types::Type) -> String {
             format!("({}) returns {}", ps.join(", "), format_type(ret))
         }
         Type::Vec(inner) => format!("Vec of {}", format_type(inner)),
+        Type::Map(k, v) if matches!(**k, Type::String) => {
+            format!("Map of {}", format_type(v))
+        }
         Type::Map(k, v) => format!("Map of {}, {}", format_type(k), format_type(v)),
+        Type::Ptr(inner) => format!("%{}", format_type(inner)),
+        Type::Struct(n, args) if !args.is_empty() => {
+            let ts: Vec<String> = args.iter().map(format_type).collect();
+            format!("{n} of {}", ts.join(", "))
+        }
         _ => format!("{ty}"),
     }
 }
