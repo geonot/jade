@@ -143,6 +143,31 @@ impl Typer {
         }
     }
 
+    pub(in crate::typer) fn instantiate_generic_methods(
+        &mut self,
+        gtd: &crate::ast::TypeDef,
+        mangled: Symbol,
+        type_map: &HashMap<Symbol, Type>,
+    ) {
+        for m in &gtd.methods {
+            let mut mono_method = m.clone();
+            for p in &mut mono_method.params {
+                if let Some(ref ty) = p.ty {
+                    p.ty = Some(Self::substitute_type_params(ty, type_map));
+                }
+            }
+            if let Some(ref ret) = mono_method.ret {
+                mono_method.ret = Some(Self::substitute_type_params(ret, type_map));
+            }
+            self.methods
+                .entry(mangled)
+                .or_default()
+                .push(mono_method.clone());
+            self.declare_method_sig_by_ptr(&mangled.as_str(), &mono_method);
+            self.pending_mono_methods.push((mangled, mono_method));
+        }
+    }
+
     pub(in crate::typer) fn monomorphize_generic_struct_annotation(
         &mut self,
         base_name: &str,
@@ -203,6 +228,7 @@ impl Typer {
             span: gtd.span,
         };
         self.mono_types.push(htd);
+        self.instantiate_generic_methods(&gtd, mangled, &type_map);
 
         Some(mangled)
     }
@@ -461,6 +487,9 @@ impl Typer {
 
         if let Some(access) = self.fn_param_access.get(&Symbol::from(name)).cloned() {
             self.fn_param_access.insert(mangled, access);
+        }
+        if let Some(mutates) = self.fn_param_mutates.get(&Symbol::from(name)).cloned() {
+            self.fn_param_mutates.insert(mangled, mutates);
         }
 
         let mono_fn = self.lower_generic_fn_body(&gf, &mangled.as_str(), id, &ptys, &ret, name)?;

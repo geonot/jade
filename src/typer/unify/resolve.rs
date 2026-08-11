@@ -134,18 +134,11 @@ impl InferCtx {
             if let Some(resolved) = self.types[root as usize].clone() {
                 return self.resolve_core(&resolved, self.collect_default_warnings);
             }
-            let constraint = &self.constraints[root as usize];
-            match constraint {
-                TypeConstraint::Float => Type::F64,
-                TypeConstraint::None | TypeConstraint::Numeric | TypeConstraint::Addable => {
-                    Type::I64
-                }
-                TypeConstraint::Integer => Type::I64,
-                TypeConstraint::Trait(_) => self.resolve_core(ty, self.collect_default_warnings),
+            if let TypeConstraint::Addable = &self.constraints[root as usize] {
+                return Type::I64;
             }
-        } else {
-            self.resolve_core(ty, self.collect_default_warnings)
         }
+        self.resolve_core(ty, self.collect_default_warnings)
     }
 
     pub(in crate::typer) fn resolve_core(&mut self, ty: &Type, warn_only: bool) -> Type {
@@ -161,7 +154,10 @@ impl InferCtx {
                     _ => Type::I64,
                 };
                 if self.suppress_unsolved_reports {
-                } else if warn_only && !self.pedantic {
+                } else if warn_only
+                    && !self.pedantic
+                    && !(self.strict_unsolved && matches!(constraint, TypeConstraint::None))
+                {
                     if let Some(origin) = &self.origins[root as usize] {
                         match constraint {
                             TypeConstraint::None => {

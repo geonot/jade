@@ -455,9 +455,10 @@ impl Typer {
                     _ => return Err("search() first argument must be a field name".into()),
                 };
                 let query_expr = self.lower_expr(&args[1])?;
+                let struct_name = crate::intern::Symbol::intern(&format!("__store_{name}"));
                 return Ok(Some(hir::Expr {
                     kind: hir::ExprKind::FtsSearch(*name, field, Box::new(query_expr)),
-                    ty: Type::Vec(Box::new(Type::I64)),
+                    ty: Type::Vec(Box::new(Type::Struct(struct_name, vec![]))),
                     span,
                 }));
             }

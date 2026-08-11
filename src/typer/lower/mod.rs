@@ -594,6 +594,19 @@ impl Typer {
         }
         self.resolve_all_types(&mut program);
 
+        while let Some((type_name, m)) = self.pending_mono_methods.pop() {
+            let mangled_fn: Symbol = format!("{}_{}", type_name.as_str(), m.name.as_str()).into();
+            if !self.mono_methods_done.insert(mangled_fn) {
+                continue;
+            }
+            match self.lower_method_by_ptr(&type_name.as_str(), &m) {
+                Ok(hf) => self.mono_fns.push(hf),
+                Err(e) => self.type_errors.push(e),
+            }
+        }
+        program.types.append(&mut self.mono_types);
+        program.enums.append(&mut self.mono_enums);
+
         if !self.mono_fns.is_empty() {
             let mut new_fns: Vec<hir::Fn> = self.mono_fns.drain(..).collect();
             for f in &mut new_fns {

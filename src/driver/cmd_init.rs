@@ -4,13 +4,25 @@ use std::path::PathBuf;
 use super::cli::*;
 
 pub(super) fn cmd_init(name: Option<String>) {
+    let root = match &name {
+        Some(n) => {
+            let dir = PathBuf::from(n);
+            if dir.exists() {
+                die(&format!("directory '{n}' already exists"));
+            }
+            fs::create_dir_all(&dir)
+                .unwrap_or_else(|e| die(&format!("cannot create directory '{n}': {e}")));
+            dir
+        }
+        None => PathBuf::from("."),
+    };
     let pkg_name = name.unwrap_or_else(|| {
         std::env::current_dir()
             .ok()
             .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
             .unwrap_or_else(|| "myproject".into())
     });
-    let project_path = PathBuf::from("project.jn");
+    let project_path = root.join("project.jn");
     if project_path.exists() {
         die("project.jn already exists");
     }
@@ -21,7 +33,7 @@ pub(super) fn cmd_init(name: Option<String>) {
     fs::write(&project_path, &project_content)
         .unwrap_or_else(|e| die(&format!("cannot write project.jn: {e}")));
 
-    let source_dir = PathBuf::from("source");
+    let source_dir = root.join("source");
     if !source_dir.exists() {
         fs::create_dir_all(&source_dir)
             .unwrap_or_else(|e| die(&format!("cannot create source/: {e}")));

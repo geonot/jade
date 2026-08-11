@@ -57,6 +57,7 @@ impl Parser {
             while !self.check(Token::Newline)
                 && !self.check(Token::Returns)
                 && !self.check(Token::Is)
+                && !self.check(Token::Bang)
                 && !self.eof()
             {
                 let is_self = matches!(self.peek(), Token::Ident(s) if s == "self");
@@ -73,6 +74,12 @@ impl Parser {
         } else {
             None
         };
+
+        let mut error_types = Vec::new();
+        while self.check(Token::Bang) {
+            self.advance();
+            error_types.push(self.parse_type()?);
+        }
 
         let default_body = if self.check(Token::Is) {
             self.advance();
@@ -95,6 +102,7 @@ impl Parser {
             name,
             params,
             ret,
+            error_types,
             default_body,
             span: sp,
         })

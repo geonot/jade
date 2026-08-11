@@ -37,6 +37,7 @@ mod caps;
 mod consume_infer;
 mod errset;
 mod mono;
+mod mutate_infer;
 mod resolve;
 pub(crate) mod unify;
 
@@ -59,6 +60,8 @@ pub(crate) enum MoveReason {
     TaskCapture(crate::ast::Span),
 
     ContainerInsert(Symbol, crate::ast::Span),
+
+    CtorCapture(crate::ast::Span),
 }
 
 #[allow(clippy::type_complexity)]
@@ -159,6 +162,16 @@ pub struct Typer {
     pub(crate) const_expansion_stack: Vec<Symbol>,
 
     pub(crate) instantiated_generics: std::collections::HashSet<Symbol>,
+
+    pub(crate) iter_borrowed: std::collections::HashMap<DefId, (Symbol, crate::ast::Span)>,
+
+    pub(crate) suppress_move_marking: u32,
+
+    pub(crate) fn_param_mutates: IndexMap<Symbol, Vec<bool>>,
+
+    pub(crate) pending_mono_methods: Vec<(Symbol, ast::Fn)>,
+
+    pub(crate) mono_methods_done: std::collections::HashSet<Symbol>,
 }
 
 #[derive(Debug, Clone)]
@@ -252,6 +265,11 @@ impl Typer {
             root_pkg_id: None,
             dep_pkg_ids: std::collections::HashMap::new(),
             scoped_use_map: crate::pkgid::ScopedUseMap::new(),
+            iter_borrowed: std::collections::HashMap::new(),
+            suppress_move_marking: 0,
+            fn_param_mutates: IndexMap::new(),
+            pending_mono_methods: Vec::new(),
+            mono_methods_done: std::collections::HashSet::new(),
         }
     }
 
@@ -336,6 +354,7 @@ impl Typer {
     pub fn set_strict_types(&mut self, enabled: bool) {
         if enabled {
             self.infer_ctx.enable_strict_types();
+            self.infer_ctx.set_strict_unsolved(true);
         }
     }
 
@@ -547,6 +566,10 @@ impl Typer {
             .collect()
     }
 
+    pub(crate) fn display_fn_name(name: &str) -> &str {
+        name.split("__G_").next().unwrap_or(name)
+    }
+
     pub(crate) fn mark_field_moved(&mut self, parent: DefId, field: Symbol) {
         self.moved_fields.entry(parent).or_default().insert(field);
     }
@@ -571,6 +594,17 @@ impl Typer {
         reason: MoveReason,
         at: crate::ast::Span,
     ) -> Result<(), String> {
+        if self.suppress_move_marking == 0
+            && let Some((_, loop_span)) = self.iter_borrowed.get(&id)
+        {
+            return Err(format!(
+                "{}: cannot move `{}` while the `for` loop at {} is iterating it; \
+                 iterate by index, or restructure so the move happens outside the loop",
+                at.loc(),
+                name,
+                loop_span.loc(),
+            ));
+        }
         if let Some(defer_span) = self.defer_read_vars.get(&id) {
             return Err(format!(
                 "{}: cannot move `{}`: it is read by the `defer` registered at {}; \
@@ -580,7 +614,9 @@ impl Typer {
                 defer_span.loc(),
             ));
         }
-        self.mark_var_moved(id, reason);
+        if self.suppress_move_marking == 0 {
+            self.mark_var_moved(id, reason);
+        }
         Ok(())
     }
 

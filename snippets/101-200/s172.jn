@@ -3,10 +3,12 @@
     t is vec(vec(0, 0, 0), vec(0, 0, 0), vec(0, 0, 0))
     i is 0
     while i < 3
+        row is copy t.get(i)
         j is 0
         while j < 3
-            t.get(i).set(j, m.get(j).get(i))
+            row.set(j, m.get(j).get(i))
             j is j + 1
+        t.set(i, row)
         i is i + 1
     for row in t
         for x in row

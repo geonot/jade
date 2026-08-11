@@ -139,9 +139,15 @@ fn keyword(s: &str) -> Option<Token> {
 
 impl<'s> Lexer<'s> {
     pub fn new(src: &'s str) -> Self {
+        let bytes = src.as_bytes();
+        let pos = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+            3
+        } else {
+            0
+        };
         Self {
-            src: src.as_bytes(),
-            pos: 0,
+            src: bytes,
+            pos,
             line: 1,
             col: 1,
             indents: vec![0],
@@ -167,7 +173,11 @@ impl<'s> Lexer<'s> {
     pub fn tokenize(&mut self) -> Result<Vec<Spanned>, LexError> {
         let mut out = Vec::new();
 
-        if self.pos == 0 && self.src.len() >= 2 && self.src[0] == b'#' && self.src[1] == b'!' {
+        if self.pos + 1 < self.src.len()
+            && (self.pos == 0 || self.pos == 3)
+            && self.src[self.pos] == b'#'
+            && self.src[self.pos + 1] == b'!'
+        {
             let (start, line, col) = (self.pos, self.line, self.col);
             while self.pos < self.src.len() && self.src[self.pos] != b'\n' {
                 self.advance();
@@ -514,7 +524,18 @@ impl<'s> Lexer<'s> {
                 }
             }
             b'*' => Token::Star,
-            _ => return self.err(&format!("unexpected character: '{}'", ch as char)),
+            _ => {
+                if ch < 0x80 {
+                    return self.err(&format!("unexpected character: '{}'", ch as char));
+                }
+                let end = (self.pos + 4).min(self.src.len());
+                let decoded = String::from_utf8_lossy(&self.src[self.pos..end]);
+                let display = decoded.chars().next().unwrap_or('\u{FFFD}');
+                return self.err(&format!(
+                    "unexpected non-ASCII character '{display}' (byte 0x{ch:02X}); \
+                     identifiers and operators are ASCII-only outside string literals"
+                ));
+            }
         };
         self.advance();
         Ok(Spanned {

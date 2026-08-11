@@ -128,6 +128,8 @@ impl Typer {
             Type::I32
         } else if let Some(ref explicit) = f.ret {
             explicit.clone()
+        } else if !f.error_types.is_empty() {
+            Type::Void
         } else {
             self.infer_ctx.fresh_var()
         };
@@ -188,7 +190,13 @@ impl Typer {
             .iter()
             .map(|p| p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()))
             .collect();
-        let ret = m.ret.clone().unwrap_or_else(|| self.infer_ctx.fresh_var());
+        let ret = m.ret.clone().unwrap_or_else(|| {
+            if m.error_types.is_empty() {
+                self.infer_ctx.fresh_var()
+            } else {
+                Type::Void
+            }
+        });
         let ret = Self::desugar_bang_ret(&ret, &m.error_types);
         let id = self.fresh_id();
         self.fns.insert(method_name, (id, ptys, ret));
@@ -214,7 +222,13 @@ impl Typer {
             }
             ptys.push(p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var()));
         }
-        let ret = m.ret.clone().unwrap_or_else(|| self.infer_ctx.fresh_var());
+        let ret = m.ret.clone().unwrap_or_else(|| {
+            if m.error_types.is_empty() {
+                self.infer_ctx.fresh_var()
+            } else {
+                Type::Void
+            }
+        });
         let ret = Self::desugar_bang_ret(&ret, &m.error_types);
         let id = self.fresh_id();
         self.fns.insert(method_name, (id, ptys, ret));
@@ -486,7 +500,7 @@ impl Typer {
                 type_bounds: Vec::new(),
                 params,
                 ret,
-                error_types: Vec::new(),
+                error_types: tm.error_types.clone(),
                 needs: None,
                 body: body.clone(),
                 is_generator: false,

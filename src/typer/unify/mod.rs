@@ -39,6 +39,7 @@ pub(crate) struct InferCtx {
 
     unify_errors: Vec<String>,
     pedantic: bool,
+    strict_unsolved: bool,
     quantified_vars: std::collections::HashSet<u32>,
 
     trait_impls: IndexMap<Symbol, Vec<String>>,
@@ -61,6 +62,7 @@ impl InferCtx {
             strict_errors: Vec::new(),
             unify_errors: Vec::new(),
             pedantic: false,
+            strict_unsolved: false,
             quantified_vars: std::collections::HashSet::new(),
             trait_impls: IndexMap::new(),
         }
@@ -137,6 +139,10 @@ impl InferCtx {
         if pedantic {
             self.strict_types = true;
         }
+    }
+
+    pub(crate) fn set_strict_unsolved(&mut self, on: bool) {
+        self.strict_unsolved = on;
     }
 
     pub(crate) fn num_vars(&self) -> u32 {
@@ -482,6 +488,7 @@ impl InferCtx {
                 Ok(())
             }
             (Type::TypeVar(v), concrete) | (concrete, Type::TypeVar(v)) => {
+                let var_is_expected = matches!(&a, Type::TypeVar(_));
                 let root = self.find(*v);
                 if self.occurs_in(root, concrete) {
                     return Err(format!("infinite type: ?{root} occurs in {concrete}"));
@@ -490,16 +497,28 @@ impl InferCtx {
                     TypeConstraint::Integer
                         if !concrete.is_int() && !matches!(concrete, Type::TypeVar(_)) =>
                     {
-                        return Err(format!(
-                            "type mismatch: expected integer type (i8..u64), found `{concrete}`"
-                        ));
+                        return Err(if var_is_expected {
+                            format!(
+                                "type mismatch: expected integer type (i8..u64), found `{concrete}`"
+                            )
+                        } else {
+                            format!(
+                                "type mismatch: expected `{concrete}`, found an integer-typed value"
+                            )
+                        });
                     }
                     TypeConstraint::Float
                         if !concrete.is_float() && !matches!(concrete, Type::TypeVar(_)) =>
                     {
-                        return Err(format!(
-                            "type mismatch: expected float type (f32/f64), found `{concrete}`"
-                        ));
+                        return Err(if var_is_expected {
+                            format!(
+                                "type mismatch: expected float type (f32/f64), found `{concrete}`"
+                            )
+                        } else {
+                            format!(
+                                "type mismatch: expected `{concrete}`, found a float-typed value"
+                            )
+                        });
                     }
                     TypeConstraint::Numeric
                         if !concrete.is_num() && !matches!(concrete, Type::TypeVar(_)) =>

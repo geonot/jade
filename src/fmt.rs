@@ -237,6 +237,9 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize, sink: &mut CommentSi
                 if let Some(ref ret) = m.ret {
                     out.push_str(&format!(" returns {}", format_type(ret)));
                 }
+                for et in &m.error_types {
+                    out.push_str(&format!(" ! {}", format_type(et)));
+                }
                 out.push('\n');
                 if let Some(ref body) = m.default_body {
                     format_block(out, body, level + 2, sink);

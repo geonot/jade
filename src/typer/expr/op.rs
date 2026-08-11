@@ -12,8 +12,26 @@ impl Typer {
         let _ = expected;
         match expr {
             ast::Expr::BinOp(lhs, op, rhs, span) => {
-                let hl = self.lower_expr(lhs)?;
+                let mut hl = self.lower_expr(lhs)?;
                 let hr = self.lower_expr_expected(rhs, Some(&hl.ty))?;
+                if let hir::ExprKind::Int(n) = hl.kind {
+                    let rr = self.infer_ctx.shallow_resolve(&hr.ty);
+                    let r_floatish = rr.is_float()
+                        || matches!(
+                            rr,
+                            Type::TypeVar(v) if matches!(
+                                self.infer_ctx.constraint(v),
+                                super::super::unify::TypeConstraint::Float
+                            )
+                        );
+                    if r_floatish {
+                        hl = hir::Expr {
+                            kind: hir::ExprKind::Float(n as f64),
+                            ty: hr.ty.clone(),
+                            span: hl.span,
+                        };
+                    }
+                }
                 let rl0 = self.infer_ctx.shallow_resolve(&hl.ty);
                 let rr0 = self.infer_ctx.shallow_resolve(&hr.ty);
 

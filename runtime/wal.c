@@ -36,10 +36,10 @@ static int jinn_wal_force(FILE *wal, int policy) {
     if (fd < 0) return -1;
     switch (policy) {
         case JINN_WAL_SYNC_NONE:
-        case JINN_WAL_SYNC_GROUP:
             return 0;
         case JINN_WAL_SYNC_FSYNC:
             return fsync(fd) == 0 ? 0 : -1;
+        case JINN_WAL_SYNC_GROUP:
         case JINN_WAL_SYNC_FDATASYNC:
         default:
 #if defined(__linux__)
@@ -179,7 +179,7 @@ FILE *jinn_wal_open(const char *path) {
                     "touch it; move it aside to proceed\n",
                     path);
             fclose(f);
-            abort();
+            exit(2);
         }
         fclose(f);
     }

@@ -62,8 +62,45 @@ impl Typer {
 
         match expr {
             ast::Expr::Int(n, span) => {
-                let ty = match expected {
-                    Some(t) if t.is_int() => t.clone(),
+                let resolved_expected = expected.map(|t| self.infer_ctx.shallow_resolve(t));
+                let ty = match &resolved_expected {
+                    Some(t) if t.is_int() => {
+                        if let Some((lo, hi)) = Self::int_type_range(t)
+                            && (*n < lo || *n > hi)
+                        {
+                            self.warnings.push(format!(
+                                "{}: warning: integer literal {} does not fit in `{}` and \
+                                 wraps to {}; use a wider type, or `as strict` to trap at \
+                                 runtime",
+                                span.loc(),
+                                n,
+                                t,
+                                Self::wrap_literal_to(*n, t),
+                            ));
+                        }
+                        t.clone()
+                    }
+                    Some(t) if t.is_float() => {
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::Float(*n as f64),
+                            ty: t.clone(),
+                            span: *span,
+                        });
+                    }
+                    Some(Type::TypeVar(v))
+                        if matches!(
+                            self.infer_ctx.constraint(*v),
+                            crate::typer::unify::TypeConstraint::Float
+                        ) =>
+                    {
+                        let fv = self.infer_ctx.fresh_float_var();
+                        let _ = self.infer_ctx.unify(&fv, &Type::TypeVar(*v));
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::Float(*n as f64),
+                            ty: fv,
+                            span: *span,
+                        });
+                    }
                     Some(t) => {
                         let fresh = self.infer_ctx.fresh_integer_var();
                         let _ = self.infer_ctx.unify(&fresh, t);
@@ -304,12 +341,38 @@ impl Typer {
             }
 
             ast::Expr::Embed(path, span) => {
+                if std::path::Path::new(path.as_str()).is_absolute() {
+                    return Err(format!(
+                        "{}: embed '{}': absolute paths are not allowed — embed reads \
+                         files at compile time, so paths must stay inside the source \
+                         directory; move the file into the project and use a relative \
+                         path",
+                        span.loc(),
+                        path,
+                    ));
+                }
                 let base = self
                     .source_dir
                     .clone()
                     .unwrap_or_else(|| PathBuf::from("."));
-                let file_path = base.join(path);
-                let contents = std::fs::read_to_string(&file_path)
+                let file_path = base.join(path.as_str());
+                let canon_base = base
+                    .canonicalize()
+                    .map_err(|e| format!("{}: embed '{}': {}", span.loc(), path, e))?;
+                let canon_file = file_path
+                    .canonicalize()
+                    .map_err(|e| format!("{}: embed '{}': {}", span.loc(), path, e))?;
+                if !canon_file.starts_with(&canon_base) {
+                    return Err(format!(
+                        "{}: embed '{}': path escapes the source directory ({}) — embed \
+                         reads files at compile time, so paths must stay inside it; move \
+                         the file into the project",
+                        span.loc(),
+                        path,
+                        canon_base.display(),
+                    ));
+                }
+                let contents = std::fs::read_to_string(&canon_file)
                     .map_err(|e| format!("embed '{}': {}", file_path.display(), e))?;
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Str(contents),
@@ -410,6 +473,31 @@ impl Typer {
             (Type::Ptr(_) | Type::Fn(..), b) if b.is_int() => true,
             (a, Type::Ptr(_) | Type::Fn(..)) if a.is_int() => true,
             _ => false,
+        }
+    }
+
+    fn int_type_range(t: &Type) -> Option<(i64, i64)> {
+        Some(match t {
+            Type::I8 => (i8::MIN as i64, i8::MAX as i64),
+            Type::I16 => (i16::MIN as i64, i16::MAX as i64),
+            Type::I32 => (i32::MIN as i64, i32::MAX as i64),
+            Type::U8 => (0, u8::MAX as i64),
+            Type::U16 => (0, u16::MAX as i64),
+            Type::U32 => (0, u32::MAX as i64),
+            Type::U64 => (0, i64::MAX),
+            _ => return None,
+        })
+    }
+
+    fn wrap_literal_to(n: i64, t: &Type) -> i64 {
+        match t {
+            Type::I8 => n as i8 as i64,
+            Type::I16 => n as i16 as i64,
+            Type::I32 => n as i32 as i64,
+            Type::U8 => n as u8 as i64,
+            Type::U16 => n as u16 as i64,
+            Type::U32 => n as u32 as i64,
+            _ => n,
         }
     }
 

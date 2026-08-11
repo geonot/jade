@@ -180,23 +180,7 @@ impl Typer {
                     span,
                 };
                 self.mono_types.push(htd);
-
-                for m in &gtd.methods {
-                    let mut mono_method = m.clone();
-                    for p in &mut mono_method.params {
-                        if let Some(ref ty) = p.ty {
-                            p.ty = Some(Self::substitute_type_params(ty, &type_map));
-                        }
-                    }
-                    if let Some(ref ret) = mono_method.ret {
-                        mono_method.ret = Some(Self::substitute_type_params(ret, &type_map));
-                    }
-                    self.methods
-                        .entry(mangled)
-                        .or_default()
-                        .push(mono_method.clone());
-                    self.declare_method_sig_by_ptr(&mangled.as_str(), &mono_method);
-                }
+                self.instantiate_generic_methods(&gtd, mangled, &type_map);
             }
 
             let mut hinits: Vec<hir::FieldInit> = Vec::with_capacity(inits.len());
@@ -420,24 +404,7 @@ impl Typer {
                     span,
                 };
                 self.mono_types.push(htd);
-
-                for m in &gtd.methods {
-                    let mut mono_method = m.clone();
-
-                    for p in &mut mono_method.params {
-                        if let Some(ref ty) = p.ty {
-                            p.ty = Some(Self::substitute_type_params(ty, &type_map));
-                        }
-                    }
-                    if let Some(ref ret) = mono_method.ret {
-                        mono_method.ret = Some(Self::substitute_type_params(ret, &type_map));
-                    }
-                    self.methods
-                        .entry(mangled)
-                        .or_default()
-                        .push(mono_method.clone());
-                    self.declare_method_sig_by_ptr(&mangled.as_str(), &mono_method);
-                }
+                self.instantiate_generic_methods(&gtd, mangled, &type_map);
             }
 
             for (i, fi) in hinits_g.iter_mut().enumerate() {

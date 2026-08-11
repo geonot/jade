@@ -44,37 +44,75 @@ type AliasMap = HashMap<Symbol, HashSet<usize>>;
 
 impl crate::typer::Typer {
     pub(crate) fn infer_consuming_params(&mut self, fns: &[&ast::Fn]) {
+        let method_items: Vec<(Symbol, ast::Fn)> = self
+            .methods
+            .iter()
+            .flat_map(|(ty, ms)| {
+                ms.iter().map(move |m| {
+                    let mangled: Symbol = format!("{}_{}", ty.as_str(), m.name.as_str()).into();
+                    (mangled, m.clone())
+                })
+            })
+            .collect();
         loop {
             let mut changed = false;
             for f in fns {
-                let mut alias: AliasMap = AliasMap::new();
-                for (i, p) in f.params.iter().enumerate() {
-                    if p.access_mod.is_some() || annotated_non_consumable(&p.ty) {
-                        continue;
-                    }
-                    alias.insert(p.name, HashSet::from([i]));
-                }
-                if alias.is_empty() {
-                    continue;
-                }
-                let mut escaping: HashSet<usize> = HashSet::new();
-                let returns_value = f.ret.is_some() || ret_is_inferred(f);
-                self.scan_block(&f.body, &mut alias, &mut escaping, returns_value);
-
-                for i in escaping {
-                    if let Some(accs) = self.fn_param_access.get_mut(&f.name)
-                        && let Some(slot) = accs.get_mut(i)
-                        && slot.is_none()
-                    {
-                        *slot = Some(ast::AccessMod::Take);
-                        changed = true;
-                    }
-                }
+                changed |= self.consume_scan_one(f.name, f, 0);
+            }
+            for (mangled, m) in &method_items {
+                changed |= self.consume_scan_one(*mangled, m, 1);
             }
             if !changed {
                 break;
             }
         }
+        self.infer_mutating_params(fns, &method_items);
+    }
+
+    fn consume_scan_one(&mut self, fname: Symbol, f: &ast::Fn, offset: usize) -> bool {
+        let mut alias: AliasMap = AliasMap::new();
+        let mut slot = offset;
+        for p in &f.params {
+            if offset == 1 && p.name.as_str() == "self" {
+                continue;
+            }
+            let this_slot = slot;
+            slot += 1;
+            if p.access_mod.is_some() || annotated_non_consumable(&p.ty) {
+                continue;
+            }
+            alias.insert(p.name, HashSet::from([this_slot]));
+        }
+        if alias.is_empty() {
+            return false;
+        }
+        let mut escaping: HashSet<usize> = HashSet::new();
+        let returns_value = f.ret.is_some() || ret_is_inferred(f);
+        self.scan_block(&f.body, &mut alias, &mut escaping, returns_value);
+
+        let mut changed = false;
+        for i in escaping {
+            if let Some(accs) = self.fn_param_access.get_mut(&fname)
+                && let Some(slot) = accs.get_mut(i)
+                && slot.is_none()
+            {
+                *slot = Some(ast::AccessMod::Take);
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    pub(in crate::typer) fn any_user_method_consumes(&self, method: Symbol, slot: usize) -> bool {
+        self.methods.iter().any(|(ty, ms)| {
+            ms.iter().any(|m| m.name == method) && {
+                let mangled: Symbol = format!("{}_{}", ty.as_str(), method.as_str()).into();
+                self.fn_param_access
+                    .get(&mangled)
+                    .map(|accs| matches!(accs.get(slot), Some(Some(ast::AccessMod::Take))))
+                    .unwrap_or(false)
+            }
+        })
     }
 
     fn scan_block(
@@ -250,6 +288,12 @@ impl crate::typer::Typer {
                 if CONSUMING_METHODS.contains(&&*name.as_str()) {
                     for a in args {
                         escaping.extend(Self::expr_alias(a, alias));
+                    }
+                } else {
+                    for (j, a) in args.iter().enumerate() {
+                        if self.any_user_method_consumes(*name, j + 1) {
+                            escaping.extend(Self::expr_alias(a, alias));
+                        }
                     }
                 }
                 self.scan_expr_sinks(recv, alias, escaping);

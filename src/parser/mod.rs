@@ -549,6 +549,17 @@ fn merge_fn_clauses(clauses: &[Fn]) -> Result<Fn, String> {
         if c.params.iter().any(|p| p.literal.is_some()) {
             guarded.push(c);
         } else {
+            if let Some(prev) = catchall {
+                return Err(format!(
+                    "{}: duplicate definition of `{}`: a clause with no literal-guarded \
+                     parameters already exists at {} — clauses are tried in order and a \
+                     second catch-all can never run; remove one, or guard one with a \
+                     literal parameter",
+                    c.span.loc(),
+                    first.name,
+                    prev.span.loc(),
+                ));
+            }
             catchall = Some(c);
         }
     }

@@ -792,6 +792,190 @@ impl<'ctx> Compiler<'ctx> {
             )))
             .into_int_value();
 
+        let sd = self
+            .store_defs
+            .get(store_name)
+            .ok_or_else(|| format!("unknown store '{store_name}'"))?
+            .clone();
+        let ensure_fn_name = format!("__store_ensure_{store_name}");
+        if let Some(ensure_fn) = self.module.get_function(&ensure_fn_name) {
+            b!(self.bld.build_call(ensure_fn, &[], ""));
+        } else {
+            let ensure_fn = self.gen_store_ensure_open(&sd)?;
+            b!(self.bld.build_call(ensure_fn, &[], ""));
+        }
+        let fp = self.load_store_fp(store_name)?;
+        let rec_size = self.store_record_size(&sd);
+        let rec_st = self
+            .module
+            .get_struct_type(&format!("__store_{store_name}_rec"))
+            .expect("ICE: struct type not declared");
+        let jinn_st = self
+            .module
+            .get_struct_type(&format!("__store_{store_name}"))
+            .expect("ICE: struct type not declared");
+        let jinn_size = self.type_store_size(jinn_st.into());
+        let total = self.store_read_count(fp)?;
+        let raw_buf = self.store_load_records(fp, total, rec_size)?;
+
+        let jinn_total =
+            b!(self
+                .bld
+                .build_int_mul(found, i64t.const_int(jinn_size, false), "fts.jt"));
+        let jinn_alloc = b!(self.bld.build_select(
+            b!(self.bld.build_int_compare(
+                inkwell::IntPredicate::EQ,
+                jinn_total,
+                i64t.const_int(0, false),
+                "fts.jisz"
+            )),
+            one,
+            jinn_total,
+            "fts.jalloc"
+        ))
+        .into_int_value();
+        let jinn_buf = self
+            .call_result(b!(self.bld.build_call(
+                malloc_fn,
+                &[jinn_alloc.into()],
+                "fts.jbuf"
+            )))
+            .into_pointer_value();
+
+        let sid_field = sd.fields.iter().position(|f| f.name == "sid");
+        let del_idx = sd.fields.iter().position(|f| f.name == "deleted");
+
+        let fv = self.cur_fn.expect("ICE: cur_fn not set");
+        let out_ptr = self.entry_alloca(i64t.into(), "fts.out");
+        b!(self.bld.build_store(out_ptr, i64t.const_int(0, false)));
+        let i_ptr = self.entry_alloca(i64t.into(), "fts.i");
+        b!(self.bld.build_store(i_ptr, i64t.const_int(0, false)));
+        let j_ptr = self.entry_alloca(i64t.into(), "fts.j");
+
+        let oloop_bb = self.ctx.append_basic_block(fv, "fts.oloop");
+        let obody_bb = self.ctx.append_basic_block(fv, "fts.obody");
+        let iloop_bb = self.ctx.append_basic_block(fv, "fts.iloop");
+        let ibody_bb = self.ctx.append_basic_block(fv, "fts.ibody");
+        let imatch_bb = self.ctx.append_basic_block(fv, "fts.imatch");
+        let icopy_bb = self.ctx.append_basic_block(fv, "fts.icopy");
+        let inext_bb = self.ctx.append_basic_block(fv, "fts.inext");
+        let onext_bb = self.ctx.append_basic_block(fv, "fts.onext");
+        let odone_bb = self.ctx.append_basic_block(fv, "fts.odone");
+
+        b!(self.bld.build_unconditional_branch(oloop_bb));
+
+        self.bld.position_at_end(oloop_bb);
+        let i = b!(self.bld.build_load(i64t, i_ptr, "fts.iv")).into_int_value();
+        let ocmp = b!(self
+            .bld
+            .build_int_compare(inkwell::IntPredicate::ULT, i, found, "fts.ocmp"));
+        b!(self.bld.build_conditional_branch(ocmp, obody_bb, odone_bb));
+
+        self.bld.position_at_end(obody_bb);
+        let id_gep = unsafe { b!(self.bld.build_gep(i64t, out_ids, &[i], "fts.idp")) };
+        let want_id = b!(self.bld.build_load(i64t, id_gep, "fts.id")).into_int_value();
+        if sid_field.is_some() {
+            b!(self.bld.build_store(j_ptr, i64t.const_int(0, false)));
+        } else {
+            let j0 = b!(self
+                .bld
+                .build_int_sub(want_id, i64t.const_int(1, false), "fts.j0"));
+            b!(self.bld.build_store(j_ptr, j0));
+        }
+        b!(self.bld.build_unconditional_branch(iloop_bb));
+
+        self.bld.position_at_end(iloop_bb);
+        let j = b!(self.bld.build_load(i64t, j_ptr, "fts.jv")).into_int_value();
+        let icmp = b!(self
+            .bld
+            .build_int_compare(inkwell::IntPredicate::ULT, j, total, "fts.icmp"));
+        b!(self.bld.build_conditional_branch(icmp, ibody_bb, onext_bb));
+
+        self.bld.position_at_end(ibody_bb);
+        let raw_off = b!(self
+            .bld
+            .build_int_mul(j, i64t.const_int(rec_size, false), "fts.roff"));
+        let raw_ptr = unsafe {
+            b!(self
+                .bld
+                .build_gep(self.ctx.i8_type(), raw_buf, &[raw_off], "fts.rptr"))
+        };
+        let sid = if let Some(si) = sid_field {
+            let sid_gep = b!(self
+                .bld
+                .build_struct_gep(rec_st, raw_ptr, si as u32, "fts.sidp"));
+            b!(self.bld.build_load(i64t, sid_gep, "fts.sid")).into_int_value()
+        } else {
+            b!(self
+                .bld
+                .build_int_add(j, i64t.const_int(1, false), "fts.sid"))
+        };
+        let is_match =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::EQ, sid, want_id, "fts.m"));
+        b!(self
+            .bld
+            .build_conditional_branch(is_match, imatch_bb, inext_bb));
+
+        self.bld.position_at_end(imatch_bb);
+        if let Some(di) = del_idx {
+            let del_gep = b!(self
+                .bld
+                .build_struct_gep(rec_st, raw_ptr, di as u32, "fts.delp"));
+            let del_val = b!(self.bld.build_load(i64t, del_gep, "fts.del")).into_int_value();
+            let is_del = b!(self.bld.build_int_compare(
+                inkwell::IntPredicate::NE,
+                del_val,
+                i64t.const_int(0, false),
+                "fts.isdel"
+            ));
+            b!(self
+                .bld
+                .build_conditional_branch(is_del, onext_bb, icopy_bb));
+        } else {
+            b!(self.bld.build_unconditional_branch(icopy_bb));
+        }
+
+        self.bld.position_at_end(icopy_bb);
+        let jinn_val = self.load_store_record_as_jinn(rec_st, raw_ptr, &sd)?;
+        let out = b!(self.bld.build_load(i64t, out_ptr, "fts.ov")).into_int_value();
+        let jinn_off =
+            b!(self
+                .bld
+                .build_int_mul(out, i64t.const_int(jinn_size, false), "fts.joff"));
+        let jinn_ptr = unsafe {
+            b!(self
+                .bld
+                .build_gep(self.ctx.i8_type(), jinn_buf, &[jinn_off], "fts.jptr"))
+        };
+        b!(self.bld.build_store(jinn_ptr, jinn_val));
+        let out_next = b!(self
+            .bld
+            .build_int_add(out, i64t.const_int(1, false), "fts.oinc"));
+        b!(self.bld.build_store(out_ptr, out_next));
+        b!(self.bld.build_unconditional_branch(onext_bb));
+
+        self.bld.position_at_end(inext_bb);
+        let j_next = b!(self
+            .bld
+            .build_int_add(j, i64t.const_int(1, false), "fts.jinc"));
+        b!(self.bld.build_store(j_ptr, j_next));
+        b!(self.bld.build_unconditional_branch(iloop_bb));
+
+        self.bld.position_at_end(onext_bb);
+        let i_next = b!(self
+            .bld
+            .build_int_add(i, i64t.const_int(1, false), "fts.iinc"));
+        b!(self.bld.build_store(i_ptr, i_next));
+        b!(self.bld.build_unconditional_branch(oloop_bb));
+
+        self.bld.position_at_end(odone_bb);
+        let free_fn = self.ensure_free();
+        b!(self.bld.build_call(free_fn, &[raw_buf.into()], ""));
+        b!(self.bld.build_call(free_fn, &[out_ids.into()], ""));
+        let final_out = b!(self.bld.build_load(i64t, out_ptr, "fts.n")).into_int_value();
+
         let header_ty = self.vec_header_type();
         let result_vec = self
             .call_result(b!(self.bld.build_call(
@@ -803,15 +987,15 @@ impl<'ctx> Compiler<'ctx> {
         let fv_d = b!(self
             .bld
             .build_struct_gep(header_ty, result_vec, 0, "fts.vec.d"));
-        b!(self.bld.build_store(fv_d, out_ids));
+        b!(self.bld.build_store(fv_d, jinn_buf));
         let fv_l = b!(self
             .bld
             .build_struct_gep(header_ty, result_vec, 1, "fts.vec.l"));
-        b!(self.bld.build_store(fv_l, found));
+        b!(self.bld.build_store(fv_l, final_out));
         let fv_c = b!(self
             .bld
             .build_struct_gep(header_ty, result_vec, 2, "fts.vec.c"));
-        b!(self.bld.build_store(fv_c, count));
+        b!(self.bld.build_store(fv_c, found));
         let _ = ptr_ty;
 
         Ok(result_vec.into())

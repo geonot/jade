@@ -388,6 +388,7 @@ impl InterfaceFile {
                             })
                             .collect(),
                         ret: Some((&m.ret).into()),
+                        error_types: Vec::new(),
                         default_body: None,
                         span: dummy,
                     })

@@ -58,8 +58,34 @@ impl Typer {
                     } else if Self::expr_is_fallible_producer(e) {
                         self.lower_expr(e)?
                     } else {
-                        let ok_inner = self.ok_inner_ty_pub(result_enum);
-                        self.lower_expr_expected(e, Some(&ok_inner))?
+                        let ok_inner = match &resolved_expected {
+                            Type::Struct(n, args) if n.as_str() == "Result" && args.len() == 2 => {
+                                args[0].clone()
+                            }
+                            _ => self.ok_inner_ty_pub(result_enum),
+                        };
+                        let he = self.lower_expr_expected(e, Some(&ok_inner))?;
+                        if matches!(self.infer_ctx.shallow_resolve(&ok_inner), Type::Void) {
+                            let het = self.infer_ctx.shallow_resolve(&he.ty);
+                            let voidish = matches!(het, Type::Void)
+                                || matches!(
+                                    het,
+                                    Type::TypeVar(v) if matches!(
+                                        self.infer_ctx.constraint(v),
+                                        super::super::unify::TypeConstraint::None
+                                    )
+                                );
+                            if !voidish {
+                                return Err(format!(
+                                    "{}: a bare `! E` signature means `Result of Unit, E`, \
+                                     so the function body must end in unit — this tail \
+                                     expression has a value type; declare `returns T ! E` \
+                                     to return a value, or drop the tail expression",
+                                    he.span.loc(),
+                                ));
+                            }
+                        }
+                        he
                     };
                     let val_ty = self.infer_ctx.resolve(&he.ty);
                     let he = match self.result_enum_of(&val_ty) {

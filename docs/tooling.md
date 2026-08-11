@@ -137,6 +137,6 @@ Set `JINN_LOG=jinnc::lsp=debug` to see request and response traffic on stderr.
 | `JINN_RT_DEBUG=1` | Build the C runtime `-O0 -g`. |
 | `JINN_MIR_VERIFY=0` | Opt out of MIR verification (on by default, including in release). |
 | `JINN_PROPTEST_CASES=N` | Property-test case count. |
-| `JINN_WAL_SYNC` | Store WAL sync policy, chosen once at first open (`S-5`, `S-6`). |
+| `JINN_WAL_SYNC` | Store WAL sync policy, chosen once at first open (`S-5`); `group` batches syncs at transaction commits and falls back to per-record `fdatasync` outside them. |
 | `JINN_LOG` | `tracing` filter, e.g. `jinnc::lsp=debug`. |
 | `LLVM_SYS_211_PREFIX` | Required for a *fresh* compiler build on Arch: `/usr/lib/llvm21`. |

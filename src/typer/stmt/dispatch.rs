@@ -277,6 +277,20 @@ impl Typer {
                     let hv = self.lower_expr_expected(&b.value, Some(&global_ty))?;
                     return Ok(hir::Stmt::GlobalStore(b.name, hv, b.span));
                 }
+                {
+                    let ns = b.name.as_str();
+                    let all_caps = ns.chars().any(|c| c.is_ascii_uppercase())
+                        && !ns.chars().any(|c| c.is_ascii_lowercase());
+                    if all_caps && self.consts.contains_key(&b.name) {
+                        return Err(format!(
+                            "{}: cannot rebind constant `{}` — a module-level constant \
+                             of this name exists and constants cannot be reassigned or \
+                             shadowed; choose a different name for the local binding",
+                            b.span.loc(),
+                            b.name,
+                        ));
+                    }
+                }
                 let value = if let Some(ref ann) = b.ty {
                     let ann_ty = self.resolve_ty(ann.clone());
                     self.lower_expr_expected(&b.value, Some(&ann_ty))?
@@ -297,12 +311,21 @@ impl Typer {
                 };
                 let ty = if let Some(ref ann) = b.ty {
                     let ann_ty = self.resolve_ty(ann.clone());
-                    let _ = self
-                        .infer_ctx
-                        .unify_at(&ann_ty, &value.ty, b.span, "bind annotation");
+                    let vt = self.infer_ctx.shallow_resolve(&value.ty);
+                    let at = self.infer_ctx.shallow_resolve(&ann_ty);
+                    if !(vt.is_int() && at.is_float()) {
+                        let _ =
+                            self.infer_ctx
+                                .unify_at(&ann_ty, &value.ty, b.span, "bind annotation");
+                    }
                     ann_ty
                 } else {
                     value.ty.clone()
+                };
+                let value = if b.ty.is_some() {
+                    self.maybe_coerce_to(value, &ty)
+                } else {
+                    value
                 };
                 let mut ownership = Self::ownership_for_type(&ty);
 
@@ -788,8 +811,26 @@ impl Typer {
                     (None, None, None)
                 };
 
+                let iter_guard =
+                    if is_collection_for && let hir::ExprKind::Var(vid, vname) = &iter.kind {
+                        let prev = self.iter_borrowed.insert(*vid, (*vname, f.span));
+                        Some((*vid, prev))
+                    } else {
+                        None
+                    };
                 let pre_loop = self.snapshot_moved_fields();
-                let mut body = self.lower_block_no_scope(&f.body, ret_ty)?;
+                let body_res = self.lower_block_no_scope(&f.body, ret_ty);
+                if let Some((vid, prev)) = iter_guard {
+                    match prev {
+                        Some(p) => {
+                            self.iter_borrowed.insert(vid, p);
+                        }
+                        None => {
+                            self.iter_borrowed.remove(&vid);
+                        }
+                    }
+                }
+                let mut body = body_res?;
                 self.check_loop_body_moves(&pre_loop, &outer_ids, f.span)?;
                 self.finalize_loop_body_drops(&mut body);
                 self.pop_scope();
@@ -1080,7 +1121,7 @@ impl Typer {
             }
 
             ast::Stmt::Transaction(body, span) => {
-                let hbody = self.lower_block(body, ret_ty)?;
+                let hbody = self.lower_block_no_scope(body, ret_ty)?;
                 Ok(hir::Stmt::Transaction(hbody, *span))
             }
 

@@ -1,4 +1,89 @@
 # Changelog
+- **[143]** (2026-08-10) roadmap remediation: 21 items closed — the ownership seams, the verified type-system defects, embed gating, and the store residue
+
+The five memory-model blockers all lived at the same seam — moves of
+*variables* were tracked exactly while moves and borrows through *expressions*
+were not — and they close together at variable granularity (place granularity
+stays open as M-6):
+
+- **Constructor expressions move their sources (M-1).** Struct literals, enum
+  payloads, `vec(v1, v2)`, tuples, and arrays now tombstone a bare aggregate
+  variable in value position exactly as `b is a` does, with a dedicated
+  `CtorCapture` diagnostic. This immediately caught a latent double-free
+  pattern; move recording is suppressed inside `return`/`break`/`err` payloads
+  because those paths diverge and the conservative loop-repeat check was
+  rejecting `return JObject(o)` inside a `loop` (seen in `std/json.jn`).
+- **One call site, one owner (M-2).** A per-call alias check rejects the same
+  variable in two consuming positions, or in one consuming and any other
+  position, of a single call — `combine(v, v)` was minting two owners of one
+  buffer and exiting 0.
+- **Call-site exclusivity (M-3).** A new parameter-mutation inference
+  (`src/typer/mutate_infer.rs`, a fixpoint structurally identical to
+  consuming-parameter inference, covering free functions and methods and
+  propagated to monomorphized names) rejects passing one variable twice to a
+  call that mutates it through either parameter. `app(v, v)` no longer chases
+  its own append. The roadmap's `noalias` miscompile half was already stale —
+  codegen no longer emits those attributes.
+- **Mutating a temporary copy is an error (M-4).** Container element reads
+  still copy (M-4r/M-13 record the cost), but `grid.get(0).push(3)` — and any
+  builtin mutating method, or user method whose receiver-mutation was
+  inferred, on an element-read receiver — is now a compile error instead of a
+  silently discarded update. This found two real bugs in std:
+  `dataframe.from_csv` built every column into a discarded temporary (all
+  frames came back empty), and `add_row` appended every cell into one. Both
+  rewritten column-first.
+- **Iteration borrows (M-5).** `for x in v` registers an iteration borrow of
+  `v` for the body: mutating calls on `v`, moves of `v`, and passing `v` to a
+  parameter the callee mutates are compile errors, so the append-while-iterate
+  hang is unrepresentable in the direct-loop form. Map/`Iter`-desugar and
+  field-place loops remain open as M-5r.
+- **Consuming methods by body, not by name (M-8, reduced).** User methods now
+  run through the same escape scan as free functions, so a storing method is
+  consuming whatever its name; the builtin name list remains only for
+  runtime-implemented methods and for receivers whose types are unknown at
+  AST-scan time (the residual imprecision).
+
+Type system and diagnostics: generic-type methods are monomorphized *with
+bodies* — instantiation queues the substituted method, a post-lowering drain
+lowers it through the same path as plain type methods, so `Box of i64(42)`
+followed by `b.get()` works (old T-1; annotation-driven instantiation also
+declares methods now). Undefined names are rejected in the typer with a span
+instead of surviving to a span-less codegen error, which also makes
+`--emit-hir` exit non-zero on broken code — the gap that made the frontend
+gates vacuous (old T-3; the fix immediately exposed that `transaction` blocks
+were typer-scoped while their bindings are function-scoped at runtime, now
+lowered scope-free to match pinned behavior). A bare `! E` means
+`Result of Unit, E` for real: the ok type is `Void`, a valued tail is a typer
+diagnostic, and the old inkwell panic is unreachable (T-4). Trait methods
+parse `! E` (T-5; conformance checking still open as T-5r). Duplicate
+catch-all clauses are a parse error naming both sites (T-6). Unsolved type
+variables warn by default — container elements included, which was the silent
+path — and `--strict-types` escalates *unconstrained* unsolved variables to
+errors while leaving ordinary literal defaulting alone, so the flag's name is
+true without rejecting `x is 42` (T-7). The M-4 check also found
+`snippets/101-200/s172.jn` transposing a matrix into discarded row copies —
+the differential gate had been pinning agreement on silently wrong output.
+Out-of-range literals against an int annotation warn with the wrapped
+value (T-8). ALL_CAPS constants cannot be shadowed (T-9). The whole compile
+runs on a 256 MiB thread, so flat operator chains bounded only by memory
+replace a stack overflow at ~5000 terms (T-11). A UTF-8 BOM is stripped and
+non-ASCII lex errors print the decoded character, not mojibake (T-12).
+Int→float coercion works in bind annotations and for integer literals against
+float operands in binary expressions, and constraint-mismatch messages name
+expected/found in the caller's order (T-14).
+
+Effects and store: `embed` rejects absolute paths and canonicalized escapes
+from the source directory (C-2). The comptime purity classifier is a least
+fixpoint that consults callees instead of deciding purity from argument shapes
+(C-3). `search` returns rows — the typer types it as the store's row struct
+and codegen resolves the posting ids against the store file, skipping deleted
+records, in id order (S-4). `JINN_WAL_SYNC=group` outside a transaction
+degrades to per-record `fdatasync` instead of never syncing (S-6). A WAL with
+bad magic exits 2 with the existing message instead of `abort()` (S-9,
+reduced). `jinn init NAME` scaffolds into `NAME/` (X-2). The stale half of S-7
+(`in [..]` "missing" — it exists in the statement filter path) is corrected in
+the roadmap.
+
 - **[142]** (2026-08-07) the std gate now means what its name says; apps/ enters the gates and two of them were broken
 
 [141] argued that the gates measuring a narrower surface than their names

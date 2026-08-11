@@ -144,6 +144,18 @@ impl Typer {
                                 name,
                                 name,
                             ),
+                            crate::typer::MoveReason::CtorCapture(at) => format!(
+                                "{}: use of moved value `{}`: it was moved into a \
+                                 constructor at {} — the new value owns it now; \
+                                 initialize the field with a clone (bind `copy {}` to a \
+                                 fresh name first) to keep both, or reassign `{}` before \
+                                 reading it",
+                                span.loc(),
+                                name,
+                                at.loc(),
+                                name,
+                                name,
+                            ),
                             crate::typer::MoveReason::AssignMove(to, at) => format!(
                                 "{}: use of moved value `{}`: it moved at {} (`{} is {}`) \
                                  — aggregates move on assignment; to keep both values, \
@@ -238,11 +250,12 @@ impl Typer {
                         return self.lower_expr(&field_expr);
                     }
                 }
-                Ok(hir::Expr {
-                    kind: hir::ExprKind::Var(DefId::BUILTIN, *name),
-                    ty: self.infer_ctx.fresh_var(),
-                    span: *span,
-                })
+                Err(format!(
+                    "{}: undefined name `{}`; no variable, constant, function, or type \
+                     of this name is in scope here",
+                    span.loc(),
+                    name,
+                ))
             }
             _ => unreachable!(),
         }

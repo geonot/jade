@@ -12,10 +12,23 @@ use fold::{fold_block_with_fns, fold_expr_with_fns};
 use purity::is_pure_fn;
 
 pub fn fold_program(prog: &mut hir::Program) {
+    let mut pure: std::collections::HashSet<Symbol> = std::collections::HashSet::new();
+    loop {
+        let mut changed = false;
+        for f in &prog.fns {
+            if !pure.contains(&f.name) && is_pure_fn(f, &pure) {
+                pure.insert(f.name);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
     let pure_fns: HashMap<Symbol, hir::Fn> = prog
         .fns
         .iter()
-        .filter(|f| is_pure_fn(f))
+        .filter(|f| pure.contains(&f.name))
         .map(|f| (f.name, f.clone()))
         .collect();
 

@@ -736,6 +736,7 @@ pub struct TraitMethod {
     pub name: Symbol,
     pub params: Vec<Param>,
     pub ret: Option<Type>,
+    pub error_types: Vec<Type>,
     pub default_body: Option<Block>,
     pub span: Span,
 }

@@ -2783,10 +2783,10 @@ fn fts_search_no_match() {
 }
 
 #[test]
-fn fts_search_typed_ids() {
+fn fts_search_returns_rows() {
     expect_store(
-        "store docs @simple\n    text as String @search\n\n*main\n    insert docs 'hello world'\n    insert docs 'hello again'\n    n is docs.search(text, 'hello')\n    for id in n\n        log id\n",
-        "1\n2",
+        "store docs @simple\n    text as String @search\n\n*main\n    insert docs 'hello world'\n    insert docs 'hello again'\n    n is docs.search(text, 'hello')\n    for row in n\n        log row.text\n",
+        "hello world\nhello again",
     );
 }
 
