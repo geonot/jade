@@ -129,7 +129,7 @@ type Url
 *percent_encode(s as String) returns String
     out is ""
     i is 0
-    while i < s.length
+    while i < s.byte_count
         c is s.char_at(i)
         if __is_unreserved(c)
             out is out + s.slice(i, i + 1)
@@ -141,7 +141,7 @@ type Url
 *percent_encode_path(s as String) returns String
     out is ""
     i is 0
-    while i < s.length
+    while i < s.byte_count
         c is s.char_at(i)
         if __is_unreserved(c) or c equals 47 or c equals 45 or c equals 95
             out is out + s.slice(i, i + 1)
@@ -153,9 +153,9 @@ type Url
 *percent_decode(s as String) returns String
     out is ""
     i is 0
-    while i < s.length
+    while i < s.byte_count
         c is s.char_at(i)
-        if c equals 37 and i + 2 < s.length
+        if c equals 37 and i + 2 < s.byte_count
             hi is __hex_val(s.char_at(i + 1))
             lo is __hex_val(s.char_at(i + 2))
             out is out + __char_from_byte((hi << 4) | lo)
@@ -251,7 +251,7 @@ type Url
     __char_to_string(b)
 
 *__char_to_string(b as i64) returns String
-    chr(b)
+    byte(b)
 
 *__last_colon_outside_brackets(s as String) returns i64
     if s.length > 0 and s.char_at(0) equals 91

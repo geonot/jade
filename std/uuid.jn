@@ -13,17 +13,17 @@ type Uuid
         format(self)
 
     *version returns i64
-        if self.bytes.length neq 16
+        if self.bytes.byte_count neq 16
             return 0
         (self.bytes.char_at(6) >> 4) & 15
 
     *variant returns i64
-        if self.bytes.length neq 16
+        if self.bytes.byte_count neq 16
             return 0
         (self.bytes.char_at(8) >> 6) & 3
 
     *is_nil returns bool
-        if self.bytes.length neq 16
+        if self.bytes.byte_count neq 16
             return false
         i is 0
         while i < 16
@@ -64,24 +64,24 @@ type Uuid
 
 *__build_v7_bytes(ms as i64, rand as String) returns String
     out is ""
-    out is out + chr((ms >> 40) & 255)
-    out is out + chr((ms >> 32) & 255)
-    out is out + chr((ms >> 24) & 255)
-    out is out + chr((ms >> 16) & 255)
-    out is out + chr((ms >> 8) & 255)
-    out is out + chr(ms & 255)
-    out is out + chr(112 | (rand.char_at(0) & 15))
-    out is out + chr(rand.char_at(1) & 255)
-    out is out + chr(128 | (rand.char_at(2) & 63))
+    out is out + byte((ms >> 40) & 255)
+    out is out + byte((ms >> 32) & 255)
+    out is out + byte((ms >> 24) & 255)
+    out is out + byte((ms >> 16) & 255)
+    out is out + byte((ms >> 8) & 255)
+    out is out + byte(ms & 255)
+    out is out + byte(112 | (rand.char_at(0) & 15))
+    out is out + byte(rand.char_at(1) & 255)
+    out is out + byte(128 | (rand.char_at(2) & 63))
     i is 3
     while i < 10
-        out is out + chr(rand.char_at(i) & 255)
+        out is out + byte(rand.char_at(i) & 255)
         i is i + 1
     out
 
 
 *format(u as Uuid) returns String
-    if u.bytes.length neq 16
+    if u.bytes.byte_count neq 16
         return ""
     hex is __bytes_to_hex(u.bytes)
     hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-" + hex.slice(16, 20) + "-" + hex.slice(20, 32)
@@ -97,15 +97,15 @@ type Uuid
     if clean.length neq 32
         return Uuid(bytes is "")
     raw is __hex_to_bytes(clean)
-    if raw.length neq 16
+    if raw.byte_count neq 16
         return Uuid(bytes is "")
     Uuid(bytes is raw)
 
 *is_valid(s as String) returns bool
-    parse(s).bytes.length equals 16
+    parse(s).bytes.byte_count equals 16
 
 *timestamp_ms(u as Uuid) returns i64
-    if u.bytes.length neq 16
+    if u.bytes.byte_count neq 16
         return 0
     if ((u.bytes.char_at(6) >> 4) & 15) neq 7
         return 0
@@ -121,10 +121,10 @@ MAX is "ffffffff-ffff-ffff-ffff-ffffffffffff"
 
 
 *__bytes_to_hex(data as String) returns String
-    if data.length equals 0
+    if data.byte_count equals 0
         return ""
-    hex_buf is extern.malloc(data.length * 2 + 1)
-    extern.jinn_bytes_to_hex(%data, data.length, hex_buf)
+    hex_buf is extern.malloc(data.byte_count * 2 + 1)
+    extern.jinn_bytes_to_hex(%data, data.byte_count, hex_buf)
     result is __string_from_ptr(hex_buf)
     extern.free(hex_buf)
     result
@@ -143,4 +143,4 @@ MAX is "ffffffff-ffff-ffff-ffff-ffffffffffff"
     result
 
 *__set_byte(s as String, i as i64, b as i64) returns String
-    s.slice(0, i) + chr(b & 255) + s.slice(i + 1, s.length)
+    s.slice(0, i) + byte(b & 255) + s.slice(i + 1, s.byte_count)

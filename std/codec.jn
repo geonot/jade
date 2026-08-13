@@ -6,7 +6,7 @@ HEX_CHARS_UPPER is "0123456789ABCDEF"
 *to_hex(data as String) returns String
     out is ""
     i is 0
-    while i < data.length
+    while i < data.byte_count
         b is data.char_at(i)
         hi is (b >> 4) & 15
         lo is b & 15
@@ -17,7 +17,7 @@ HEX_CHARS_UPPER is "0123456789ABCDEF"
 *to_hex_upper(data as String) returns String
     out is ""
     i is 0
-    while i < data.length
+    while i < data.byte_count
         b is data.char_at(i)
         hi is (b >> 4) & 15
         lo is b & 15
@@ -28,10 +28,10 @@ HEX_CHARS_UPPER is "0123456789ABCDEF"
 *from_hex(hex as String) returns String
     out is ""
     i is 0
-    while i + 1 < hex.length
+    while i + 1 < hex.byte_count
         hi is __hex_digit(hex.char_at(i))
         lo is __hex_digit(hex.char_at(i + 1))
-        out is out + chr(hi * 16 + lo)
+        out is out + byte(hi * 16 + lo)
         i is i + 2
     out
 
@@ -60,7 +60,7 @@ B64_URL_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
 *from_base64_url(encoded as String) returns String
     converted is ""
     i is 0
-    while i < encoded.length
+    while i < encoded.byte_count
         c is encoded.char_at(i)
         if c equals 45
             converted is converted + "+"
@@ -74,7 +74,7 @@ B64_URL_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
 *__b64_encode(data as String, table as String, pad as bool) returns String
     out is ""
     i is 0
-    len is data.length
+    len is data.byte_count
     while i < len
         b0 is data.char_at(i)
         b1 is 0
@@ -103,21 +103,21 @@ B64_URL_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
 *__b64_decode(encoded as String) returns String
     out is ""
     i is 0
-    while i < encoded.length
-        if i + 3 >= encoded.length
+    while i < encoded.byte_count
+        if i + 3 >= encoded.byte_count
             break
         c0 is __b64_val(encoded.char_at(i))
         c1 is __b64_val(encoded.char_at(i + 1))
         c2 is __b64_val(encoded.char_at(i + 2))
         c3 is __b64_val(encoded.char_at(i + 3))
         b0 is ((c0 << 2) | (c1 >> 4)) & 255
-        out is out + chr(b0)
+        out is out + byte(b0)
         if encoded.char_at(i + 2) neq 61
             b1 is (((c1 & 15) << 4) | (c2 >> 2)) & 255
-            out is out + chr(b1)
+            out is out + byte(b1)
         if encoded.char_at(i + 3) neq 61
             b2 is (((c2 & 3) << 6) | c3) & 255
-            out is out + chr(b2)
+            out is out + byte(b2)
         i is i + 4
     out
 
@@ -144,7 +144,7 @@ B32_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 *to_base32(data as String) returns String
     out is ""
     i is 0
-    n is data.length
+    n is data.byte_count
     while i < n
         b is vec()
         j is 0
@@ -184,23 +184,23 @@ B32_TABLE is "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 *from_base32(encoded as String) returns String
     out is ""
     i is 0
-    while i < encoded.length
-        if i + 7 >= encoded.length
+    while i < encoded.byte_count
+        if i + 7 >= encoded.byte_count
             break
         v is vec()
         j is 0
         while j < 8
             v.push(__b32_val(encoded.char_at(i + j)))
             j is j + 1
-        out is out + chr(((v.get(0) << 3) | (v.get(1) >> 2)) & 255)
+        out is out + byte(((v.get(0) << 3) | (v.get(1) >> 2)) & 255)
         if encoded.char_at(i + 2) neq 61
-            out is out + chr((((v.get(1) & 3) << 6) | (v.get(2) << 1) | (v.get(3) >> 4)) & 255)
+            out is out + byte((((v.get(1) & 3) << 6) | (v.get(2) << 1) | (v.get(3) >> 4)) & 255)
         if encoded.char_at(i + 4) neq 61
-            out is out + chr((((v.get(3) & 15) << 4) | (v.get(4) >> 1)) & 255)
+            out is out + byte((((v.get(3) & 15) << 4) | (v.get(4) >> 1)) & 255)
         if encoded.char_at(i + 5) neq 61
-            out is out + chr((((v.get(4) & 1) << 7) | (v.get(5) << 2) | (v.get(6) >> 3)) & 255)
+            out is out + byte((((v.get(4) & 1) << 7) | (v.get(5) << 2) | (v.get(6) >> 3)) & 255)
         if encoded.char_at(i + 7) neq 61
-            out is out + chr((((v.get(6) & 7) << 5) | v.get(7)) & 255)
+            out is out + byte((((v.get(6) & 7) << 5) | v.get(7)) & 255)
         i is i + 8
     out
 

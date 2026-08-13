@@ -285,15 +285,61 @@ impl<'ctx> Compiler<'ctx> {
                 let i8t = self.ctx.i8_type();
                 let i64t = self.ctx.i64_type();
 
+                let code64 = if code.get_type().get_bit_width() < 64 {
+                    b!(self.bld.build_int_s_extend(code, i64t, "chr.code"))
+                } else {
+                    code
+                };
+
+                let size = i64t.const_int(5, false);
+                let malloc = self.ensure_malloc();
+                let buf = b!(self.bld.build_call(malloc, &[size.into()], "chr.buf"))
+                    .try_as_basic_value()
+                    .basic()
+                    .expect("ICE: call returned void");
+                let bufp = buf.into_pointer_value();
+
+                let enc = self
+                    .module
+                    .get_function("jinn_utf8_encode")
+                    .unwrap_or_else(|| {
+                        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+                        let ft = i64t.fn_type(&[i64t.into(), ptr_ty.into()], false);
+                        self.module.add_function(
+                            "jinn_utf8_encode",
+                            ft,
+                            Some(inkwell::module::Linkage::External),
+                        )
+                    });
+                let len = b!(self
+                    .bld
+                    .build_call(enc, &[code64.into(), bufp.into()], "chr.len"))
+                .try_as_basic_value()
+                .basic()
+                .expect("ICE: call returned void")
+                .into_int_value();
+
+                let nul = unsafe { b!(self.bld.build_gep(i8t, bufp, &[len], "chr.nul")) };
+                b!(self.bld.build_store(nul, i8t.const_zero()));
+                return Ok(Some(self.build_string(buf, len, size, "chr")?));
+            }
+            "Byte" => {
+                if args.is_empty() {
+                    return Ok(None);
+                }
+                let code = self.val(args[0]).into_int_value();
+                let i8t = self.ctx.i8_type();
+                let i64t = self.ctx.i64_type();
+
                 let byte = if code.get_type().get_bit_width() > 8 {
-                    b!(self.bld.build_int_truncate(code, i8t, "chr.byte"))
+                    b!(self.bld.build_int_truncate(code, i8t, "byte.byte"))
                 } else {
                     code
                 };
 
                 let size = i64t.const_int(2, false);
                 let malloc = self.ensure_malloc();
-                let buf = b!(self.bld.build_call(malloc, &[size.into()], "chr.buf"))
+                let buf = b!(self.bld.build_call(malloc, &[size.into()], "byte.buf"))
                     .try_as_basic_value()
                     .basic()
                     .expect("ICE: call returned void");
@@ -302,14 +348,14 @@ impl<'ctx> Compiler<'ctx> {
                 let p1 = unsafe {
                     b!(self
                         .bld
-                        .build_gep(i8t, bufp, &[i64t.const_int(1, false)], "chr.p1"))
+                        .build_gep(i8t, bufp, &[i64t.const_int(1, false)], "byte.p1"))
                 };
                 b!(self.bld.build_store(p1, i8t.const_zero()));
                 return Ok(Some(self.build_string(
                     buf,
                     i64t.const_int(1, false),
                     size,
-                    "chr",
+                    "byte",
                 )?));
             }
             "VolatileLoad" => {

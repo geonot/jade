@@ -281,3 +281,32 @@ fn every_diagnostic_input_exits_nonzero() {
         );
     }
 }
+
+#[test]
+fn conditional_consumption_diagnostic_names_the_consuming_path() {
+    let c = compile(
+        "*maybe_keep(v, keep as bool) returns Vec of i64\n    if keep\n        return v\n    vec(0)\n\n*main\n    a is vec(1, 2, 3)\n    s is maybe_keep(a, false)\n    log(s.length)\n    log(a.length)\n",
+    );
+    assert!(
+        !c.ok(),
+        "use-after-conditional-consumption must not compile"
+    );
+    let stderr = c.stderr();
+    assert!(
+        stderr.contains("it is consumed at") && stderr.contains("conditional path"),
+        "diagnostic must name the consuming site and say it is conditional: {stderr}"
+    );
+}
+
+#[test]
+fn unconditional_consumption_diagnostic_names_the_consuming_site() {
+    let c = compile(
+        "*keep(v) returns Vec of i64\n    return v\n\n*main\n    a is vec(1, 2, 3)\n    s is keep(a)\n    log(s.length)\n    log(a.length)\n",
+    );
+    assert!(!c.ok(), "use-after-consumption must not compile");
+    let stderr = c.stderr();
+    assert!(
+        stderr.contains("it is consumed at") && !stderr.contains("conditional path"),
+        "diagnostic must name the consuming site without a conditional note: {stderr}"
+    );
+}

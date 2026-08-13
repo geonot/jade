@@ -823,7 +823,7 @@ impl Typer {
                                 self.mark_var_moved_checked(
                                     *id,
                                     *vname,
-                                    crate::typer::MoveReason::ConsumingCall(*name),
+                                    crate::typer::MoveReason::ConsumingCall(*name, i),
                                     a.span,
                                 )?;
                             }
@@ -966,7 +966,7 @@ impl Typer {
                             self.mark_var_moved_checked(
                                 *id,
                                 *vname,
-                                crate::typer::MoveReason::ConsumingCall(mangled),
+                                crate::typer::MoveReason::ConsumingCall(mangled, 0),
                                 recv.span,
                             )?;
                         }
@@ -980,7 +980,7 @@ impl Typer {
                                 self.mark_var_moved_checked(
                                     *id,
                                     *vname,
-                                    crate::typer::MoveReason::ConsumingCall(mangled),
+                                    crate::typer::MoveReason::ConsumingCall(mangled, i + 1),
                                     a.span,
                                 )?;
                             }

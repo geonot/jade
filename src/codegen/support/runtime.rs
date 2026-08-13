@@ -395,6 +395,19 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
+    pub(crate) fn ensure_ascii_imemcmp(&mut self) -> FunctionValue<'ctx> {
+        self.module
+            .get_function("jinn_ascii_imemcmp")
+            .unwrap_or_else(|| {
+                let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+                let i64t = self.ctx.i64_type();
+                let i32t = self.ctx.i32_type();
+                let ft = i32t.fn_type(&[ptr_ty.into(), ptr_ty.into(), i64t.into()], false);
+                self.module
+                    .add_function("jinn_ascii_imemcmp", ft, Some(Linkage::External))
+            })
+    }
+
     pub(crate) fn ensure_memcpy(&mut self) -> FunctionValue<'ctx> {
         self.module.get_function("memcpy").unwrap_or_else(|| {
             let ptr_ty = self.ctx.ptr_type(AddressSpace::default());

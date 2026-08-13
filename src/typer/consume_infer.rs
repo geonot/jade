@@ -42,6 +42,25 @@ fn annotated_non_consumable(ty: &Option<Type>) -> bool {
 
 type AliasMap = HashMap<Symbol, HashSet<usize>>;
 
+#[derive(Default)]
+struct Escapes {
+    sites: HashMap<usize, (ast::Span, bool)>,
+}
+
+impl Escapes {
+    fn record(&mut self, slots: HashSet<usize>, span: ast::Span, cond: bool) {
+        for i in slots {
+            match self.sites.get(&i) {
+                Some((_, false)) => {}
+                Some((_, true)) if cond => {}
+                _ => {
+                    self.sites.insert(i, (span, cond));
+                }
+            }
+        }
+    }
+}
+
 impl crate::typer::Typer {
     pub(crate) fn infer_consuming_params(&mut self, fns: &[&ast::Fn]) {
         let method_items: Vec<(Symbol, ast::Fn)> = self
@@ -86,17 +105,33 @@ impl crate::typer::Typer {
         if alias.is_empty() {
             return false;
         }
-        let mut escaping: HashSet<usize> = HashSet::new();
+        let mut escaping = Escapes::default();
         let returns_value = f.ret.is_some() || ret_is_inferred(f);
-        self.scan_block(&f.body, &mut alias, &mut escaping, returns_value);
+        self.scan_block(&f.body, &mut alias, &mut escaping, returns_value, false);
 
         let mut changed = false;
-        for i in escaping {
+        for (i, (span, cond)) in escaping.sites {
+            let mut flipped = false;
+            let mut n_slots = 0;
             if let Some(accs) = self.fn_param_access.get_mut(&fname)
                 && let Some(slot) = accs.get_mut(i)
                 && slot.is_none()
             {
                 *slot = Some(ast::AccessMod::Take);
+                n_slots = accs.len();
+                flipped = true;
+            }
+            if flipped {
+                let sites = self
+                    .fn_param_consume_sites
+                    .entry(fname)
+                    .or_insert_with(|| vec![None; n_slots]);
+                if sites.len() < n_slots {
+                    sites.resize(n_slots, None);
+                }
+                if let Some(s) = sites.get_mut(i) {
+                    *s = Some((span, cond));
+                }
                 changed = true;
             }
         }
@@ -119,13 +154,14 @@ impl crate::typer::Typer {
         &self,
         block: &[Stmt],
         alias: &mut AliasMap,
-        escaping: &mut HashSet<usize>,
+        escaping: &mut Escapes,
         tail_returns: bool,
+        cond: bool,
     ) {
         let last = block.len().saturating_sub(1);
         for (idx, s) in block.iter().enumerate() {
             let is_tail = tail_returns && idx == last;
-            self.scan_stmt(s, alias, escaping, is_tail);
+            self.scan_stmt(s, alias, escaping, is_tail, cond);
         }
     }
 
@@ -133,21 +169,22 @@ impl crate::typer::Typer {
         &self,
         s: &Stmt,
         alias: &mut AliasMap,
-        escaping: &mut HashSet<usize>,
+        escaping: &mut Escapes,
         is_tail: bool,
+        cond: bool,
     ) {
         match s {
             Stmt::Bind(b) => {
-                self.scan_expr_sinks(&b.value, alias, escaping);
+                self.scan_expr_sinks(&b.value, alias, escaping, cond);
                 let set = Self::expr_alias(&b.value, alias);
                 if !set.is_empty() {
                     alias.entry(b.name).or_default().extend(set);
                 }
             }
-            Stmt::TupleBind(_, e, _) => self.scan_expr_sinks(e, alias, escaping),
+            Stmt::TupleBind(_, e, _) => self.scan_expr_sinks(e, alias, escaping, cond),
             Stmt::Assign(target, value, _) => {
-                self.scan_expr_sinks(value, alias, escaping);
-                self.scan_expr_sinks(target, alias, escaping);
+                self.scan_expr_sinks(value, alias, escaping, cond);
+                self.scan_expr_sinks(target, alias, escaping, cond);
                 match target {
                     Expr::Ident(n, _) => {
                         let set = Self::expr_alias(value, alias);
@@ -157,71 +194,71 @@ impl crate::typer::Typer {
                     }
 
                     _ => {
-                        escaping.extend(Self::expr_alias(value, alias));
+                        escaping.record(Self::expr_alias(value, alias), value.span(), cond);
                     }
                 }
             }
             Stmt::Expr(e) => {
-                self.scan_expr_sinks(e, alias, escaping);
+                self.scan_expr_sinks(e, alias, escaping, cond);
                 if is_tail {
-                    escaping.extend(Self::expr_alias(e, alias));
+                    escaping.record(Self::expr_alias(e, alias), e.span(), cond);
                 }
             }
             Stmt::Ret(Some(e), _) | Stmt::ErrReturn(e, _) | Stmt::Break(Some(e), _) => {
-                self.scan_expr_sinks(e, alias, escaping);
-                escaping.extend(Self::expr_alias(e, alias));
+                self.scan_expr_sinks(e, alias, escaping, cond);
+                escaping.record(Self::expr_alias(e, alias), e.span(), cond);
             }
             Stmt::If(i) => {
-                self.scan_expr_sinks(&i.cond, alias, escaping);
-                self.scan_block(&i.then, alias, escaping, is_tail);
+                self.scan_expr_sinks(&i.cond, alias, escaping, cond);
+                self.scan_block(&i.then, alias, escaping, is_tail, true);
                 for (c, b) in &i.elifs {
-                    self.scan_expr_sinks(c, alias, escaping);
-                    self.scan_block(b, alias, escaping, is_tail);
+                    self.scan_expr_sinks(c, alias, escaping, cond);
+                    self.scan_block(b, alias, escaping, is_tail, true);
                 }
                 if let Some(b) = &i.els {
-                    self.scan_block(b, alias, escaping, is_tail);
+                    self.scan_block(b, alias, escaping, is_tail, true);
                 }
             }
             Stmt::While(w) => {
-                self.scan_expr_sinks(&w.cond, alias, escaping);
-                self.scan_block(&w.body, alias, escaping, false);
+                self.scan_expr_sinks(&w.cond, alias, escaping, cond);
+                self.scan_block(&w.body, alias, escaping, false, true);
             }
             Stmt::For(f) | Stmt::SimFor(f, _) => {
-                self.scan_expr_sinks(&f.iter, alias, escaping);
+                self.scan_expr_sinks(&f.iter, alias, escaping, cond);
                 if let Some(e) = &f.end {
-                    self.scan_expr_sinks(e, alias, escaping);
+                    self.scan_expr_sinks(e, alias, escaping, cond);
                 }
                 if let Some(e) = &f.step {
-                    self.scan_expr_sinks(e, alias, escaping);
+                    self.scan_expr_sinks(e, alias, escaping, cond);
                 }
-                self.scan_block(&f.body, alias, escaping, false);
+                self.scan_block(&f.body, alias, escaping, false, true);
             }
-            Stmt::Loop(l) => self.scan_block(&l.body, alias, escaping, false),
+            Stmt::Loop(l) => self.scan_block(&l.body, alias, escaping, false, cond),
             Stmt::Match(m) => {
-                self.scan_expr_sinks(&m.subject, alias, escaping);
+                self.scan_expr_sinks(&m.subject, alias, escaping, cond);
                 for arm in &m.arms {
                     if let Some(g) = &arm.guard {
-                        self.scan_expr_sinks(g, alias, escaping);
+                        self.scan_expr_sinks(g, alias, escaping, cond);
                     }
-                    self.scan_block(&arm.body, alias, escaping, is_tail);
+                    self.scan_block(&arm.body, alias, escaping, is_tail, true);
                 }
             }
             Stmt::Defer(b, _) | Stmt::Transaction(b, _) | Stmt::SimBlock(b, _) => {
-                self.scan_block(b, alias, escaping, false);
+                self.scan_block(b, alias, escaping, false, cond);
             }
-            Stmt::Together(_, b, _, _) => self.scan_block(b, alias, escaping, false),
+            Stmt::Together(_, b, _, _) => self.scan_block(b, alias, escaping, false, cond),
             Stmt::StoreInsert(_, inits, _) => {
                 for fi in inits {
-                    self.scan_expr_sinks(&fi.value, alias, escaping);
+                    self.scan_expr_sinks(&fi.value, alias, escaping, cond);
                 }
             }
             Stmt::StoreSet(_, sets, _, _) => {
                 for (_, e) in sets {
-                    self.scan_expr_sinks(e, alias, escaping);
+                    self.scan_expr_sinks(e, alias, escaping, cond);
                 }
             }
             Stmt::ChannelClose(e, _) | Stmt::Stop(e, _) | Stmt::Join(e, _) => {
-                self.scan_expr_sinks(e, alias, escaping);
+                self.scan_expr_sinks(e, alias, escaping, cond);
             }
             _ => {}
         }
@@ -261,7 +298,7 @@ impl crate::typer::Typer {
         }
     }
 
-    fn scan_expr_sinks(&self, e: &Expr, alias: &AliasMap, escaping: &mut HashSet<usize>) {
+    fn scan_expr_sinks(&self, e: &Expr, alias: &AliasMap, escaping: &mut Escapes, cond: bool) {
         match e {
             Expr::Call(callee, args, _) => {
                 if !args.iter().any(|a| matches!(a, Expr::NamedArg(..))) {
@@ -275,30 +312,30 @@ impl crate::typer::Typer {
                     {
                         for (j, a) in args.iter().enumerate() {
                             if matches!(access.get(j), Some(Some(ast::AccessMod::Take))) {
-                                escaping.extend(Self::expr_alias(a, alias));
+                                escaping.record(Self::expr_alias(a, alias), a.span(), cond);
                             }
                         }
                     }
                 }
                 for a in args {
-                    self.scan_expr_sinks(a, alias, escaping);
+                    self.scan_expr_sinks(a, alias, escaping, cond);
                 }
             }
             Expr::Method(recv, name, args, _) => {
                 if CONSUMING_METHODS.contains(&&*name.as_str()) {
                     for a in args {
-                        escaping.extend(Self::expr_alias(a, alias));
+                        escaping.record(Self::expr_alias(a, alias), a.span(), cond);
                     }
                 } else {
                     for (j, a) in args.iter().enumerate() {
                         if self.any_user_method_consumes(*name, j + 1) {
-                            escaping.extend(Self::expr_alias(a, alias));
+                            escaping.record(Self::expr_alias(a, alias), a.span(), cond);
                         }
                     }
                 }
-                self.scan_expr_sinks(recv, alias, escaping);
+                self.scan_expr_sinks(recv, alias, escaping, cond);
                 for a in args {
-                    self.scan_expr_sinks(a, alias, escaping);
+                    self.scan_expr_sinks(a, alias, escaping, cond);
                 }
             }
             Expr::Pipe(lhs, target, rest, _) => {
@@ -306,39 +343,39 @@ impl crate::typer::Typer {
                     && let Some(access) = self.fn_param_access.get(fname)
                     && matches!(access.first(), Some(Some(ast::AccessMod::Take)))
                 {
-                    escaping.extend(Self::expr_alias(lhs, alias));
+                    escaping.record(Self::expr_alias(lhs, alias), lhs.span(), cond);
                 }
-                self.scan_expr_sinks(lhs, alias, escaping);
+                self.scan_expr_sinks(lhs, alias, escaping, cond);
                 for a in rest {
-                    self.scan_expr_sinks(a, alias, escaping);
+                    self.scan_expr_sinks(a, alias, escaping, cond);
                 }
             }
             Expr::ChannelSend(ch, v, _) => {
-                escaping.extend(Self::expr_alias(v, alias));
-                self.scan_expr_sinks(ch, alias, escaping);
-                self.scan_expr_sinks(v, alias, escaping);
+                escaping.record(Self::expr_alias(v, alias), v.span(), cond);
+                self.scan_expr_sinks(ch, alias, escaping, cond);
+                self.scan_expr_sinks(v, alias, escaping, cond);
             }
             Expr::Send(actor, _, args, _) => {
                 for a in args {
-                    escaping.extend(Self::expr_alias(a, alias));
-                    self.scan_expr_sinks(a, alias, escaping);
+                    escaping.record(Self::expr_alias(a, alias), a.span(), cond);
+                    self.scan_expr_sinks(a, alias, escaping, cond);
                 }
-                self.scan_expr_sinks(actor, alias, escaping);
+                self.scan_expr_sinks(actor, alias, escaping, cond);
             }
             Expr::Spawn(_, inits, _) => {
                 for (_, v) in inits {
-                    escaping.extend(Self::expr_alias(v, alias));
-                    self.scan_expr_sinks(v, alias, escaping);
+                    escaping.record(Self::expr_alias(v, alias), v.span(), cond);
+                    self.scan_expr_sinks(v, alias, escaping, cond);
                 }
             }
             Expr::Yield(v, _) => {
-                escaping.extend(Self::expr_alias(v, alias));
-                self.scan_expr_sinks(v, alias, escaping);
+                escaping.record(Self::expr_alias(v, alias), v.span(), cond);
+                self.scan_expr_sinks(v, alias, escaping, cond);
             }
 
             Expr::BinOp(l, _, r, _) | Expr::Index(l, r, _) | Expr::OfCall(l, r, _) => {
-                self.scan_expr_sinks(l, alias, escaping);
-                self.scan_expr_sinks(r, alias, escaping);
+                self.scan_expr_sinks(l, alias, escaping, cond);
+                self.scan_expr_sinks(r, alias, escaping, cond);
             }
             Expr::UnaryOp(_, x, _)
             | Expr::Field(x, _, _)
@@ -350,17 +387,17 @@ impl crate::typer::Typer {
             | Expr::Grad(x, _)
             | Expr::AsFormat(x, _, _)
             | Expr::NamedArg(_, x, _) => {
-                self.scan_expr_sinks(x, alias, escaping);
+                self.scan_expr_sinks(x, alias, escaping, cond);
             }
             Expr::Ternary(c, t, els, _) => {
-                self.scan_expr_sinks(c, alias, escaping);
-                self.scan_expr_sinks(t, alias, escaping);
-                self.scan_expr_sinks(els, alias, escaping);
+                self.scan_expr_sinks(c, alias, escaping, cond);
+                self.scan_expr_sinks(t, alias, escaping, true);
+                self.scan_expr_sinks(els, alias, escaping, true);
             }
             Expr::Quaternary(subj, ok, nothing, err, _) => {
-                self.scan_expr_sinks(subj, alias, escaping);
+                self.scan_expr_sinks(subj, alias, escaping, cond);
                 for arm in [ok, nothing, err].into_iter().flatten() {
-                    self.scan_expr_sinks(arm, alias, escaping);
+                    self.scan_expr_sinks(arm, alias, escaping, true);
                 }
             }
             Expr::Array(es, _)
@@ -368,18 +405,18 @@ impl crate::typer::Typer {
             | Expr::Syscall(es, _)
             | Expr::Einsum(_, es, _) => {
                 for x in es {
-                    self.scan_expr_sinks(x, alias, escaping);
+                    self.scan_expr_sinks(x, alias, escaping, cond);
                 }
             }
             Expr::Struct(_, inits, _) => {
                 for fi in inits {
-                    self.scan_expr_sinks(&fi.value, alias, escaping);
+                    self.scan_expr_sinks(&fi.value, alias, escaping, cond);
                 }
             }
             Expr::Slice(a, b, c, _) => {
-                self.scan_expr_sinks(a, alias, escaping);
-                self.scan_expr_sinks(b, alias, escaping);
-                self.scan_expr_sinks(c, alias, escaping);
+                self.scan_expr_sinks(a, alias, escaping, cond);
+                self.scan_expr_sinks(b, alias, escaping, cond);
+                self.scan_expr_sinks(c, alias, escaping, cond);
             }
 
             _ => {}

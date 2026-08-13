@@ -127,3 +127,90 @@ fn upper_lower_ascii_only() {
     expect("*main\n    log(\"héllo\".to_upper())", "HéLLO");
     expect("*main\n    log(\"HÉLLO\".to_lower())", "hÉllo");
 }
+
+#[test]
+fn chr_encodes_ascii() {
+    expect("*main\n    log(chr(65) + chr(66) + chr(67))", "ABC");
+}
+
+#[test]
+fn chr_utf8_encodes_two_byte_scalar() {
+    expect(
+        "*main\n    s is chr(233)\n    log(s.byte_count)\n    log(s.char_at(0))\n    log(s.char_at(1))\n    log(s)",
+        "2\n195\n169\né",
+    );
+}
+
+#[test]
+fn chr_utf8_encodes_four_byte_scalar() {
+    expect(
+        "*main\n    s is chr(128512)\n    log(s.byte_count)\n    log(s.length)\n    log(s)",
+        "4\n1\n😀",
+    );
+}
+
+#[test]
+fn chr_replaces_invalid_scalars() {
+    expect(
+        "*main\n    a is chr(55296)\n    b is chr(1114112)\n    log(a.byte_count)\n    log(a equals b ? 1 ! 0)\n    log(a equals chr(65533) ? 1 ! 0)",
+        "3\n1\n1",
+    );
+}
+
+#[test]
+fn byte_builds_raw_bytes() {
+    expect(
+        "*main\n    s is byte(200)\n    log(s.byte_count)\n    log(s.char_at(0))\n    t is byte(456)\n    log(t.char_at(0))",
+        "1\n200\n200",
+    );
+}
+
+#[test]
+fn chr_rejects_non_integer_argument() {
+    let dir = tempfile::tempdir().unwrap();
+    let jinn = dir.path().join("bad.jn");
+    std::fs::write(&jinn, "*main\n    log(chr(\"x\"))\n").unwrap();
+    let out = Command::new(jinnc())
+        .arg(&jinn)
+        .arg("--emit-hir")
+        .output()
+        .expect("jinnc failed to start");
+    assert!(!out.status.success(), "chr(\"x\") must not type-check");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("integer"),
+        "diagnostic must mention the integer requirement: {stderr}"
+    );
+}
+
+#[test]
+fn uuid_v7_formats_after_byte_fix() {
+    expect(
+        "use uuid\nuse strings\n\n*main\n    u is uuid.v7()\n    log(u.byte_count)\n    log(u.char_at(14) equals 55 ? 1 ! 0)\n    log(uuid.is_valid(u) ? 1 ! 0)",
+        "36\n1\n1",
+    );
+}
+
+#[test]
+fn url_percent_round_trips_non_ascii() {
+    expect(
+        "use url\n\n*main\n    e is url.percent_encode(\"é\")\n    log(e)\n    d is url.percent_decode(e)\n    log(d equals \"é\" ? 1 ! 0)",
+        "%C3%A9\n1",
+    );
+}
+
+#[test]
+fn codec_hex_round_trips_high_bytes() {
+    expect(
+        "use codec\n\n*main\n    raw is codec.from_hex(\"c3a9\")\n    log(raw.byte_count)\n    log(codec.to_hex(raw))",
+        "2\nc3a9",
+    );
+}
+
+#[test]
+fn strings_case_mapping_survives_multibyte_input() {
+    expect(
+        "use strings\n\n*main\n    log(strings.to_lower(\"HéLLO\"))\n    log(strings.to_upper(\"héllo\"))",
+        "héllo\nHéLLO",
+    );
+}

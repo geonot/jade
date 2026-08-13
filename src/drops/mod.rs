@@ -67,3 +67,4 @@ pub struct DropStats {
 }
 
 pub mod mir_drops;
+mod verify;

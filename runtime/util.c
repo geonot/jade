@@ -76,3 +76,37 @@ void jinn_sort_f64(double *data, int64_t len) {
     if (!data || len <= 1) return;
     qsort(data, (size_t)len, sizeof(double), cmp_f64_asc);
 }
+int64_t jinn_utf8_encode(int64_t code, char *buf) {
+    uint32_t c = (uint32_t)code;
+    if (code < 0 || code > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF)) c = 0xFFFD;
+    if (c < 0x80) {
+        buf[0] = (char)c;
+        return 1;
+    }
+    if (c < 0x800) {
+        buf[0] = (char)(0xC0 | (c >> 6));
+        buf[1] = (char)(0x80 | (c & 0x3F));
+        return 2;
+    }
+    if (c < 0x10000) {
+        buf[0] = (char)(0xE0 | (c >> 12));
+        buf[1] = (char)(0x80 | ((c >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (c & 0x3F));
+        return 3;
+    }
+    buf[0] = (char)(0xF0 | (c >> 18));
+    buf[1] = (char)(0x80 | ((c >> 12) & 0x3F));
+    buf[2] = (char)(0x80 | ((c >> 6) & 0x3F));
+    buf[3] = (char)(0x80 | (c & 0x3F));
+    return 4;
+}
+int32_t jinn_ascii_imemcmp(const char *a, const char *b, int64_t n) {
+    for (int64_t i = 0; i < n; i++) {
+        unsigned char ca = (unsigned char)a[i];
+        unsigned char cb = (unsigned char)b[i];
+        if (ca >= 'A' && ca <= 'Z') ca += 32;
+        if (cb >= 'A' && cb <= 'Z') cb += 32;
+        if (ca != cb) return ca < cb ? -1 : 1;
+    }
+    return 0;
+}

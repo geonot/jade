@@ -186,7 +186,10 @@ impl Typer {
             ),
 
             "chr" if args.len() == 1 && !self.fns.contains_key(name) => {
-                Some(self.lower_simple_builtin(args, hir::BuiltinFn::Chr, Type::String, span))
+                Some(self.lower_int_to_string_builtin(args, hir::BuiltinFn::Chr, "chr", span))
+            }
+            "byte" if args.len() == 1 && !self.fns.contains_key(name) => {
+                Some(self.lower_int_to_string_builtin(args, hir::BuiltinFn::Byte, "byte", span))
             }
             "__get_args" if args.is_empty() && !self.fns.contains_key(name) => {
                 Some(Ok(hir::Expr {
@@ -563,6 +566,36 @@ impl Typer {
         Ok(hir::Expr {
             kind: hir::ExprKind::Builtin(builtin, hargs),
             ty,
+            span,
+        })
+    }
+
+    fn lower_int_to_string_builtin(
+        &mut self,
+        args: &[ast::Expr],
+        builtin: hir::BuiltinFn,
+        bname: &str,
+        span: Span,
+    ) -> Result<hir::Expr, String> {
+        let hargs = self.lower_exprs(args)?;
+        if let Some(a) = hargs.first() {
+            let resolved = self.infer_ctx.resolve(&a.ty);
+            match &resolved {
+                t if t.is_int() => {}
+                Type::TypeVar(_) => {
+                    let _ = self.infer_ctx.unify(&a.ty, &Type::I64);
+                }
+                other => {
+                    return Err(format!(
+                        "{}: `{bname}` takes an integer code, found {other}",
+                        span.loc()
+                    ));
+                }
+            }
+        }
+        Ok(hir::Expr {
+            kind: hir::ExprKind::Builtin(builtin, hargs),
+            ty: Type::String,
             span,
         })
     }

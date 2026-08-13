@@ -51,7 +51,7 @@ pub(crate) struct MoveState {
 pub(crate) enum MoveReason {
     TakeExplicit,
 
-    ConsumingCall(Symbol),
+    ConsumingCall(Symbol, usize),
 
     AssignMove(Symbol, crate::ast::Span),
 
@@ -169,9 +169,13 @@ pub struct Typer {
 
     pub(crate) fn_param_mutates: IndexMap<Symbol, Vec<bool>>,
 
+    pub(crate) fn_param_consume_sites: IndexMap<Symbol, Vec<Option<(crate::ast::Span, bool)>>>,
+
     pub(crate) pending_mono_methods: Vec<(Symbol, ast::Fn)>,
 
     pub(crate) mono_methods_done: std::collections::HashSet<Symbol>,
+
+    pub(crate) std_files: std::collections::HashSet<Symbol>,
 }
 
 #[derive(Debug, Clone)]
@@ -268,13 +272,19 @@ impl Typer {
             iter_borrowed: std::collections::HashMap::new(),
             suppress_move_marking: 0,
             fn_param_mutates: IndexMap::new(),
+            fn_param_consume_sites: IndexMap::new(),
             pending_mono_methods: Vec::new(),
             mono_methods_done: std::collections::HashSet::new(),
+            std_files: std::collections::HashSet::new(),
         }
     }
 
     pub fn set_source_dir(&mut self, dir: PathBuf) {
         self.source_dir = Some(dir);
+    }
+
+    pub fn set_std_files(&mut self, files: std::collections::HashSet<Symbol>) {
+        self.std_files = files;
     }
 
     pub fn set_root_pkg_id(&mut self, id: crate::pkgid::PkgId) {

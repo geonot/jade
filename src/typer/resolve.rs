@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::ast::{self, Span};
 use crate::intern::Symbol;
 use crate::types::Type;
@@ -409,6 +411,8 @@ impl Typer {
                 }
             }
 
+            self.check_impl_signatures(ib, trait_name)?;
+
             let synthesized =
                 self.synthesize_default_methods(*trait_name, ib.type_name, &impl_method_names);
             if !synthesized.is_empty() {
@@ -511,6 +515,131 @@ impl Typer {
         out
     }
 
+    fn check_impl_signatures(
+        &self,
+        ib: &ast::ImplBlock,
+        trait_name: &Symbol,
+    ) -> Result<(), String> {
+        let Some(td) = self.trait_defs.get(trait_name) else {
+            return Ok(());
+        };
+        let mut subst: HashMap<Symbol, Type> = HashMap::new();
+        for (tp, ta) in td.type_params.iter().zip(ib.trait_type_args.iter()) {
+            subst.insert(*tp, ta.clone());
+        }
+        for (an, at) in &ib.assoc_type_bindings {
+            subst.insert(*an, at.clone());
+        }
+
+        let row_names = |row: &[Type]| -> std::collections::BTreeSet<String> {
+            row.iter()
+                .map(|et| {
+                    let et = Self::subst_self_ty(Self::substitute_type(et, &subst), ib.type_name);
+                    match et {
+                        Type::Enum(n) | Type::Struct(n, _) | Type::Param(n) => n.to_string(),
+                        other => format!("{other:?}"),
+                    }
+                })
+                .collect()
+        };
+        let render_row = |names: &std::collections::BTreeSet<String>| -> String {
+            if names.is_empty() {
+                "(none)".to_string()
+            } else {
+                names.iter().cloned().collect::<Vec<_>>().join(" | ")
+            }
+        };
+
+        for tm in &td.methods {
+            let Some(m) = ib.methods.iter().find(|m| m.name == tm.name) else {
+                continue;
+            };
+
+            let trait_row = row_names(&tm.error_types);
+            let impl_row = row_names(&m.error_types);
+            if trait_row != impl_row {
+                return Err(format!(
+                    "{}: method `{}` of impl {} for {} declares error row `{}`, but the \
+                     trait declares `{}` at {} — an impl may neither widen nor narrow the \
+                     trait's error row",
+                    m.span.loc(),
+                    m.name,
+                    trait_name,
+                    ib.type_name,
+                    render_row(&impl_row),
+                    render_row(&trait_row),
+                    tm.span.loc(),
+                ));
+            }
+
+            if tm.params.len() != m.params.len() {
+                return Err(format!(
+                    "{}: method `{}` of impl {} for {} takes {} parameter(s), but the trait \
+                     declares {} at {}",
+                    m.span.loc(),
+                    m.name,
+                    trait_name,
+                    ib.type_name,
+                    m.params.len().saturating_sub(1),
+                    tm.params.len().saturating_sub(1),
+                    tm.span.loc(),
+                ));
+            }
+
+            let resolve_trait_ty = |t: &Type| -> Type {
+                Self::subst_self_ty(Self::substitute_type(t, &subst), ib.type_name)
+            };
+            let resolve_impl_ty =
+                |t: &Type| -> Type { Self::subst_self_ty(t.clone(), ib.type_name) };
+
+            for (tp, ip) in tm.params.iter().zip(m.params.iter()).skip(1) {
+                let (Some(tt), Some(it)) = (&tp.ty, &ip.ty) else {
+                    continue;
+                };
+                let want = resolve_trait_ty(tt);
+                if type_is_open(&want) {
+                    continue;
+                }
+                let got = resolve_impl_ty(it);
+                if want != got {
+                    return Err(format!(
+                        "{}: parameter `{}` of method `{}` in impl {} for {} has type \
+                         {:?}, but the trait declares {:?} at {}",
+                        m.span.loc(),
+                        ip.name,
+                        m.name,
+                        trait_name,
+                        ib.type_name,
+                        got,
+                        want,
+                        tm.span.loc(),
+                    ));
+                }
+            }
+
+            if let (Some(tr), Some(ir)) = (&tm.ret, &m.ret) {
+                let want = resolve_trait_ty(tr);
+                if !type_is_open(&want) {
+                    let got = resolve_impl_ty(ir);
+                    if want != got {
+                        return Err(format!(
+                            "{}: method `{}` of impl {} for {} returns {:?}, but the trait \
+                             declares {:?} at {}",
+                            m.span.loc(),
+                            m.name,
+                            trait_name,
+                            ib.type_name,
+                            got,
+                            want,
+                            tm.span.loc(),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn subst_self_ty(ty: Type, type_name: Symbol) -> Type {
         match ty {
             Type::Param(n) if n.as_str() == "Self" => Type::Struct(type_name, vec![]),
@@ -571,5 +700,24 @@ impl Typer {
                 );
             }
         }
+    }
+}
+
+fn type_is_open(t: &Type) -> bool {
+    match t {
+        Type::Param(_) | Type::TypeVar(_) => true,
+        Type::Array(i, _)
+        | Type::Vec(i)
+        | Type::Ptr(i)
+        | Type::Channel(i)
+        | Type::Coroutine(i)
+        | Type::Generator(i)
+        | Type::Alias(_, i)
+        | Type::Newtype(_, i) => type_is_open(i),
+        Type::Map(k, v) => type_is_open(k) || type_is_open(v),
+        Type::Tuple(ts) => ts.iter().any(type_is_open),
+        Type::Fn(ps, r) => ps.iter().any(type_is_open) || type_is_open(r),
+        Type::Struct(_, args) => args.iter().any(type_is_open),
+        _ => false,
     }
 }

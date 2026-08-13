@@ -345,7 +345,36 @@ impl Typer {
 
         self.seed_inferred_fallibility(&non_generic_fns);
 
-        super::caps::analyze(&non_generic_fns)?;
+        let mut cap_items: Vec<super::caps::CapItem> = Vec::new();
+        for d in &prog.decls {
+            match d {
+                ast::Decl::Fn(f) => cap_items.push(super::caps::CapItem {
+                    name: f.name,
+                    bare_method: None,
+                    fun: f,
+                }),
+                ast::Decl::Type(td) => {
+                    for m in &td.methods {
+                        cap_items.push(super::caps::CapItem {
+                            name: Symbol::intern(&format!("{}_{}", td.name, m.name)),
+                            bare_method: Some(m.name),
+                            fun: m,
+                        });
+                    }
+                }
+                ast::Decl::Impl(ib) => {
+                    for m in &ib.methods {
+                        cap_items.push(super::caps::CapItem {
+                            name: Symbol::intern(&format!("{}_{}", ib.type_name, m.name)),
+                            bare_method: Some(m.name),
+                            fun: m,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+        super::caps::analyze(&cap_items, &self.std_files)?;
 
         let mut lowered_fn_names = std::collections::HashSet::new();
         for scc in &sccs {

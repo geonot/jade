@@ -4339,3 +4339,97 @@ fn access_field_auto_copy_escape() {
 fn access_field_short_lived_borrow() {
     expect_file("tests/programs/field_short_lived_borrow.jn", "zero\n0\nhi");
 }
+
+#[test]
+fn query_block_in_list() {
+    expect_store(
+        "store nums\n    val as i64\n    tag as String\n\n*main\n    insert nums 10, 'a'\n    insert nums 20, 'b'\n    insert nums 30, 'c'\n\n    r is nums query\n        where val in [20]\n    log r.tag\n",
+        "b",
+    );
+}
+
+#[test]
+fn query_block_in_list_after_and_is_hoisted() {
+    expect_store(
+        "store nums\n    val as i64\n    tag as String\n\n*main\n    insert nums 10, 'a'\n    insert nums 20, 'b'\n    insert nums 30, 'c'\n\n    r is nums query\n        where tag equals 'c' and val in [10, 30]\n    log r.tag\n",
+        "c",
+    );
+}
+
+#[test]
+fn query_block_in_list_before_and() {
+    expect_store(
+        "store nums\n    val as i64\n    tag as String\n\n*main\n    insert nums 10, 'a'\n    insert nums 20, 'b'\n    insert nums 30, 'c'\n\n    r is nums query\n        where val in [10, 30] and tag equals 'c'\n    log r.tag\n",
+        "c",
+    );
+}
+
+#[test]
+fn query_block_empty_in_list_is_rejected() {
+    let stderr = expect_compile_fail(
+        "store nums\n    val as i64\n\n*main\n    r is nums query\n        where val in []\n    log r.val\n",
+    );
+    assert!(
+        stderr.contains("at least one value"),
+        "diagnostic must reject the empty in-list: {stderr}"
+    );
+}
+
+#[test]
+fn query_block_or_with_in_list_is_rejected() {
+    let stderr = expect_compile_fail(
+        "store nums\n    val as i64\n    tag as String\n\n*main\n    insert nums 10, 'a'\n    r is nums query\n        where tag equals 'a' or val in [10, 30]\n    log r.tag\n",
+    );
+    assert!(
+        stderr.contains("ambiguous"),
+        "diagnostic must flag or+in mixing: {stderr}"
+    );
+}
+
+#[test]
+fn query_block_text_predicate() {
+    expect_store(
+        "store items\n    name as String\n\n*main\n    insert items 'apple'\n    insert items 'mango'\n    insert items 'banana'\n\n    r is items query\n        where name.starts_with('man')\n    log r.name\n",
+        "mango",
+    );
+}
+
+#[test]
+fn query_block_case_insensitive_contains() {
+    expect_store(
+        "store items\n    name as String\n\n*main\n    insert items 'Apple'\n    insert items 'MANGO'\n    insert items 'cherry'\n\n    r is items query\n        where name.icontains('ang')\n    log r.name\n",
+        "MANGO",
+    );
+}
+
+#[test]
+fn store_filter_iequals() {
+    expect_store(
+        "store items\n    name as String\n\n*main\n    insert items 'Apple'\n    insert items 'MANGO'\n    c is count items where name iequals 'apple'\n    log c\n",
+        "1",
+    );
+}
+
+#[test]
+fn store_filter_icontains() {
+    expect_store(
+        "store items\n    name as String\n\n*main\n    insert items 'Apple'\n    insert items 'apricot'\n    insert items 'banana'\n    c is count items where name icontains 'AP'\n    log c\n",
+        "2",
+    );
+}
+
+#[test]
+fn store_filter_istarts_with() {
+    expect_store(
+        "store items\n    name as String\n\n*main\n    insert items 'Apple'\n    insert items 'apricot'\n    insert items 'banana'\n    c is count items where name istarts_with 'ap'\n    log c\n",
+        "2",
+    );
+}
+
+#[test]
+fn store_filter_iends_with() {
+    expect_store(
+        "store items\n    name as String\n\n*main\n    insert items 'apPLE'\n    insert items 'maple'\n    insert items 'banana'\n    c is count items where name iends_with 'PLE'\n    log c\n",
+        "2",
+    );
+}

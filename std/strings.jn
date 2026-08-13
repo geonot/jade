@@ -9,15 +9,15 @@ type StringBuilder
 
     *write(s as String) returns i64
         self.parts.push(s)
-        self.total is self.total + s.length
+        self.total is self.total + s.byte_count
 
     *write_line(s as String)
         self.parts.push(s)
         self.parts.push('\n')
-        self.total is self.total + s.length + 1
+        self.total is self.total + s.byte_count + 1
 
     *write_byte(b as i64)
-        c is chr(b & 255)
+        c is byte(b & 255)
         self.parts.push(c)
         self.total is self.total + 1
 
@@ -29,8 +29,8 @@ type StringBuilder
         buf is extern.malloc(self.total + 1)
         offset is 0 as i64
         loop self.parts
-            extern.memcpy(buf + offset, %$ as %i8, $.length)
-            offset is offset + $.length
+            extern.memcpy(buf + offset, %$ as %i8, $.byte_count)
+            offset is offset + $.byte_count
         __string_from_raw(buf, self.total, self.total + 1)
 
     *length returns i64
@@ -146,7 +146,7 @@ type StringBuilder
 *to_lower(s as String) returns String
     out is ""
     i is 0
-    while i < s.length
+    while i < s.byte_count
         c is s.char_at(i)
         if c >= 65 and c <= 90
             out is out + chr(c + 32)
@@ -158,7 +158,7 @@ type StringBuilder
 *to_upper(s as String) returns String
     out is ""
     i is 0
-    while i < s.length
+    while i < s.byte_count
         c is s.char_at(i)
         if c >= 97 and c <= 122
             out is out + chr(c - 32)
@@ -168,17 +168,17 @@ type StringBuilder
     out
 
 *capitalize(s as String) returns String
-    if s.length equals 0
+    if s.byte_count equals 0
         return s
     c is s.char_at(0)
     head is c >= 97 and c <= 122 ? chr(c - 32) ! s.slice(0, 1)
-    head + to_lower(s.slice(1, s.length))
+    head + to_lower(s.slice(1, s.byte_count))
 
 *title_case(s as String) returns String
     out is ""
     cap_next is true
     i is 0
-    while i < s.length
+    while i < s.byte_count
         c is s.char_at(i)
         if is_space(c) or c equals 45 or c equals 95
             out is out + s.slice(i, i + 1)
@@ -234,7 +234,7 @@ type StringBuilder
     out is ""
     cap_next is false
     i is 0
-    while i < s.length
+    while i < s.byte_count
         c is s.char_at(i)
         if c equals 95
             cap_next is true
@@ -250,7 +250,7 @@ type StringBuilder
 *camel_to_snake(s as String) returns String
     out is ""
     i is 0
-    while i < s.length
+    while i < s.byte_count
         c is s.char_at(i)
         if c >= 65 and c <= 90
             if i > 0
@@ -267,7 +267,7 @@ type StringBuilder
 
 *is_blank(s as String) returns bool
     i is 0
-    while i < s.length
+    while i < s.byte_count
         if not is_space(s.char_at(i))
             return false
         i is i + 1

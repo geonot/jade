@@ -40,6 +40,7 @@ pub(in crate::driver) fn resolve_modules(
     base_dir: &std::path::Path,
     loaded: &mut HashSet<Symbol>,
     packages: &HashMap<Symbol, PathBuf>,
+    std_files: &mut HashSet<Symbol>,
 ) {
     let uses: Vec<(Vec<Symbol>, Option<Vec<Symbol>>)> = prog
         .decls
@@ -61,55 +62,62 @@ pub(in crate::driver) fn resolve_modules(
         loaded.insert(key);
         let file_path = path_strs.join("/");
         let name = path.last().unwrap();
-        let mut candidates = Vec::new();
+        let mut candidates: Vec<(PathBuf, bool)> = Vec::new();
 
-        candidates.push(base_dir.join(format!("{file_path}.jn")));
+        candidates.push((base_dir.join(format!("{file_path}.jn")), false));
         if let Some(project_root) = base_dir.parent() {
-            candidates.push(project_root.join("source").join(format!("{file_path}.jn")));
+            candidates.push((
+                project_root.join("source").join(format!("{file_path}.jn")),
+                false,
+            ));
         }
 
         if let Ok(exe) = std::env::current_exe()
             && let Some(exe_dir) = exe.parent()
         {
-            candidates.push(exe_dir.join("std").join(format!("{name}.jn")));
+            candidates.push((exe_dir.join("std").join(format!("{name}.jn")), true));
 
             if let Some(parent) = exe_dir.parent() {
-                candidates.push(parent.join("std").join(format!("{name}.jn")));
+                candidates.push((parent.join("std").join(format!("{name}.jn")), true));
                 if let Some(grandparent) = parent.parent() {
-                    candidates.push(grandparent.join("std").join(format!("{name}.jn")));
+                    candidates.push((grandparent.join("std").join(format!("{name}.jn")), true));
                 }
             }
         }
         if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
-            candidates.push(
+            candidates.push((
                 PathBuf::from(manifest)
                     .join("std")
                     .join(format!("{name}.jn")),
-            );
+                true,
+            ));
         }
-        candidates.push(base_dir.join("std").join(format!("{name}.jn")));
+        candidates.push((base_dir.join("std").join(format!("{name}.jn")), true));
 
         if let Some(pkg_path) = packages.get(&path[0]) {
             if path.len() > 1 {
                 let rest = path_strs[1..].join("/");
-                candidates.push(pkg_path.join("source").join(format!("{rest}.jn")));
-                candidates.push(pkg_path.join("src").join(format!("{rest}.jn")));
+                candidates.push((pkg_path.join("source").join(format!("{rest}.jn")), false));
+                candidates.push((pkg_path.join("src").join(format!("{rest}.jn")), false));
             } else {
-                candidates.push(pkg_path.join("source").join(format!("{}.jn", path[0])));
-                candidates.push(pkg_path.join("src").join(format!("{}.jn", path[0])));
+                candidates.push((
+                    pkg_path.join("source").join(format!("{}.jn", path[0])),
+                    false,
+                ));
+                candidates.push((pkg_path.join("src").join(format!("{}.jn", path[0])), false));
             }
         }
 
         if let Ok(pkg_paths) = std::env::var("JINN_PACKAGE_PATH") {
             for pkg_dir in pkg_paths.split(':') {
                 let pkg_dir = PathBuf::from(pkg_dir);
-                candidates.push(pkg_dir.join(format!("{file_path}.jn")));
+                candidates.push((pkg_dir.join(format!("{file_path}.jn")), false));
             }
         }
 
-        let candidate = candidates
+        let (candidate, from_std) = candidates
             .into_iter()
-            .find(|c| c.exists())
+            .find(|(c, _)| c.exists())
             .unwrap_or_else(|| die(&format!("module not found: {key}")));
 
         let jni_path = candidate.with_extension("jni");
@@ -131,6 +139,9 @@ pub(in crate::driver) fn resolve_modules(
         let src = fs::read_to_string(&candidate)
             .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", candidate.display())));
         let file_sym = Symbol::intern(&candidate.display().to_string());
+        if from_std {
+            std_files.insert(file_sym);
+        }
         let tokens = Lexer::new(&src)
             .with_file(file_sym)
             .tokenize()
@@ -145,6 +156,7 @@ pub(in crate::driver) fn resolve_modules(
             candidate.parent().unwrap_or(base_dir),
             loaded,
             packages,
+            std_files,
         );
 
         let all_decls = std::mem::take(&mut mod_prog.decls);

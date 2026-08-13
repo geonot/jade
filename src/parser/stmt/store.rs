@@ -289,6 +289,62 @@ impl Parser {
                     ));
                     return Ok(());
                 }
+                "iequals" => {
+                    self.advance();
+                    let v = self.parse_bitor()?;
+                    out.push((
+                        logical,
+                        StoreFilterCond {
+                            field,
+                            op: BinOp::Eq,
+                            value: v,
+                            pred: crate::ast::FilterPred::IEq,
+                        },
+                    ));
+                    return Ok(());
+                }
+                "icontains" => {
+                    self.advance();
+                    let v = self.parse_bitor()?;
+                    out.push((
+                        logical,
+                        StoreFilterCond {
+                            field,
+                            op: BinOp::Eq,
+                            value: v,
+                            pred: crate::ast::FilterPred::IContains,
+                        },
+                    ));
+                    return Ok(());
+                }
+                "istarts_with" => {
+                    self.advance();
+                    let v = self.parse_bitor()?;
+                    out.push((
+                        logical,
+                        StoreFilterCond {
+                            field,
+                            op: BinOp::Eq,
+                            value: v,
+                            pred: crate::ast::FilterPred::IStartsWith,
+                        },
+                    ));
+                    return Ok(());
+                }
+                "iends_with" => {
+                    self.advance();
+                    let v = self.parse_bitor()?;
+                    out.push((
+                        logical,
+                        StoreFilterCond {
+                            field,
+                            op: BinOp::Eq,
+                            value: v,
+                            pred: crate::ast::FilterPred::IEndsWith,
+                        },
+                    ));
+                    return Ok(());
+                }
                 "between" => {
                     self.advance();
                     let lo = self.parse_bitor()?;

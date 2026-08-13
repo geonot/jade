@@ -11,10 +11,13 @@ Read [`lamp.md`](lamp.md) first for what consumes all of this.
 
 Current reality, stated plainly so the gap is visible:
 
-- **Capabilities are inert.** `src/typer/caps.rs` and `src/cap_sites.rs` exist,
-  the table is keyed on symbols that are not callable names in this language, so
-  nothing ever matches and `needs pure` is an unchecked comment. Tracked as
-  `C-1` in [`../roadmap.md`](../roadmap.md#effects-and-capabilities).
+- **Capability checking is live for `needs` upper bounds** (closed old `C-1`,
+  [145]). Effects are classified at the extern leaves (`src/cap_sites.rs`; an
+  unclassified extern call or `syscall`/`asm` is `ffi.unsafe`), std-vetted
+  aperture entries give `io.*`/`fs.*` path-scoped signatures, and the fixpoint
+  in `src/typer/caps.rs` covers free functions, generics, and type/impl
+  methods. What this design still adds beyond that: module/project capability
+  ceilings, actor and store-operation classification, and the manifest story.
 - **Modules are merged by string prefixing.** `prefix_module` in
   `src/resolve.rs` rewrites `*name` → `module_name` and `Type` → `Module_Type`,
   after which there are no modules — just a flat mangled global namespace.

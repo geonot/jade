@@ -1030,6 +1030,39 @@ transaction
     delete users where age > 50
 ```
 
+### Filter vocabulary
+
+Statement filters accept, besides the comparisons composed with `and`/`or`:
+`between lo and hi`, membership `in [v1, v2]` (an equality chain), the text
+predicates `contains`, `starts_with`, `ends_with`, and their ASCII
+case-insensitive forms `iequals`, `icontains`, `istarts_with`, `iends_with`.
+
+<!-- doctest:prelude
+store users
+    name as String
+    age as i64
+-->
+```jinn
+teens is count users where age between 13 and 19
+named is count users where name iequals 'ALICE'
+polite is count users where name istarts_with 'al'
+```
+
+Query blocks take the same comparisons, plus `field in [..]` (combinable with
+`and`, not `or`) and the text predicates in method form:
+
+<!-- doctest:prelude
+store users
+    name as String
+    age as i64
+-->
+```jinn
+insert users 'Alice', 30
+r is users query
+    where name.icontains('ALI') and age in [30, 31]
+log r.age
+```
+
 ### Constraint failures are errors
 
 `insert` and `set` are fallible: attach handler arms (`?` / `!!`) and they

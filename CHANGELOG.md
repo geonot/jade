@@ -1,4 +1,94 @@
 # Changelog
+- **[145]** (2026-08-12) roadmap remediation: `needs` is checked for real, drops are verified after every Perceus transform, trait impls must conform, `chr` finally means a character, and store filters learn `in`-in-query-blocks and case folding
+
+Six roadmap items closed (C-1, M-7, M-9, T-5r, T-13, S-7), each leaving its
+honest residue filed (C-1r, M-7r, M-9r, T-5r2, T-13r, S-7r).
+
+**Capability checking is live (C-1).** The old table keyed every entry on
+`std.net.connect`-style symbols that are not callable names, so nothing ever
+matched and `needs pure` was a comment. Rather than re-keying onto the std
+API surface wholesale, effects are now classified where they actually happen:
+at the extern leaves. `src/cap_sites.rs` classifies every extern the std
+library declares (fs/net/process/env/clock/random; `fopen` is mode-dependent;
+`setenv` is `state 'env'`), a call to an *unclassified* extern — or a
+`syscall` or `asm` block — derives `ffi.unsafe`, and benign externs
+(malloc/memcmp/sin/crypto/fd-level I/O on already-held descriptors) derive
+nothing, on the capability-security reading that the descriptor is the
+authority and the aperture is where it was acquired. On top of the leaves,
+`io.*`/`fs.*` calls carry vetted path-scoped signatures (`io.write_file(lit,
+..)` derives `fs.write 'lit'`), trusted as row replacements only when the
+callee resolved to a module loaded from a std directory (the driver records
+provenance during module resolution) — a user module named `io` keeps its
+derived row. The fixpoint now scans every expression form (lambda bodies,
+store filters, `together` blocks and select arms were all invisible before),
+covers generic functions and type/impl methods (method calls join a name
+bucket — over-approximate, but only ever toward false rejection), and the
+whole thing stays opt-in: no `needs`, no check. The roadmap's sneaky canary
+now fails to compile with the introduction path named, and `tests/caps.rs`
+pins eight behaviours including scoped-path bounding and the
+method-body-cannot-hide-an-effect case.
+
+**Drop placement is verified (M-9).** `src/drops/verify.rs` runs by default in
+release (`JINN_MIR_VERIFY=0` opts out): after each of sinking, elision, reuse
+pairing, and fusion, the per-block drop multiset must be preserved (elision
+may remove only trivially-droppable entries), and a final path-sensitive
+dataflow — dropped-set forward analysis with kills at SSA re-definitions, so
+loop-local owners do not false-positive — rejects any use-after-drop, any
+value dropped twice on one path (including through DropMany and phi edges),
+and reuse metadata whose save/consume sites no longer exist. Failures print
+per-function diagnostics and die as compiler bugs. The whole corpus compiles
+clean under it, which is now a regression fence rather than an assumption;
+the leak side (every owner dropped at least once) needs typer-owned
+obligations threaded into MIR and is filed as M-9r.
+
+**Impls must conform to their traits (T-5r).** Conformance previously checked
+method presence only, so an impl could silently widen or narrow the declared
+`! E` row — unsound for callers dispatching through the bound. The check now
+compares declared error rows exactly (neither widening nor narrowing, after
+`Self` and trait-type-argument substitution), parameter counts, and annotated
+parameter/return types, naming both the impl site and the trait declaration
+site in the diagnostic. Unannotated impl signatures still conform by
+adoption (T-5r2).
+
+**`chr` encodes, `byte` does not (T-13).** The decision: `chr(code)` UTF-8-
+encodes a Unicode scalar (surrogates and codes past 0x10FFFF encode U+FFFD),
+and a new `byte(code)` builtin emits the raw single byte, documented in
+docs/strings.md as outside the UTF-8 contract exactly like mid-scalar slices.
+Both now reject non-integer arguments (the old lowering type-checked
+`chr("x")`). Sweeping std's byte-assembly callers onto `byte` exposed that
+the String-as-byte-buffer idiom was already half-broken — every one of these
+loops bounded byte offsets with the scalar `.length`: `uuid.v7()` always
+returned `""` (byte 8 is `0x80`–`0xBF`, invisible to the scalar count),
+`url.percent_encode("é")` returned `"%C3"`, `codec.to_hex(from_hex("c3a9"))`
+returned `"c3"`, `strings.to_lower` truncated multi-byte input, and
+`StringBuilder` undercounted its malloc/memcpy sizes. All fixed with
+`byte_count` bounds and pinned by new conformance tests in
+tests/string_unicode.rs; the surviving scalar-bound `.slice(i, s.length)`
+idiom on ASCII-expected parse paths is T-13r.
+
+**Store filters (S-7).** Query blocks accept `field in [v1, v2]` — the parser
+already desugars `in` to `[..].contains(field)`, and the typer now recognises
+that shape, expands it to an equality chain, and *hoists it to the head of
+the filter*, because codegen folds conditions left-to-right with no
+precedence: an Or-chain is only correct at the head, so `where tag equals 'c'
+and val in [10, 30]` is reordered to `(v10 ∨ v30) ∧ tag` rather than
+miscompiled to `(tag ∧ v10) ∨ v30`. Combining `in` with `or`, a second `in`,
+or an empty list is a diagnostic. Query blocks also gained method-form text
+predicates (`name.starts_with('x')`), which never existed on that path. And
+both filter paths gained ASCII case-insensitive matching — `iequals`,
+`icontains`, `istarts_with`, `iends_with` — compiled against a new
+`jinn_ascii_imemcmp` runtime helper, the same folding `@search` and
+`to_lower` already use. The statement parser's parse-time mixed-connector
+rejection still blocks `and`+`in` combinations there (S-7r).
+
+**The consuming-call diagnostic names the path (M-7).** Consuming-parameter
+inference now records the span of the consuming site per inferred slot and
+whether it sits on a conditional path (if/match arms, loop bodies, ternary
+arms), the tables propagate through monomorphization, and the use-after-move
+diagnostic says `it is consumed at file:line:col` — with an explicit note
+when that consumption is conditional, since the analysis is path-insensitive
+and treats may-consume as always-consume. Callee names are demangled before
+printing. The analysis itself is unchanged (M-7r).
 - **[144]** (2026-08-10) `jinn fmt` no longer destroys code: printer rebuilt against the real grammar, gated by compile-after-format
 
 X-1 measured 164 of 688 corpus files that compiled before `jinnc fmt` and not

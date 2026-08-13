@@ -450,9 +450,55 @@ impl<'ctx> Compiler<'ctx> {
                 .build_int_compare(IntPredicate::UGE, stored_len, needle_len, "tp.fits"));
 
         let fv = self.current_fn();
-        let memcmp_fn = self.ensure_memcmp();
+        let memcmp_fn = match pred {
+            crate::ast::FilterPred::IEq
+            | crate::ast::FilterPred::IContains
+            | crate::ast::FilterPred::IStartsWith
+            | crate::ast::FilterPred::IEndsWith => self.ensure_ascii_imemcmp(),
+            _ => self.ensure_memcmp(),
+        };
+        let shape = match pred {
+            crate::ast::FilterPred::IContains => crate::ast::FilterPred::Contains,
+            crate::ast::FilterPred::IStartsWith => crate::ast::FilterPred::StartsWith,
+            crate::ast::FilterPred::IEndsWith => crate::ast::FilterPred::EndsWith,
+            other => other,
+        };
 
-        match pred {
+        match shape {
+            crate::ast::FilterPred::IEq => {
+                let len_eq = b!(self.bld.build_int_compare(
+                    IntPredicate::EQ,
+                    stored_len,
+                    needle_len,
+                    "tp.ieq.len"
+                ));
+                let do_bb = self.ctx.append_basic_block(fv, "tp.ieq.do");
+                let res_bb = self.ctx.append_basic_block(fv, "tp.ieq.res");
+                let entry_end = self.current_bb();
+                b!(self.bld.build_conditional_branch(len_eq, do_bb, res_bb));
+
+                self.bld.position_at_end(do_bb);
+                let mc = self
+                    .call_result(b!(self.bld.build_call(
+                        memcmp_fn,
+                        &[stored_data.into(), needle_data.into(), needle_len.into()],
+                        "tp.ieq.mc"
+                    )))
+                    .into_int_value();
+                let m = b!(self.bld.build_int_compare(
+                    IntPredicate::EQ,
+                    mc,
+                    i32t.const_int(0, false),
+                    "tp.ieq.m"
+                ));
+                b!(self.bld.build_unconditional_branch(res_bb));
+                let do_end = self.current_bb();
+
+                self.bld.position_at_end(res_bb);
+                let phi = b!(self.bld.build_phi(boolt, "tp.ieq"));
+                phi.add_incoming(&[(&boolt.const_int(0, false), entry_end), (&m, do_end)]);
+                Ok(phi.as_basic_value().into_int_value())
+            }
             crate::ast::FilterPred::StartsWith => {
                 let do_bb = self.ctx.append_basic_block(fv, "tp.sw.do");
                 let res_bb = self.ctx.append_basic_block(fv, "tp.sw.res");
@@ -567,7 +613,10 @@ impl<'ctx> Compiler<'ctx> {
                 ]);
                 Ok(phi.as_basic_value().into_int_value())
             }
-            crate::ast::FilterPred::Cmp => unreachable!(),
+            crate::ast::FilterPred::Cmp
+            | crate::ast::FilterPred::IContains
+            | crate::ast::FilterPred::IStartsWith
+            | crate::ast::FilterPred::IEndsWith => unreachable!(),
         }
     }
 }

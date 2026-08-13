@@ -318,6 +318,10 @@ impl<'ctx> Compiler<'ctx> {
             "contains" => (BinOp::Eq, FilterPred::Contains),
             "startswith" => (BinOp::Eq, FilterPred::StartsWith),
             "endswith" => (BinOp::Eq, FilterPred::EndsWith),
+            "ieq" => (BinOp::Eq, FilterPred::IEq),
+            "icontains" => (BinOp::Eq, FilterPred::IContains),
+            "istartswith" => (BinOp::Eq, FilterPred::IStartsWith),
+            "iendswith" => (BinOp::Eq, FilterPred::IEndsWith),
             _ => (BinOp::Eq, FilterPred::Cmp),
         }
     }

@@ -4,32 +4,69 @@ use crate::ast::Span;
 use crate::mir::{self, InstKind, Instruction, Terminator, ValueId};
 use crate::types::Type;
 
-use super::DropHints;
+use super::{DropHints, verify};
 
-pub fn analyze_mir_program(prog: &mut mir::Program) -> DropHints {
-    run(prog)
-}
-
-pub fn run(prog: &mut mir::Program) -> DropHints {
+pub fn run(prog: &mut mir::Program) -> Result<DropHints, Vec<String>> {
     let mut hints = DropHints::default();
     let mut next_slot: u32 = 0;
+    let checked = verify::enabled();
+    let mut errors: Vec<String> = Vec::new();
     for func in &mut prog.functions {
-        run_on_function(func, &mut hints, &mut next_slot);
+        run_on_function(func, &mut hints, &mut next_slot, checked, &mut errors);
     }
-    hints
+    if errors.is_empty() {
+        Ok(hints)
+    } else {
+        Err(errors)
+    }
 }
 
-fn run_on_function(func: &mut mir::Function, hints: &mut DropHints, next_slot: &mut u32) {
+fn run_on_function(
+    func: &mut mir::Function,
+    hints: &mut DropHints,
+    next_slot: &mut u32,
+    checked: bool,
+    errors: &mut Vec<String>,
+) {
     let uses = count_uses(func);
     hints.stats.total_bindings_analyzed += uses.len() as u32;
 
+    let fname = func.name.to_string();
+    let before = if checked {
+        Some(verify::snapshot(func))
+    } else {
+        None
+    };
+
     let sunk = drop_sinking(func, &uses);
     hints.stats.last_use_tracked += sunk;
+    if let Some(b) = &before {
+        verify::check_preserved(&fname, "drop sinking", b, func, false, errors);
+    }
 
     drop_elision(func, hints);
+    let after_elision = if checked {
+        if let Some(b) = &before {
+            verify::check_preserved(&fname, "drop elision", b, func, true, errors);
+        }
+        Some(verify::snapshot(func))
+    } else {
+        None
+    };
 
     vec_reuse_pairing(func, hints, next_slot);
+    if let Some(b) = &after_elision {
+        verify::check_preserved(&fname, "reuse pairing", b, func, false, errors);
+    }
+
     drop_fusion(func, hints);
+    if let Some(b) = &after_elision {
+        verify::check_preserved(&fname, "drop fusion", b, func, false, errors);
+    }
+
+    if checked {
+        errors.extend(verify::verify_function(func));
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -210,7 +247,7 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, UseInfo> {
     uses
 }
 
-fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
+pub(super) fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
     match kind {
         InstKind::IntConst(_)
         | InstKind::FloatConst(_)

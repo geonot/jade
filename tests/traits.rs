@@ -231,3 +231,140 @@ impl Greeter for Cat
         "hi, cat",
     );
 }
+
+#[test]
+fn impl_may_not_widen_the_trait_error_row() {
+    let stderr = expect_compile_fail(
+        "\
+err FileError
+    NotFound
+
+err NetError
+    Down
+
+type F
+    n as i64
+
+trait Reader
+    *read(self) returns i64 ! FileError
+
+impl Reader for F
+    *read(self) returns i64 ! NetError
+        err NetError:Down
+
+*main()
+    f is F(n is 1)
+    log(f.n)
+",
+    );
+    assert!(
+        stderr.contains("error row") && stderr.contains("NetError") && stderr.contains("FileError"),
+        "diagnostic must name both rows: {stderr}"
+    );
+}
+
+#[test]
+fn impl_may_not_narrow_the_trait_error_row() {
+    let stderr = expect_compile_fail(
+        "\
+err FileError
+    NotFound
+
+type F
+    n as i64
+
+trait Reader
+    *read(self) returns i64 ! FileError
+
+impl Reader for F
+    *read(self) returns i64
+        self.n
+
+*main()
+    f is F(n is 1)
+    log(f.n)
+",
+    );
+    assert!(
+        stderr.contains("error row") && stderr.contains("(none)"),
+        "diagnostic must show the narrowed row: {stderr}"
+    );
+}
+
+#[test]
+fn conforming_error_row_is_accepted() {
+    expect(
+        "\
+err FileError
+    NotFound
+
+type F
+    n as i64
+
+trait Reader
+    *read(self) returns i64 ! FileError
+
+impl Reader for F
+    *read(self) returns i64 ! FileError
+        if self.n < 0
+            err FileError:NotFound
+        self.n
+
+*main()
+    f is F(n is 7)
+    r is f.read()
+    log(7)
+",
+        "7",
+    );
+}
+
+#[test]
+fn impl_return_type_must_match_the_trait() {
+    let stderr = expect_compile_fail(
+        "\
+type F
+    n as i64
+
+trait Sized2
+    *size(self) returns i64
+
+impl Sized2 for F
+    *size(self) returns String
+        'big'
+
+*main()
+    f is F(n is 1)
+    log(f.n)
+",
+    );
+    assert!(
+        stderr.contains("returns") && stderr.contains("trait"),
+        "diagnostic must name the mismatched return: {stderr}"
+    );
+}
+
+#[test]
+fn impl_param_count_must_match_the_trait() {
+    let stderr = expect_compile_fail(
+        "\
+type F
+    n as i64
+
+trait Adder
+    *add_to(self, x as i64) returns i64
+
+impl Adder for F
+    *add_to(self) returns i64
+        self.n
+
+*main()
+    f is F(n is 1)
+    log(f.n)
+",
+    );
+    assert!(
+        stderr.contains("parameter") && stderr.contains("trait"),
+        "diagnostic must flag the arity mismatch: {stderr}"
+    );
+}

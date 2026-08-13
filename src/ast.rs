@@ -785,6 +785,10 @@ pub enum FilterPred {
     Contains,
     StartsWith,
     EndsWith,
+    IEq,
+    IContains,
+    IStartsWith,
+    IEndsWith,
 }
 
 #[derive(Debug, Clone)]

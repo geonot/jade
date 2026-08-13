@@ -94,20 +94,42 @@ impl Typer {
                                 name,
                                 name,
                             ),
-                            crate::typer::MoveReason::ConsumingCall(callee) => format!(
-                                "{}: use of moved value `{}`: it was moved into the call \
-                                 to `{}`, whose parameter takes ownership (the value \
-                                 escapes through `{}`); pass a clone instead \
-                                 (`{}2 is copy {}` before the call), or reassign `{}` \
-                                 before reading it",
-                                span.loc(),
-                                name,
-                                callee,
-                                callee,
-                                name,
-                                name,
-                                name,
-                            ),
+                            crate::typer::MoveReason::ConsumingCall(callee, slot) => {
+                                let callee_str = callee.as_str();
+                                let shown = crate::typer::Typer::display_fn_name(&callee_str);
+                                let where_consumed = match self
+                                    .fn_param_consume_sites
+                                    .get(callee)
+                                    .and_then(|sites| sites.get(*slot))
+                                    .and_then(|s| *s)
+                                {
+                                    Some((at, true)) => format!(
+                                        "(it is consumed at {}, on one conditional path — \
+                                         the analysis is path-insensitive, so a call that \
+                                         may consume is treated as always consuming)",
+                                        at.loc()
+                                    ),
+                                    Some((at, false)) => {
+                                        format!("(it is consumed at {})", at.loc())
+                                    }
+                                    None => {
+                                        format!("(the value escapes through `{shown}`)")
+                                    }
+                                };
+                                format!(
+                                    "{}: use of moved value `{}`: it was moved into the call \
+                                     to `{}`, whose parameter takes ownership {}; pass a \
+                                     clone instead (`{}2 is copy {}` before the call), or \
+                                     reassign `{}` before reading it",
+                                    span.loc(),
+                                    name,
+                                    shown,
+                                    where_consumed,
+                                    name,
+                                    name,
+                                    name,
+                                )
+                            }
                             crate::typer::MoveReason::ContainerInsert(meth, at) => format!(
                                 "{}: use of moved value `{}`: it was moved into a container \
                                  by the `{}` at {} — the container now owns it, so the \

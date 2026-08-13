@@ -491,6 +491,13 @@ impl Typer {
         if let Some(mutates) = self.fn_param_mutates.get(&Symbol::from(name)).cloned() {
             self.fn_param_mutates.insert(mangled, mutates);
         }
+        if let Some(sites) = self
+            .fn_param_consume_sites
+            .get(&Symbol::from(name))
+            .cloned()
+        {
+            self.fn_param_consume_sites.insert(mangled, sites);
+        }
 
         let mono_fn = self.lower_generic_fn_body(&gf, &mangled.as_str(), id, &ptys, &ret, name)?;
         self.mono_fns.push(mono_fn);

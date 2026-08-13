@@ -252,9 +252,11 @@ pub fn run() {
                     loaded.insert(Symbol::intern(&canon.to_string_lossy()));
                 }
                 let packages = load_packages(base_dir);
-                resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
+                let mut std_files: HashSet<Symbol> = HashSet::new();
+                resolve_modules(&mut prog, base_dir, &mut loaded, &packages, &mut std_files);
                 let mut typer = Typer::new();
                 typer.set_source_dir(base_dir.to_path_buf());
+                typer.set_std_files(std_files);
 
                 match typer.lower_program(&prog) {
                     Ok(mut hir_prog) => {
@@ -391,7 +393,8 @@ pub fn run() {
 
     let packages = load_packages(base_dir);
 
-    resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
+    let mut std_files: HashSet<Symbol> = HashSet::new();
+    resolve_modules(&mut prog, base_dir, &mut loaded, &packages, &mut std_files);
 
     if !cli.lib && !cli.test && !cli.standalone {
         let has_main = prog
@@ -408,6 +411,7 @@ pub fn run() {
 
     let mut typer = Typer::new();
     typer.set_source_dir(base_dir.to_path_buf());
+    typer.set_std_files(std_files);
     if cli.test {
         typer.set_test_mode(true);
     }
@@ -566,7 +570,12 @@ pub fn run() {
     {
         use crate::drops::mir_drops;
         comp.tune_empty_vec_growth_floor_from_mir(&mir_prog);
-        let mir_hints = mir_drops::run(&mut mir_prog);
+        let mir_hints = mir_drops::run(&mut mir_prog).unwrap_or_else(|errors| {
+            for e in errors {
+                eprintln!("MIR drop verify: {e}");
+            }
+            die("MIR drop-linearity verification failed — this is a compiler bug");
+        });
         if cli.debug_drops {
             eprintln!(
                 "mir-drops: {} drops elided, {} drops sunk, {} drops fused, {} reuse pairs ({} bindings)",

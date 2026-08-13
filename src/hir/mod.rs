@@ -300,6 +300,10 @@ pub fn store_filter_pred_str(pred: ast::FilterPred, op: BinOp) -> &'static str {
         ast::FilterPred::Contains => "contains",
         ast::FilterPred::StartsWith => "startswith",
         ast::FilterPred::EndsWith => "endswith",
+        ast::FilterPred::IEq => "ieq",
+        ast::FilterPred::IContains => "icontains",
+        ast::FilterPred::IStartsWith => "istartswith",
+        ast::FilterPred::IEndsWith => "iendswith",
     }
 }
 
@@ -561,6 +565,7 @@ pub enum BuiltinFn {
     StringFromRaw,
     StringFromPtr,
     Chr,
+    Byte,
     GetArgs,
     Ln,
     Log2,

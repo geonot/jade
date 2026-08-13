@@ -59,7 +59,8 @@ pub(super) fn compile_and_link(
     let mut loaded: HashSet<Symbol> = HashSet::new();
     loaded.insert(Symbol::intern(&input_canon.to_string_lossy()));
     let (packages, pkg_id_map) = load_packages_with_ids(base_dir);
-    resolve_modules(&mut prog, base_dir, &mut loaded, &packages);
+    let mut std_files: HashSet<Symbol> = HashSet::new();
+    resolve_modules(&mut prog, base_dir, &mut loaded, &packages, &mut std_files);
 
     if !standalone && !test_mode {
         let has_main = prog
@@ -111,6 +112,7 @@ pub(super) fn compile_and_link(
 
     let mut typer = Typer::new();
     typer.set_source_dir(base_dir.to_path_buf());
+    typer.set_std_files(std_files);
     typer.set_root_pkg_id(root_pkg_id);
     typer.set_dep_pkg_ids(pkg_id_map);
     let scoped_use_map = {
@@ -205,7 +207,12 @@ pub(super) fn compile_and_link(
     {
         use crate::drops::mir_drops;
         comp.tune_empty_vec_growth_floor_from_mir(&mir_prog);
-        let mir_hints = mir_drops::run(&mut mir_prog);
+        let mir_hints = mir_drops::run(&mut mir_prog).unwrap_or_else(|errors| {
+            for e in errors {
+                eprintln!("MIR drop verify: {e}");
+            }
+            die("MIR drop-linearity verification failed — this is a compiler bug");
+        });
         if let Err(e) = comp.compile_program(&mir_prog, &hir_prog, mir_hints) {
             die(&strip_codegen_prefix(&e.to_string()));
         }

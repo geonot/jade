@@ -384,6 +384,8 @@ int64_t jinn_f64_to_bits(double val);
 double jinn_bits_to_f64(int64_t bits);
 const char *jinn_getenv_or_empty(const char *name);
 void jinn_sort_i64(int64_t *data, int64_t len);
+int64_t jinn_utf8_encode(int64_t code, char *buf);
+int32_t jinn_ascii_imemcmp(const char *a, const char *b, int64_t n);
 void jinn_sort_f64(double *data, int64_t len);
 int jinn_terminal_enable_raw(int fd);
 int jinn_terminal_disable_raw(int fd);

@@ -519,6 +519,10 @@ fn format_filter_cond(field: &Symbol, op: &BinOp, pred: &FilterPred, value: &Exp
         FilterPred::Contains => format!("{field} contains {}", format_expr(value)),
         FilterPred::StartsWith => format!("{field} starts_with {}", format_expr(value)),
         FilterPred::EndsWith => format!("{field} ends_with {}", format_expr(value)),
+        FilterPred::IEq => format!("{field} iequals {}", format_expr(value)),
+        FilterPred::IContains => format!("{field} icontains {}", format_expr(value)),
+        FilterPred::IStartsWith => format!("{field} istarts_with {}", format_expr(value)),
+        FilterPred::IEndsWith => format!("{field} iends_with {}", format_expr(value)),
         FilterPred::Cmp => {
             let op_s = match op {
                 BinOp::Eq => "equals",

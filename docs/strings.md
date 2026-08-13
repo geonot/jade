@@ -67,8 +67,26 @@ byte-level iteration.
 
 `s[i]` and `s.char_at(i)` address the string by **byte offset** and return the
 `i64` value of that single UTF-8 byte. This is the low-level building block for
-parsers, hashing, and protocol code, and it composes with `chr(code)` (the
-inverse: an `i64` byte code → a one-byte string).
+parsers, hashing, and protocol code, and it composes with `byte(code)` (the
+inverse: an `i64` byte code → a one-byte string containing `code & 255`,
+unencoded).
+
+Two builtins construct strings from integer codes, and they sit on opposite
+sides of the character/byte divide:
+
+- `chr(code)` treats `code` as a **Unicode scalar value** and returns its
+  UTF-8 encoding: `chr(65)` is `"A"` (one byte), `chr(233)` is `"é"` (two
+  bytes), `chr(128512)` is `"😀"` (four bytes). Codes above `0x10FFFF` and
+  surrogate codes encode as U+FFFD (the replacement character). `chr` always
+  returns valid UTF-8, so it is the inverse of a scalar decode, not of
+  `char_at`.
+- `byte(code)` returns a one-byte string holding `code & 255`, unencoded.
+  It is the byte-level inverse of `char_at`, and the building block for
+  assembling binary data into a `String` used as a byte buffer. A `byte(b)`
+  with `b >= 0x80` is **not** valid UTF-8 on its own; like mid-scalar slices,
+  such strings are outside the UTF-8 contract until the caller has assembled a
+  valid sequence (or keeps the value in byte-buffer territory: `byte_count`,
+  `char_at`, `slice`, and concatenation all remain byte-exact).
 
 ```
 "héllo".char_at(0)   # 104  (= 'h')
@@ -118,10 +136,13 @@ delimiters.
 The following are pinned and may not change before `1.0` without a changelog
 entry:
 
-1. `String` is valid UTF-8.
+1. `String` is valid UTF-8, except for byte buffers deliberately assembled
+   with `byte(code)` or mid-scalar slices, which are outside the contract
+   until made valid.
 2. `s.length` / `s.len()` is the Unicode **scalar** count.
 3. `s.byte_count` is the **byte** count and is the unit for `char_at`, `s[i]`,
    `slice`, `find`, `contains`, `starts_with`, `ends_with`.
 4. `s[i]` / `s.char_at(i)` return a single UTF-8 **byte** as `i64`.
-5. Equality and search are byte-exact, with no normalisation.
-6. `to_upper` / `to_lower` are ASCII-only.
+5. `chr(code)` UTF-8-encodes a Unicode scalar; `byte(code)` emits a raw byte.
+6. Equality and search are byte-exact, with no normalisation.
+7. `to_upper` / `to_lower` are ASCII-only.

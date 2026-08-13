@@ -19,7 +19,9 @@ forward and not re-checked in that pass — check before acting on the details.
 The 2026-08-10 remediation pass ([143]) closed M-1, M-2, M-3, M-4, M-5, T-1,
 T-3, T-4, T-5, T-6, T-7, T-8, T-9, T-11, T-12, T-14, C-2, C-3, S-4, S-6, and
 X-2, and reduced M-8, T-2, and S-9; the closed items' reproductions now live in
-the test suite and CHANGELOG entry [143]. Items below are what remains.
+the test suite and CHANGELOG entry [143]. The 2026-08-12 pass ([145]) closed
+C-1, M-7, M-9, T-5r, T-13, and S-7, leaving the residues filed as C-1r, M-7r,
+M-9r, T-5r2, T-13r, and S-7r below. Items below are what remains.
 
 ---
 
@@ -61,13 +63,14 @@ Map iteration (`for k, v in m`), `Iter`-trait desugared loops, and iteration
 over a field place (`for x in s.items`) do not register an iteration borrow;
 mutation during those loops is still accepted. Falls out of `M-6`.
 
-### M-7 (m) Conditional consumption over-tombstones and the diagnostic hides why
+### M-7r (m) Conditional consumption still over-tombstones
 
-A callee that consumes a parameter on one branch is inferred unconditionally
-consuming, so a call that dynamically never consumes is still rejected. Sound
-but imprecise, and the diagnostic ("whose parameter takes ownership") does not
-say the consumption was conditional. Minimum bar: the diagnostic names the
-consuming path. Better: path-splitting for the common `if`/`return` shape.
+[145] hit M-7's minimum bar: the use-after-move diagnostic now names the
+consuming site in the callee (`it is consumed at file:line:col`) and says when
+that site sits on a conditional path, with the callee name demangled. The
+analysis itself is still path-insensitive — a call that dynamically never
+consumes is still rejected. Path-splitting for the common `if`/`return` shape
+remains open.
 
 ### M-8 (m) Consuming-method inference over-approximates by name for unknown receivers
 
@@ -81,12 +84,16 @@ whose `set` does not store — the enclosing function's parameter is then
 over-inferred as consuming. Resolving this needs receiver types at scan time,
 i.e. moving the scan after inference or into `M-6`'s place framework.
 
-### M-9 (M) MIR drop-linearity verifier — *verified absent*
+### M-9r (m) Drop verifier does not cover the leak side
 
-Nothing in `src/` checks that drop placement preserves "exactly one drop per owner" after
-sinking, fusion, and reuse. A debug-build verifier asserting that every owner is
-dropped exactly once on every path — re-run after each Perceus transform —
-turns silent corruption into an ICE.
+[145] added `src/drops/verify.rs`, on by default in release (`JINN_MIR_VERIFY=0`
+opts out): each Perceus transform is checked to preserve the per-block drop
+multiset (elision may remove only trivially-droppable entries), and a
+path-sensitive dataflow rejects any use-after-drop, any double drop on a path,
+and inconsistent reuse metadata, dying with a compiler-bug message. What it
+cannot yet prove is the leak side — "every owner is dropped *at least* once" —
+because drop obligations are decided in the typer and are not first-class in
+MIR; threading them through would close this.
 
 ### M-10 (M) Whole-corpus sanitizer sweep
 
@@ -173,11 +180,14 @@ The old T-1 instance is gone and the [143] ownership diagnostics strip the
 diagnostic prints a mangled symbol; codegen-level errors still name raw
 symbols.
 
-### T-5r (m) Trait/impl signature conformance is unchecked
+### T-5r2 (m) Trait/impl conformance skips inference-eligible signatures
 
-Trait methods parse and declare `! E` since [143], but an impl may still
-silently widen (or narrow) the error row past the trait's declaration — impl
-conformance checks only method presence, not signatures.
+[143] parsed `! E` on trait methods; [145] enforces conformance: an impl may
+neither widen nor narrow the trait's declared error row, and annotated return
+types and parameter counts must match (both sites named in the diagnostic,
+`Self` and trait type arguments substituted). Unannotated impl parameters and
+returns are still accepted by adoption, and trait-side types that stay generic
+after substitution are skipped rather than deferred to inference.
 
 ### T-10 (M) Control-flow merges of differently-shaped values are unrepresentable — *verified*
 
@@ -187,38 +197,45 @@ shapes (array on one path, tuple on another). This is a diagnostic naming the
 function and the construct, not an ICE, and the harness asserts that exact
 diagnostic — so it reports both a regression to a panic and a fix.
 
-### T-13 (m) Safe code can construct invalid-UTF-8 Strings — *verified*
+### T-13r (m) String-as-byte-buffer residue in std
 
-`chr(200)` yields a one-byte String holding `0xC8`, which is not valid UTF-8,
-while `String` is documented as guaranteed valid UTF-8. Unresolved because
-`docs/strings.md` *also* documents `chr` as the byte-level inverse of indexing,
-and `std/url.jn` percent-decoding and `std/uuid.jn` byte assembly depend on
-byte semantics — closing this needs a decision (UTF-8-encoding `chr` plus a
-separate byte builtin, or renaming the contract), not just a fix.
+[145] decided T-13: `chr(code)` UTF-8-encodes a Unicode scalar (invalid and
+surrogate codes encode U+FFFD), a new `byte(code)` builtin emits the raw byte
+(documented as outside the UTF-8 contract, like mid-scalar slices), both
+reject non-integer arguments, and the byte-assembling std callers (`uuid`,
+`url`, `codec`, `strings.StringBuilder`) moved to `byte` — which also fixed
+`uuid.v7()` returning `""`, `percent_encode`/`codec.to_hex` truncating
+non-ASCII input, `to_lower`/`to_upper` dropping trailing bytes, and
+`StringBuilder` undercounting byte sizes (all were scalar-`.length` bounds on
+byte loops). Residue: the `.slice(i, s.length)` scalar-bound idiom survives on
+ASCII-expected text paths (`url` parsing, `uuid.parse`), and `Bytes.to_string`
+is still lossy, so `std/bytes.jn` cannot yet serve as the byte-buffer bridge.
 
 ---
 
 ## Effects and capabilities
 
-### C-1 (M) Capability inference is inert — *verified*
+### C-1r (m) Capability classification gaps
 
-```jinn
-use io
+[145] made the capability pass real: effects are classified at the extern
+leaves (`src/cap_sites.rs` classifies every extern std declares; an
+unclassified extern call, `syscall`, or `asm` block derives `ffi.unsafe`),
+std-vetted `io.*`/`fs.*` calls carry path-scoped capability signatures whose
+row replacement is trusted only for modules loaded from a std directory, and
+the fixpoint in `src/typer/caps.rs` scans free functions, generic functions,
+and type/impl methods — so `needs` is a checked upper bound (the old sneaky
+canary is a compile error naming the introduction path; `tests/caps.rs` pins
+it). What remains:
 
-*sneaky() returns i64 needs pure
-    io.write_file('canary.txt', 'written')
-    0
-```
-
-Compiles, runs, and writes the file. `src/cap_sites.rs` keys every entry on
-`std.net.connect`, `std.fs.read_file`, … — none of which are callable names in
-this language, so nothing ever matches. `grep -rn "needs " ` over the whole
-corpus finds no real annotation, so nothing depends on the current behaviour.
-
-Capabilities are documented as **design, not implemented** in
-[`design/compiler-prereqs.md`](design/compiler-prereqs.md). Closing this item
-means making the pass real: key the table on callable names, and check `needs`
-as an upper bound on the inferred set.
+- Actor handlers and store operations (a store is a filesystem write) carry no
+  classification and are invisible to the pass.
+- Method-call edges are name-buckets: `x.m()` joins every user method named
+  `m`, an over-approximation that can only produce false rejections for
+  `needs`-annotated functions, never false acceptance.
+- Modules imported through `.jni` interface files have no bodies to scan
+  (interface reuse is off by default — X-5).
+- Module and project capability ceilings, and the manifest surface, remain
+  design ([`design/compiler-prereqs.md`](design/compiler-prereqs.md)).
 
 [143] gated `embed` to the source directory — absolute paths are rejected and
 the canonicalized target must stay inside the canonicalized source dir (old
@@ -270,14 +287,20 @@ ledger with a throwaway cache gets one policy for both, set outside the source.
 Wanted: per-store `@durable` / `@relaxed` / `@volatile`, with the env var
 demoted to a testing override.
 
-### S-7 (m) `where` has no `in` in query blocks and no case-insensitive match
+### S-7r (m) Flat filter chains cap what `in` can compose with
 
-The statement-level filter parser supports `in [..]` (desugared to an `Eq`
-chain), `between`, `contains`, `starts_with`, `ends_with`, and grouping — the
-old claim that `in` was missing is stale for that path. Still missing:
-`in [..]` inside *query blocks* (`flatten_filter_expr` accepts only
-comparisons), and case-insensitive comparison anywhere, despite `@search`
-existing.
+[145] closed S-7's two gaps. Query blocks accept `field in [..]` (the
+desugared Or-chain is hoisted to the head of the filter so the left-to-right
+fold stays correct; combining it with `or`, a second `in`, or an empty list is
+a diagnostic) and method-form text predicates (`name.contains(..)` and
+friends). ASCII case-insensitive comparison exists on both paths: `iequals`,
+`icontains`, `istarts_with`, `iends_with` in statement filters and their
+method forms in query blocks, compiled against `jinn_ascii_imemcmp` (the same
+ASCII folding `@search` and `to_lower` use). Residue: the *statement* parser
+still rejects `in` combined with `and` (its parse-time mixed-connector
+ambiguity check predates the hoist), and a filter is still one flat and/or
+chain — supporting `a in [..] and b in [..]` or real grouping needs a grouped
+predicate encoding through MIR's name-encoded call scheme.
 
 ### S-8 (m) Each transaction snapshots the whole store file — *verified*
 
