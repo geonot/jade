@@ -308,6 +308,12 @@ impl Typer {
             self.infer_consuming_params(&all_fns);
         }
 
+        for d in &prog.decls {
+            if let ast::Decl::Type(td) = d {
+                self.check_category_assertion(td)?;
+            }
+        }
+
         if self.debug_types {
             tracing::debug!(target: "jinnc::type", "lowering declarations to HIR");
         }

@@ -310,3 +310,20 @@ fn unconditional_consumption_diagnostic_names_the_consuming_site() {
         "diagnostic must name the consuming site without a conditional note: {stderr}"
     );
 }
+
+#[test]
+fn vec_slice_copies_the_requested_window() {
+    let c = compile(
+        "*main\n    v is vec(10, 20, 30, 40, 50)\n    s is v from 1 to 4\n    log(s.length)\n    log(s.get(0))\n    log(s.get(2))\n    log(v.length)\n",
+    );
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "3\n20\n40\n5",
+        "vec slice must copy elements 1..4 ([147]: codegen passed 3 of __jinn_vec_slice's 4 \
+         arguments, so elem_size was garbage — zero gave [0, 0, 0], other values gave terabyte \
+         mallocs)"
+    );
+}

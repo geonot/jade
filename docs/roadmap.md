@@ -23,7 +23,13 @@ the test suite and CHANGELOG entry [143]. The 2026-08-12 pass ([145]) closed
 C-1, M-7, M-9, T-5r, T-13, and S-7, leaving the residues filed as C-1r, M-7r,
 M-9r, T-5r2, T-13r, and S-7r below. The 2026-08-12 place-granularity pass
 ([146]) closed M-6 and M-5r — see the Memory and ownership header for what it
-fixed along the way — leaving M-6r. Items below are what remains.
+fixed along the way — leaving M-6r. The 2026-08-13 memory-model pass ([147])
+closed M-9r, M-10, and M-15, reduced M-6r, M-8, M-11, and M-12, gave M-13,
+M-14, and M-16 their designs (`design/second-class-refs.md`,
+`design/freeze.md`, `design/closure-captures.md`), and fixed two live
+unsoundness classes (idiomatic field writes invisible to both inference scans;
+early-return drop omission) plus a silently-broken vec-slice codegen — see the
+header below and CHANGELOG [147]. Items below are what remains.
 
 ---
 
@@ -44,15 +50,37 @@ check, nested `take` SIGSEGV) plus two silently-broken corpus components
 copies). `tests/place_ownership.rs` pins all of it, including the previously
 unpinned [143] diagnostics.
 
+[147] extended the same probe-first method to the rest of this section.
+Idiomatic field writes in methods (bare `data is x` — the documented style)
+were invisible to *both* inference scans: a method storing a parameter that
+way double-freed at runtime, and a method mutating a field that way silently
+lost updates through nested receivers; both scans now treat a bind to a
+`self`-field as what it is. Moves inside quaternary arms were never recorded
+(the post-lowering walk skipped `Block` expressions), and `x ~ consuming_fn`
+pipes compiled and then SIGSEGVed on the next read of `x`; both are ordinary
+use-after-move errors now. On the drop side, MIR now proves and repairs its
+own placement: a must-hold dataflow over container allocations inserts the
+drops the typer omits on early-return paths (previously every `return` inside
+an `if` leaked every live local container), and the verifier fails the compile
+if any must-held allocation still reaches a `return`. `ci/sanitize-corpus.sh`
+runs the whole executable corpus (510 programs) under ASan+LSan at `--opt 0`
+and `--opt 3`: **zero memory-corruption findings**, and its first run caught
+`v from a to b` on vectors passing 3 of the 4 runtime arguments — a silent
+wrong answer on every vec slice, now fixed and pinned. `std/arena` ships the
+blessed replacement for pointer-linked structures (old M-15): a generational
+`Arena of T` whose `Handle`s detect staleness instead of dangling.
+
 ### M-6r (m) Place residue
 
 What place granularity deliberately does not yet do: element indices are
 compared only when both are integer literals (any dynamic index conservatively
-overlaps); `ternary`/`quaternary` arms do not snapshot move state (moves in
-either arm accumulate unconditionally — pre-existing); `x |> consuming_fn`
-pipes are not move-marked; mutation-through-call during a pending `defer` is
-unchecked (only moves are); and `sim for`/`together` blocks keep their own
-coarser capture rules.
+overlaps), and `sim for`/`together` blocks keep their own coarser capture
+rules. Closed by [147]: quaternary/ternary arms now record moves with
+snapshot-and-union semantics (a consuming call inside a `? !!` arm tombstones;
+the same call in both `? !` arms counts once), pipes move-mark through
+`fn_param_access` like ordinary calls, and probing showed `defer` observes
+variable state at scope exit, so mutation during a pending defer is sound and
+needs no new rejection (moves were already blocked root-based).
 
 ### M-4r (m) Element reads still deep-copy
 
@@ -62,92 +90,118 @@ read in expression position still pays a hidden O(n) deep copy, and a
 *read-only* method call on an element read still operates on a copy without a
 diagnostic. The honest fix is `M-13`'s second-class borrows.
 
-### M-7r (m) Conditional consumption still over-tombstones
+### M-7r (m) Conditional consumption: over-tombstones on one side, leaks on the other
 
 [145] hit M-7's minimum bar: the use-after-move diagnostic now names the
 consuming site in the callee (`it is consumed at file:line:col`) and says when
 that site sits on a conditional path, with the callee name demangled. The
 analysis itself is still path-insensitive — a call that dynamically never
-consumes is still rejected. Path-splitting for the common `if`/`return` shape
-remains open.
+consumes is still rejected. [147] found the dual on the drop side: a value
+consumed on only *one* branch is excluded from scope-end drops entirely, so it
+leaks on the branch that did not consume it (the drop-repair pass inserts only
+must-held drops, deliberately — an unconditional drop there would double-free
+the consumed path). Path-splitting for the common `if`/`return` shape would
+close both halves at once; until then the leak side is bounded and measured by
+`ci/sanitize-corpus.sh`.
 
-### M-8 (m) Consuming-method inference over-approximates by name for unknown receivers
+### M-8r (m) Consuming/mutating inference falls back to name-buckets for unknown receivers
 
-[143] closed the unsound half of the *inference*: user methods run through the
-same body-derived escape scan as free functions. [146] found that the
-*enforcement* half had been inert the whole time — the typer double-mangled
-the method key (`Type_method_method`), so no user-method call ever consulted
-`fn_param_access`/`fn_param_mutates`; a method that stored its argument
-double-freed at runtime. Fixed; `tests/place_ownership.rs` pins it. What
-remains is the imprecise half: the AST-level scan in `consume_infer.rs` runs
-before types exist, so a call `x.set(v)` still matches the builtin name list
-even when `x` will turn out to be a user type whose `set` does not store — the
-enclosing function's parameter is then over-inferred as consuming. Resolving
-this needs receiver types at scan time.
+[147] closed the knowable half: both inference scans resolve receiver types
+from single-static AST facts (parameter annotations, constructor binds, `self`
+and its fields) and consult that type's own method table instead of the
+builtin name list — `g.set(x)` on a `Gauge` no longer marks `x` consuming
+because `Vec` has a `set` (`tests/place_ownership.rs` pins it). The same pass
+found and fixed both scans being blind to idiomatic bare field writes
+(`data is x` stored without consuming → double-free; `total is total + x`
+mutated without marking → silent lost updates through nested receivers). What
+remains is the genuinely unknowable receiver — locals bound from calls,
+element reads, rebound names — which still joins the name-bucket; full
+resolution needs types at scan time, i.e. moving the fixpoint after inference.
 
-### M-9r (m) Drop verifier does not cover the leak side
+### M-9r2 (m) Drop repair and leak verification cover containers, not every temp
 
-[145] added `src/drops/verify.rs`, on by default in release (`JINN_MIR_VERIFY=0`
-opts out): each Perceus transform is checked to preserve the per-block drop
-multiset (elision may remove only trivially-droppable entries), and a
-path-sensitive dataflow rejects any use-after-drop, any double drop on a path,
-and inconsistent reuse metadata, dying with a compiler-bug message. What it
-cannot yet prove is the leak side — "every owner is dropped *at least* once" —
-because drop obligations are decided in the typer and are not first-class in
-MIR; threading them through would close this.
+[147] closed M-9r's stated gap and went one further: drop obligations are now
+first-class at the MIR level for container allocations (`vec_new`, `map_init`,
+container-typed `clone` and known-function call results). A must-hold dataflow
+with ownership-precise transfer edges (consuming slots from `fn_param_access`,
+container-insert builtin methods, stores, sends, captures, returns) *inserts*
+the drops the typer omits — early returns leaked every live container before
+this — and `src/drops/verify.rs` then fails the compile if any must-held
+allocation still reaches a `return`. Inserted drops land after inlined `defer`
+bodies, so defer-reads-then-drop ordering holds on early returns too. Residue:
+method-call results (`p.split('/')` on an early-return path), `String` temps,
+loop-iteration reallocation, and the conditional-path leaks of `M-7r` are
+outside the obligation set; `ci/sanitize-corpus.sh` measures that surface
+(49 of 510 corpus programs leak, 76 B–49 KB per run, zero corruption).
 
-### M-10 (M) Whole-corpus sanitizer sweep
+### M-10r (m) Sanitizer sweep residue: fiber annotations and the leak tail
 
-`ci/sanitize.sh` runs nine targeted programs. Every conformance test and every
-`apps/` program should run under ASan+LSan at `--opt 0` and `--opt 3`, plus a
-fuzzer that mutates ownership-relevant syntax. The constructor-move double-free
-class ([143], old M-1) is now compile-rejected, but the sweep is what would
-catch the next seam this list has not named.
+[147] closed M-10: `ci/sanitize-corpus.sh` compiles and runs the whole
+executable corpus — `tests/programs`, every `apps/` entry, every snippet, 510
+programs — under ASan+LSan at `--opt 0` and `--opt 3` (919 clean runs, zero
+memory corruption, the two compile failures are `T-10`'s pinned program), and
+`ci/fuzz-ownership.py` mutates ownership-relevant syntax (duplicated
+arguments, inserted/swapped `take`/`copy`, late uses, rebinds) and asserts the
+compiler either rejects with a diagnostic or the binary runs memory-safe under
+ASan — 197 mutants, 128 ran clean, 69 cleanly rejected, no ICE, no memory
+error. Its first full run caught vec slices passing 3 of the runtime's 4
+arguments (silent wrong answers since the surface existed; fixed, pinned in
+`tests/semantics_regression.rs`). Residue: the runtime lacks
+`__sanitizer_start_switch_fiber` annotations, so actor-heavy programs can
+SEGV spuriously (no report) under ASan — the ASan sibling of `N-5`'s TSan gap
+— and the leak tail belongs to `M-9r2`. Leaks report but do not gate
+(`JINN_SAN_STRICT=1` makes them gate).
 
-### M-11 (m) Category transitions are silent
+### M-11r (m) Category transitions warn only at an asserted definition
 
-A type's category is inferred from its field types, transitively, so adding a
-`Vec` field to a leaf struct silently changes assignment semantics for every
-struct that embeds it, several levels up. Wanted: a diagnostic on category
-transition ("this change makes `Config` an aggregate: assignments now move"),
-and `@value` / `@aggregate` assertions so a library author can pin the category.
+[147] shipped the assertion half: `type Point @value` / `type Bag @aggregate`
+pin a struct's ownership category, and a definition whose fields contradict
+the assertion is a compile error naming the field that flips it
+(`src/typer/resolve.rs::check_category_assertion`). Unasserted types still
+transition silently when a field changes category several embeddings away; the
+embedding-site diagnostic ("this change makes `Config` an aggregate:
+assignments now move") needs a cross-compile baseline and remains open.
 
-### M-12 (M) Ownership at public boundaries
+### M-12r (m) Boundary ownership: policy and `fmt` insertion remain
 
-A call site's meaning (move vs borrow) depends on the callee's body,
-transitively. That is fine inside a module and corrosive across a package
-boundary: editing a library function's *body* can break downstream callers with
-no signature change. Exported functions should be required to state
-`take`/`copy` explicitly (compiler suggests it, `fmt` inserts it), and inferred
-consumingness must enter the interface hash either way.
+[147] shipped the mechanical half: `.jni` interfaces are version 2 and carry
+per-parameter `consumes`/`mutates` bits populated from the inferred tables
+(inferred consumingness is in the interface, as required), and a `--lib`
+compile warns on every exported function whose parameter consumes *by
+inference*, naming the escape site and suggesting the explicit
+`v as take ...` spelling (`tests/place_ownership.rs` pins it). Making
+explicitness *required* at package boundaries, and having `fmt` insert the
+annotation, are policy decisions deferred until the package/visibility surface
+exists (`design/lamp.md`); `fmt` insertion additionally needs inference results
+at format time.
 
-### M-13 (M) Second-class references and slices
+### M-13 (M) Second-class references and slices — *design exists*
 
 There is no way to express a zero-copy sub-slice, a lending iterator, or a
 returned view into an argument. Borrows usable in parameter position,
 expression position, and yield-accessors — but never storable — keep the
 "no lifetime syntax" property while unlocking all three, and give `M-4` its
-honest fix.
+honest fix. The design, including sequencing that makes step 1 shippable
+alone, is [`design/second-class-refs.md`](design/second-class-refs.md) ([147]).
 
-### M-14 (M) `freeze` and shared immutables
+### M-14 (M) `freeze` and shared immutables — *design exists*
 
 Large read-only data shared across tasks (config, model weights, tables) must
 today be copied per task or funnelled through one actor. A one-way transition
 to a deeply-immutable value that may be shared across tasks without copying
 needs no refcount if frozen values are scope-bounded — and `together` already
-supplies the scope.
+supplies the scope. The design is [`design/freeze.md`](design/freeze.md)
+([147]).
 
-### M-15 (m) Arena / generational-index type in `std`
+### M-16 (M) Closure and generator capture rules — *specified, not implemented*
 
-Doubly-linked lists, parent pointers, and graphs are inexpressible by design.
-The blessed replacement pattern should ship as a documented `std` type rather
-than be reinvented per project.
-
-### M-16 (M) Closure and generator capture rules are unaudited
-
-Closures (`f is *() …`) do not parse, so no capture rule could be tested. When
-they land they inherit the whole cross-task capture problem and must be
-specified before implementation, not after.
+Closures (`f is *() …`) do not parse, so no capture rule could be tested. The
+specification the item demanded now exists —
+[`design/closure-captures.md`](design/closure-captures.md) ([147]): captures
+follow task-capture rules (values copy, aggregates move, no capture by
+reference), the closure value is itself an aggregate owning its environment,
+and generators are the same rules plus suspended-frame drops. Implementation
+starts at the parser.
 
 ---
 
@@ -384,10 +438,16 @@ deterministic. Not re-measured; re-measure before acting on it.
 It should be specified as sugar over `together`: a long-lived scope whose error
 handler restarts children per strategy instead of re-raising.
 
-### N-5 (m) Whole-program TSan is not yet meaningful
+### N-5 (m) Whole-program sanitizers need fiber annotations
 
 Coroutines migrate between OS threads, so TSan needs `__tsan_switch_to_fiber`
 annotations at the context-switch points before its results can be trusted.
+The same gap exists for ASan ([147]): without
+`__sanitizer_start_switch_fiber`/`__sanitizer_finish_switch_fiber` around the
+switches in `runtime/sched.c`, ASan's stack-bounds tracking can SEGV
+spuriously (no report) on actor-heavy programs — `ci/sanitize-corpus.sh`
+classifies those runs as `segv?` and does not gate on them. One annotation
+pass at the context-switch points serves both sanitizers.
 
 ---
 

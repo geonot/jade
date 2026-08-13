@@ -49,3 +49,6 @@ before specifying the target.
 | [`design/compiler-prereqs.md`](design/compiler-prereqs.md) | The compiler machinery lamp assumes: capabilities as an effect pass, path-scoped package identity, interface v2 with the three-hash ladder, and config blocks. |
 | [`design/fmt-and-lint.md`](design/fmt-and-lint.md) | The formatter and linter: lossless syntax tree, tiered rule engine, and the verifier that makes behaviour preservation checkable rather than hoped for. |
 | [`design/libjn.md`](design/libjn.md) | A C standard library in Jinn, and the language gaps it is a forcing function for. |
+| [`design/second-class-refs.md`](design/second-class-refs.md) | Borrowed views in parameter, expression, and yield positions — never storable, so no lifetime syntax; the honest fix for element-read deep copies (`M-13`). |
+| [`design/freeze.md`](design/freeze.md) | One-way deep immutability for sharing read-only data across tasks without copies or refcounts (`M-14`). |
+| [`design/closure-captures.md`](design/closure-captures.md) | Capture rules for closures and generators — specified before implementation, as `M-16` requires. |

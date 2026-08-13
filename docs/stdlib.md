@@ -97,11 +97,11 @@ programs the full pipeline rejects (`T-3`).
 Alpha-stable is not a guarantee that every function returns the right answer,
 and not yet a guarantee of API stability across versions.
 
-## Alpha-stable modules (49)
+## Alpha-stable modules (50)
 
 | Domain | Modules |
 | --- | --- |
-| Core / language | `convert`, `fmt`, `bytes`, `bit`, `binary`, `volatile`, `collections`, `sort` |
+| Core / language | `convert`, `fmt`, `bytes`, `bit`, `binary`, `volatile`, `collections`, `sort`, `arena` |
 | Numerics | `math`, `complex`, `rational`, `decimal`, `bigint`, `stats`, `fft`, `random` |
 | Text | `strings`, `regex`, `glob`, `codec`, `hex`, `uuid` |
 | Data formats | `json`, `csv`, `toml`, `dataframe` |

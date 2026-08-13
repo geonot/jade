@@ -1,0 +1,16 @@
+# LeakSanitizer suppressions for the corpus sweep (ci/sanitize-corpus.sh).
+#
+# The runtime intentionally leaves process-lifetime allocations to exit:
+# the scheduler and its worker structures, per-worker deques, actor
+# registries, and the store's global registry are created once and never
+# freed — freeing them at exit is pure cost. Suppress those so the sweep's
+# leak signal is about per-value drops (the memory model's obligation),
+# not runtime bookkeeping.
+leak:jinn_sched
+leak:jinn_worker
+leak:jinn_actor_registry
+leak:jinn_store_registry
+leak:jinn_store_open
+leak:jinn_chan_new
+leak:jinn_rt_init
+leak:jinn_tls

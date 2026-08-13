@@ -174,6 +174,11 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize, sink: &mut CommentSi
             if let Some(a) = t.layout.align {
                 out.push_str(&format!(" @align({a})"));
             }
+            match t.layout.category {
+                Some(crate::ast::CategoryAssert::Value) => out.push_str(" @value"),
+                Some(crate::ast::CategoryAssert::Aggregate) => out.push_str(" @aggregate"),
+                None => {}
+            }
             if t.layout.resource {
                 out.push_str(" @resource");
             }

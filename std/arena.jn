@@ -1,0 +1,58 @@
+type Handle
+    idx as i64
+    gen as i64
+
+type Arena of T
+    slots as Vec of T
+    gens as Vec of i64
+    live as Vec of bool
+    free as Vec of i64
+    count as i64
+
+    *insert(v as T) returns Handle
+        if free.length > 0
+            i is free.pop()
+            slots.set(i, v)
+            live.set(i, true)
+            count is count + 1
+            return Handle(idx is i, gen is gens.get(i))
+        slots.push(v)
+        gens.push(0)
+        live.push(true)
+        count is count + 1
+        Handle(idx is slots.length - 1, gen is 0)
+
+    *contains(h as Handle) returns bool
+        h.idx >= 0 and h.idx < slots.length and live.get(h.idx) and gens.get(h.idx) equals h.gen
+
+    *get(h as Handle) returns T
+        assert(self.contains(h))
+        slots.get(h.idx)
+
+    *set(h as Handle, v as T) returns bool
+        if not self.contains(h)
+            return false
+        slots.set(h.idx, v)
+        true
+
+    *remove(h as Handle) returns bool
+        if not self.contains(h)
+            return false
+        gens.set(h.idx, gens.get(h.idx) + 1)
+        live.set(h.idx, false)
+        free.push(h.idx)
+        count is count - 1
+        true
+
+    *size returns i64
+        count
+
+    *is_empty returns bool
+        count equals 0
+
+    *handles returns Vec of Handle
+        out as Vec of Handle is vec()
+        for i in 0 to slots.length
+            if live.get(i)
+                out.push(Handle(idx is i, gen is gens.get(i)))
+        out

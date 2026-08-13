@@ -6,13 +6,23 @@ use crate::types::Type;
 
 use super::{DropHints, verify};
 
-pub fn run(prog: &mut mir::Program) -> Result<DropHints, Vec<String>> {
+pub fn run(
+    prog: &mut mir::Program,
+    consuming: &verify::ConsumingMap,
+) -> Result<DropHints, Vec<String>> {
     let mut hints = DropHints::default();
     let mut next_slot: u32 = 0;
     let checked = verify::enabled();
     let mut errors: Vec<String> = Vec::new();
     for func in &mut prog.functions {
-        run_on_function(func, &mut hints, &mut next_slot, checked, &mut errors);
+        run_on_function(
+            func,
+            &mut hints,
+            &mut next_slot,
+            checked,
+            &mut errors,
+            consuming,
+        );
     }
     if errors.is_empty() {
         Ok(hints)
@@ -21,13 +31,45 @@ pub fn run(prog: &mut mir::Program) -> Result<DropHints, Vec<String>> {
     }
 }
 
+pub(super) fn insert_missing_return_drops(
+    func: &mut mir::Function,
+    consuming: &verify::ConsumingMap,
+) -> u32 {
+    let missing = verify::must_held_at_returns(func, consuming);
+    let mut inserted = 0u32;
+    for (bi, items) in missing {
+        let span = func.blocks[bi]
+            .insts
+            .last()
+            .map(|i| i.span)
+            .unwrap_or(func.span);
+        for (v, ty) in items {
+            if matches!(ty, Type::Void) {
+                continue;
+            }
+            func.blocks[bi].insts.push(Instruction {
+                dest: None,
+                kind: InstKind::Drop(v, ty),
+                ty: Type::Void,
+                span,
+                def_id: None,
+            });
+            inserted += 1;
+        }
+    }
+    inserted
+}
+
 fn run_on_function(
     func: &mut mir::Function,
     hints: &mut DropHints,
     next_slot: &mut u32,
     checked: bool,
     errors: &mut Vec<String>,
+    consuming: &verify::ConsumingMap,
 ) {
+    hints.stats.return_drops_inserted += insert_missing_return_drops(func, consuming);
+
     let uses = count_uses(func);
     hints.stats.total_bindings_analyzed += uses.len() as u32;
 
@@ -66,6 +108,7 @@ fn run_on_function(
 
     if checked {
         errors.extend(verify::verify_function(func));
+        errors.extend(verify::verify_function_leaks(func, consuming));
     }
 }
 

@@ -64,7 +64,10 @@ pub struct DropStats {
     pub last_use_tracked: u32,
     pub total_bindings_analyzed: u32,
     pub pool_hints_found: u32,
+    pub return_drops_inserted: u32,
 }
+
+pub type ConsumingMap = std::collections::HashMap<crate::intern::Symbol, Vec<bool>>;
 
 pub mod mir_drops;
 mod verify;

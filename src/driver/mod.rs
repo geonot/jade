@@ -451,6 +451,9 @@ pub fn run() {
             }
             die("library compile failed: unresolvable exported generics");
         }
+        for w in typer.boundary_ownership_warnings(&prog) {
+            eprintln!("{w}");
+        }
     }
 
     if cli.emit_interface {
@@ -458,7 +461,8 @@ pub fn run() {
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("module");
-        let iface = crate::interface::InterfaceFile::from_decls(mod_name, &prog.decls);
+        let mut iface = crate::interface::InterfaceFile::from_decls(mod_name, &prog.decls);
+        iface.annotate_ownership(&typer.fn_param_access, &typer.fn_param_mutates);
         let iface_path = input.with_extension("jni");
         if let Err(e) = iface.write_to(&iface_path) {
             die(&format!("interface: {e}"));
@@ -570,7 +574,19 @@ pub fn run() {
     {
         use crate::drops::mir_drops;
         comp.tune_empty_vec_growth_floor_from_mir(&mir_prog);
-        let mir_hints = mir_drops::run(&mut mir_prog).unwrap_or_else(|errors| {
+        let consuming: crate::drops::ConsumingMap = typer
+            .fn_param_access
+            .iter()
+            .map(|(name, accs)| {
+                (
+                    *name,
+                    accs.iter()
+                        .map(|a| matches!(a, Some(crate::ast::AccessMod::Take)))
+                        .collect(),
+                )
+            })
+            .collect();
+        let mir_hints = mir_drops::run(&mut mir_prog, &consuming).unwrap_or_else(|errors| {
             for e in errors {
                 eprintln!("MIR drop verify: {e}");
             }

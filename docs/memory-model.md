@@ -53,7 +53,10 @@ does.
 
 Category is inferred from field types, transitively: adding a `Vec` field to a
 leaf struct changes the assignment semantics of every struct that embeds it.
-That transition is currently silent — see `M-11`.
+Since [147] a type can pin its category — `type Point @value` / `type Bag
+@aggregate` — and a definition whose fields contradict the assertion is a
+compile error naming the field that flips it. Types without an assertion still
+transition silently; the embedding-site diagnostic remains open (`M-11`).
 
 ## 3. Bindings and moves
 
@@ -189,9 +192,12 @@ suggests declaring the parameter `take`.
 
 If the callee's body **consumes** the parameter — returns it, binds it, stores
 it in something that outlives the call, sends it on a channel, moves it into
-a task, or captures it in a constructor (a struct literal, tuple, array, or
-`vec(...)` takes ownership of its parts, [146]) — the parameter is inferred
-**consuming**, and the call site moves the argument exactly as `take` would:
+a task, captures it in a constructor (a struct literal, tuple, array, or
+`vec(...)` takes ownership of its parts, [146]), or stores it into a field of
+`self` — in either spelling, `self.data is x` or the idiomatic bare
+`data is x` ([147]; the bare form used to slip past inference and double-free
+at runtime) — the parameter is inferred **consuming**, and the call site moves
+the argument exactly as `take` would:
 
 ```jinn
 *ident(v) returns Vec of i64
@@ -440,6 +446,9 @@ A plain scalar is POD, copies freely, and crosses without issue. See
 | Escape analysis | `src/escape/mod.rs` |
 | Drop emission | `src/codegen/drop/aggregates.rs` |
 | Drop placement / Perceus | `src/drops/mir_drops.rs` |
+| Drop verification (double-drop, use-after-drop, and since [147] the leak side: every `Vec`/`Map` allocation dropped or moved on every path to return) | `src/drops/verify.rs` (`JINN_MIR_VERIFY=0` opts out) |
+| Category assertions (`@value`/`@aggregate`) | `src/typer/resolve.rs` (`check_category_assertion`) |
+| Boundary ownership (`--lib` warnings, `.jni` `consumes`/`mutates` bits) | `src/typer/consume_infer.rs` (`boundary_ownership_warnings`), `src/interface.rs` |
 
 ## 14. Conformance
 
@@ -452,3 +461,10 @@ through `jinnc`, or asserts a specific diagnostic lead line:
 | `tests/access_semantics.rs` | modifier surface, `@resource` linearity, drop timing, tombstones |
 | `tests/semantics_regression.rs` | the §10 rejection table |
 | `tests/ownership_fuzz.rs` | randomized ownership-relevant programs |
+| `tests/place_ownership.rs` | the [146] place lattice and the [147] closures: quaternary-arm and pipe moves, idiomatic field-store/field-write inference, category assertions, boundary warnings, `std/arena` |
+
+Beyond the suites, `ci/sanitize-corpus.sh` compiles and runs the whole
+executable corpus (conformance programs, apps, snippets) under ASan+LSan at
+`--opt 0` and `--opt 3`, and `ci/fuzz-ownership.py` mutates ownership-relevant
+syntax and asserts the compiler either rejects the mutant with a diagnostic or
+the compiled result stays memory-safe (`M-10`).

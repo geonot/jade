@@ -291,20 +291,31 @@ impl<'ctx> Compiler<'ctx> {
         let hi_val = self.val(hi);
 
         match result_ty {
-            Type::Vec(_) => {
+            Type::Vec(elem) => {
                 let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
                 let i64t = self.ctx.i64_type();
+                let elem_lty = self.llvm_ty(elem);
+                let elem_size = self.type_store_size(elem_lty);
                 let slice_fn = self
                     .module
                     .get_function("__jinn_vec_slice")
                     .unwrap_or_else(|| {
-                        let ft = ptr_ty.fn_type(&[ptr_ty.into(), i64t.into(), i64t.into()], false);
+                        let ft = ptr_ty.fn_type(
+                            &[ptr_ty.into(), i64t.into(), i64t.into(), i64t.into()],
+                            false,
+                        );
                         self.module
                             .add_function("__jinn_vec_slice", ft, Some(Linkage::External))
                     });
+                let size_val = i64t.const_int(elem_size, false);
                 let result = b!(self.bld.build_call(
                     slice_fn,
-                    &[base_val.into(), lo_val.into(), hi_val.into()],
+                    &[
+                        base_val.into(),
+                        lo_val.into(),
+                        hi_val.into(),
+                        size_val.into()
+                    ],
                     "slice"
                 ));
                 Ok(self.call_result(result))

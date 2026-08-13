@@ -236,3 +236,121 @@ fn heap_and_priority_queue_order_correctly() {
         "1\n3\n5\n20",
     );
 }
+
+#[test]
+fn consuming_call_inside_quaternary_arm_tombstones() {
+    rejects(
+        "*eat(v as Vec of i64) returns Vec of i64\n    v\n\n*find(f as bool) returns Option of i64\n    if f\n        return Some(1)\n    Nothing\n\n*main\n    v is vec(1, 2, 3)\n    o is find(true)\n    n is o ? eat(v).length !! 0\n    log(n)\n    log(v.length)\n",
+        &["use of moved value `v`", "eat"],
+    );
+}
+
+#[test]
+fn consuming_call_in_both_ternary_arms_is_one_move() {
+    accepts_and_prints(
+        "*eat(v as Vec of i64) returns Vec of i64\n    v\n\n*main\n    v is vec(1, 2, 3)\n    c is true\n    n is c ? eat(v).length ! eat(v).length\n    log(n)\n",
+        "3",
+    );
+}
+
+#[test]
+fn consuming_pipe_tombstones_instead_of_segfaulting() {
+    rejects(
+        "*eat(v as Vec of i64) returns Vec of i64\n    v\n\n*main\n    v is vec(1, 2, 3)\n    n is v ~ eat\n    log(n.length)\n    log(v.length)\n",
+        &["use of moved value `v`", "eat"],
+    );
+}
+
+#[test]
+fn idiomatic_field_store_makes_method_consuming() {
+    rejects(
+        "type Sink\n    data as Vec of i64\n\n    *swallow(x as Vec of i64)\n        data is x\n\n*main\n    s is Sink(data is vec())\n    a is vec(1, 2, 3)\n    s.swallow(a)\n    log(a.length)\n",
+        &["use of moved value `a`"],
+    );
+}
+
+#[test]
+fn idiomatic_field_write_makes_method_mutating() {
+    rejects(
+        "type Counter\n    total as i64\n\n    *bump(x as i64)\n        total is total + x\n\ntype Holder\n    c as Counter\n\n*main\n    h is Holder(c is Counter(total is 0))\n    h.c.bump(5)\n    log(h.c.total)\n",
+        &["mutates its receiver", "nested place `h.c`"],
+    );
+}
+
+#[test]
+fn user_set_method_no_longer_matches_builtin_name_bucket() {
+    accepts_and_prints(
+        "type Gauge\n    n as i64\n\n    *set(x as Vec of i64)\n        n is x.length\n\n*stash(g as Gauge, x as Vec of i64)\n    g.set(x)\n\n*main\n    g is Gauge(n is 0)\n    v is vec(1, 2, 3)\n    stash(g, v)\n    log(v.length)\n",
+        "3",
+    );
+}
+
+#[test]
+fn mutation_during_pending_defer_observes_exit_state() {
+    accepts_and_prints(
+        "*main\n    v is vec(1)\n    defer log(v.length)\n    i is 0\n    while i < 100\n        v.push(i)\n        i is i + 1\n    log('built')\n",
+        "built\n101",
+    );
+}
+
+#[test]
+fn value_assertion_on_aggregate_struct_is_rejected() {
+    rejects(
+        "type Config @value\n    items as Vec of i64\n\n*main\n    log(1)\n",
+        &["asserted `@value`", "field `items`", "aggregate"],
+    );
+}
+
+#[test]
+fn aggregate_assertion_on_value_struct_is_rejected() {
+    rejects(
+        "type Point @aggregate\n    x as i64\n    y as i64\n\n*main\n    log(1)\n",
+        &["asserted `@aggregate`", "value"],
+    );
+}
+
+#[test]
+fn correct_category_assertions_are_accepted() {
+    accepts_and_prints(
+        "type Point @value\n    x as i64\n    y as i64\n\ntype Bag @aggregate\n    items as Vec of i64\n\n*main\n    p is Point(x is 1, y is 2)\n    q is p\n    b is Bag(items is vec(7))\n    log(p.x + q.y + b.items.length)\n",
+        "4",
+    );
+}
+
+#[test]
+fn arena_generational_handles_end_to_end() {
+    accepts_and_prints(
+        "use arena\n\ntype Node\n    label as String\n    next as i64\n\n*main\n    a is Arena(slots is vec(Node(label is 'seed', next is -1)), gens is vec(0), live is vec(false), free is vec(0), count is 0)\n    h1 is a.insert(Node(label is 'one', next is -1))\n    h2 is a.insert(Node(label is 'two', next is -1))\n    log(a.get(h1).label)\n    ok is a.remove(h1)\n    if a.contains(h1)\n        log('bug')\n    else\n        log('dead')\n    h3 is a.insert(Node(label is 'three', next is -1))\n    log(a.get(h3).label)\n    log(a.get(h2).label)\n    log(a.size())\n",
+        "one\ndead\nthree\ntwo\n2",
+    );
+}
+
+#[test]
+fn lib_compile_warns_on_inferred_consuming_boundary() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("prog.jn");
+    std::fs::write(
+        &file,
+        "*eat(v as Vec of i64) returns Vec of i64\n    v\n\n*explicit(v as take Vec of i64) returns i64\n    v.length\n",
+    )
+    .unwrap();
+    let out = Command::new(jinnc())
+        .arg("prog.jn")
+        .arg("--lib")
+        .arg("--emit-obj")
+        .arg("-o")
+        .arg(dir.path().join("prog"))
+        .current_dir(dir.path())
+        .output()
+        .expect("invoke jinnc");
+    assert!(out.status.success(), "lib compile must succeed");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("consumes its parameter `v` by inference"),
+        "missing boundary warning in:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("`explicit` consumes"),
+        "explicit take must not warn:\n{stderr}"
+    );
+}

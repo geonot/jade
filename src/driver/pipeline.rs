@@ -207,7 +207,19 @@ pub(super) fn compile_and_link(
     {
         use crate::drops::mir_drops;
         comp.tune_empty_vec_growth_floor_from_mir(&mir_prog);
-        let mir_hints = mir_drops::run(&mut mir_prog).unwrap_or_else(|errors| {
+        let consuming: crate::drops::ConsumingMap = typer
+            .fn_param_access
+            .iter()
+            .map(|(name, accs)| {
+                (
+                    *name,
+                    accs.iter()
+                        .map(|a| matches!(a, Some(crate::ast::AccessMod::Take)))
+                        .collect(),
+                )
+            })
+            .collect();
+        let mir_hints = mir_drops::run(&mut mir_prog, &consuming).unwrap_or_else(|errors| {
             for e in errors {
                 eprintln!("MIR drop verify: {e}");
             }

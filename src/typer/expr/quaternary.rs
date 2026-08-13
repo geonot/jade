@@ -39,14 +39,14 @@ impl Typer {
                 ast::Expr::Void(_) => None,
                 other => Some(other),
             };
-            let r = self.lower_quaternary(cond, ok_arm, nothing_arm, None, span, expected)?;
+            let r = self.build_quaternary(snapshot, ok_arm, nothing_arm, None, span, expected)?;
             Ok(Some(r))
         } else {
             let err_arm = match els {
                 ast::Expr::Void(_) => None,
                 other => Some(other),
             };
-            let r = self.lower_quaternary(cond, ok_arm, None, err_arm, span, expected)?;
+            let r = self.build_quaternary(snapshot, ok_arm, None, err_arm, span, expected)?;
             Ok(Some(r))
         }
     }

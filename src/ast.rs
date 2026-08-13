@@ -418,6 +418,13 @@ pub struct LayoutAttrs {
     pub align: Option<u32>,
 
     pub resource: bool,
+    pub category: Option<CategoryAssert>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CategoryAssert {
+    Value,
+    Aggregate,
 }
 
 #[derive(Debug, Clone)]

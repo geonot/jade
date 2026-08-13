@@ -269,6 +269,48 @@ impl Typer {
         self.struct_attrs.insert(td.name, td.layout.clone());
     }
 
+    pub(crate) fn check_category_assertion(&mut self, td: &ast::TypeDef) -> Result<(), String> {
+        let Some(cat) = self.struct_attrs.get(&td.name).and_then(|a| a.category) else {
+            return Ok(());
+        };
+        let is_agg = self.type_is_aggregate(&Type::Struct(td.name, vec![]));
+        match cat {
+            ast::CategoryAssert::Value if is_agg => {
+                let witness = self
+                    .structs
+                    .get(&td.name)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .find(|(_, t)| self.type_is_aggregate(t));
+                let detail = match witness {
+                    Some((n, t)) => format!(
+                        ": field `{n}` has the aggregate type `{t}`, so assignments of \
+                         `{}` move",
+                        td.name
+                    ),
+                    None => String::from(": it is marked @resource"),
+                };
+                Err(format!(
+                    "{}: `{}` is asserted `@value` but it is an aggregate{}; remove the \
+                     aggregate field, or change the assertion to `@aggregate` and update \
+                     the callers that relied on copy semantics",
+                    td.span.loc(),
+                    td.name,
+                    detail,
+                ))
+            }
+            ast::CategoryAssert::Aggregate if !is_agg => Err(format!(
+                "{}: `{}` is asserted `@aggregate` but every field is a value type, so it \
+                 is a value (assignments copy); add the intended aggregate field, or \
+                 change the assertion to `@value`",
+                td.span.loc(),
+                td.name,
+            )),
+            _ => Ok(()),
+        }
+    }
+
     pub(crate) fn declare_enum_def(&mut self, ed: &ast::EnumDef) {
         let mut variants = Vec::new();
         for (tag, v) in ed.variants.iter().enumerate() {

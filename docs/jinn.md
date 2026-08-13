@@ -550,6 +550,25 @@ type Config
     host as String
 ```
 
+A type's ownership category — whether assignment copies it or moves it — is
+inferred from its fields (see [Memory and ownership](#memory-and-ownership)).
+`@value` and `@aggregate` assert the intended category, so adding a `Vec`
+field to a type that promises copy semantics is a compile error naming the
+field instead of a silent behavior change several embeddings away:
+
+```jinn
+type Point @value
+    x as i64
+    y as i64
+
+type Basket @aggregate
+    items as Vec of i64
+
+p is Point(x is 10, y is 20)
+q is p
+log(p.x + q.x)
+```
+
 ### Methods
 
 Methods are functions declared inside the type. They take `self` explicitly, or
@@ -1267,6 +1286,16 @@ how data moves between tasks.
 Two properties hold by construction: there are no shared reference counts, so
 reference cycles cannot be constructed and cycle leaks are impossible; and every
 owned value has exactly one drop site, so cleanup is deterministic.
+
+Doubly-linked lists, parent pointers, and cyclic graphs are therefore
+inexpressible with direct ownership — by design. The blessed replacement is
+`std/arena`: an `Arena of T` owns the nodes, and `Handle` values (index +
+generation) stand in for pointers. A stale handle is detected, not dangling —
+`contains` returns false and `get` traps once the slot is removed or reused.
+
+`@value` and `@aggregate` on a `type` assert its ownership category, turning
+an accidental category flip (adding a `Vec` field to a value type) into a
+compile error at the definition.
 
 The full contract — the rules, the exact diagnostics, the tiers, and where the
 implementation does not yet meet the contract — is

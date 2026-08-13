@@ -446,7 +446,22 @@ impl Typer {
                     self.collect_consumed_in_expr(a, out);
                 }
             }
-            hir::ExprKind::Pipe(e, _, _, rest) => {
+            hir::ExprKind::Pipe(e, _, name, rest) => {
+                if let Some(access) = self.fn_param_access.get(name).cloned() {
+                    let mut parts: Vec<&hir::Expr> = Vec::with_capacity(rest.len() + 1);
+                    parts.push(e);
+                    parts.extend(rest.iter());
+                    for (i, a) in parts.iter().enumerate() {
+                        if matches!(access.get(i), Some(Some(crate::ast::AccessMod::Take)))
+                            && let hir::ExprKind::Var(id, _) = &a.kind
+                        {
+                            let resolved = self.infer_ctx.resolve(&a.ty);
+                            if Self::expr_type_needs_drop(&resolved) {
+                                out.insert(*id);
+                            }
+                        }
+                    }
+                }
                 self.collect_consumed_in_expr(e, out);
                 for a in rest {
                     self.collect_consumed_in_expr(a, out);
@@ -1169,8 +1184,56 @@ impl Typer {
             }
             hir::ExprKind::Ternary(c, t, e) => {
                 self.record_take_moves_in_expr(c)?;
+                let pre = self.snapshot_moved_fields();
                 self.record_take_moves_in_expr(t)?;
+                let t_end = self.snapshot_moved_fields();
+                self.restore_moved_fields(pre.clone());
                 self.record_take_moves_in_expr(e)?;
+                let e_end = self.snapshot_moved_fields();
+                self.restore_moved_fields(pre);
+                self.merge_moved_fields_union(&[t_end, e_end]);
+            }
+            hir::ExprKind::Block(stmts) => {
+                for s in stmts {
+                    match s {
+                        hir::Stmt::Bind(b) => self.record_take_moves_in_expr(&b.value)?,
+                        other => self.record_take_moves_in_stmt(other)?,
+                    }
+                }
+            }
+            hir::ExprKind::Pipe(first, _, name, rest) => {
+                if let Some(access) = self.fn_param_access.get(name).cloned() {
+                    let mut parts: Vec<&hir::Expr> = Vec::with_capacity(rest.len() + 1);
+                    parts.push(first);
+                    parts.extend(rest.iter());
+                    self.check_call_arg_aliasing(*name, &access, &parts, false, expr.span)?;
+                    for (i, a) in parts.iter().enumerate() {
+                        if matches!(access.get(i), Some(Some(crate::ast::AccessMod::Take)))
+                            && let hir::ExprKind::Var(id, vname) = &a.kind
+                        {
+                            let resolved = self.infer_ctx.resolve(&a.ty);
+                            if Self::expr_type_needs_drop(&resolved) {
+                                self.mark_var_moved_checked(
+                                    *id,
+                                    *vname,
+                                    crate::typer::MoveReason::ConsumingCall(*name, i),
+                                    a.span,
+                                )?;
+                            }
+                        }
+                    }
+                }
+                self.record_take_moves_in_expr(first)?;
+                for a in rest {
+                    self.record_take_moves_in_expr(a)?;
+                }
+            }
+            hir::ExprKind::StringMethod(recv, _, args)
+            | hir::ExprKind::DeferredMethod(recv, _, args) => {
+                self.record_take_moves_in_expr(recv)?;
+                for a in args {
+                    self.record_take_moves_in_expr(a)?;
+                }
             }
             hir::ExprKind::Tuple(xs) | hir::ExprKind::Array(xs) | hir::ExprKind::VecNew(xs) => {
                 for x in xs {

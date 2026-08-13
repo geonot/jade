@@ -2,7 +2,7 @@ use crate::intern::Symbol;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-const INTERFACE_VERSION: u32 = 1;
+const INTERFACE_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum IType {
@@ -56,6 +56,10 @@ pub struct FnSig {
 pub struct ParamSig {
     pub name: String,
     pub ty: IType,
+    #[serde(default)]
+    pub consumes: bool,
+    #[serde(default)]
+    pub mutates: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,6 +210,8 @@ impl InterfaceFile {
                             .map(|p| ParamSig {
                                 name: p.name.to_string(),
                                 ty: p.ty.as_ref().map(|t| t.into()).unwrap_or(IType::I64),
+                                consumes: matches!(p.access_mod, Some(crate::ast::AccessMod::Take)),
+                                mutates: false,
                             })
                             .collect(),
                         ret: f.ret.as_ref().map(|t| t.into()).unwrap_or(IType::Void),
@@ -255,6 +261,11 @@ impl InterfaceFile {
                                     .map(|p| ParamSig {
                                         name: p.name.to_string(),
                                         ty: p.ty.as_ref().map(|t| t.into()).unwrap_or(IType::I64),
+                                        consumes: matches!(
+                                            p.access_mod,
+                                            Some(crate::ast::AccessMod::Take)
+                                        ),
+                                        mutates: false,
                                     })
                                     .collect(),
                                 ret: m.ret.as_ref().map(|t| t.into()).unwrap_or(IType::Void),
@@ -274,6 +285,27 @@ impl InterfaceFile {
             }
         }
         iface
+    }
+
+    pub fn annotate_ownership(
+        &mut self,
+        access: &indexmap::IndexMap<Symbol, Vec<Option<crate::ast::AccessMod>>>,
+        mutates: &indexmap::IndexMap<Symbol, Vec<bool>>,
+    ) {
+        for f in &mut self.functions {
+            let key = Symbol::intern(&f.name);
+            if let Some(accs) = access.get(&key) {
+                for (i, p) in f.params.iter_mut().enumerate() {
+                    p.consumes = p.consumes
+                        || matches!(accs.get(i), Some(Some(crate::ast::AccessMod::Take)));
+                }
+            }
+            if let Some(muts) = mutates.get(&key) {
+                for (i, p) in f.params.iter_mut().enumerate() {
+                    p.mutates = muts.get(i).copied().unwrap_or(false);
+                }
+            }
+        }
     }
 
     pub fn write_to(&self, path: &Path) -> Result<(), String> {
@@ -424,10 +456,14 @@ mod tests {
                 ParamSig {
                     name: "a".into(),
                     ty: IType::I64,
+                    consumes: false,
+                    mutates: false,
                 },
                 ParamSig {
                     name: "b".into(),
                     ty: IType::I64,
+                    consumes: false,
+                    mutates: false,
                 },
             ],
             ret: IType::I64,
@@ -515,6 +551,8 @@ mod tests {
             params: vec![ParamSig {
                 name: "name".into(),
                 ty: IType::String,
+                consumes: false,
+                mutates: false,
             }],
             ret: IType::String,
         });

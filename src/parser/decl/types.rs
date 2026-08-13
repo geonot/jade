@@ -76,6 +76,18 @@ impl Parser {
                 layout.align = Some(n);
             } else if attr == "resource" {
                 layout.resource = true;
+            } else if attr == "value" || attr == "aggregate" {
+                let this = if attr == "value" {
+                    crate::ast::CategoryAssert::Value
+                } else {
+                    crate::ast::CategoryAssert::Aggregate
+                };
+                if let Some(prev) = layout.category
+                    && prev != this
+                {
+                    return Err(self.error("a type cannot assert both @value and @aggregate"));
+                }
+                layout.category = Some(this);
             } else {
                 return Err(self.error(&format!("unknown layout attribute: @{attr}")));
             }

@@ -1,4 +1,122 @@
 # Changelog
+- **[147]** (2026-08-13) the memory model gets its verification teeth: MIR repairs and proves its own drop placement, the whole corpus runs under ASan with zero corruption, idiomatic field writes stop being invisible to inference, and every slice of a vector was wrong
+
+The remaining memory-model items, worked as one batch (closed M-9r, M-10,
+M-15; reduced M-6r, M-8, M-11, M-12; designs written for M-13, M-14, M-16).
+Probing before porting — the [146] method — again found live unsoundness that
+no test pinned:
+
+- **Idiomatic field writes were invisible to both inference scans.** The
+  documented method style drops `self.` (`data is x`, `total is total + x`),
+  and both the consuming and the mutating scan only recognized the
+  `self.data is x` spelling. A method storing a parameter the idiomatic way
+  double-freed at runtime (`free(): invalid pointer`, probe p6); a method
+  mutating a field the idiomatic way was not marked receiver-mutating, so
+  calling it on a nested place mutated a copy and silently lost the update —
+  the exact class [146] made a compile error, escaped through the house
+  style (probe p7: `h.c.bump(5)` left `h.c.total` at 0). Both scans now treat
+  a bind to a field of the method's self type as a store into `self` /
+  receiver mutation, with parameter names excluded from field shadowing.
+- **Early returns leaked every live container.** The typer emits scope-end
+  drops only at block ends; a `return` inside an `if` exited through no drop
+  at all (MIR for the `path.normalize` shape: the fall-through block dropped
+  both vectors, the early-return block dropped neither). Fixed at the layer
+  that owns drop placement: `src/drops/mir_drops.rs` now runs a
+  must-hold dataflow over container allocations (`vec_new`, `map_init`,
+  container-typed `clone`/known-call results) with ownership-precise transfer
+  edges — per-slot consuming information passed down from the typer's
+  `fn_param_access`, container-insert builtin methods, stores, sends,
+  captures, phi edges, returns — and inserts a drop before any `return` a
+  must-held allocation reaches. Must-held (intersection at joins) is the
+  safety argument: a value moved on *any* path never gets an unconditional
+  drop, so the repair can only free, never double-free. Inserted drops land
+  after inlined `defer` bodies, preserving defer-before-drop on early exits.
+  `src/drops/verify.rs` then re-runs the same analysis as a post-condition
+  and fails the compile ("this is a compiler bug") if anything must-held
+  still reaches a `return` — closing M-9r's "leak side" for the container
+  obligation set. Conditional consumption still leaks its untaken branch
+  (documented at M-7r; an unconditional drop there would double-free), and
+  method-call results/String temps are outside the obligation set (M-9r2).
+- **Quaternary arms never recorded moves; consuming pipes segfaulted.** The
+  post-lowering move-recording walk had no `Block` arm, and `? !!` arms lower
+  to blocks — `o ? eat(v).length !! 0` then `v.length` compiled and read
+  freed memory. `x ~ eat` (pipe into a consuming function) compiled and
+  SIGSEGVed. The walk now descends into block statements (bind values only —
+  quaternary subject/`$`/`err` binds and desugared-iterator binds are borrows
+  at runtime and must not tombstone), records ternary arms with
+  snapshot-and-union semantics (consuming the same value in both `? !` arms
+  is one move, matching if/else), and handles `Pipe` exactly like `Call`
+  including call-site aliasing checks. The ternary-as-quaternary path also
+  stopped lowering its subject twice. Probing the last M-6r entry showed
+  `defer` observes variable state at scope exit (2 000 reallocating pushes
+  after registration, defer printed 2001), so mutation during a pending defer
+  is sound and stays legal; the item asked for a restriction that would have
+  been wrong.
+- **Receiver-typed inference (M-8).** The AST-level scans no longer join the
+  builtin name-bucket when the receiver's type is knowable from single-static
+  facts (parameter annotations, constructor binds, `self` and its fields —
+  one binding event, or the fact dies): `g.set(x)` on a `Gauge` whose `set`
+  stores nothing no longer forces the caller's argument into a move. Facts
+  are single-static so branch-local rebinds cannot resurrect a stale type.
+- **M-10, the whole-corpus sweep.** `ci/sanitize-corpus.sh` compiles
+  `tests/programs` (87), every `apps/` entry (21), and every snippet (~400)
+  against an ASan-instrumented runtime at `--opt 0` and `--opt 3` and runs
+  each in an isolated scratch dir: 919 clean runs, **zero memory
+  corruption**, 99 leak runs (49 programs, 76 B–49 KB — the M-9r2 tail,
+  reported but non-gating; `JINN_SAN_STRICT=1` gates), 2 compile failures
+  (T-10's pinned program). Its very first run caught the batch's biggest
+  surprise: **every vec slice was silently wrong** — codegen declared
+  `__jinn_vec_slice` with three arguments but the runtime takes four, so
+  `elem_size` was whatever sat in the register (0 in release builds:
+  `v from 1 to 4` printed `[0, 0, 0]`; under ASan: terabyte allocation
+  requests). No test ever ran a vec slice. Fixed, pinned in
+  `tests/semantics_regression.rs`. `ci/fuzz-ownership.py` (seeded,
+  deterministic) mutates ownership-relevant syntax — duplicated args,
+  inserted/swapped `take`/`copy`, late uses, rebinds — over a 60-file sample:
+  197 mutants, 128 compiled and ran clean under ASan, 69 cleanly rejected,
+  zero ICEs, zero memory errors. Actor-heavy programs can SEGV spuriously
+  under ASan (no report) because the runtime lacks
+  `__sanitizer_start_switch_fiber` annotations — classified `segv?`,
+  non-gating, filed with N-5.
+- **M-11 assertions.** `type Point @value` / `type Bag @aggregate` pin a
+  struct's ownership category; a contradicting definition is a compile error
+  naming the flipping field. Parser, `fmt` printer, typer check
+  (`check_category_assertion`), docs, and pins.
+- **M-12 mechanics.** `.jni` interface files are version 2: every parameter
+  carries `consumes`/`mutates` populated from the inferred tables after
+  typing, so inferred consumingness is in the interface as the item required.
+  `--lib` compiles warn per exported function whose parameter consumes by
+  inference, naming the escape site and the explicit `v as take ...`
+  spelling. Required-explicitness policy and `fmt` insertion wait on the
+  package surface (M-12r).
+- **M-15, `std/arena`.** A generational `Arena of T` (insert/get/set/remove/
+  contains/size/handles over parallel slot/generation/liveness vectors with a
+  free list) ships as the blessed replacement for pointer-linked structures;
+  stale handles are detected (`contains` false, `get` traps), slot reuse
+  bumps generations. Building it surfaced the practical T-1r wall: generic
+  constructor functions break method resolution on the result, `Option of T`
+  returns from generic methods don't resolve at call sites, and bind
+  annotations don't unify with generic constructors — the API avoids all
+  three (trap-checked `get`, constructor-literal idiom) and the tour
+  documents the pattern. 50th alpha-stable module, auto-gated.
+- **Designs for the three remaining majors.** `design/second-class-refs.md`
+  (M-13: never-storable views — the stack is the lifetime; reuses the [146]
+  place lattice for root-locking), `design/freeze.md` (M-14: one-way deep
+  immutability, scope-bounded sharing via `together`, no refcounts, `freeze`
+  is a runtime no-op), `design/closure-captures.md` (M-16: closures capture
+  like tasks — values copy, aggregates move, nothing by reference; the
+  closure is itself an aggregate; spec-before-implementation as the item
+  demanded).
+
+2145 tests green across 49 binaries (21 new: 13 place-ownership pins for
+every fix above, arena end-to-end, category assertions, the boundary warning,
+5 drop-verifier unit tests including "conditionally-moved values must not get
+an unconditional drop", the vec-slice pin); `cargo fmt --check` and
+`cargo clippy --release -- -D warnings` clean; corpus sweep and fuzzer as
+above. Roadmap: M-9r, M-10, M-15 closed; M-6r shrunk to dynamic element
+indices and `sim for`/`together` capture; M-8→M-8r, M-11→M-11r, M-12→M-12r,
+M-9r→M-9r2, M-10→M-10r residues filed; M-13/M-14/M-16 marked design-complete.
+
 - **[146]** (2026-08-12) ownership goes place-based: one lattice for moves and borrows of `root.field.elem…`, four double-frees fixed, and the corpus gave up two silently-broken components
 
 M-6 — the last blocker — plus M-5r. The refactor replaced `moved_vars` +
