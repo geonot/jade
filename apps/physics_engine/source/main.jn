@@ -23,7 +23,10 @@ use solver
 
     loop(0, $ < 60, $ + 1)
         loop(0, $ < world.len(), $ + 1)
-            integrator.step(world.get($), dt)
+            idx is $
+            b is copy world.get(idx)
+            integrator.step(b, dt)
+            world.set(idx, b)
         pairs is broadphase.sap(world)
         contacts is narrowphase.resolve_pairs(world, pairs)
         contacts_total is contacts_total + contacts.len()

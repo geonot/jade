@@ -373,9 +373,8 @@ impl Typer {
                 }
             }
 
-            hir::ExprKind::Method(recv, ty_name, m_name, args) => {
-                let mangled: crate::intern::Symbol =
-                    format!("{}_{}", ty_name.as_str(), m_name.as_str()).into();
+            hir::ExprKind::Method(recv, mangled_name, _m_name, args) => {
+                let mangled: crate::intern::Symbol = *mangled_name;
                 let access = self.fn_param_access.get(&mangled).cloned();
                 if let Some(access) = access {
                     if matches!(access.first(), Some(Some(crate::ast::AccessMod::Take)))
@@ -538,7 +537,7 @@ impl Typer {
         }
     }
 
-    fn peel_move_wrappers(e: &hir::Expr) -> &hir::Expr {
+    pub(in crate::typer) fn peel_move_wrappers(e: &hir::Expr) -> &hir::Expr {
         match &e.kind {
             hir::ExprKind::Coerce(inner, _) | hir::ExprKind::Cast(inner, _) => {
                 Self::peel_move_wrappers(inner)
@@ -547,7 +546,10 @@ impl Typer {
         }
     }
 
-    fn find_var_by_id(&self, id: crate::hir::DefId) -> Option<&crate::typer::VarInfo> {
+    pub(in crate::typer) fn find_var_by_id(
+        &self,
+        id: crate::hir::DefId,
+    ) -> Option<&crate::typer::VarInfo> {
         self.scopes
             .iter()
             .rev()
@@ -607,6 +609,7 @@ impl Typer {
                 let src = Self::peel_move_wrappers(&b.value);
                 if let hir::ExprKind::Var(id, name) = &src.kind
                     && *id != b.def_id
+                    && !matches!(b.ownership, crate::hir::Ownership::Borrowed)
                 {
                     let resolved = self.infer_ctx.resolve(&src.ty);
                     match b.access_mod {
@@ -675,6 +678,22 @@ impl Typer {
                     {
                         let resolved = self.infer_ctx.resolve(&src.ty);
                         if self.type_is_aggregate(&resolved) {
+                            if self.find_var_by_id(*id).is_some_and(|v| {
+                                matches!(v.ownership, crate::hir::Ownership::Borrowed)
+                            }) {
+                                return Err(format!(
+                                    "{}: cannot assign `{}` to `{}`: `{}` is a borrow, \
+                                     not an owner (a parameter borrows unless the \
+                                     function consumes it); assign a clone \
+                                     (`{} is copy {}`) instead",
+                                    span.loc(),
+                                    name,
+                                    tname,
+                                    name,
+                                    tname,
+                                    name,
+                                ));
+                            }
                             self.mark_var_moved_checked(
                                 *id,
                                 *name,
@@ -723,85 +742,161 @@ impl Typer {
         callee: crate::intern::Symbol,
         access: &[Option<crate::ast::AccessMod>],
         parts: &[&hir::Expr],
+        is_method: bool,
         span: crate::ast::Span,
     ) -> Result<(), String> {
+        use crate::typer::place::{Place, place_of_expr};
         let mutates = self
             .fn_param_mutates
             .get(&callee)
             .cloned()
             .unwrap_or_default();
-        let mut consumed: Vec<(usize, crate::hir::DefId, crate::intern::Symbol)> = Vec::new();
-        let mut borrowed: Vec<(usize, crate::hir::DefId, crate::intern::Symbol)> = Vec::new();
+        struct ArgPlace {
+            slot: usize,
+            place: Place,
+            consuming: bool,
+            clonable: bool,
+        }
+        let mut places: Vec<ArgPlace> = Vec::new();
         for (i, a) in parts.iter().enumerate() {
             let src = Self::peel_move_wrappers(a);
-            if let hir::ExprKind::Var(id, vname) = &src.kind {
+            if let Some(place) = place_of_expr(src) {
                 let resolved = self.infer_ctx.resolve(&src.ty);
                 if !self.type_is_aggregate(&resolved) && !Self::expr_type_needs_drop(&resolved) {
                     continue;
                 }
-                if matches!(access.get(i), Some(Some(crate::ast::AccessMod::Take))) {
-                    consumed.push((i, *id, *vname));
-                } else {
-                    borrowed.push((i, *id, *vname));
-                }
+                places.push(ArgPlace {
+                    slot: i,
+                    place,
+                    consuming: matches!(access.get(i), Some(Some(crate::ast::AccessMod::Take))),
+                    clonable: resolved.is_value_clonable(),
+                });
             }
         }
-        for (ci, cid, cname) in &consumed {
+        let shown_callee = crate::typer::Typer::display_fn_name(&callee.as_str()).to_string();
+
+        for p in &places {
+            if p.place.is_root() {
+                continue;
+            }
+            let is_recv = is_method && p.slot == 0;
+            let is_mut = mutates.get(p.slot).copied().unwrap_or(false);
+            if is_mut && is_recv {
+                return Err(format!(
+                    "{}: `{}` mutates its receiver, but the receiver here is the \
+                     nested place `{}` — the method would act on a copy and the \
+                     mutation would be silently lost; bind the value out, mutate \
+                     it, and write it back",
+                    span.loc(),
+                    shown_callee,
+                    p.place.render(),
+                ));
+            }
+            if is_mut {
+                return Err(format!(
+                    "{}: cannot pass `{}` to `{}`, which mutates it through this \
+                     parameter — a field or element read passes a copy, so the \
+                     mutation would be silently lost; pass the whole variable, or \
+                     bind the value out, mutate it, and write it back",
+                    span.loc(),
+                    p.place.render(),
+                    shown_callee,
+                ));
+            }
+            if p.consuming && (is_recv || !p.clonable) {
+                return Err(format!(
+                    "{}: `{}` is moved into this call to `{}` (consuming \
+                     parameter), but it is a field or element of a value that \
+                     still owns it — the call would create two owners; bind it \
+                     out with `take` first, or pass a clone (`copy {}`)",
+                    span.loc(),
+                    p.place.render(),
+                    shown_callee,
+                    p.place.render(),
+                ));
+            }
+        }
+
+        for p in &places {
+            if !p.consuming || !p.place.is_root() {
+                continue;
+            }
             for (j, a) in parts.iter().enumerate() {
-                if j == *ci {
+                if j == p.slot {
                     continue;
                 }
                 let mut ids = std::collections::HashSet::new();
                 Self::collect_hir_var_ids_expr(a, &mut ids);
-                if ids.contains(cid) {
+                if ids.contains(&p.place.root) {
                     return Err(format!(
                         "{}: `{}` is moved into this call to `{}` (consuming parameter) \
                          and used again in the same argument list — the call would \
                          create two owners of one value; pass a clone (`copy {}`) for \
                          one of the uses",
                         span.loc(),
-                        cname,
-                        crate::typer::Typer::display_fn_name(&callee.as_str()),
-                        cname,
+                        p.place.render(),
+                        shown_callee,
+                        p.place.render(),
                     ));
                 }
             }
         }
-        for (ai, aid, aname) in &borrowed {
-            for (bi, bid, _) in &borrowed {
-                if bi <= ai || bid != aid {
+
+        for (ai, a) in places.iter().enumerate() {
+            for b in places.iter().skip(ai + 1) {
+                if a.consuming || b.consuming {
                     continue;
                 }
-                let a_mut = mutates.get(*ai).copied().unwrap_or(false);
-                let b_mut = mutates.get(*bi).copied().unwrap_or(false);
+                if !a.place.overlaps(&b.place) {
+                    continue;
+                }
+                let a_mut = mutates.get(a.slot).copied().unwrap_or(false);
+                let b_mut = mutates.get(b.slot).copied().unwrap_or(false);
                 if a_mut || b_mut {
+                    if a.place.proj == b.place.proj {
+                        return Err(format!(
+                            "{}: `{}` is passed twice to `{}`, and the call mutates it \
+                             through one of those parameters — the two parameters would \
+                             alias one value while it is being modified; pass a clone \
+                             (`copy {}`) for the read-only use",
+                            span.loc(),
+                            a.place.render(),
+                            shown_callee,
+                            a.place.render(),
+                        ));
+                    }
                     return Err(format!(
-                        "{}: `{}` is passed twice to `{}`, and the call mutates it \
-                         through one of those parameters — the two parameters would \
-                         alias one value while it is being modified; pass a clone \
-                         (`copy {}`) for the read-only use",
+                        "{}: `{}` and `{}` overlap, and this call to `{}` mutates one \
+                         of them — the parameters would alias one value while it is \
+                         being modified; pass a clone (`copy`) for the read-only use",
                         span.loc(),
-                        aname,
-                        crate::typer::Typer::display_fn_name(&callee.as_str()),
-                        aname,
+                        a.place.render(),
+                        b.place.render(),
+                        shown_callee,
                     ));
                 }
             }
         }
-        for (i, a) in parts.iter().enumerate() {
-            let src = Self::peel_move_wrappers(a);
-            if let hir::ExprKind::Var(id, vname) = &src.kind
-                && let Some((_, loop_span)) = self.iter_borrowed.get(id)
-                && mutates.get(i).copied().unwrap_or(false)
-            {
+
+        for p in &places {
+            if !mutates.get(p.slot).copied().unwrap_or(false) {
+                continue;
+            }
+            if let Some((borrowed_place, loop_span)) = self.iter_borrow_conflict(&p.place) {
+                let what = if borrowed_place.proj == p.place.proj {
+                    "it".to_string()
+                } else {
+                    format!("`{}`", borrowed_place.render())
+                };
                 return Err(format!(
                     "{}: cannot pass `{}` to `{}`, which mutates it, while the `for` \
-                     loop at {} is iterating it; iterate by index, or collect the \
+                     loop at {} is iterating {}; iterate by index, or collect the \
                      changes and apply them after the loop",
                     span.loc(),
-                    vname,
-                    crate::typer::Typer::display_fn_name(&callee.as_str()),
+                    p.place.render(),
+                    shown_callee,
                     loop_span.loc(),
+                    what,
                 ));
             }
         }
@@ -813,7 +908,7 @@ impl Typer {
             hir::ExprKind::Call(_, name, args) => {
                 if let Some(access) = self.fn_param_access.get(name).cloned() {
                     let parts: Vec<&hir::Expr> = args.iter().collect();
-                    self.check_call_arg_aliasing(*name, &access, &parts, expr.span)?;
+                    self.check_call_arg_aliasing(*name, &access, &parts, false, expr.span)?;
                     for (i, a) in args.iter().enumerate() {
                         if matches!(access.get(i), Some(Some(crate::ast::AccessMod::Take)))
                             && let hir::ExprKind::Var(id, vname) = &a.kind
@@ -850,18 +945,24 @@ impl Typer {
                             m,
                         ));
                     }
-                    if let hir::ExprKind::Var(id, vname) = &recv.kind
-                        && let Some((_, loop_span)) = self.iter_borrowed.get(id)
+                    if let Some(pl) = crate::typer::place::place_of_expr(recv)
+                        && let Some((borrowed, loop_span)) = self.iter_borrow_conflict(&pl)
                     {
+                        let what = if borrowed.proj == pl.proj {
+                            "it".to_string()
+                        } else {
+                            format!("`{}`", borrowed.render())
+                        };
                         return Err(format!(
                             "{}: cannot call `{}` on `{}` while the `for` loop at {} is \
-                             iterating it — the iteration would observe (or outlive) the \
+                             iterating {} — the iteration would observe (or outlive) the \
                              modification; iterate by index, or collect the changes and \
                              apply them after the loop",
                             expr.span.loc(),
                             m,
-                            vname,
+                            pl.render(),
                             loop_span.loc(),
+                            what,
                         ));
                     }
                 }
@@ -917,9 +1018,8 @@ impl Typer {
                     self.record_take_moves_in_expr(a)?;
                 }
             }
-            hir::ExprKind::Method(recv, ty_name, m_name, args) => {
-                let mangled: crate::intern::Symbol =
-                    format!("{}_{}", ty_name.as_str(), m_name.as_str()).into();
+            hir::ExprKind::Method(recv, mangled_name, m_name, args) => {
+                let mangled: crate::intern::Symbol = *mangled_name;
                 let recv_mutated = self
                     .fn_param_mutates
                     .get(&mangled)
@@ -935,29 +1035,31 @@ impl Typer {
                         m_name,
                     ));
                 }
-                if let hir::ExprKind::Var(id, vname) = &recv.kind
-                    && let Some((_, loop_span)) = self.iter_borrowed.get(id)
-                    && self
-                        .fn_param_mutates
-                        .get(&mangled)
-                        .and_then(|s| s.first().copied())
-                        .unwrap_or(false)
+                if recv_mutated
+                    && let Some(pl) = crate::typer::place::place_of_expr(recv)
+                    && let Some((borrowed, loop_span)) = self.iter_borrow_conflict(&pl)
                 {
+                    let what = if borrowed.proj == pl.proj {
+                        "it".to_string()
+                    } else {
+                        format!("`{}`", borrowed.render())
+                    };
                     return Err(format!(
                         "{}: cannot call `{}` on `{}` while the `for` loop at {} is \
-                         iterating it — the method mutates its receiver; iterate by \
+                         iterating {} — the method mutates its receiver; iterate by \
                          index, or collect the changes and apply them after the loop",
                         expr.span.loc(),
                         m_name,
-                        vname,
+                        pl.render(),
                         loop_span.loc(),
+                        what,
                     ));
                 }
                 if let Some(access) = self.fn_param_access.get(&mangled).cloned() {
                     let mut parts: Vec<&hir::Expr> = Vec::with_capacity(args.len() + 1);
                     parts.push(recv);
                     parts.extend(args.iter());
-                    self.check_call_arg_aliasing(mangled, &access, &parts, expr.span)?;
+                    self.check_call_arg_aliasing(mangled, &access, &parts, true, expr.span)?;
                     if matches!(access.first(), Some(Some(crate::ast::AccessMod::Take)))
                         && let hir::ExprKind::Var(id, vname) = &recv.kind
                     {

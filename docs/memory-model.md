@@ -11,11 +11,14 @@ it disagrees with this file. Rules are numbered `M1`–`M11` and each is pinned 
 a conformance test in `tests/memory_model.rs`, `tests/access_semantics.rs`, or
 `tests/semantics_regression.rs`.
 
-Known gaps between this contract and the implementation are tracked as `M-1`
-through `M-16` in [`roadmap.md`](roadmap.md#memory-and-ownership). They all sit
-at projection and aliasing seams — constructor-literal fields, container
-elements, overlapping call arguments, iteration. Moves of *variables* are exact;
-moves and borrows of *places* are not yet.
+Known gaps between this contract and the implementation are tracked in
+[`roadmap.md`](roadmap.md#memory-and-ownership). Since [146], moves and borrows
+are tracked per **place** (`root.field.elem…`) with overlap and disjointness
+queries: overlapping call arguments, iteration borrows of field places and
+maps, and moves through projections are checked, and disjoint sibling places
+stay independent. What remains open is expression-position ergonomics —
+element reads still deep-copy (`M-4r`), and zero-copy views need second-class
+borrows (`M-13`).
 
 ## 1. Design pillars
 
@@ -146,12 +149,21 @@ the entire lifetime story, and it is why no lifetime annotations exist.
     0
 ```
 
-The simplification "a borrow ends with its statement" is not yet compositional:
-loops and multi-argument calls are statements containing sub-statements where
-two borrows of one place can coexist. The model needs an explicit **exclusivity
-axiom** — at any program point a place has either one mutable borrow or any
-number of read borrows — enforced *within* statements as well as across them.
-That is `M-3` and `M-5`.
+The **exclusivity axiom** — at any program point a place has either one
+mutable borrow or any number of read borrows — is enforced *within* statements
+as well as across them ([146]): one call may not receive overlapping places
+when a parameter mutates or consumes one of them, a `for` loop takes an
+iteration borrow of the iterated *place* (a variable, a field like `s.items`,
+a map, or an `Iter` source) that rejects overlapping mutation, moves, and
+reassignment in the body — while leaving disjoint sibling places free — and a
+parameter that was inferred borrowing cannot be moved out of (`take v`,
+rebinding it into an owner, or capturing it in a constructor either makes the
+parameter consuming or is a compile error). Two deliberate exceptions remain:
+container-method argument reads (`v.set(i, v.get(j))`) evaluate before the
+receiver's mutable borrow activates, and a mutating call argument must be a
+whole variable — field and element reads pass copies, so passing one to a
+mutating or consuming parameter is rejected outright rather than silently
+losing the update.
 
 ### M6 — parameters borrow unless the callee consumes
 
@@ -169,10 +181,17 @@ ownership:
     0
 ```
 
+Binding a borrowed parameter to a local (`s is v`) does not mint an owner: the
+new binding borrows too, so the callee can rename or restructure without
+double-freeing the caller's value ([146] — this used to create a second owner
+and free twice). `s is take v` on a borrowed parameter is a compile error that
+suggests declaring the parameter `take`.
+
 If the callee's body **consumes** the parameter — returns it, binds it, stores
-it in something that outlives the call, sends it on a channel, or moves it into
-a task — the parameter is inferred **consuming**, and the call site moves the
-argument exactly as `take` would:
+it in something that outlives the call, sends it on a channel, moves it into
+a task, or captures it in a constructor (a struct literal, tuple, array, or
+`vec(...)` takes ownership of its parts, [146]) — the parameter is inferred
+**consuming**, and the call site moves the argument exactly as `take` would:
 
 ```jinn
 *ident(v) returns Vec of i64

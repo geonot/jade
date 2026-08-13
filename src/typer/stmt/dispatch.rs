@@ -394,12 +394,56 @@ impl Typer {
                     ownership = self.ownership_with_mod(&ty, access_mod)?;
                 }
 
-                let partial_move: Option<(DefId, Symbol)> =
+                if matches!(access_mod, Some(ast::AccessMod::Take))
+                    && let Some(pl) = crate::typer::place::place_of_expr(&value)
+                    && pl.proj.len() > 1
+                {
+                    return Err(format!(
+                        "{}: `take` of the nested place `{}` is not supported: take \
+                         the outer field first, or clone it (`{} is copy {}`)",
+                        b.span.loc(),
+                        pl.render(),
+                        b.name,
+                        pl.render(),
+                    ));
+                }
+
+                if access_mod.is_none()
+                    && let Some(pl) = crate::typer::place::place_of_expr(&value)
+                    && pl.is_root()
+                    && let Some(info) = self.find_var_by_id(pl.root)
+                    && matches!(info.ownership, Ownership::Borrowed)
+                    && self.needs_drop(&resolved_bind_ty)
+                {
+                    ownership = Ownership::Borrowed;
+                }
+
+                if matches!(access_mod, Some(ast::AccessMod::Take))
+                    && let Some(pl) = crate::typer::place::place_of_expr(&value)
+                    && pl.is_root()
+                    && let Some(info) = self.find_var_by_id(pl.root)
+                    && matches!(info.ownership, Ownership::Borrowed)
+                {
+                    return Err(format!(
+                        "{}: cannot `take` from `{}`: it is a borrow, not an owner \
+                         (a parameter borrows unless the function consumes it); \
+                         declare the parameter `take` to consume it at call sites, \
+                         or bind a clone (`{} is copy {}`)",
+                        b.span.loc(),
+                        pl.render(),
+                        b.name,
+                        pl.render(),
+                    ));
+                }
+
+                let partial_move: Option<crate::typer::place::Place> =
                     if matches!(access_mod, Some(ast::AccessMod::Take))
                         && let hir::ExprKind::Field(parent, field, _) = &value.kind
-                        && let hir::ExprKind::Var(parent_id, _) = &parent.kind
+                        && let hir::ExprKind::Var(parent_id, parent_name) = &parent.kind
                     {
-                        Some((*parent_id, *field))
+                        let mut p = crate::typer::place::Place::var(*parent_id, *parent_name);
+                        p.proj.push(crate::typer::place::Proj::Field(*field));
+                        Some(p)
                     } else {
                         None
                     };
@@ -426,8 +470,12 @@ impl Typer {
                             scheme: None,
                         },
                     );
-                    if let Some((pid, fname)) = partial_move {
-                        self.mark_field_moved(pid, fname);
+                    if let Some(pl) = partial_move {
+                        self.mark_place_moved_checked(
+                            pl,
+                            crate::typer::MoveReason::AssignMove(b.name, b.span),
+                            b.span,
+                        )?;
                     }
                     Ok(hir::Stmt::Bind(hir::Bind {
                         def_id: id,
@@ -469,8 +517,12 @@ impl Typer {
                     if matches!(access_mod, Some(ast::AccessMod::Const)) {
                         self.const_vars.insert(id);
                     }
-                    if let Some((pid, fname)) = partial_move {
-                        self.mark_field_moved(pid, fname);
+                    if let Some(pl) = partial_move {
+                        self.mark_place_moved_checked(
+                            pl,
+                            crate::typer::MoveReason::AssignMove(b.name, b.span),
+                            b.span,
+                        )?;
                     }
                     Ok(hir::Stmt::Bind(hir::Bind {
                         def_id: id,
@@ -585,10 +637,21 @@ impl Typer {
                 self.collect_unify_error(r);
                 let hv = self.maybe_coerce_to(hv, &ht.ty);
 
-                if let hir::ExprKind::Field(parent, field, _) = &ht.kind
-                    && let hir::ExprKind::Var(parent_id, _) = &parent.kind
-                {
-                    self.clear_field_moved(*parent_id, field);
+                if let Some(pl) = crate::typer::place::place_of_expr(&ht) {
+                    if let Some((borrowed, loop_span)) = self.iter_borrow_conflict(&pl) {
+                        return Err(format!(
+                            "{}: cannot assign to `{}` while the `for` loop at {} is \
+                             iterating `{}`; iterate by index, or collect the changes \
+                             and apply them after the loop",
+                            span.loc(),
+                            pl.render(),
+                            loop_span.loc(),
+                            borrowed.render(),
+                        ));
+                    }
+                    if !pl.is_root() {
+                        self.moves.clear_place(&pl);
+                    }
                 }
                 Ok(hir::Stmt::Assign(ht, hv, *span))
             }
@@ -811,24 +874,18 @@ impl Typer {
                     (None, None, None)
                 };
 
-                let iter_guard =
-                    if is_collection_for && let hir::ExprKind::Var(vid, vname) = &iter.kind {
-                        let prev = self.iter_borrowed.insert(*vid, (*vname, f.span));
-                        Some((*vid, prev))
-                    } else {
-                        None
-                    };
+                let iter_guard = if is_collection_for
+                    && let Some(pl) = crate::typer::place::place_of_expr(&iter)
+                {
+                    self.iter_borrowed.push((pl, f.span));
+                    true
+                } else {
+                    false
+                };
                 let pre_loop = self.snapshot_moved_fields();
                 let body_res = self.lower_block_no_scope(&f.body, ret_ty);
-                if let Some((vid, prev)) = iter_guard {
-                    match prev {
-                        Some(p) => {
-                            self.iter_borrowed.insert(vid, p);
-                        }
-                        None => {
-                            self.iter_borrowed.remove(&vid);
-                        }
-                    }
+                if iter_guard {
+                    self.iter_borrowed.pop();
                 }
                 let mut body = body_res?;
                 self.check_loop_body_moves(&pre_loop, &outer_ids, f.span)?;

@@ -40,6 +40,7 @@ impl Typer {
         ret_ty: &Type,
     ) -> Result<hir::Stmt, String> {
         let span = f.span;
+        let borrow_place = crate::typer::place::place_of_expr(&iter_expr);
 
         let mut option_type_map = HashMap::new();
         option_type_map.insert("T".into(), elem_ty.clone());
@@ -111,7 +112,17 @@ impl Typer {
                 scheme: None,
             },
         );
-        let mut body = self.lower_block_no_scope(&f.body, ret_ty)?;
+        let guard = if let Some(pl) = borrow_place {
+            self.iter_borrowed.push((pl, f.span));
+            true
+        } else {
+            false
+        };
+        let body_res = self.lower_block_no_scope(&f.body, ret_ty);
+        if guard {
+            self.iter_borrowed.pop();
+        }
+        let mut body = body_res?;
         self.finalize_loop_body_drops(&mut body);
         self.pop_scope();
 
@@ -159,6 +170,7 @@ impl Typer {
         let span = f.span;
         let key_ty = key_ty.clone();
         let val_ty = val_ty.clone();
+        let borrow_place = crate::typer::place::place_of_expr(&map_expr);
 
         let map_id = self.fresh_id();
         let map_var = "__map_iter".to_string();
@@ -308,7 +320,17 @@ impl Typer {
             span,
         });
 
-        let mut user_body = self.lower_block_no_scope(&f.body, ret_ty)?;
+        let guard = if let Some(pl) = borrow_place {
+            self.iter_borrowed.push((pl, f.span));
+            true
+        } else {
+            false
+        };
+        let user_body_res = self.lower_block_no_scope(&f.body, ret_ty);
+        if guard {
+            self.iter_borrowed.pop();
+        }
+        let mut user_body = user_body_res?;
         self.finalize_loop_body_drops(&mut user_body);
         self.pop_scope();
 

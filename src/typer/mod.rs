@@ -38,14 +38,11 @@ mod consume_infer;
 mod errset;
 mod mono;
 mod mutate_infer;
+pub(crate) mod place;
 mod resolve;
 pub(crate) mod unify;
 
-#[derive(Clone, Default)]
-pub(crate) struct MoveState {
-    pub(crate) fields: std::collections::HashMap<DefId, std::collections::HashSet<Symbol>>,
-    pub(crate) vars: std::collections::HashMap<DefId, MoveReason>,
-}
+pub(crate) type MoveState = place::MoveSet;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum MoveReason {
@@ -123,9 +120,7 @@ pub struct Typer {
 
     pub(crate) fn_param_access: IndexMap<Symbol, Vec<Option<ast::AccessMod>>>,
 
-    pub(crate) moved_fields: std::collections::HashMap<DefId, std::collections::HashSet<Symbol>>,
-
-    pub(crate) moved_vars: std::collections::HashMap<DefId, MoveReason>,
+    pub(crate) moves: place::MoveSet,
 
     pub(crate) current_fn_param_ids: std::collections::HashSet<DefId>,
 
@@ -163,7 +158,7 @@ pub struct Typer {
 
     pub(crate) instantiated_generics: std::collections::HashSet<Symbol>,
 
-    pub(crate) iter_borrowed: std::collections::HashMap<DefId, (Symbol, crate::ast::Span)>,
+    pub(crate) iter_borrowed: Vec<(place::Place, crate::ast::Span)>,
 
     pub(crate) suppress_move_marking: u32,
 
@@ -246,8 +241,7 @@ impl Typer {
             fn_param_names: IndexMap::new(),
             fn_defaults: IndexMap::new(),
             fn_param_access: IndexMap::new(),
-            moved_fields: std::collections::HashMap::new(),
-            moved_vars: std::collections::HashMap::new(),
+            moves: place::MoveSet::default(),
             current_fn_param_ids: std::collections::HashSet::new(),
             suppress_whole_struct_check: 0,
             declared_type_names: std::collections::HashSet::new(),
@@ -269,7 +263,7 @@ impl Typer {
             root_pkg_id: None,
             dep_pkg_ids: std::collections::HashMap::new(),
             scoped_use_map: crate::pkgid::ScopedUseMap::new(),
-            iter_borrowed: std::collections::HashMap::new(),
+            iter_borrowed: Vec::new(),
             suppress_move_marking: 0,
             fn_param_mutates: IndexMap::new(),
             fn_param_consume_sites: IndexMap::new(),
@@ -413,30 +407,32 @@ impl Typer {
         outer_ids: &std::collections::HashSet<DefId>,
         span: crate::ast::Span,
     ) -> Result<(), String> {
-        for id in self.moved_vars.keys() {
-            if !pre.vars.contains_key(id) && outer_ids.contains(id) {
-                return Err(format!(
-                    "{}: value moved inside a loop body (by `take`, an aggregate \
-                     assignment, a consuming call, or a channel send) would be moved \
-                     again on the next iteration; move a fresh value each iteration or \
-                     reassign it before the loop repeats",
-                    span.loc(),
-                ));
-            }
-        }
-        for (id, fields) in &self.moved_fields {
+        for (id, entries) in self.moves.roots() {
             if !outer_ids.contains(id) {
                 continue;
             }
-            let pre_fields = pre.fields.get(id);
-            for f in fields {
-                if pre_fields.map(|pf| !pf.contains(f)).unwrap_or(true) {
+            for e in entries {
+                let pre_has = pre
+                    .entries_for(*id)
+                    .iter()
+                    .any(|p| p.place.proj == e.place.proj);
+                if pre_has {
+                    continue;
+                }
+                if e.place.is_root() {
                     return Err(format!(
-                        "{}: field moved out inside a loop body would be moved \
-                         again on the next iteration; reassign it before the loop repeats",
+                        "{}: value moved inside a loop body (by `take`, an aggregate \
+                         assignment, a consuming call, or a channel send) would be moved \
+                         again on the next iteration; move a fresh value each iteration or \
+                         reassign it before the loop repeats",
                         span.loc(),
                     ));
                 }
+                return Err(format!(
+                    "{}: field moved out inside a loop body would be moved \
+                     again on the next iteration; reassign it before the loop repeats",
+                    span.loc(),
+                ));
             }
         }
         Ok(())
@@ -580,21 +576,52 @@ impl Typer {
         name.split("__G_").next().unwrap_or(name)
     }
 
-    pub(crate) fn mark_field_moved(&mut self, parent: DefId, field: Symbol) {
-        self.moved_fields.entry(parent).or_default().insert(field);
+    pub(crate) fn iter_borrow_conflict(
+        &self,
+        place: &place::Place,
+    ) -> Option<&(place::Place, crate::ast::Span)> {
+        self.iter_borrowed
+            .iter()
+            .rev()
+            .find(|(b, _)| b.overlaps(place))
     }
 
-    pub(crate) fn clear_field_moved(&mut self, parent: DefId, field: &Symbol) {
-        if let Some(set) = self.moved_fields.get_mut(&parent) {
-            set.remove(field);
-            if set.is_empty() {
-                self.moved_fields.remove(&parent);
-            }
+    pub(crate) fn mark_place_moved_checked(
+        &mut self,
+        pl: place::Place,
+        reason: MoveReason,
+        at: crate::ast::Span,
+    ) -> Result<(), String> {
+        if self.suppress_move_marking == 0
+            && let Some((borrowed, loop_span)) = self.iter_borrow_conflict(&pl)
+        {
+            let what = if borrowed.proj == pl.proj {
+                "it".to_string()
+            } else {
+                format!("`{}`", borrowed.render())
+            };
+            return Err(format!(
+                "{}: cannot move `{}` while the `for` loop at {} is iterating {}; \
+                 iterate by index, or restructure so the move happens outside the loop",
+                at.loc(),
+                pl.render(),
+                loop_span.loc(),
+                what,
+            ));
         }
-    }
-
-    pub(crate) fn mark_var_moved(&mut self, id: DefId, reason: MoveReason) {
-        self.moved_vars.insert(id, reason);
+        if let Some(defer_span) = self.defer_read_vars.get(&pl.root) {
+            return Err(format!(
+                "{}: cannot move `{}`: it is read by the `defer` registered at {}; \
+                 move it before the defer is registered, or clone it into the defer",
+                at.loc(),
+                pl.render(),
+                defer_span.loc(),
+            ));
+        }
+        if self.suppress_move_marking == 0 {
+            self.moves.record(pl, reason);
+        }
+        Ok(())
     }
 
     pub(crate) fn mark_var_moved_checked(
@@ -604,63 +631,25 @@ impl Typer {
         reason: MoveReason,
         at: crate::ast::Span,
     ) -> Result<(), String> {
-        if self.suppress_move_marking == 0
-            && let Some((_, loop_span)) = self.iter_borrowed.get(&id)
-        {
-            return Err(format!(
-                "{}: cannot move `{}` while the `for` loop at {} is iterating it; \
-                 iterate by index, or restructure so the move happens outside the loop",
-                at.loc(),
-                name,
-                loop_span.loc(),
-            ));
-        }
-        if let Some(defer_span) = self.defer_read_vars.get(&id) {
-            return Err(format!(
-                "{}: cannot move `{}`: it is read by the `defer` registered at {}; \
-                 move it before the defer is registered, or clone it into the defer",
-                at.loc(),
-                name,
-                defer_span.loc(),
-            ));
-        }
-        if self.suppress_move_marking == 0 {
-            self.mark_var_moved(id, reason);
-        }
-        Ok(())
+        self.mark_place_moved_checked(place::Place::var(id, name), reason, at)
     }
 
     pub(crate) fn clear_all_moved_for(&mut self, parent: DefId) {
-        self.moved_fields.remove(&parent);
-        self.moved_vars.remove(&parent);
+        self.moves.clear_root(parent);
     }
 
     pub(crate) fn snapshot_moved_fields(&self) -> MoveState {
-        MoveState {
-            fields: self.moved_fields.clone(),
-            vars: self.moved_vars.clone(),
-        }
+        self.moves.clone()
     }
 
     pub(crate) fn restore_moved_fields(&mut self, snap: MoveState) {
-        self.moved_fields = snap.fields;
-        self.moved_vars = snap.vars;
+        self.moves = snap;
     }
 
     pub(crate) fn merge_moved_fields_union(&mut self, branches: &[MoveState]) {
-        let mut out_fields = self.moved_fields.clone();
-        let mut out_vars = self.moved_vars.clone();
         for br in branches {
-            for (id, fields) in &br.fields {
-                out_fields
-                    .entry(*id)
-                    .or_default()
-                    .extend(fields.iter().cloned());
-            }
-            out_vars.extend(br.vars.iter().map(|(k, v)| (*k, *v)));
+            self.moves.union(br);
         }
-        self.moved_fields = out_fields;
-        self.moved_vars = out_vars;
     }
 
     fn ownership_for_type(ty: &Type) -> Ownership {

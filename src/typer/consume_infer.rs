@@ -301,6 +301,13 @@ impl crate::typer::Typer {
     fn scan_expr_sinks(&self, e: &Expr, alias: &AliasMap, escaping: &mut Escapes, cond: bool) {
         match e {
             Expr::Call(callee, args, _) => {
+                if let Expr::Ident(cn, _) = &**callee
+                    && matches!(cn.as_str().as_str(), "vec" | "vector")
+                {
+                    for a in args {
+                        escaping.record(Self::expr_alias(a, alias), a.span(), cond);
+                    }
+                }
                 if !args.iter().any(|a| matches!(a, Expr::NamedArg(..))) {
                     let fname = match &**callee {
                         Expr::Ident(n, _) => Some(*n),
@@ -400,16 +407,20 @@ impl crate::typer::Typer {
                     self.scan_expr_sinks(arm, alias, escaping, true);
                 }
             }
-            Expr::Array(es, _)
-            | Expr::Tuple(es, _)
-            | Expr::Syscall(es, _)
-            | Expr::Einsum(_, es, _) => {
+            Expr::Array(es, _) | Expr::Tuple(es, _) => {
+                for x in es {
+                    escaping.record(Self::expr_alias(x, alias), x.span(), cond);
+                    self.scan_expr_sinks(x, alias, escaping, cond);
+                }
+            }
+            Expr::Syscall(es, _) | Expr::Einsum(_, es, _) => {
                 for x in es {
                     self.scan_expr_sinks(x, alias, escaping, cond);
                 }
             }
             Expr::Struct(_, inits, _) => {
                 for fi in inits {
+                    escaping.record(Self::expr_alias(&fi.value, alias), fi.value.span(), cond);
                     self.scan_expr_sinks(&fi.value, alias, escaping, cond);
                 }
             }

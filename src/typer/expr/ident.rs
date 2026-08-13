@@ -54,13 +54,20 @@ impl Typer {
                     let def_id = v.def_id;
                     let mono_ty = v.ty.clone();
                     let scheme_clone = v.scheme.clone();
-                    if self.suppress_moved_field_check == 0
+                    let moved_parts: Vec<String> = if self.suppress_moved_field_check == 0
                         && self.suppress_whole_struct_check == 0
-                        && let Some(moved) = self.moved_fields.get(&def_id)
-                        && !moved.is_empty()
                     {
-                        let mut fields: Vec<String> =
-                            moved.iter().map(|f| f.as_str().to_string()).collect();
+                        self.moves
+                            .entries_for(def_id)
+                            .iter()
+                            .filter(|e| !e.place.is_root())
+                            .map(|e| e.place.render_proj())
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+                    if !moved_parts.is_empty() {
+                        let mut fields = moved_parts;
                         fields.sort();
                         return Err(format!(
                             "{}: `{}` cannot be read as a whole: its field{} {} {} moved out \
@@ -84,8 +91,9 @@ impl Typer {
                         ));
                     }
                     if self.suppress_moved_field_check == 0
-                        && let Some(reason) = self.moved_vars.get(&def_id)
+                        && let Some(entry) = self.moves.whole(def_id)
                     {
+                        let reason = &entry.reason;
                         return Err(match reason {
                             crate::typer::MoveReason::TakeExplicit => format!(
                                 "{}: `{}` was moved out by an earlier `take`; \

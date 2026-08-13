@@ -1,4 +1,70 @@
 # Changelog
+- **[146]** (2026-08-12) ownership goes place-based: one lattice for moves and borrows of `root.field.elem…`, four double-frees fixed, and the corpus gave up two silently-broken components
+
+M-6 — the last blocker — plus M-5r. The refactor replaced `moved_vars` +
+`moved_fields` (variable-keyed, single-level) with one place lattice
+(`src/typer/place.rs`): a place is a root binding plus a projection path of
+fields and elements, with overlap and disjointness queries (`s` covers `s.a`
+covers `s.a.b`; `s.a` and `s.b` are disjoint; `v[0]` and `v[1]` are disjoint,
+any dynamic index conservatively overlaps). Every recording, clearing,
+snapshot/merge, and read-check site was ported; the flow-sensitivity
+machinery, loop-repeat check, and all pinned diagnostics are byte-compatible
+at variable granularity. Iteration borrows became a stack of places: `for x in
+s.items`, `for k, v in m` (the map desugar), and `Iter`-trait desugared loops
+now register the iterated place, and moves, mutating calls,
+mutation-through-calls, and reassignment of any *overlapping* place in the
+body are compile errors — while sibling places stay free, which the corpus
+depends on (`loop self.def_names` mutating `self.def_required` in std/args is
+the canonical shape and still compiles). Call-site exclusivity now checks
+argument places: overlapping bare-place arguments where a parameter mutates or
+consumes one of them are rejected; computed arguments (`qsort(a, 0, a.length -
+1)`) evaluate before the call and stay legal, as does the container idiom
+`v.set(i, v.get(j))` (builtin container methods keep two-phase semantics).
+
+Probing each seam before porting it found that most field reads deep-copy at
+runtime (so `f(s.a, s.a)` and constructor field captures were benign copies,
+not the moves the roadmap feared — the checks now match that reality), but
+four shapes were live memory unsafety, all now fixed:
+
+- **Moving out of a borrowed parameter double-freed.** `*peek(v)\n    s is v`
+  minted an owning binding of the caller's value; callee and caller both
+  freed. Now a bind whose source is a borrowed binding borrows too
+  (`Ownership::Borrowed` propagates; no tombstone, no drop), and `s is take v`
+  from a borrow is a compile error that suggests declaring the parameter
+  `take`.
+- **Constructor capture of a borrowed parameter double-freed.** `Box2(v is v)`
+  aliased the parameter into an owning struct. Struct-literal, tuple, array,
+  and `vec(...)` captures now count as escapes in consuming-parameter
+  inference, so such parameters are consuming and call sites move (enum
+  variant payloads already were).
+- **The user-method ownership checks were inert.** The typer double-mangled
+  the method key (`Sink_swallow` became `Sink_swallow_swallow`), so a method
+  that stored its argument — [143]'s M-8 fix — never marked the move and
+  double-freed at runtime; the element-temp-mutation, iterate-while-mutating,
+  and call-aliasing checks for user methods were dead for the same reason. One
+  key fix revived all four.
+- **`take o.inner.data` compiled and SIGSEGVed.** Nested-place `take` was
+  silently unrecorded and miscompiled; it is now a compile error naming the
+  place ("take the outer field first").
+
+Two more shapes were silent lost updates, now compile errors: passing a field
+or element read to a parameter that mutates it (`app(s.a)` mutated a copy),
+and calling a mutating method on a nested receiver (`h.c.bump()` bumped a
+copy). Enforcing those found real corpus bugs: `std/collections`' `Heap` and
+`PriorityQueue` passed `self.data` to their sift helpers — every heap ever
+constructed was an insertion-ordered vector, and no test or program had ever
+noticed; the sifts are now in-place methods and a heap finally pops in sorted
+order. And `apps/physics_engine` ran `integrator.step(world.get($), dt)` —
+sixty frames of physics integrated copies and threw them away; the app now
+binds the body out, steps it, and writes it back.
+
+`tests/place_ownership.rs` (21 tests) pins the four unsafety fixes, the two
+lost-update rules, place-granular iteration borrows for fields/maps/`Iter`,
+sibling-disjointness acceptance, the swap idiom, deep-place reads under moved
+prefixes, and — for the first time — the [143] diagnostics themselves
+("is iterating it", "passed twice"), which had been pinned only by corpus
+compile gates. Residue is filed as M-6r (literal-only element indices,
+ternary arms not snapshotted, pipe move-marking, defer mutation checks).
 - **[145]** (2026-08-12) roadmap remediation: `needs` is checked for real, drops are verified after every Perceus transform, trait impls must conform, `chr` finally means a character, and store filters learn `in`-in-query-blocks and case folding
 
 Six roadmap items closed (C-1, M-7, M-9, T-5r, T-13, S-7), each leaving its

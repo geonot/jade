@@ -151,7 +151,7 @@ type Heap
 
     *push(val)
         self.data.push(val)
-        __sift_up(self.data, self.data.length - 1)
+        self.__sift_up(self.data.length - 1)
 
     *pop
         if self.data.length equals 0
@@ -160,8 +160,36 @@ type Heap
         last is self.data.pop()
         if self.data.length > 0
             self.data.set(0, last)
-            __sift_down(self.data, 0)
+            self.__sift_down(0)
         top
+
+    *__sift_up(i as i64)
+        while i > 0
+            parent is (i - 1) / 2
+            if self.data.get(i) < self.data.get(parent)
+                tmp is self.data.get(i)
+                self.data.set(i, self.data.get(parent))
+                self.data.set(parent, tmp)
+                i is parent
+            else
+                return
+
+    *__sift_down(i as i64)
+        n is self.data.length
+        while true
+            left is 2 * i + 1
+            right is 2 * i + 2
+            smallest is i
+            if left < n and self.data.get(left) < self.data.get(smallest)
+                smallest is left
+            if right < n and self.data.get(right) < self.data.get(smallest)
+                smallest is right
+            if smallest equals i
+                return
+            tmp is self.data.get(i)
+            self.data.set(i, self.data.get(smallest))
+            self.data.set(smallest, tmp)
+            i is smallest
 
     *peek
         if self.data.length equals 0
@@ -177,35 +205,6 @@ type Heap
 *new_heap returns Heap
     Heap(data is vec())
 
-*__sift_up(d as Vec of i64, i as i64)
-    while i > 0
-        parent is (i - 1) / 2
-        if d.get(i) < d.get(parent)
-            tmp is d.get(i)
-            d.set(i, d.get(parent))
-            d.set(parent, tmp)
-            i is parent
-        else
-            return
-
-*__sift_down(d as Vec of i64, i as i64)
-    n is d.length
-    while true
-        left is 2 * i + 1
-        right is 2 * i + 2
-        smallest is i
-        if left < n and d.get(left) < d.get(smallest)
-            smallest is left
-        if right < n and d.get(right) < d.get(smallest)
-            smallest is right
-        if smallest equals i
-            return
-        tmp is d.get(i)
-        d.set(i, d.get(smallest))
-        d.set(smallest, tmp)
-        i is smallest
-
-
 type PqEntry
     priority as i64
     value as i64
@@ -215,7 +214,7 @@ type PriorityQueue
 
     *push(priority as i64, value as i64)
         self.data.push(PqEntry(priority is priority, value is value))
-        __pq_sift_up(self.data, self.data.length - 1)
+        self.__sift_up(self.data.length - 1)
 
     *pop returns PqEntry
         if self.data.length equals 0
@@ -224,8 +223,36 @@ type PriorityQueue
         last is self.data.pop()
         if self.data.length > 0
             self.data.set(0, last)
-            __pq_sift_down(self.data, 0)
+            self.__sift_down(0)
         top
+
+    *__sift_up(i as i64)
+        while i > 0
+            parent is (i - 1) / 2
+            if self.data.get(i).priority < self.data.get(parent).priority
+                tmp is self.data.get(i)
+                self.data.set(i, self.data.get(parent))
+                self.data.set(parent, tmp)
+                i is parent
+            else
+                return
+
+    *__sift_down(i as i64)
+        n is self.data.length
+        while true
+            left is 2 * i + 1
+            right is 2 * i + 2
+            smallest is i
+            if left < n and self.data.get(left).priority < self.data.get(smallest).priority
+                smallest is left
+            if right < n and self.data.get(right).priority < self.data.get(smallest).priority
+                smallest is right
+            if smallest equals i
+                return
+            tmp is self.data.get(i)
+            self.data.set(i, self.data.get(smallest))
+            self.data.set(smallest, tmp)
+            i is smallest
 
     *size
         self.data.length
@@ -235,35 +262,6 @@ type PriorityQueue
 
 *new_priority_queue returns PriorityQueue
     PriorityQueue(data is vec())
-
-*__pq_sift_up(d as Vec of PqEntry, i as i64)
-    while i > 0
-        parent is (i - 1) / 2
-        if d.get(i).priority < d.get(parent).priority
-            tmp is d.get(i)
-            d.set(i, d.get(parent))
-            d.set(parent, tmp)
-            i is parent
-        else
-            return
-
-*__pq_sift_down(d as Vec of PqEntry, i as i64)
-    n is d.length
-    while true
-        left is 2 * i + 1
-        right is 2 * i + 2
-        smallest is i
-        if left < n and d.get(left).priority < d.get(smallest).priority
-            smallest is left
-        if right < n and d.get(right).priority < d.get(smallest).priority
-            smallest is right
-        if smallest equals i
-            return
-        tmp is d.get(i)
-        d.set(i, d.get(smallest))
-        d.set(smallest, tmp)
-        i is smallest
-
 
 type LruCache
     capacity as i64

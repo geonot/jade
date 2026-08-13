@@ -299,24 +299,32 @@ impl Typer {
                 self.suppress_whole_struct_check -= 1;
                 let hobj = hobj_res?;
 
-                if let hir::ExprKind::Var(parent_id, parent_name) = &hobj.kind
-                    && self.suppress_moved_field_check == 0
-                    && let Some(moved) = self.moved_fields.get(parent_id)
-                    && moved.contains(field)
+                if self.suppress_moved_field_check == 0
+                    && let Some(mut read_place) = crate::typer::place::place_of_expr(&hobj)
                 {
-                    return Err(format!(
-                        "{}: use of moved field `{}.{}`: the field was moved out earlier \
-                         (binding an aggregate field moves it, as `take` does); to keep \
-                         it, clone at the move site (`copy {}.{}`), or reassign \
-                         `{}.{}` before reading it",
-                        span.loc(),
-                        parent_name,
-                        field,
-                        parent_name,
-                        field,
-                        parent_name,
-                        field,
-                    ));
+                    read_place
+                        .proj
+                        .push(crate::typer::place::Proj::Field(*field));
+                    let hit = self
+                        .moves
+                        .covering(&read_place)
+                        .filter(|e| !e.place.is_root())
+                        .map(|e| e.place.render())
+                        .or_else(|| self.moves.within(&read_place).map(|e| e.place.render()));
+                    if let Some(moved_place) = hit {
+                        let read = read_place.render();
+                        return Err(format!(
+                            "{}: use of moved field `{}`: `{}` was moved out earlier \
+                             (binding an aggregate field moves it, as `take` does); to keep \
+                             it, clone at the move site (`copy {}`), or reassign \
+                             `{}` before reading it",
+                            span.loc(),
+                            read,
+                            moved_place,
+                            moved_place,
+                            moved_place,
+                        ));
+                    }
                 }
                 let resolved_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
 

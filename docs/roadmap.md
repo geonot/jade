@@ -21,7 +21,9 @@ T-3, T-4, T-5, T-6, T-7, T-8, T-9, T-11, T-12, T-14, C-2, C-3, S-4, S-6, and
 X-2, and reduced M-8, T-2, and S-9; the closed items' reproductions now live in
 the test suite and CHANGELOG entry [143]. The 2026-08-12 pass ([145]) closed
 C-1, M-7, M-9, T-5r, T-13, and S-7, leaving the residues filed as C-1r, M-7r,
-M-9r, T-5r2, T-13r, and S-7r below. Items below are what remains.
+M-9r, T-5r2, T-13r, and S-7r below. The 2026-08-12 place-granularity pass
+([146]) closed M-6 and M-5r — see the Memory and ownership header for what it
+fixed along the way — leaving M-6r. Items below are what remains.
 
 ---
 
@@ -30,38 +32,35 @@ M-9r, T-5r2, T-13r, and S-7r below. Items below are what remains.
 The single-owner dataflow core — move-on-assign, branch and loop dataflow,
 consuming-parameter inference, task isolation, drop discipline — holds up under
 attack. [143] closed the worst of the projection/aliasing seams at *variable*
-granularity: constructor expressions tombstone their aggregate sources (old
-M-1), one call site may not consume the same variable twice or consume it and
-read it again (old M-2), a variable may not be passed twice to one call when a
-parameter mutates it (old M-3, backed by a new parameter-mutation inference
-fixpoint), mutating a temporary copy of a container element is a compile error
-(old M-4), and `for x in v` takes an iteration borrow of `v` that rejects
-mutating calls, moves, and mutation-through-calls in the body (old M-5). What
-remains below is *place* granularity — fields, elements, overlapping
-projections — which is `M-6`, plus the residuals it subsumes.
+granularity, and [146] made the analysis **place-based** (old M-6, the last
+blocker here): `moved_vars`/`moved_fields` are one place lattice
+(`src/typer/place.rs`) with overlap and disjointness queries, iteration
+borrows cover field places, map iteration, and `Iter`-desugared loops,
+call-site exclusivity checks argument *places*, and the sweep surfaced and
+fixed four runtime double-frees (moving out of a borrowed parameter,
+constructor capture of a borrowed parameter, the inert user-method consuming
+check, nested `take` SIGSEGV) plus two silently-broken corpus components
+(`std/collections` heaps never sifted; `apps/physics_engine` integrated
+copies). `tests/place_ownership.rs` pins all of it, including the previously
+unpinned [143] diagnostics.
 
-### M-6 (B) Make the analysis place-based rather than variable-based
+### M-6r (m) Place residue
 
-Unify `moved_vars`, `moved_fields`, and the element rules into one *place*
-lattice (`root.field.elem…`) with overlap and disjointness queries. The [143]
-checks are variable-granular: `f(s.a, s.a)` aliasing, moves of
-fields-inside-constructors, iteration borrows of `s.field` or map/`Iter`-trait
-desugared loops, and element-place overlap all pass unchecked today. Every
-residual falls out of place granularity. This is the highest-leverage refactor
-in the compiler.
+What place granularity deliberately does not yet do: element indices are
+compared only when both are integer literals (any dynamic index conservatively
+overlaps); `ternary`/`quaternary` arms do not snapshot move state (moves in
+either arm accumulate unconditionally — pre-existing); `x |> consuming_fn`
+pipes are not move-marked; mutation-through-call during a pending `defer` is
+unchecked (only moves are); and `sim for`/`together` blocks keep their own
+coarser capture rules.
 
 ### M-4r (m) Element reads still deep-copy
 
-The silent lost update is now a compile error, but every nested-container read
-in expression position still pays a hidden O(n) deep copy, and a *read-only*
-method call on an element read still operates on a copy without a diagnostic.
-The honest fix is `M-13`'s second-class borrows.
-
-### M-5r (m) Iteration borrows cover only `for x in <var>`
-
-Map iteration (`for k, v in m`), `Iter`-trait desugared loops, and iteration
-over a field place (`for x in s.items`) do not register an iteration borrow;
-mutation during those loops is still accepted. Falls out of `M-6`.
+The silent lost update is now a compile error — including through call
+arguments and nested method receivers since [146] — but every nested-container
+read in expression position still pays a hidden O(n) deep copy, and a
+*read-only* method call on an element read still operates on a copy without a
+diagnostic. The honest fix is `M-13`'s second-class borrows.
 
 ### M-7r (m) Conditional consumption still over-tombstones
 
@@ -74,15 +73,17 @@ remains open.
 
 ### M-8 (m) Consuming-method inference over-approximates by name for unknown receivers
 
-[143] closed the unsound half: user methods now run through the same
-body-derived escape scan as free functions (fixpoint over methods and free
-functions together), so a method that stores its argument is detected
-regardless of its name. What remains is the imprecise half: the AST-level scan
-in `consume_infer.rs` runs before types exist, so a call `x.set(v)` still
-matches the builtin name list even when `x` will turn out to be a user type
-whose `set` does not store — the enclosing function's parameter is then
-over-inferred as consuming. Resolving this needs receiver types at scan time,
-i.e. moving the scan after inference or into `M-6`'s place framework.
+[143] closed the unsound half of the *inference*: user methods run through the
+same body-derived escape scan as free functions. [146] found that the
+*enforcement* half had been inert the whole time — the typer double-mangled
+the method key (`Type_method_method`), so no user-method call ever consulted
+`fn_param_access`/`fn_param_mutates`; a method that stored its argument
+double-freed at runtime. Fixed; `tests/place_ownership.rs` pins it. What
+remains is the imprecise half: the AST-level scan in `consume_infer.rs` runs
+before types exist, so a call `x.set(v)` still matches the builtin name list
+even when `x` will turn out to be a user type whose `set` does not store — the
+enclosing function's parameter is then over-inferred as consuming. Resolving
+this needs receiver types at scan time.
 
 ### M-9r (m) Drop verifier does not cover the leak side
 
