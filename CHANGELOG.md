@@ -1,4 +1,64 @@
 # Changelog
+- **[158]** (2026-08-14) payload pass — M-17 closes: consuming one payload bind stops leaking its siblings, and probing it surfaced an opt-0 codegen crash, unrecursed enum payload drops, and a ctor-in-push double ownership
+
+M-17's two edges close, and the probe-first sweep around them found three
+pre-existing defects — one crash on plausible code, one silent leak class,
+one latent use-after-free — all fixed. Full suite is 2257 tests; fmt/clippy
+clean; the whole-corpus ASan+LSan sweep stays at zero corruption and the
+leak tail *shrinks* (90 → 88 report lines — the enum-drop fix closed a
+corpus program's leak at both opt levels).
+
+- **M-17: partial payload consumption no longer leaks the siblings.**
+  `match r` / `Pair(x, y) ? n is sink(take x)` suppressed the whole
+  subject's drop (correctly — `x` now owns that field) but leaked `y`, and
+  a temporary subject (`match make()`) leaked the same way with no place to
+  even link. A consuming arm now drops the unconsumed payload at arm end:
+  bound siblings flow through the ordinary scope-drop machinery (they are
+  excluded only when *no* bind was consumed, since then they alias the
+  live subject), and wildcarded fields (`Pair(x, _)`) are rewritten to
+  synthesized binds with a drop appended after the arm's tail. Temporaries
+  need nothing extra — the cleanup lives in the arm. A bind whose field
+  (not whole) moved out stays conservatively excluded (leak-shaped, filed
+  with M-7r's bounded residue).
+- **Codegen emitted basic blocks in storage order and crashed at `--opt 0`.**
+  `match` lowering allocates the merge block before the arm blocks, so an
+  arm-computed value read in the merge block (`n is sink(take x)` inside an
+  arm, `log(n)` after) hit "missing value for ValueId — this is a compiler
+  bug" whenever MIR opts didn't happen to renumber the blocks — every such
+  program failed at `--opt 0` and compiled at `--opt 1+`. Codegen now emits
+  blocks in reverse postorder from the entry (a dominator always precedes
+  the blocks it dominates in RPO, which is exactly the SSA guarantee the
+  emitter needs); unreachable blocks keep storage order at the tail.
+- **Enum drop glue never recursed through named-struct spellings.** Variant
+  payload and struct field types spell a nested enum as `Struct(Inner)`
+  (the parser cannot know `Inner` is an enum), and both the typer's
+  `needs_drop` and codegen's `drop_value` routed that spelling to struct
+  field lookup — which knows nothing for an enum name and silently dropped
+  nothing. An enum payload inside an enum, an enum-typed struct field, and
+  `Vec of Inner` elements all leaked their heap payloads on every drop.
+  Both layers now route enum-named spellings through the enum path (the
+  unifier already treated the two spellings as equal; the drop layers were
+  the ones that didn't).
+- **`xs.push(Leaf(a))` left `drop a` in place — double ownership.** The
+  drop-time consumed scan only recognized *bare variable* arguments to
+  container inserts; a constructor wrapped around the variable was
+  invisible, so the vec element and the dead local both owned `a`'s
+  allocation. Use-after-move checking already rejected later *reads* of `a`
+  (the eager move-marking knew), but the drop stayed: with element drops
+  fixed this became a double free, and before that it was a latent
+  use-after-free (reading the element after `a`'s scope drop). The scan now
+  collects moved roots through ctor/tuple/array wrappers with the same
+  helper the tail-expression path uses.
+- Also: the [157] stale-warning filter now drops a recorded default warning
+  when the variable later acquired an integer/float constraint (`v is
+  vector()` then `v.push(1)` warned "unsolved type variable" even though
+  the element was integer-constrained and defaults silently by design).
+- Pinned in `tests/semantics_regression.rs` (opt-0 match-arm assignment,
+  enum-payload drop recursion at both opt levels, subject-use-after-consume
+  stays rejected, ctor-wrapped push runs clean) and
+  `tests/programs/enum_payload_drops.jn` + expected output joins the
+  snapshot/differential/sanitizer corpora with every shape from this pass.
+
 - **[157]** (2026-08-14) types pass, part 5 — T-1r2 closes and the Types section empties: expected types flow into generic instantiation, generic functions get the `of` call form, and undefined type names in declarations stop passing silently
 
 T-1r2's four reproduced bullets close, and probing them surfaced two

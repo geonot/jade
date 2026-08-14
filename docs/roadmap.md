@@ -83,6 +83,17 @@ is Nothing` was a type error; only the `i64` instantiation ever worked).
 The "unsolved type variable defaulted to i64" warning also stopped firing
 for binds that a later statement resolves — each warning is now tagged with
 its variable and dropped at reporting time if the variable resolved.
+The 2026-08-14 payload pass ([158]) closed M-17 — consuming one bind of a
+multi-field payload now drops the unconsumed siblings (bound or wildcarded)
+at arm end instead of leaking them, for local and temporary subjects alike —
+and fixed three pre-existing defects its probing surfaced: codegen emitted
+basic blocks in storage order and crashed at `--opt 0` on any match arm
+whose value reached the merge block (blocks now emit in reverse postorder);
+enum drop glue never recursed into payload fields spelled as named structs,
+leaking every enum-in-enum, enum-in-struct-field, and Vec-of-enum payload;
+and a constructor wrapped inside a container insert (`xs.push(Leaf(a))`)
+left the source local's drop in place while the element aliased the same
+allocation — a use-after-free once element drops worked.
 Items below are what remains.
 
 ---
@@ -324,14 +335,21 @@ function-typed parameter are invisible to the caps taint; by-view capture
 for provably in-frame closures (step 4); and `copy x` at the capture site is
 spelled "bind `copy x` to a fresh name first" rather than inline.
 
-### M-17 (m) Payload-bind subject links: temporaries and partial payloads
+### M-17 — closed by [158]
 
-[151] made consuming a match-payload bind consume the *subject* (the
-`json.set` rewrap idiom double-freed before). Two edges remain: a subject
-that is a temporary (`match f() ...`) has no place to link, so consuming its
-payload bind is invisible to the temp's drop; and moving one bind of a
-multi-field payload suppresses the whole subject's drop, leaking the fields
-the pattern did not consume. Both are leak-or-reject shaped, not corruption.
+[151] made consuming a match-payload bind consume the *subject*; [158]
+closed both remaining edges. A consuming arm now drops the payload fields
+the pattern did not consume at arm end — unconsumed binds through the
+ordinary scope machinery, wildcarded fields through synthesized binds — so
+the subject's suppressed whole-drop no longer leaks its other fields, and
+the fix covers temporary subjects (`match f() ...`) for free because the
+cleanup lives in the arm, not on the subject's place.
+`tests/programs/enum_payload_drops.jn` pins every shape under the corpus
+sanitizer sweep. Residue: a bind whose *field* was moved out (rather than
+the bind whole) is conservatively excluded from arm-end drops, so its
+remaining fields leak — same class as `M-7r`'s bounded leak side; and a
+consumption in one arm still suppresses the subject's scope-end drop even
+when a different arm runs (that path-sensitivity is `M-7r`).
 
 ---
 

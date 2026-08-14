@@ -1,0 +1,92 @@
+enum Inner
+  Leaf(Vec of i64)
+
+enum Rec
+  Pair(Vec of i64, Vec of i64)
+
+enum Outer
+  Wrap(Inner, Vec of i64)
+
+type Holder
+  f as Inner
+  n as i64
+
+*make() returns Rec
+  a is vector()
+  a.push(1)
+  b is vector()
+  b.push(2)
+  b.push(3)
+  Pair(a, b)
+
+*sink(xs as take Vec of i64) returns i64
+  xs.length
+
+*main()
+  a1 is vector()
+  a1.push(1)
+  b1 is vector()
+  b1.push(2)
+  r1 is Pair(a1, b1)
+  n1 is 0
+  match r1
+    Pair(x, y) ? n1 is sink(take x)
+  log(n1)
+
+  n2 is 0
+  match make()
+    Pair(x, y) ? n2 is sink(take x)
+  log(n2)
+
+  a3 is vector()
+  a3.push(1)
+  b3 is vector()
+  b3.push(2)
+  r3 is Pair(a3, b3)
+  n3 is 0
+  match r3
+    Pair(x, _) ? n3 is sink(take x)
+  log(n3)
+
+  a4 is vector()
+  a4.push(1)
+  b4 is vector()
+  b4.push(2)
+  r4 is Pair(a4, b4)
+  n4 is 0
+  match r4
+    Pair(x, y) ? n4 is x.length + y.length
+  log(n4)
+
+  a5 is vector()
+  a5.push(1)
+  b5 is vector()
+  b5.push(2)
+  b5.push(3)
+  o5 is Wrap(Leaf(a5), b5)
+  n5 is 0
+  match o5
+    Wrap(i, y) ? n5 is sink(take y)
+  log(n5)
+
+  a6 is vector()
+  a6.push(1)
+  h6 is Holder(f is Leaf(a6), n is 7)
+  log(h6.n)
+
+  a7 is vector()
+  a7.push(1)
+  xs7 as Vec of Inner is vector()
+  xs7.push(Leaf(a7))
+  log(xs7.length)
+
+  a8 is vector()
+  a8.push(1)
+  a8.push(2)
+  r8 is Pair(a8, vector())
+  n8 is 0
+  match r8
+    Pair(x, y) ?
+      n8 is sink(take x)
+      log(y.length)
+  log(n8)

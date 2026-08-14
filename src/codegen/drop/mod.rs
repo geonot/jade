@@ -36,7 +36,11 @@ impl<'ctx> Compiler<'ctx> {
                 self.drop_tuple(val, tys)?;
             }
             Type::Struct(name, _) => {
-                self.drop_struct_fields(val, &name.as_str())?;
+                if self.enums.contains_key(&name.as_str()) {
+                    self.call_enum_drop_fn(val, &name.as_str())?;
+                } else {
+                    self.drop_struct_fields(val, &name.as_str())?;
+                }
             }
             Type::Array(elem, n) => {
                 if !elem.is_trivially_droppable() {

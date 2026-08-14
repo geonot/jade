@@ -361,7 +361,58 @@ impl Typer {
                     first_arm_ty = Some(tail_ty);
                 }
             }
-            self.finalize_block_drops_excluding(&mut body, &pat_binds);
+            let consumed_binds: std::collections::HashSet<crate::hir::DefId> = pat_binds
+                .iter()
+                .filter(|b| !self.moves.entries_for(**b).is_empty())
+                .cloned()
+                .collect();
+            let mut pat = pat;
+            let mut wild_drops: Vec<hir::Stmt> = Vec::new();
+            if !consumed_binds.is_empty()
+                && let hir::Pat::Ctor(ref vname, _, ref mut subpats, _) = pat
+            {
+                let vsym = Symbol::intern(vname);
+                let field_tys: Vec<Type> = self
+                    .variant_tags
+                    .get(&vsym)
+                    .map(|(en, _)| *en)
+                    .and_then(|en| {
+                        self.enums.get(&en).and_then(|vs| {
+                            vs.iter()
+                                .find(|(vn, _)| *vn == vsym)
+                                .map(|(_, ftys)| ftys.clone())
+                        })
+                    })
+                    .unwrap_or_default();
+                for (i, sp) in subpats.iter_mut().enumerate() {
+                    if let hir::Pat::Wild(wspan) = sp {
+                        let wspan = *wspan;
+                        let Some(fty) = field_tys.get(i).cloned() else {
+                            continue;
+                        };
+                        let resolved = {
+                            let was_strict = self.infer_ctx.is_strict();
+                            self.infer_ctx.set_strict(false);
+                            let r = self.infer_ctx.resolve(&fty);
+                            self.infer_ctx.set_strict(was_strict);
+                            r
+                        };
+                        if self.needs_drop(&resolved) {
+                            let id = self.fresh_id();
+                            let nm: Symbol = format!("__unbound{i}").into();
+                            *sp = hir::Pat::Bind(id, nm, fty, wspan);
+                            wild_drops.push(hir::Stmt::Drop(id, nm, resolved, wspan));
+                        }
+                    }
+                }
+            }
+            let arm_excl = if consumed_binds.is_empty() {
+                &pat_binds
+            } else {
+                &consumed_binds
+            };
+            self.finalize_block_drops_excluding(&mut body, arm_excl);
+            body.extend(wild_drops);
             self.pop_scope();
             arm_ends.push(self.snapshot_moved_fields());
             arms.push(hir::Arm {

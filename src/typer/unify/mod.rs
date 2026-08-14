@@ -92,10 +92,12 @@ impl InferCtx {
             .into_iter()
             .filter_map(|(root, msg)| {
                 let r = self.find(root);
-                if self.types[r as usize].is_none() {
-                    Some(msg)
-                } else {
-                    None
+                if self.types[r as usize].is_some() {
+                    return None;
+                }
+                match self.constraints[r as usize] {
+                    TypeConstraint::None | TypeConstraint::Numeric => Some(msg),
+                    _ => None,
                 }
             })
             .collect()

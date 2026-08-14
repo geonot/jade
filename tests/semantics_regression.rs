@@ -544,3 +544,76 @@ fn generic_enums_flow_through_function_boundaries() {
          concretely-annotated consumer as the same monomorphized enum"
     );
 }
+
+fn compile_opt(src: &str, opt: &str) -> Compiled {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("prog.jn");
+    std::fs::write(&file, src).unwrap();
+    let out = Command::new(jinnc())
+        .arg("prog.jn")
+        .arg("--opt")
+        .arg(opt)
+        .arg("-o")
+        .arg(dir.path().join("prog.bin"))
+        .current_dir(dir.path())
+        .output()
+        .expect("invoke jinnc");
+    Compiled { dir, out }
+}
+
+#[test]
+fn match_arm_assigning_outer_local_compiles_at_opt0() {
+    let c = compile_opt(
+        "enum Rec\n    One(Vec of i64)\n\n*sink(xs as take Vec of i64) returns i64\n    xs.length\n\n*main\n    a is vec(1)\n    r is One(a)\n    n is 0\n    match r\n        One(x) ? n is sink(take x)\n    log(n)\n",
+        "0",
+    );
+    assert!(
+        c.ok(),
+        "codegen emitted blocks in storage order and read a merge-block value before its \
+         defining arm block was emitted: {}",
+        c.stderr()
+    );
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "1\n");
+}
+
+#[test]
+fn enum_payload_drops_recurse_through_named_spellings() {
+    for opt in ["0", "3"] {
+        let c = compile_opt(
+            "enum Inner\n    Leaf(Vec of i64)\n\nenum Outer\n    Wrap(Inner, Vec of i64)\n\ntype Holder\n    f as Inner\n    n as i64\n\n*main\n    a is vec(1)\n    b is vec(2)\n    o is Wrap(Leaf(a), b)\n    h is Holder(f is Leaf(vec(3)), n is 7)\n    xs as Vec of Inner is vector()\n    xs.push(Leaf(vec(4)))\n    log(h.n)\n    log(xs.length)\n",
+            opt,
+        );
+        assert!(c.ok(), "opt {opt}: {}", c.stderr());
+        let run = c.run();
+        assert!(run.status.success(), "opt {opt}: {}", exit_desc(&run));
+        assert_eq!(String::from_utf8_lossy(&run.stdout), "7\n1\n");
+    }
+}
+
+#[test]
+fn consuming_one_payload_bind_still_rejects_later_subject_use() {
+    let c = compile(
+        "enum Rec\n    Pair(Vec of i64, Vec of i64)\n\n*sink(xs as take Vec of i64) returns i64\n    xs.length\n\n*main\n    r is Pair(vec(1), vec(2))\n    n is 0\n    match r\n        Pair(x, y) ? n is sink(take x)\n    c is count_of(r)\n    log(n)\n\n*count_of(q as Rec) returns i64\n    1\n",
+    );
+    assert!(
+        !c.ok(),
+        "reading the subject after a payload bind was consumed must stay a move error"
+    );
+}
+
+#[test]
+fn ctor_wrapped_push_argument_suppresses_source_drop() {
+    let c = compile(
+        "enum Inner\n    Leaf(Vec of i64)\n\n*main\n    a is vec(1)\n    xs as Vec of Inner is vector()\n    xs.push(Leaf(a))\n    log(xs.length)\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    let run = c.run();
+    assert!(
+        run.status.success(),
+        "the vec element and the moved-from local both owned the same allocation: {}",
+        exit_desc(&run)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "1\n");
+}

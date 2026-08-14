@@ -59,6 +59,41 @@ impl<'ctx> Compiler<'ctx> {
         floors
     }
 
+    fn dominance_compatible_order(func: &mir::Function) -> Vec<usize> {
+        let index: HashMap<mir::BlockId, usize> = func
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(i, b)| (b.id, i))
+            .collect();
+        let mut visited = vec![false; func.blocks.len()];
+        let mut post: Vec<usize> = Vec::with_capacity(func.blocks.len());
+        let mut stack: Vec<(mir::BlockId, bool)> = vec![(func.entry, false)];
+        while let Some((bid, finished)) = stack.pop() {
+            let Some(&i) = index.get(&bid) else { continue };
+            if finished {
+                post.push(i);
+                continue;
+            }
+            if visited[i] {
+                continue;
+            }
+            visited[i] = true;
+            stack.push((bid, true));
+            for succ in func.blocks[i].terminator.successors() {
+                stack.push((succ, false));
+            }
+        }
+        post.reverse();
+        let mut order = post;
+        for (i, seen) in visited.iter().enumerate() {
+            if !seen {
+                order.push(i);
+            }
+        }
+        order
+    }
+
     pub fn compile_program(
         &mut self,
         prog: &mir::Program,
@@ -618,7 +653,9 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        for bb in &func.blocks {
+        let emit_order = Self::dominance_compatible_order(func);
+        for &bi in &emit_order {
+            let bb = &func.blocks[bi];
             let llvm_bb = self.block_map[&bb.id];
             self.bld.position_at_end(llvm_bb);
 

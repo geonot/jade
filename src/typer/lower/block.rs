@@ -343,11 +343,8 @@ impl Typer {
                 ) {
                     for a in args {
                         let resolved = self.infer_ctx.resolve(&a.ty);
-                        if Self::expr_type_needs_drop(&resolved)
-                            && matches!(a.kind, hir::ExprKind::Var(_, _))
-                            && let hir::ExprKind::Var(id, _) = &a.kind
-                        {
-                            out.insert(*id);
+                        if Self::expr_type_needs_drop(&resolved) {
+                            Self::collect_moved_var_ids(a, out);
                         }
                     }
                 }
@@ -1810,6 +1807,9 @@ impl Typer {
                     .unwrap_or(false)
                 {
                     return true;
+                }
+                if !self.structs.contains_key(name) && self.enums.contains_key(name) {
+                    return self.needs_drop_inner(&Type::Enum(*name), visiting);
                 }
                 if !visiting.insert(*name) {
                     return false;
