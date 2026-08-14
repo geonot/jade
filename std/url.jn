@@ -15,25 +15,25 @@ type Url
 
     *to_string returns String
         out is ""
-        if self.scheme.length > 0
+        if self.scheme.byte_count > 0
             out is out + self.scheme + "://"
-        if self.user.length > 0
+        if self.user.byte_count > 0
             out is out + percent_encode(self.user)
-            if self.password.length > 0
+            if self.password.byte_count > 0
                 out is out + ":" + percent_encode(self.password)
             out is out + "@"
         out is out + self.host
         if self.port > 0 and self.port neq default_port(self.scheme)
             out is out + ":" + to_string(self.port)
         out is out + self.path
-        if self.raw_query.length > 0
+        if self.raw_query.byte_count > 0
             out is out + "?" + self.raw_query
-        if self.fragment.length > 0
+        if self.fragment.byte_count > 0
             out is out + "#" + percent_encode(self.fragment)
         out
 
     *origin returns String
-        if self.scheme.length equals 0
+        if self.scheme.byte_count equals 0
             return ""
         port_part is ""
         if self.port > 0 and self.port neq default_port(self.scheme)
@@ -48,14 +48,14 @@ type Url
 
 
 *parse(s as String) returns Url
-    if s.length equals 0
+    if s.byte_count equals 0
         return __empty()
     rest is s
     scheme is ""
     sep is rest.find("://")
     if sep > 0
         scheme is rest.slice(0, sep).to_lower()
-        rest is rest.slice(sep + 3, rest.length)
+        rest is rest.slice(sep + 3, rest.byte_count)
     user is ""
     password is ""
     host is ""
@@ -65,35 +65,35 @@ type Url
     fragment is ""
     hash_pos is rest.find("#")
     if hash_pos >= 0
-        fragment is percent_decode(rest.slice(hash_pos + 1, rest.length))
+        fragment is percent_decode(rest.slice(hash_pos + 1, rest.byte_count))
         rest is rest.slice(0, hash_pos)
     q_pos is rest.find("?")
     if q_pos >= 0
-        raw_query is rest.slice(q_pos + 1, rest.length)
+        raw_query is rest.slice(q_pos + 1, rest.byte_count)
         rest is rest.slice(0, q_pos)
     slash is rest.find("/")
     authority is ""
     if slash >= 0
         authority is rest.slice(0, slash)
-        path is rest.slice(slash, rest.length)
+        path is rest.slice(slash, rest.byte_count)
     else
         authority is rest
         path is "/"
     at_pos is authority.find("@")
     if at_pos >= 0
         userinfo is authority.slice(0, at_pos)
-        authority is authority.slice(at_pos + 1, authority.length)
+        authority is authority.slice(at_pos + 1, authority.byte_count)
         colon is userinfo.find(":")
         if colon >= 0
             user is percent_decode(userinfo.slice(0, colon))
-            password is percent_decode(userinfo.slice(colon + 1, userinfo.length))
+            password is percent_decode(userinfo.slice(colon + 1, userinfo.byte_count))
         else
             user is percent_decode(userinfo)
     colon is __last_colon_outside_brackets(authority)
     if colon >= 0
         host is authority.slice(0, colon)
-        port_str is authority.slice(colon + 1, authority.length)
-        if port_str.length > 0
+        port_str is authority.slice(colon + 1, authority.byte_count)
+        if port_str.byte_count > 0
             port is convert.parse_int(port_str)
     else
         host is authority
@@ -102,13 +102,13 @@ type Url
 
 *build(scheme as String, host as String, path as String, query as Map of String) returns String
     raw is encode_query(query)
-    out is scheme + "://" + host + (path.length equals 0 ? "/" ! path)
-    if raw.length > 0
+    out is scheme + "://" + host + (path.byte_count equals 0 ? "/" ! path)
+    if raw.byte_count > 0
         out is out + "?" + raw
     out
 
 *resolve(base as String, ref as String) returns String
-    if ref.length equals 0
+    if ref.byte_count equals 0
         return base
     if ref.find("://") > 0
         return ref
@@ -119,7 +119,7 @@ type Url
         return b.scheme + "://" + b.host + ref
     if ref.starts_with("?") or ref.starts_with("#")
         return b.scheme + "://" + b.host + b.path + ref
-    last is b.path.length - 1
+    last is b.path.byte_count - 1
     while last >= 0 and b.path.char_at(last) neq 47
         last is last - 1
     new_path is b.path.slice(0, last + 1) + ref
@@ -182,7 +182,7 @@ type Url
 
 *decode_query(s as String) returns Map of String
     out is map()
-    if s.length equals 0
+    if s.byte_count equals 0
         return out
     parts is s.split("&")
     loop parts
@@ -191,7 +191,7 @@ type Url
             out.set(percent_decode($), "")
         else
             k is percent_decode($.slice(0, eq))
-            v is percent_decode($.slice(eq + 1, $.length))
+            v is percent_decode($.slice(eq + 1, $.byte_count))
             out.set(k, v)
     out
 
@@ -213,7 +213,7 @@ type Url
 
 *is_valid(s as String) returns bool
     u is parse(s)
-    u.scheme.length > 0 and u.host.length > 0
+    u.scheme.byte_count > 0 and u.host.byte_count > 0
 
 
 *__empty returns Url
@@ -254,11 +254,11 @@ type Url
     byte(b)
 
 *__last_colon_outside_brackets(s as String) returns i64
-    if s.length > 0 and s.char_at(0) equals 91
+    if s.byte_count > 0 and s.char_at(0) equals 91
         close is s.find("]")
         if close < 0
             return -1
-        rest is s.slice(close + 1, s.length)
+        rest is s.slice(close + 1, s.byte_count)
         c is rest.find(":")
         if c < 0
             return -1

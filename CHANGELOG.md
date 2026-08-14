@@ -1,4 +1,39 @@
 # Changelog
+- **[155]** (2026-08-14) types pass, part 3 — T-13r closes: url/uuid/bytes drop the last scalar-length byte bounds, `Bytes.to_string` stops eating bytes, and `Bytes.slice` turns out to have returned zeros since it was written
+
+The byte-buffer bridge residue from [145]. All three modules now use
+`.byte_count` (O(1), byte-correct) everywhere a bound feeds `slice`,
+`char_at`, or an extern taking a byte length; `.length` — a scalar count
+that rescans the string per call — survives only where scalars are the
+subject. Full suite is 2232 tests (the two new stdlib suites ride the
+auto-discovering `stdlib_behavior` gate); fmt/clippy clean.
+
+- **`url`**: every `slice(i, s.length)` tail-slice in `parse`, `resolve`'s
+  backward byte walk to the last `/`, `decode_query`'s value slice, and the
+  emptiness checks moved to `byte_count`. Non-ASCII URLs
+  (`/pfad/müßig?stück=größe#straße`) previously lost trailing bytes of
+  every component after the first multi-byte scalar; pinned in the new
+  `tests/stdlib/url_tests.jn` (parse round-trip, non-ASCII components,
+  default-port elision, relative resolution incl. multi-byte segments,
+  IPv6 authority, percent round-trip).
+- **`uuid`**: `parse`'s dash-stripping loop and `__hex_to_bytes` were
+  scalar-bounded — the latter passed a *scalar count* as the byte length of
+  an extern C call (`jinn_hex_to_bytes`). Correct on well-formed ASCII
+  input, under-read on anything else; validity checks masked it into
+  "invalid uuid".
+- **`bytes`**: `from_string` dropped every byte after a multi-byte scalar
+  (scalar bound), and `to_string` mapped all control and high bytes to `?`
+  via a printable-ASCII table — both directions of the byte-buffer bridge
+  were lossy. `from_string` is byte-bounded and `to_string` emits raw bytes
+  with [151]'s `byte()` builtin; `s -> from_string -> to_string` is now the
+  identity on any `String`, pinned including control/high bytes. Writing the
+  pins found a harder defect: **`Bytes.slice` has returned zeros since the
+  type existed** — it wrote through `set()`, whose bounds guard tests
+  `self.len`, *before* raising `len`, so every copy was silently dropped and
+  the zero-fill from `new()` came back. It now builds on `zeroed()` (writes
+  land; the beyond-source tail keeps the documented zero padding), pinned in
+  `tests/stdlib/bytes_tests.jn` alongside hex and find_byte round-trips.
+
 - **[154]** (2026-08-14) types pass, part 2: generic types get one spelling — constructors stop baking unresolved inference variables into mono names, unification sees through monomorphized names, and `Pair<A, B>` finally has an annotation
 
 Second slice of the Types section (T-1r's core closed, residue refiled as

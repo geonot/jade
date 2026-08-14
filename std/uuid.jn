@@ -89,12 +89,12 @@ type Uuid
 *parse(s as String) returns Uuid
     clean is ""
     i is 0
-    while i < s.length
+    while i < s.byte_count
         c is s.char_at(i)
         if c neq 45
             clean is clean + s.slice(i, i + 1)
         i is i + 1
-    if clean.length neq 32
+    if clean.byte_count neq 32
         return Uuid(bytes is "")
     raw is __hex_to_bytes(clean)
     if raw.byte_count neq 16
@@ -130,11 +130,11 @@ MAX is "ffffffff-ffff-ffff-ffff-ffffffffffff"
     result
 
 *__hex_to_bytes(hex as String) returns String
-    if hex.length equals 0 or hex.length mod 2 neq 0
+    if hex.byte_count equals 0 or hex.byte_count mod 2 neq 0
         return ""
-    n is hex.length / 2
+    n is hex.byte_count / 2
     buf is extern.malloc(n)
-    rc is extern.jinn_hex_to_bytes(%hex, hex.length, buf)
+    rc is extern.jinn_hex_to_bytes(%hex, hex.byte_count, buf)
     if rc < 0
         extern.free(buf)
         return ""

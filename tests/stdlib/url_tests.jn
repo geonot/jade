@@ -1,0 +1,47 @@
+use std/url
+
+test 'parse round-trips an ascii url'
+    u is url.parse('https://user:pw@example.com:8443/a/b?x=1&y=2#frag')
+    assert u.scheme equals 'https'
+    assert u.user equals 'user'
+    assert u.password equals 'pw'
+    assert u.host equals 'example.com'
+    assert u.port equals 8443
+    assert u.path equals '/a/b'
+    assert u.raw_query equals 'x=1&y=2'
+    assert u.query.get('x') equals '1'
+    assert u.query.get('y') equals '2'
+    assert u.fragment equals 'frag'
+
+test 'parse keeps every byte of a non-ascii url'
+    u is url.parse('https://example.com/pfad/müßig?stück=größe#straße')
+    assert u.path equals '/pfad/müßig'
+    assert u.query.get('stück') equals 'größe'
+    assert u.fragment equals 'straße'
+
+test 'default ports are elided and foreign ports kept'
+    u is url.parse('https://example.com:443/x')
+    assert u.to_string() equals 'https://example.com/x'
+    v is url.parse('http://example.com:8080/x')
+    assert v.to_string() equals 'http://example.com:8080/x'
+
+test 'resolve walks relative references'
+    assert url.resolve('https://a.io/dir/page', 'other') equals 'https://a.io/dir/other'
+    assert url.resolve('https://a.io/dir/page', '/root') equals 'https://a.io/root'
+    assert url.resolve('https://a.io/dir/page', '#f') equals 'https://a.io/dir/page#f'
+
+test 'resolve keeps multi-byte path segments intact'
+    assert url.resolve('https://a.io/müßig/page', 'next') equals 'https://a.io/müßig/next'
+
+test 'percent encoding round-trips multi-byte text'
+    enc is url.percent_encode('größe straße')
+    assert url.percent_decode(enc) equals 'größe straße'
+
+test 'ipv6 authority keeps the bracketed host'
+    u is url.parse('http://[::1]:8080/x')
+    assert u.host equals '[::1]'
+    assert u.port equals 8080
+
+test 'is_valid'
+    assert url.is_valid('https://example.com/x')
+    assert not url.is_valid('')

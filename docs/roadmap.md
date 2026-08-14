@@ -52,7 +52,11 @@ T-1r's spelling core — constructors stopped minting mono names from unresolved
 inference variables, every generic-type spelling canonicalizes to one mono
 name, unification sees through mono names via an origin table, and
 multi-parameter generics gained their `Pair<A, B>` annotation form — leaving
-the residue filed as T-1r2.
+the residue filed as T-1r2. [155] closed T-13r: `url`, `uuid`, and `bytes`
+dropped the last scalar-`.length` byte bounds, `Bytes.to_string` emits raw
+bytes instead of `?`, and `Bytes.slice` — which had returned zeros since it
+was written (its length guard dropped every copy) — is fixed; both modules
+gained behavior suites in the stdlib gate.
 Items below are what remains.
 
 ---
@@ -236,9 +240,10 @@ checksums identical under [151]'s benchmark gate), a whole `String` coerces
 into `View of u8` parameters, `strings.__contains_byte` and
 `sort.is_sorted`/`binary_search` take view parameters, and `sort` uses the
 builtin byte-lex `<`. Residue: the same `.length`-bounded byte-loop idiom
-survives outside the sweep's scope — `url`, `toml`, `http`, `regex`, `date`,
-`path`, `args`, and friends are correct on ASCII but quadratic and
-scalar-bounded; convert them with the same span recipe when they matter.
+survives outside the sweep's scope — [155] converted `url`, `uuid`, and
+`bytes` (closing T-13r); `toml`, `http`, `regex`, `date`, `path`, `args`,
+and friends are correct on ASCII but quadratic and scalar-bounded; convert
+them with the same span recipe when they matter.
 
 ### M-14r (m) `freeze`: actor-handler classification, function-exit dispatch, std adoption
 
@@ -362,20 +367,6 @@ types and parameter counts must match (both sites named in the diagnostic,
 `Self` and trait type arguments substituted). Unannotated impl parameters and
 returns are still accepted by adoption, and trait-side types that stay generic
 after substitution are skipped rather than deferred to inference.
-
-### T-13r (m) String-as-byte-buffer residue in std
-
-[145] decided T-13: `chr(code)` UTF-8-encodes a Unicode scalar (invalid and
-surrogate codes encode U+FFFD), a new `byte(code)` builtin emits the raw byte
-(documented as outside the UTF-8 contract, like mid-scalar slices), both
-reject non-integer arguments, and the byte-assembling std callers (`uuid`,
-`url`, `codec`, `strings.StringBuilder`) moved to `byte` — which also fixed
-`uuid.v7()` returning `""`, `percent_encode`/`codec.to_hex` truncating
-non-ASCII input, `to_lower`/`to_upper` dropping trailing bytes, and
-`StringBuilder` undercounting byte sizes (all were scalar-`.length` bounds on
-byte loops). Residue: the `.slice(i, s.length)` scalar-bound idiom survives on
-ASCII-expected text paths (`url` parsing, `uuid.parse`), and `Bytes.to_string`
-is still lossy, so `std/bytes.jn` cannot yet serve as the byte-buffer bridge.
 
 ---
 

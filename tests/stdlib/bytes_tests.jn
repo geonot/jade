@@ -1,0 +1,45 @@
+use std/bytes
+
+test 'push get set length'
+    b is bytes.new(0)
+    b.push(1)
+    b.push(2)
+    b.push(300)
+    assert b.length() equals 3
+    assert b.get(2) equals 44
+    b.set(0, 9)
+    assert b.get(0) equals 9
+
+test 'from_string to_string round-trips ascii'
+    b is bytes.from_string('hello world')
+    assert b.to_string() equals 'hello world'
+
+test 'from_string to_string round-trips every byte of multi-byte text'
+    s is 'größe-straße-日本語'
+    b is bytes.from_string(s)
+    assert b.length() equals s.byte_count
+    assert b.to_string() equals s
+
+test 'to_string keeps control and high bytes'
+    b is bytes.new(0)
+    b.push(10)
+    b.push(0)
+    b.push(200)
+    r is b.to_string()
+    assert r.byte_count equals 3
+    assert r.char_at(0) equals 10
+    assert r.char_at(1) equals 0
+    assert r.char_at(2) equals 200
+
+test 'hex round-trip'
+    b is bytes.from_string('jinn')
+    h is b.to_hex()
+    assert h equals '6a696e6e'
+    assert bytes.from_hex(h).to_string() equals 'jinn'
+
+test 'slice and find_byte'
+    b is bytes.from_string('abcdef')
+    s is b.slice(2, 5)
+    assert s.to_string() equals 'cde'
+    assert b.find_byte(100) equals 3
+    assert b.find_byte(999) equals -1

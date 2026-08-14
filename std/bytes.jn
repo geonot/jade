@@ -32,12 +32,13 @@ type Bytes
             i is i + 1
 
     *slice(start as i64, end as i64) returns Bytes
-        result is new(end - start)
+        if end <= start
+            return new(0)
+        result is zeroed(end - start)
         i is start
         while i < end and i < self.len
             result.set(i - start, self.get(i))
             i is i + 1
-        result.len is end - start
         result
 
     *length returns i64
@@ -59,7 +60,7 @@ type Bytes
         result is ""
         i is 0
         while i < self.len
-            result is result + __byte_char(self.get(i))
+            result is result + byte(self.get(i))
             i is i + 1
         result
 
@@ -124,7 +125,7 @@ type Bytes
 
 
 *new(capacity as i64) returns Bytes
-    data is vec()
+    data as Vec of i64 is vec()
     for i in 0 to capacity
         data.push(0)
     Bytes(data is data, len is 0)
@@ -135,17 +136,17 @@ type Bytes
     buf
 
 *from_string(s as String) returns Bytes
-    buf is new(s.length)
+    buf is new(s.byte_count)
     i is 0
-    while i < s.length
+    while i < s.byte_count
         buf.push(s.char_at(i))
         i is i + 1
     buf
 
 *from_hex(hex_str as String) returns Bytes
-    buf is new(hex_str.length / 2)
+    buf is new(hex_str.byte_count / 2)
     i is 0
-    while i < hex_str.length - 1
+    while i < hex_str.byte_count - 1
         hi is __hex_val(hex_str.char_at(i))
         lo is __hex_val(hex_str.char_at(i + 1))
         buf.push(hi * 16 + lo)
@@ -180,15 +181,3 @@ type Bytes
         return ch - 55
     0
 
-*__byte_char(code as i64) returns String
-    if code equals 10
-        return "\n"
-    if code equals 9
-        return "\t"
-    if code equals 13
-        return "\r"
-    if code < 32 or code > 126
-        return "?"
-    chars is " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
-    idx is code - 32
-    chars.slice(idx, idx + 1)
