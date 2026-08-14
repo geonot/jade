@@ -639,7 +639,11 @@ impl Typer {
             }
             match self.lower_method_by_ptr(&type_name.as_str(), &m) {
                 Ok(hf) => self.mono_fns.push(hf),
-                Err(e) => self.type_errors.push(e),
+                Err(e) => {
+                    if self.called_mono_methods.contains(&mangled_fn) {
+                        self.type_errors.push(e);
+                    }
+                }
             }
         }
         program.types.append(&mut self.mono_types);

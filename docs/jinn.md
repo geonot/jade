@@ -721,6 +721,27 @@ enum Option of T
 ```
 
 Generic types appear in annotations with `of`, for example `Vec of Account`.
+`of` takes a single type argument. For a type with several parameters, annotate
+with angle brackets — `Pair<i64, String>` — which stay unambiguous where a
+comma already separates parameters or fields. The two forms are
+interchangeable for one argument (`Box of i64` and `Box<i64>` name the same
+type), and annotations nest: `Pair<i64, Pair<i64, String>>`.
+
+```jinn
+type Pair of A, B
+    first as A
+    second as B
+
+*flip(p as Pair<A, B>) returns Pair<B, A>
+    Pair(first is p.second, second is p.first)
+
+*main
+    p is Pair(first is 5, second is 'hello')
+    q is flip(p)
+    log(q.first)
+    log(q.second)
+    0
+```
 
 ---
 

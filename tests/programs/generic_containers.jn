@@ -1,0 +1,56 @@
+type Box of T
+    value as T
+
+type Pair of A, B
+    first as A
+    second as B
+
+    *describe(self) returns i64
+        self.first
+
+enum Maybe of T
+    Just(T)
+    Nothing
+
+*get_value(b as Box of T) returns T
+    b.value
+
+*rebox(b as Box of T) returns Box of T
+    Box(value is b.value)
+
+*flip(p as Pair<A, B>) returns Pair<B, A>
+    Pair(first is p.second, second is p.first)
+
+*outer_first(p as Pair<i64, Pair<i64, string>>) returns i64
+    p.first
+
+*wrap(x as T) returns Maybe of T
+    Just(x)
+
+*or_zero(m as Maybe of i64) returns i64
+    match m
+        Just(v) ? v
+        Nothing ? 0
+
+*main
+    a as Box of i64 is Box(value is 7)
+    log(get_value(a))
+
+    b is Box(value is 'a-heap-string-well-past-sso-width')
+    c is rebox(b)
+    log(get_value(c))
+
+    p is Pair(first is 5, second is 'hello')
+    log(p.describe())
+    q is flip(p)
+    log(q.first)
+    log(q.second)
+
+    n is Pair(first is 1, second is Pair(first is 2, second is 'deep'))
+    log(outer_first(n))
+
+    m is wrap(41)
+    log(or_zero(m) + 1)
+    z as Maybe of i64 is Nothing
+    log(or_zero(z))
+    0

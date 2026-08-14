@@ -114,6 +114,8 @@ impl Typer {
                     && let hir::ExprKind::DeferredMethod(recv, _method_str, args) =
                         std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
                 {
+                    self.called_mono_methods
+                        .insert(Symbol::intern(&method_name));
                     expr.kind = hir::ExprKind::Method(recv, method_name.into(), method, args);
                 }
             }
@@ -574,7 +576,19 @@ impl Typer {
                     self.resolve_expr(e);
                 }
             }
-            hir::ExprKind::Struct(_, fields) | hir::ExprKind::VariantCtor(_, _, _, fields) => {
+            hir::ExprKind::Struct(name, fields) => {
+                if let Type::Struct(resolved_name, args) = &expr.ty
+                    && args.is_empty()
+                    && *name != *resolved_name
+                    && self.generic_types.contains_key(name)
+                {
+                    *name = *resolved_name;
+                }
+                for fi in fields {
+                    self.resolve_expr(&mut fi.value);
+                }
+            }
+            hir::ExprKind::VariantCtor(_, _, _, fields) => {
                 for fi in fields {
                     self.resolve_expr(&mut fi.value);
                 }
@@ -787,6 +801,25 @@ impl Typer {
                     if let Ok(mangled) = self.monomorphize_enum(&n.as_str(), &m) {
                         return Type::Enum(mangled);
                     }
+                }
+                Type::Struct(*n, cargs)
+            }
+            Type::Struct(n, args) if !args.is_empty() && self.generic_types.contains_key(n) => {
+                let n_params = self
+                    .generic_types
+                    .get(n)
+                    .map(|g| g.type_params.len())
+                    .unwrap_or(0);
+                let cargs: Vec<Type> = args
+                    .iter()
+                    .map(|a| self.canonicalize_generic_enums(a))
+                    .collect();
+                if cargs.len() == n_params
+                    && cargs.iter().all(Self::is_concrete_type)
+                    && let Some(mangled) =
+                        self.monomorphize_generic_struct_annotation(&n.as_str(), &cargs)
+                {
+                    return Type::Struct(mangled, vec![]);
                 }
                 Type::Struct(*n, cargs)
             }

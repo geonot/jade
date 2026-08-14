@@ -5,6 +5,7 @@ use crate::types::Type;
 
 impl Typer {
     pub(in crate::typer) fn collect_type_mapping(
+        &self,
         declared: &Type,
         concrete: &Type,
         map: &mut std::collections::HashMap<Symbol, Type>,
@@ -15,20 +16,83 @@ impl Typer {
             }
             Type::Vec(inner) => {
                 if let Type::Vec(ci) = concrete {
-                    Self::collect_type_mapping(inner, ci, map);
+                    self.collect_type_mapping(inner, ci, map);
                 }
             }
             Type::Ptr(inner) => {
                 if let Type::Ptr(ci) = concrete {
-                    Self::collect_type_mapping(inner, ci, map);
+                    self.collect_type_mapping(inner, ci, map);
                 }
             }
+            Type::View(inner) => {
+                if let Type::View(ci) = concrete {
+                    self.collect_type_mapping(inner, ci, map);
+                }
+            }
+            Type::Frozen(inner) => {
+                if let Type::Frozen(ci) = concrete {
+                    self.collect_type_mapping(inner, ci, map);
+                }
+            }
+            Type::Channel(inner) => {
+                if let Type::Channel(ci) = concrete {
+                    self.collect_type_mapping(inner, ci, map);
+                }
+            }
+            Type::Array(inner, _) => {
+                if let Type::Array(ci, _) = concrete {
+                    self.collect_type_mapping(inner, ci, map);
+                }
+            }
+            Type::Map(dk, dv) => {
+                if let Type::Map(ck, cv) = concrete {
+                    self.collect_type_mapping(dk, ck, map);
+                    self.collect_type_mapping(dv, cv, map);
+                }
+            }
+            Type::Tuple(dts) => {
+                if let Type::Tuple(cts) = concrete {
+                    for (dt, ct) in dts.iter().zip(cts.iter()) {
+                        self.collect_type_mapping(dt, ct, map);
+                    }
+                }
+            }
+            Type::Struct(dname, dargs) if !dargs.is_empty() => match concrete {
+                Type::Struct(cname, cargs) if cname == dname && cargs.len() == dargs.len() => {
+                    for (dt, ct) in dargs.iter().zip(cargs.iter()) {
+                        self.collect_type_mapping(dt, ct, map);
+                    }
+                }
+                Type::Struct(cname, cargs) if cargs.is_empty() => {
+                    if let Some((base, oargs)) = self.infer_ctx.mono_origin(cname)
+                        && base == dname
+                        && oargs.len() == dargs.len()
+                    {
+                        let oargs = oargs.clone();
+                        for (dt, ot) in dargs.iter().zip(oargs.iter()) {
+                            self.collect_type_mapping(dt, ot, map);
+                        }
+                    }
+                }
+                Type::Enum(cname) => {
+                    if let Some((base, oargs)) = self.infer_ctx.mono_origin(cname)
+                        && base == dname
+                        && oargs.len() == dargs.len()
+                    {
+                        let oargs = oargs.clone();
+                        for (dt, ot) in dargs.iter().zip(oargs.iter()) {
+                            self.collect_type_mapping(dt, ot, map);
+                        }
+                    }
+                }
+                _ => {}
+            },
             Type::Fn(params, ret) => {
                 if let Type::Fn(cp, cr) = concrete {
                     for (dp, cp) in params.iter().zip(cp.iter()) {
-                        Self::collect_type_mapping(dp, cp, map);
+                        self.collect_type_mapping(dp, cp, map);
                     }
-                    Self::collect_type_mapping(ret, cr, map);
+                    self.collect_type_mapping(ret, cr, map);
                 }
             }
             _ => {}

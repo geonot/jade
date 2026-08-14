@@ -194,6 +194,8 @@ impl Typer {
             .collect::<Vec<_>>()
             .join("_");
         let mangled: Symbol = format!("{base_name}_{ty_suffix}").into();
+        self.infer_ctx
+            .record_mono_origin(mangled, Symbol::intern(base_name), type_args.to_vec());
         if self.structs.contains_key(&mangled) {
             return Some(mangled);
         }
@@ -320,6 +322,11 @@ impl Typer {
                 }
                 Self::collect_type_params_from(ret, out);
             }
+            Type::Struct(_, args) => {
+                for a in args {
+                    Self::collect_type_params_from(a, out);
+                }
+            }
             _ => {}
         }
     }
@@ -343,6 +350,8 @@ impl Typer {
             .collect::<Vec<_>>()
             .join("_");
         let mangled: Symbol = format!("{base_name}_{ty_suffix}").into();
+        self.infer_ctx
+            .record_mono_origin(mangled, Symbol::intern(base_name), arg_tys.to_vec());
 
         if self.structs.contains_key(&mangled) {
             return Ok(mangled);
@@ -610,6 +619,13 @@ impl Typer {
         };
         let type_map = &type_map;
         let mangled: Symbol = Self::mangle_generic(name, type_map, &ge.type_params).into();
+        let ordered_args: Vec<Type> = ge
+            .type_params
+            .iter()
+            .map(|tp| type_map.get(tp).cloned().unwrap_or(Type::I64))
+            .collect();
+        self.infer_ctx
+            .record_mono_origin(mangled, Symbol::intern(name), ordered_args);
         if self.enums.contains_key(&mangled) {
             return Ok(mangled);
         }

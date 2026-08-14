@@ -493,3 +493,54 @@ fn recursive_enum_rebound_in_loop_merges_correctly() {
          element-wise"
     );
 }
+
+#[test]
+fn generic_struct_args_unify_across_mono_and_structural_spellings() {
+    let c = compile(
+        "type Box of T\n    value as T\n\n*get_value(b as Box of T) returns T\n    b.value\n\n*rebox(b as Box of T) returns Box of T\n    Box(value is b.value)\n\n*main\n    a as Box of i64 is Box(value is 7)\n    log(get_value(a))\n    b is Box(value is 'a-heap-string-well-past-sso-width')\n    c is rebox(b)\n    log(get_value(c))\n    0\n",
+    );
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "7\na-heap-string-well-past-sso-width",
+        "constructors minted mono names from unresolved inference variables (Box_?0) while \
+         instantiated functions spelled the same type structurally (Struct(Box, [i64])); \
+         the spellings never unified and generic-fn type maps defaulted every non-bare \
+         parameter to i64"
+    );
+}
+
+#[test]
+fn multi_param_generics_annotate_with_angle_brackets() {
+    let c = compile(
+        "type Pair of A, B\n    first as A\n    second as B\n\n    *sum_len(self) returns i64\n        self.second.length\n\n*flip(p as Pair<A, B>) returns Pair<B, A>\n    Pair(first is p.second, second is p.first)\n\n*outer_first(p as Pair<i64, Pair<i64, string>>) returns i64\n    p.first\n\n*main\n    p is Pair(first is 5, second is 'hello')\n    log(p.sum_len())\n    q is flip(p)\n    log(q.first)\n    log(q.second)\n    n is Pair(first is 1, second is Pair(first is 2, second is 'deep'))\n    log(outer_first(n))\n    0\n",
+    );
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "5\nhello\n5\n1",
+        "`p as Pair of A, B` parses as two parameters (the comma is a parameter separator), \
+         so multi-argument generics had no expressible annotation; the grammar's documented \
+         `Pair<A, B>` form now parses, including nested closers lexed as `>>`"
+    );
+}
+
+#[test]
+fn generic_enums_flow_through_function_boundaries() {
+    let c = compile(
+        "enum Maybe of T\n    Just(T)\n    Nothing\n\n*or_zero(m as Maybe of i64) returns i64\n    match m\n        Just(v) ? v\n        Nothing ? 0\n\n*wrap(x as T) returns Maybe of T\n    Just(x)\n\n*main\n    a is wrap(41)\n    log(or_zero(a) + 1)\n    b as Maybe of i64 is Nothing\n    log(or_zero(b))\n    0\n",
+    );
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "42\n0",
+        "a generic enum built through a return-position generic function must reach a \
+         concretely-annotated consumer as the same monomorphized enum"
+    );
+}

@@ -1223,11 +1223,14 @@ fn format_type(ty: &crate::types::Type) -> String {
         Type::Map(k, v) if matches!(**k, Type::String) => {
             format!("Map of {}", format_type(v))
         }
-        Type::Map(k, v) => format!("Map of {}, {}", format_type(k), format_type(v)),
+        Type::Map(k, v) => format!("Map<{}, {}>", format_type(k), format_type(v)),
         Type::Ptr(inner) => format!("%{}", format_type(inner)),
+        Type::Struct(n, args) if args.len() == 1 => {
+            format!("{n} of {}", format_type(&args[0]))
+        }
         Type::Struct(n, args) if !args.is_empty() => {
             let ts: Vec<String> = args.iter().map(format_type).collect();
-            format!("{n} of {}", ts.join(", "))
+            format!("{n}<{}>", ts.join(", "))
         }
         _ => format!("{ty}"),
     }

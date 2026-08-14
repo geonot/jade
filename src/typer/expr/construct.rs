@@ -160,6 +160,8 @@ impl Typer {
                 .collect::<Vec<_>>()
                 .join("_");
             let mangled = Symbol::intern(&format!("{name}_{ty_suffix}"));
+            self.infer_ctx
+                .record_mono_origin(mangled, Symbol::intern(name), type_args.to_vec());
 
             if !self.structs.contains_key(&mangled) {
                 self.structs.insert(mangled, concrete_fields.clone());
@@ -359,10 +361,14 @@ impl Typer {
                 if let Some(field_def) = field_def
                     && let Some(ref declared_ty) = field_def.ty
                 {
-                    Self::collect_type_mapping(declared_ty, &fi.value.ty, &mut type_map);
+                    let cty = fi.value.ty.clone();
+                    self.collect_type_mapping(declared_ty, &cty, &mut type_map);
                 }
             }
 
+            for v in type_map.values_mut() {
+                *v = self.infer_ctx.resolve(v);
+            }
             for tp in &gtd.type_params {
                 type_map.entry(*tp).or_insert(Type::I64);
             }
@@ -379,38 +385,63 @@ impl Typer {
                 })
                 .collect();
 
-            let ty_suffix = gtd
-                .type_params
-                .iter()
-                .map(|tp| format!("{}", type_map.get(tp).unwrap_or(&Type::I64)))
-                .collect::<Vec<_>>()
-                .join("_");
-            let mangled = Symbol::intern(&format!("{name}_{ty_suffix}"));
+            let all_concrete = gtd.type_params.iter().all(|tp| {
+                type_map
+                    .get(tp)
+                    .map(Self::is_concrete_type)
+                    .unwrap_or(false)
+            });
 
-            if !self.structs.contains_key(&mangled) {
-                self.structs.insert(mangled, concrete_fields.clone());
-
-                let hir_fields: Vec<hir::Field> = concrete_fields
+            let (ctor_name, expr_ty) = if all_concrete {
+                let ty_suffix = gtd
+                    .type_params
                     .iter()
-                    .map(|(fname, fty)| hir::Field {
-                        name: *fname,
-                        ty: fty.clone(),
-                        default: None,
-                        access_mod: None,
-                        span,
-                    })
+                    .map(|tp| format!("{}", type_map.get(tp).unwrap_or(&Type::I64)))
+                    .collect::<Vec<_>>()
+                    .join("_");
+                let mangled = Symbol::intern(&format!("{name}_{ty_suffix}"));
+                let ordered_args: Vec<Type> = gtd
+                    .type_params
+                    .iter()
+                    .map(|tp| type_map.get(tp).cloned().unwrap_or(Type::I64))
                     .collect();
-                let htd = hir::TypeDef {
-                    def_id: self.fresh_id(),
-                    name: mangled,
-                    fields: hir_fields,
-                    methods: Vec::new(),
-                    layout: gtd.layout.clone(),
-                    span,
-                };
-                self.mono_types.push(htd);
-                self.instantiate_generic_methods(&gtd, mangled, &type_map);
-            }
+                self.infer_ctx
+                    .record_mono_origin(mangled, Symbol::intern(name), ordered_args);
+
+                if !self.structs.contains_key(&mangled) {
+                    self.structs.insert(mangled, concrete_fields.clone());
+
+                    let hir_fields: Vec<hir::Field> = concrete_fields
+                        .iter()
+                        .map(|(fname, fty)| hir::Field {
+                            name: *fname,
+                            ty: fty.clone(),
+                            default: None,
+                            access_mod: None,
+                            span,
+                        })
+                        .collect();
+                    let htd = hir::TypeDef {
+                        def_id: self.fresh_id(),
+                        name: mangled,
+                        fields: hir_fields,
+                        methods: Vec::new(),
+                        layout: gtd.layout.clone(),
+                        span,
+                    };
+                    self.mono_types.push(htd);
+                    self.instantiate_generic_methods(&gtd, mangled, &type_map);
+                }
+                (mangled, Type::Struct(mangled, vec![]))
+            } else {
+                let base = Symbol::intern(name);
+                let args: Vec<Type> = gtd
+                    .type_params
+                    .iter()
+                    .map(|tp| type_map.get(tp).cloned().unwrap_or(Type::I64))
+                    .collect();
+                (base, Type::Struct(base, args))
+            };
 
             for (i, fi) in hinits_g.iter_mut().enumerate() {
                 let declared_ty = if let Some(fname) = &fi.name {
@@ -433,8 +464,8 @@ impl Typer {
 
             self.clone_string_captures_in_inits(&mut hinits_g);
             return Ok(hir::Expr {
-                kind: hir::ExprKind::Struct(mangled, hinits_g),
-                ty: Type::Struct(mangled, vec![]),
+                kind: hir::ExprKind::Struct(ctor_name, hinits_g),
+                ty: expr_ty,
                 span,
             });
         }

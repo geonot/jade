@@ -1,4 +1,56 @@
 # Changelog
+- **[154]** (2026-08-14) types pass, part 2: generic types get one spelling — constructors stop baking unresolved inference variables into mono names, unification sees through monomorphized names, and `Pair<A, B>` finally has an annotation
+
+Second slice of the Types section (T-1r's core closed, residue refiled as
+T-1r2). Full suite is 2232 tests; fmt and clippy clean; the whole-corpus
+ASan+LSan sweep stays at zero memory corruption.
+
+- **A generic struct had at least three mutually non-unifying spellings.**
+  `Box(value is 42)` minted its mono name *while the argument type was still
+  an inference variable*, producing a struct literally named `Box_?0`; the
+  instantiated `*unwrap(b as Box of T)` spelled the same type structurally
+  as `Struct(Box, [i64])`; and an explicit annotation spelled it `Box_i64`.
+  Codegen knew only one of the three — field reads through the others hit
+  the *silent* `(i64, index 0)` fallback in field lookup and read garbage
+  that was only correct when the field happened to be a leading i64. Now:
+  constructors whose type arguments are still unresolved defer instantiation
+  (typed structurally, field lookup falls back to the generic template) and
+  the end-of-lowering canonicalization pass — which already did exactly this
+  for generic *enums* — mints the mono name once the arguments resolve;
+  every mint records its origin `(base, args)` in a table the unifier and
+  generic-call type maps consult, so `Box_string` unifies with `Box of T`
+  and maps `T := String` (previously `build_type_map` recognized only *bare*
+  `T` parameters and silently defaulted everything else to i64 — a
+  `Box of String` argument reached `unwrap__G_i64`). `collect_type_mapping`
+  also learned the Struct/Tuple/Map/Array/View/Frozen/Channel arms it never
+  had.
+- **Multi-parameter generics had no expressible annotation.** In a parameter
+  list, `p as Pair of A, B` parses as *two parameters* (`p as Pair of A`
+  and an untyped `B`) — the comma is claimed by the list, so the two-argument
+  form documented in jinn.ebnf's `generic_args` (`"<" type_expr {"," ...}
+  ">"`) simply did not exist in the parser. It does now: `Pair<A, B>` in any
+  type position, nested (`Pair<i64, Pair<i64, string>>` — a `>>` closer is
+  split in place), with `Vec<T>`/`Map<K, V>`/`View<T>`/`Frozen<T>` accepted
+  as the bracket spelling of the built-in sugar, and `jinn fmt` printing
+  multi-argument generics back in bracket form (it used to print the
+  unparseable `of` form; single-argument types keep `of`). `of` remains the
+  single-argument style throughout.
+- **Eagerly-instantiated methods no longer abort compiles they don't
+  belong to.** Instantiating `Pair<i64, Pair<i64, string>>` also instantiated
+  `sum_len` (which calls `.second.length`) and hard-failed the whole program
+  even though nothing calls `sum_len` on that instantiation. Method-lowering
+  failures now surface only for methods some call site actually names —
+  C++-style: ill-typed instantiations of *unused* methods are not errors.
+- Pinned in `tests/semantics_regression.rs` (spelling unification round-trip
+  with a heap string, angle-bracket annotations incl. the `>>` split, generic
+  enums through function boundaries) and `tests/programs/generic_containers.jn`
+  joins the snapshot/differential/sanitizer corpora. The tour's Generics
+  section documents the bracket form with a compiled example. Residue —
+  phantom params still default silently, no expression-position `<...>` for
+  return-only function generics, undefined generic bases in uncalled
+  signatures pass silently, `Map<K, V>` is grammar-only until non-String
+  keys exist — is T-1r2 in the roadmap.
+
 - **[153]** (2026-08-14) types pass, part 1: tuples get one canonical layout — the phi-shape merge error and a silent heterogeneous-tuple corruption die together, unannotated signatures resolve before callers read them, and a type named `E` unifies with itself
 
 First slice of the Types/inference/diagnostics section (T-10 closed, T-15

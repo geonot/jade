@@ -47,7 +47,12 @@ LLVM struct layout everywhere — the phi-shape diagnostic's trigger is gone,
 and a silent heterogeneous-tuple corruption it was masking is fixed and
 pinned) and T-15 (unannotated signatures resolve before callers read them),
 and reduced T-1r (single-letter type names no longer shadow-collide with the
-parser's type-parameter reading).
+parser's type-parameter reading). The 2026-08-14 generics pass ([154]) closed
+T-1r's spelling core — constructors stopped minting mono names from unresolved
+inference variables, every generic-type spelling canonicalizes to one mono
+name, unification sees through mono names via an origin table, and
+multi-parameter generics gained their `Pair<A, B>` annotation form — leaving
+the residue filed as T-1r2.
 Items below are what remains.
 
 ---
@@ -316,16 +321,31 @@ display (old T-12), and int→float coercion works in bind annotations and for
 literals in binary operands, with mismatch diagnostics naming expected/found in
 the caller's order (old T-14).
 
-### T-1r (M) Generic types: non-unifying spellings, phantom and return-only parameters
+### T-1r2 (m) Generic types: the residue after the [154] spelling unification
 
-Method bodies on generic types are emitted since [143], but a generic struct
-still has several mutually non-unifying spellings, and return-position-only and
-phantom type parameters cannot be used, with no turbofish to escape. [153]
-fixed the harshest collision: the parser reads any single uppercase letter in
-type position as a type parameter, so a user enum or struct actually *named*
-`E` never unified with its own annotation (`expected E, found E`); declared
-names now win over the parameter reading during unification, and the
-same-name/different-kind fallback diagnostic says which is which.
+[153] fixed the harshest name collision (a user type actually *named* `E`
+never unified with its own annotation) and [154] closed the spelling core:
+constructors no longer mint mono names from unresolved inference variables
+(`Box_?0`) — instantiation defers until the arguments resolve and every
+spelling canonicalizes to one mono name in finalization; unification and
+generic-call type maps see through mono names via an origin table; multi-
+parameter generics gained their grammar-documented `Pair<A, B>` annotation
+form (nested closers split `>>`; the formatter prints it back); and mono
+methods that fail to type for an instantiation that never calls them no
+longer abort the compile. What remains, all reproduced on 2026-08-14:
+
+- A phantom type parameter (no field mentions it) silently defaults to i64
+  at the constructor; there is no way to bind it, and no warning.
+- Return-position-only type parameters on *functions* (`*empty of T()
+  returns Vec of T`) have no call-side spelling — the `Name of Type(args)`
+  ctor form covers structs/variants only, and `<...>` does not parse in
+  expression position.
+- An undefined generic base in an uncalled function's signature (`x as Zorp
+  of A`) passes the frontend silently, and unknown struct names in field
+  positions still fall back to typing the access as `(i64, index 0)` when
+  neither the structs table nor a generic template knows them.
+- `Map<K, V>` parses, but `map()` literals and the runtime are String-keyed;
+  a non-String key annotation only produces a unification error at the bind.
 
 ### T-2 (m) Mangled internal names can reach user diagnostics
 

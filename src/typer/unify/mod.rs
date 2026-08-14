@@ -43,6 +43,7 @@ pub(crate) struct InferCtx {
     quantified_vars: std::collections::HashSet<u32>,
 
     trait_impls: IndexMap<Symbol, Vec<String>>,
+    mono_origins: IndexMap<Symbol, (Symbol, Vec<Type>)>,
 }
 
 impl InferCtx {
@@ -65,11 +66,20 @@ impl InferCtx {
             strict_unsolved: false,
             quantified_vars: std::collections::HashSet::new(),
             trait_impls: IndexMap::new(),
+            mono_origins: IndexMap::new(),
         }
     }
 
     pub(crate) fn set_trait_impls(&mut self, impls: IndexMap<Symbol, Vec<String>>) {
         self.trait_impls = impls;
+    }
+
+    pub(crate) fn record_mono_origin(&mut self, mono: Symbol, base: Symbol, args: Vec<Type>) {
+        self.mono_origins.insert(mono, (base, args));
+    }
+
+    pub(crate) fn mono_origin(&self, name: &Symbol) -> Option<&(Symbol, Vec<Type>)> {
+        self.mono_origins.get(name)
     }
 
     pub(crate) fn enable_default_warnings(&mut self) {
@@ -613,6 +623,44 @@ impl InferCtx {
             (Type::Frozen(a), Type::Frozen(b)) => self.unify(a, b),
             (Type::Struct(na, aa), Type::Struct(nb, ab)) if na == nb && aa.len() == ab.len() => {
                 for (x, y) in aa.iter().zip(ab.iter()) {
+                    self.unify(x, y)?;
+                }
+                Ok(())
+            }
+            (Type::Struct(na, aa), Type::Struct(nb, ab))
+                if aa.is_empty()
+                    && self
+                        .mono_origins
+                        .get(na)
+                        .is_some_and(|(base, o)| base == nb && o.len() == ab.len()) =>
+            {
+                let (_, oargs) = self.mono_origins.get(na).cloned().unwrap();
+                for (x, y) in oargs.iter().zip(ab.iter()) {
+                    self.unify(x, y)?;
+                }
+                Ok(())
+            }
+            (Type::Struct(na, aa), Type::Struct(nb, ab))
+                if ab.is_empty()
+                    && self
+                        .mono_origins
+                        .get(nb)
+                        .is_some_and(|(base, o)| base == na && o.len() == aa.len()) =>
+            {
+                let (_, oargs) = self.mono_origins.get(nb).cloned().unwrap();
+                for (x, y) in aa.iter().zip(oargs.iter()) {
+                    self.unify(x, y)?;
+                }
+                Ok(())
+            }
+            (Type::Enum(na), Type::Struct(nb, ab)) | (Type::Struct(nb, ab), Type::Enum(na))
+                if self
+                    .mono_origins
+                    .get(na)
+                    .is_some_and(|(base, o)| base == nb && o.len() == ab.len()) =>
+            {
+                let (_, oargs) = self.mono_origins.get(na).cloned().unwrap();
+                for (x, y) in oargs.iter().zip(ab.iter()) {
                     self.unify(x, y)?;
                 }
                 Ok(())

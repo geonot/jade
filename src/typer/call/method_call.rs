@@ -411,6 +411,7 @@ impl Typer {
                         self.peel_frozen_arg(mangled, i + 1, param_tys.get(i + 1), ha, span)?;
                         self.coerce_arg_to_view(param_tys.get(i + 1), ha, span);
                     }
+                    self.called_mono_methods.insert(mangled);
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::Method(
                             Box::new(hobj),
@@ -580,6 +581,8 @@ impl Typer {
                     self.peel_frozen_arg(mangled, i + 1, param_tys.get(i + 1), ha, span)?;
                     self.coerce_arg_to_view(param_tys.get(i + 1), ha, span);
                 }
+                self.called_mono_methods
+                    .insert(Symbol::intern(&method_name));
                 return Ok(hir::Expr {
                     kind: hir::ExprKind::Method(
                         Box::new(hobj),
@@ -679,6 +682,8 @@ impl Typer {
                         self.lower_expr_expected(e, expected)
                     })
                     .collect::<Result<_, _>>()?;
+                self.called_mono_methods
+                    .insert(Symbol::intern(&method_name));
                 return Ok(hir::Expr {
                     kind: hir::ExprKind::Method(
                         Box::new(hobj),

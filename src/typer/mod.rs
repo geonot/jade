@@ -234,6 +234,7 @@ pub struct Typer {
     pub(crate) pending_mono_methods: Vec<(Symbol, ast::Fn)>,
 
     pub(crate) mono_methods_done: std::collections::HashSet<Symbol>,
+    pub(crate) called_mono_methods: std::collections::HashSet<Symbol>,
 
     pub(crate) std_files: std::collections::HashSet<Symbol>,
 }
@@ -337,6 +338,7 @@ impl Typer {
             fn_param_consume_sites: IndexMap::new(),
             pending_mono_methods: Vec::new(),
             mono_methods_done: std::collections::HashSet::new(),
+            called_mono_methods: std::collections::HashSet::new(),
             std_files: std::collections::HashSet::new(),
         }
     }

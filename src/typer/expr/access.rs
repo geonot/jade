@@ -461,6 +461,38 @@ impl Typer {
                                 field
                             ));
                         }
+                    } else if let Some(gtd) = self.generic_types.get(name).cloned() {
+                        let args = match &peeled_ty {
+                            Type::Struct(_, args) => args.clone(),
+                            Type::Ptr(inner) | Type::View(inner) => {
+                                match self.infer_ctx.shallow_resolve(inner) {
+                                    Type::Struct(_, args) => args,
+                                    _ => vec![],
+                                }
+                            }
+                            _ => vec![],
+                        };
+                        let mut type_map = std::collections::HashMap::new();
+                        for (tp, ta) in gtd.type_params.iter().zip(args.iter()) {
+                            type_map.insert(*tp, ta.clone());
+                        }
+                        if let Some((i, f)) = gtd
+                            .fields
+                            .iter()
+                            .enumerate()
+                            .find(|(_, f)| f.name == *field)
+                        {
+                            let declared = f.ty.clone().unwrap_or(Type::I64);
+                            let substituted = Self::substitute_type_params(&declared, &type_map);
+                            (self.infer_ctx.shallow_resolve(&substituted), i)
+                        } else {
+                            return Err(format!(
+                                "{}: type '{}' has no field '{}'",
+                                span.loc(),
+                                name,
+                                field
+                            ));
+                        }
                     } else {
                         (Type::I64, 0)
                     }

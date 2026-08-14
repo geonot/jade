@@ -168,6 +168,18 @@ impl Parser {
         Ok(a)
     }
 
+    fn expect_type_gt(&mut self) -> Result<(), ParseError> {
+        if self.check(Token::Gt) {
+            self.advance();
+            return Ok(());
+        }
+        if self.check(Token::Shr) && self.pos < self.tok.len() {
+            self.tok[self.pos].token = Token::Gt;
+            return Ok(());
+        }
+        Err(self.error("expected > to close type arguments"))
+    }
+
     pub(in crate::parser) fn parse_type_multi(&mut self) -> Result<Type, ParseError> {
         let prev = self.allow_multi_type_args;
         self.allow_multi_type_args = true;
@@ -213,6 +225,35 @@ impl Parser {
                     } else {
                         Ok(t)
                     }
+                } else if self.check(Token::Lt)
+                    && let Some(name) = match &t {
+                        Type::Struct(name, _) => Some(*name),
+                        Type::Param(name) => Some(*name),
+                        _ => None,
+                    }
+                {
+                    self.advance();
+                    let mut targs = vec![self.parse_type()?];
+                    while self.check(Token::Comma) {
+                        self.advance();
+                        targs.push(self.parse_type()?);
+                    }
+                    self.expect_type_gt()?;
+                    if name == "Vec" && targs.len() == 1 {
+                        return Ok(Type::Vec(Box::new(targs.pop().unwrap())));
+                    }
+                    if name == "Map" && targs.len() == 2 {
+                        let v = targs.pop().unwrap();
+                        let k = targs.pop().unwrap();
+                        return Ok(Type::Map(Box::new(k), Box::new(v)));
+                    }
+                    if name == "View" && targs.len() == 1 {
+                        return Ok(Type::View(Box::new(targs.pop().unwrap())));
+                    }
+                    if name == "Frozen" && targs.len() == 1 {
+                        return Ok(Type::Frozen(Box::new(targs.pop().unwrap())));
+                    }
+                    Ok(Type::Struct(name, targs))
                 } else {
                     Ok(t)
                 }
