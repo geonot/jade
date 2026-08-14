@@ -196,39 +196,39 @@ annotation, are policy decisions deferred until the package/visibility surface
 exists (`design/lamp.md`); `fmt` insertion additionally needs inference results
 at format time.
 
-### M-13r (m) Second-class references: bind position, lending iteration, std adoption
+### M-13r (m) Second-class references: method reads through views, std adoption
 
-[148] shipped step 1 of [`design/second-class-refs.md`](design/second-class-refs.md):
-`View of T` exists (`{ptr, len}`, trivially droppable, bounds-checked reads),
-created by `xs.view(a, b)`, `xs.at_view(i)`, and `s.view(a, b)` over string
-bytes; a `View of T` parameter accepts a whole `Vec`, an array, or a sub-slice
-view via automatic coercion; views support `.length`, `.get(i)`, and
-iteration; and every escaping position rejects at compile time — binds,
-returns, struct/enum/store fields, nested annotations, container elements,
-task and closure captures, sends, and yields (`tests/views.rs` pins all of
-it). Remaining, in the design's own sequencing: bind-position views with
-root-locking through the place lattice (step 2 — until then a view lives only
-inside its statement, which the existing statement borrows already make
-sound), `views()` lending iteration (step 3), the std adoption sweep with
-benchmarks (step 4), and field/method reads through an element view — the
-part of `M-4r` step 1 does not yet reach.
+[148] shipped step 1 of [`design/second-class-refs.md`](design/second-class-refs.md)
+(`View of T`, creation methods, `View` parameters with whole-container
+coercion, `{ptr, len}` codegen, full escape rejection), and [149] shipped
+steps 2 and 3: a view may be **bound** (`v is xs.view(1, 3)`), which locks
+its root through the same borrow lattice iteration uses — mutation, moves,
+and reassignment of the root reject with the view named until the view's
+block ends; views of temporaries cannot be bound; alias binds inherit the
+root. `for p in pts.views()` is lending iteration (per-element view binder),
+and *field* reads through an element view read through the pointer with no
+element copy — closing `M-4r`'s field half. `tests/views.rs` pins all of it.
+Remaining: read-only *method calls* through an element view still resolve
+against a copied receiver, and the std adoption sweep (`strings`, `csv`,
+`json`, `sort`) with benchmarks has not started (step 4).
 
-### M-14r (m) `freeze`: the multi-task sharing exception
+### M-14r (m) `freeze`: actor-handler classification, function-exit dispatch, std adoption
 
-[148] shipped step 1 of [`design/freeze.md`](design/freeze.md): `freeze x`
-consumes its aggregate operand through the move lattice and produces
-`Frozen of T` — structurally checked freezability with the offending field
-path named, auto-deref on every read path, and compile-time rejection of
-every write (mutating and consuming methods, assignment through a frozen
-component, partial moves, mutating/consuming parameters), with `Frozen of T`
-usable in parameter and field position as an API contract
-(`tests/freeze.rs` pins all of it). Remaining: step 2's whole point — the
-capture exception that lets every `dispatch` inside a `together` share one
-frozen value without copying (today a frozen value moves into at most one
-task, like any aggregate); step 3's std adoption; and peeling `Frozen`
-arguments at actor-send and pipe boundaries, which today fail unification
-with a generic type mismatch instead of the frozen-aware diagnostic the
-direct-call path gives.
+[148] shipped step 1 of [`design/freeze.md`](design/freeze.md) (the `freeze`
+expression, `Frozen of T`, structural freezability, auto-deref reads,
+compile-time rejection of every write), and [149] shipped step 2's core: every
+`dispatch` inside a `together` shares one frozen value bound outside it — no
+move, no copy, no refcount — with a `FrozenShare` borrow rejecting any move
+of the shared value until the `together` joins, and the owner readable after
+and dropping once. Pipes peel frozen arguments like direct calls (read pipes
+work, mutating pipes reject with the frozen wording). `tests/freeze.rs` pins
+it. Remaining: frozen values created *inside* the `together` body fall back
+to single-task moves (their drop would race the join); function-exit
+`dispatch` sharing (the design's second scope supplier); actor sends of
+frozen values are conservatively rejected with guidance unless the handler
+declares `Frozen of ...` — accepting them for provably read-only handlers
+needs handler write-inference; and step 3's std adoption (config-style
+loaders returning frozen values).
 
 ### M-16r (m) Closures: caps edges, generators, temp environments
 
@@ -244,15 +244,24 @@ owns a heap environment carrying its own drop function, function-typed
 parameters borrow, and closures move into at most one task
 (`tests/closure_captures.rs` pins it; returning a closure over a local
 aggregate is now sound and pinned in `tests/alpha_review_regressions.rs`).
-Remaining: the caps fixpoint still has no edge for an indirect call through a
-closure value, so a `needs`-annotated function calling one under-reports
-(design step 2); generators still need suspended-frame drops before the same
-rules apply to them (step 3); by-view capture for provably in-frame closures
-(step 4); `copy x` at the capture site is spelled "bind `copy x` to a fresh
-name first" rather than inline; and a closure created in expression position
-with captures (`xs.map` with a capturing lambda argument) leaks its
-environment — closure temps are outside `M-9r2`'s drop-obligation set, and
-the leak tail is measured by `ci/sanitize-corpus.sh`.
+[149] closed the worst of the residue: the caps fixpoint now taints any call
+through a function-typed parameter with a conservative "indirect call"
+pseudo-capability, so a `needs`-annotated function calling a closure it did
+not create is a compile error naming the introduction path (lambda *bodies*
+were already scanned at their definition site, so a closure's own effects are
+charged to its creator); a generator's aggregate arguments are inferred
+consuming, closing the same aliasing unsoundness closures had (resuming after
+the caller consumed the vec SIGSEGVed — now a use-after-move error); and
+closure temporaries joined `M-9r2`'s drop-obligation set, so an
+expression-position capturing closure on a straight-line path frees its
+environment at function exit. Remaining: suspended-frame drops (a generator
+dropped mid-iteration frees its frame but not the aggregates it still
+holds); per-iteration closure temporaries in loops still leak their
+environments (the return-repair pass cannot reach them by design — same
+class as `M-9r2`'s loop-iteration reallocation); locals that alias a
+function-typed parameter are invisible to the caps taint; by-view capture
+for provably in-frame closures (step 4); and `copy x` at the capture site is
+spelled "bind `copy x` to a fresh name first" rather than inline.
 
 ---
 

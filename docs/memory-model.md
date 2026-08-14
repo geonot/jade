@@ -277,9 +277,22 @@ Creating a generator moves captured aggregates into its frame. The frame
 outlives the creating statement, so borrowing would be unsound — the same
 reasoning as M8. The frame's owner drops whatever it still holds. Yielded
 aggregate values transfer ownership to the consumer of `next()`; yielded scalars
-and strings copy.
+and strings copy. Since [149] the move-in is enforced: a generator's aggregate
+arguments are inferred consuming (the frame outlives the call), so using the
+original after creation is a use-after-move — previously the frame aliased the
+caller's value and resuming after a consuming call read freed memory. Captures
+still held by a generator dropped mid-suspension are not yet freed
+(suspended-frame drops, `M-16r`).
 
 ### M12 — closures capture exactly like tasks
+
+Since [149], calling through a function-typed *parameter* inside a
+`needs`-annotated function is a capability error: the callee's row cannot be
+classified through a closure value yet, so the row derives the conservative
+"indirect call" taint and the diagnostic names the introduction path. Lambda
+*bodies* are scanned where they are written, so a closure's own effects are
+always charged to its defining function.
+
 
 Creating a closure (`f is |x| …` with free variables) classifies each captured
 binding by category: scalars copy at creation, `String`s and value structs are
@@ -454,21 +467,34 @@ to a parameter the mutation inference marks mutating or consuming — consuming
 is rejected because a move into a mutable owner would thaw. `Frozen of T` in a
 parameter or field position demands immutability at the boundary; `copy` of a
 frozen place produces a fresh mutable value. Scope-shared multi-task capture
-(`together` handing one frozen value to every `dispatch`) is designed but not
-implemented — a frozen value still moves into at most one task
-([`design/freeze.md`](design/freeze.md), roadmap `M-14r`).
+(`together` handing one frozen value to every `dispatch`) shipped in [149]:
+frozen captures inside a `together` do not move — every `dispatch` shares the
+one value by pointer, a `FrozenShare` borrow locks it against moves until the
+`together` joins, and the owner (which must be bound outside the `together`)
+keeps it afterwards and drops it once. Frozen values created *inside* the
+`together` body still move into a single task (their drop would race the
+join). Actor sends of frozen values are rejected with guidance unless the
+handler declares `Frozen of ...` — handler write-inference is not yet
+classified ([`design/freeze.md`](design/freeze.md), roadmap `M-14r`).
 
 **`View of T`** is a two-word borrowed window (`ptr + len`) created by
 `xs.view(a, b)`, `xs.at_view(i)`, and `s.view(a, b)` (string bytes), or by
 passing a whole `Vec`/array to a `View of T` parameter. Views are
 *second-class*: they flow down (calls, expressions, loop bodies) and never
-out — binding, returning, storing in fields/containers/stores, sending,
-task capture, closure capture, and yielding are all rejected at compile time,
-so a view is statement-scoped and M5's statement borrows already keep the
-root alive and stable for its whole life. Reads through a view bounds-check
-against the view's own length; `.get` on value-category elements copies out
-(clone for `String`). Bind-position views with root-locking and lending
-iteration are the next steps
+out — returning, storing in fields/containers/stores (declared *or*
+inferred), sending, task capture, closure capture, and yielding are all
+rejected at compile time. Since [149] a view may be **bound**: the bind
+registers a borrow of the view's root in the same lattice stack iteration
+borrows use, so mutating, moving, or reassigning the root while the view
+lives is rejected with the view named, and the borrow dies with the view's
+block. Views of temporaries cannot be bound; a bind from another view
+inherits its root; view-typed parameters have no local root (the caller's
+call-borrow covers them). `for x in xs.views()` is lending iteration —
+the binder is a per-element view — and a field read through an element view
+reads through the pointer, no element copy (the `M-4r` fix). Moving a field
+out of a view is rejected; `.get` on value-category elements copies out
+(clone for `String`). Read-only *method calls* through element views and the
+std adoption sweep remain
 ([`design/second-class-refs.md`](design/second-class-refs.md), roadmap
 `M-13r`).
 

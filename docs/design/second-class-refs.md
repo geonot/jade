@@ -1,13 +1,14 @@
 # Second-class references and slices — design
 
-> **Status: step 1 implemented ([148]).** `View of T`, the creation methods
-> (`view`, `at_view`, string-byte `view`), whole-`Vec`/array coercion into
-> `View` parameters, `{ptr, len}` codegen with bounds checks, and the full
-> escape rejection are in the compiler and pinned by `tests/views.rs`.
-> Bind-position views with root-locking (step 2), `views()` lending iteration
-> (step 3), and the std adoption sweep (step 4) remain design — tracked as
-> `M-13r` in [`../roadmap.md`](../roadmap.md#memory-and-ownership). This is
-> the honest fix for `M-4r` (element reads deep-copy).
+> **Status: steps 1–3 implemented ([148], [149]).** `View of T`, the creation
+> methods, whole-`Vec`/array coercion into `View` parameters, `{ptr, len}`
+> codegen with bounds checks, and the full escape rejection shipped in [148];
+> [149] added bind-position views with root-locking through the borrow
+> lattice, `views()` lending iteration, and zero-copy *field* reads through
+> element views — the `M-4r` fix. Pinned by `tests/views.rs`. Remaining:
+> read-only *method calls* through element views, and the std adoption sweep
+> with benchmarks (step 4) — tracked as `M-13r` in
+> [`../roadmap.md`](../roadmap.md#memory-and-ownership).
 
 The premise stays fixed: **no lifetime syntax, ever.** Jinn's borrows today
 are invisible because they are statement-scoped — a method call or field read

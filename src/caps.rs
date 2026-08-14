@@ -14,6 +14,7 @@ pub enum Capability {
     Random,
     FfiUnsafe,
     State(Option<String>),
+    IndirectCall,
 }
 
 impl Capability {
@@ -30,6 +31,7 @@ impl Capability {
             Capability::Random => "random",
             Capability::FfiUnsafe => "ffi.unsafe",
             Capability::State(_) => "state",
+            Capability::IndirectCall => "indirect-call",
         }
     }
 
@@ -38,6 +40,11 @@ impl Capability {
             Capability::FsRead(Some(p)) => format!("fs.read '{p}'"),
             Capability::FsWrite(Some(p)) => format!("fs.write '{p}'"),
             Capability::State(Some(r)) => format!("state <{r}>"),
+            Capability::IndirectCall => {
+                "a call through a function value (the callee's capabilities cannot \
+                 be classified yet; call a named function instead)"
+                    .to_string()
+            }
             other => other.class().to_string(),
         }
     }

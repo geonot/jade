@@ -45,6 +45,62 @@ pub(crate) mod unify;
 pub(crate) type MoveState = place::MoveSet;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum BorrowKind {
+    Iter,
+    ViewBind { binder: DefId, scope_depth: usize },
+    FrozenShare,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BorrowEntry {
+    pub(crate) place: place::Place,
+    pub(crate) span: Span,
+    pub(crate) kind: BorrowKind,
+}
+
+impl BorrowEntry {
+    pub(crate) fn clause(&self, at: &place::Place) -> String {
+        let what = if self.place.proj == at.proj {
+            "it".to_string()
+        } else {
+            format!("`{}`", self.place.render())
+        };
+        match self.kind {
+            BorrowKind::Iter => {
+                format!(
+                    "the `for` loop at {} is iterating {}",
+                    self.span.loc(),
+                    what
+                )
+            }
+            BorrowKind::ViewBind { .. } => {
+                format!("the view bound at {} borrows {}", self.span.loc(), what)
+            }
+            BorrowKind::FrozenShare => format!(
+                "the `together` at {} shares it frozen with its tasks",
+                self.span.loc()
+            ),
+        }
+    }
+
+    pub(crate) fn help(&self) -> &'static str {
+        match self.kind {
+            BorrowKind::Iter => {
+                "iterate by index, or collect the changes and apply them after the loop"
+            }
+            BorrowKind::ViewBind { .. } => {
+                "the view lives to the end of its block; do this after the block, or \
+                 copy the data instead (`slice` copies)"
+            }
+            BorrowKind::FrozenShare => {
+                "a frozen value shared with tasks stays readable until the `together` \
+                 joins them; do this after the `together`"
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum MoveReason {
     TakeExplicit,
 
@@ -162,7 +218,11 @@ pub struct Typer {
 
     pub(crate) instantiated_generics: std::collections::HashSet<Symbol>,
 
-    pub(crate) iter_borrowed: Vec<(place::Place, crate::ast::Span)>,
+    pub(crate) iter_borrowed: Vec<BorrowEntry>,
+
+    pub(crate) view_roots: std::collections::HashMap<DefId, place::Place>,
+
+    pub(crate) together_outer_ids: Vec<std::collections::HashSet<DefId>>,
 
     pub(crate) suppress_move_marking: u32,
 
@@ -268,6 +328,8 @@ impl Typer {
             dep_pkg_ids: std::collections::HashMap::new(),
             scoped_use_map: crate::pkgid::ScopedUseMap::new(),
             iter_borrowed: Vec::new(),
+            view_roots: std::collections::HashMap::new(),
+            together_outer_ids: Vec::new(),
             suppress_move_marking: 0,
             fn_param_mutates: IndexMap::new(),
             fn_param_consume_sites: IndexMap::new(),
@@ -390,6 +452,36 @@ impl Typer {
 
     fn pop_scope(&mut self) {
         self.scopes.pop();
+        let depth = self.scopes.len();
+        self.iter_borrowed.retain(
+            |e| !matches!(e.kind, BorrowKind::ViewBind { scope_depth, .. } if scope_depth > depth),
+        );
+    }
+
+    pub(crate) fn release_view_binds(&mut self, binder: DefId) {
+        self.iter_borrowed
+            .retain(|e| !matches!(e.kind, BorrowKind::ViewBind { binder: b, .. } if b == binder));
+        self.view_roots.remove(&binder);
+    }
+
+    pub(crate) fn register_view_bind(
+        &mut self,
+        binder: DefId,
+        root: Option<place::Place>,
+        span: Span,
+    ) {
+        self.release_view_binds(binder);
+        if let Some(root) = root {
+            self.iter_borrowed.push(BorrowEntry {
+                place: root.clone(),
+                span,
+                kind: BorrowKind::ViewBind {
+                    binder,
+                    scope_depth: self.scopes.len(),
+                },
+            });
+            self.view_roots.insert(binder, root);
+        }
     }
 
     fn define_var(&mut self, name: &str, info: VarInfo) {
@@ -580,14 +672,11 @@ impl Typer {
         name.split("__G_").next().unwrap_or(name)
     }
 
-    pub(crate) fn iter_borrow_conflict(
-        &self,
-        place: &place::Place,
-    ) -> Option<&(place::Place, crate::ast::Span)> {
+    pub(crate) fn iter_borrow_conflict(&self, place: &place::Place) -> Option<&BorrowEntry> {
         self.iter_borrowed
             .iter()
             .rev()
-            .find(|(b, _)| b.overlaps(place))
+            .find(|e| e.place.overlaps(place))
     }
 
     pub(crate) fn mark_place_moved_checked(
@@ -597,20 +686,14 @@ impl Typer {
         at: crate::ast::Span,
     ) -> Result<(), String> {
         if self.suppress_move_marking == 0
-            && let Some((borrowed, loop_span)) = self.iter_borrow_conflict(&pl)
+            && let Some(entry) = self.iter_borrow_conflict(&pl)
         {
-            let what = if borrowed.proj == pl.proj {
-                "it".to_string()
-            } else {
-                format!("`{}`", borrowed.render())
-            };
             return Err(format!(
-                "{}: cannot move `{}` while the `for` loop at {} is iterating {}; \
-                 iterate by index, or restructure so the move happens outside the loop",
+                "{}: cannot move `{}` while {}; {}",
                 at.loc(),
                 pl.render(),
-                loop_span.loc(),
-                what,
+                entry.clause(&pl),
+                entry.help(),
             ));
         }
         if let Some(defer_span) = self.defer_read_vars.get(&pl.root) {
@@ -620,6 +703,20 @@ impl Typer {
                 at.loc(),
                 pl.render(),
                 defer_span.loc(),
+            ));
+        }
+        if !pl.is_root()
+            && self.suppress_move_marking == 0
+            && let Some(root_ty) = self.find_var_by_id(pl.root).map(|v| v.ty.clone())
+            && matches!(self.infer_ctx.resolve(&root_ty), Type::View(_))
+        {
+            return Err(format!(
+                "{}: cannot move `{}` out of `{}`: it is a view, a borrowed window \
+                 that owns nothing; copy the data instead (`copy {}`)",
+                at.loc(),
+                pl.render(),
+                pl.root_name,
+                pl.render(),
             ));
         }
         if !pl.is_root()

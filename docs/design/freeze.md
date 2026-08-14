@@ -1,13 +1,14 @@
 # `freeze` and shared immutables — design
 
-> **Status: step 1 implemented ([148]).** The `freeze` expression,
+> **Status: steps 1–2 implemented ([148], [149]).** The `freeze` expression,
 > `Frozen of T`, the structural freezability check, auto-deref reads, and the
-> full write rejection are in the compiler and pinned by `tests/freeze.rs`.
-> The multi-capture exception (every `dispatch` in a `together` sharing one
-> frozen value — step 2) and std adoption (step 3) remain design — tracked as
-> `M-14r` in [`../roadmap.md`](../roadmap.md#memory-and-ownership). Until
-> step 2 lands, a frozen value moves into at most one task, like any
-> aggregate.
+> full write rejection shipped in [148]; [149] added the multi-capture
+> exception — every `dispatch` in a `together` shares one frozen value bound
+> outside it, locked against moves until the join — plus frozen-aware pipes.
+> Pinned by `tests/freeze.rs`. Remaining: function-exit `dispatch` sharing,
+> actor handlers accepting frozen payloads without a `Frozen of ...`
+> annotation (handler write-inference), and std adoption (step 3) — tracked
+> as `M-14r` in [`../roadmap.md`](../roadmap.md#memory-and-ownership).
 
 Large read-only data — configuration, lookup tables, model weights — must
 today be copied into every task that reads it or funnelled through one actor.

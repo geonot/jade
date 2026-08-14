@@ -113,7 +113,11 @@ impl Typer {
             },
         );
         let guard = if let Some(pl) = borrow_place {
-            self.iter_borrowed.push((pl, f.span));
+            self.iter_borrowed.push(crate::typer::BorrowEntry {
+                place: pl,
+                span: f.span,
+                kind: crate::typer::BorrowKind::Iter,
+            });
             true
         } else {
             false
@@ -321,7 +325,11 @@ impl Typer {
         });
 
         let guard = if let Some(pl) = borrow_place {
-            self.iter_borrowed.push((pl, f.span));
+            self.iter_borrowed.push(crate::typer::BorrowEntry {
+                place: pl,
+                span: f.span,
+                kind: crate::typer::BorrowKind::Iter,
+            });
             true
         } else {
             false

@@ -232,3 +232,39 @@ fn vec_literal_capture_of_a_bound_vec_does_not_double_free() {
         "1",
     );
 }
+
+#[test]
+fn together_dispatches_share_one_frozen_value() {
+    accepts_and_prints(
+        "*worker(cfg as Vec of i64, id as i64) returns i64\n    cfg.sum() + id\n\n*main\n    xs is vector(1, 2, 3)\n    fz is freeze xs\n    together\n        dispatch\n            log(worker(fz, 1))\n        dispatch\n            log(worker(fz, 1))\n    log(fz.length)\n",
+        "7\n7\n3",
+    );
+}
+
+#[test]
+fn moving_a_shared_frozen_value_inside_the_together_is_rejected() {
+    rejects(
+        "*main\n    xs is vector(1, 2, 3)\n    fz is freeze xs\n    together\n        dispatch\n            log(fz.length)\n        gz is fz\n    log(1)\n",
+        &["shares it frozen with its tasks"],
+    );
+}
+
+#[test]
+fn unfrozen_aggregates_still_move_into_one_task_only() {
+    rejects(
+        "*main\n    xs is vector(1, 2, 3)\n    together\n        dispatch\n            log(xs.length)\n        dispatch\n            log(xs.sum())\n",
+        &["used after being moved into a concurrent task"],
+    );
+}
+
+#[test]
+fn frozen_pipes_peel_for_reads_and_reject_mutation() {
+    accepts_and_prints(
+        "*total(v as Vec of i64) returns i64\n    v.sum()\n\n*main\n    xs is vector(1, 2, 3)\n    fz is freeze xs\n    log(fz ~ total)\n",
+        "6",
+    );
+    rejects(
+        "*grow(v as Vec of i64)\n    v.push(9)\n\n*main\n    xs is vector(1, 2)\n    fz is freeze xs\n    fz ~ grow\n",
+        &["is frozen", "mutates it"],
+    );
+}

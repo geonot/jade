@@ -814,7 +814,10 @@ Available combinators include `map`, `filter`, `fold`, `any`, `all`, `find`,
 ## Generators
 
 A function that contains `yield` is a generator. Calling it produces a lazy
-sequence; `next()` advances it.
+sequence; `next()` advances it. The frame outlives the call, so a generator
+**consumes its aggregate arguments** — passing a `Vec` to a generator moves
+it into the frame, and using the original afterwards is the ordinary
+use-after-move error (scalars and `String`s copy, as everywhere).
 
 ```jinn
 *counter()
@@ -1358,9 +1361,32 @@ built of data — scalars, `String`, `Vec`, `Map`, and structs or enums of the
 same, recursively; `@resource` types, channels, actors, coroutines, and
 functions are live handles, not data, and are rejected with the offending
 field named. There is no `thaw`: to get a mutable value back, `copy` a part
-out and build anew. The design — including the planned exception that lets
-every `dispatch` in a `together` share one frozen value without copying,
-which is not implemented yet — is [`design/freeze.md`](design/freeze.md).
+out and build anew.
+
+Sharing is what freezing buys. Inside a `together`, every `dispatch` may
+capture the *same* frozen value — the one exception to "an aggregate moves
+into at most one task" — because the tasks are joined before the owner's
+scope ends, no copy and no reference count is needed, and there is no state
+left to race on:
+
+```jinn
+*worker(cfg as Vec of i64, id as i64) returns i64
+    cfg.sum() + id
+
+*main
+    xs is vector(10, 20, 30)
+    frozen is freeze xs
+    together
+        dispatch
+            log(worker(frozen, 1))
+        dispatch
+            log(worker(frozen, 2))
+    log(frozen.length)      # still owned and readable after the join
+```
+
+Moving the shared value away while the `together` runs is a compile error;
+after it joins, the owner keeps reading it, and one drop at the owner's scope
+end frees it. The design is [`design/freeze.md`](design/freeze.md).
 
 ### Views
 
@@ -1383,15 +1409,36 @@ view, or an array — the callee cannot tell and cannot keep it:
     log(total(xs.view(1, 3)))    # elements 1 and 2, no copy
 ```
 
+A view may also be **bound** — `v is xs.view(1, 3)` — and the bind locks
+its root: mutating, moving, or reassigning `xs` while `v` is live is a
+compile error naming the view, and the lock releases when `v`'s block ends.
+A view of a temporary cannot be bound (the data would die with the
+statement). For iteration without per-element copies, `for p in pts.views()`
+binds each element as a view, and reading a field through an element view
+(`pts.at_view(i).x`, `p.x` in the loop) reads through the pointer — no
+element copy, which is the honest fix for the old hidden deep-copy on
+nested-container reads:
+
+```jinn
+type Point
+    x as i64
+    y as i64
+
+*main
+    pts is vector(Point(x is 1, y is 2), Point(x is 3, y is 4))
+    total is 0
+    for p in pts.views()
+        total is total + p.x
+    log(total)                 # 4, and no Point was copied
+```
+
 What makes views safe without lifetime annotations is *second-classness*: a
-view flows **down** — into calls, expressions, and loop bodies — but never
-**out**. Binding one to a name, returning one, storing one in a struct field,
-container, or store, sending one across a task boundary, and capturing one in
-a closure are all compile errors, so a view can never outlive the statement
-that created it, and the existing borrow rules already keep the owner stable
-for that long. The copying `slice` stays available when you need an owned
-sub-sequence. The full design, including the planned bind-position views and
-lending iteration, is
+view flows **down** — into calls, expressions, loop bodies, and block-scoped
+binds — but never **out**. Returning one, storing one in a struct field,
+container, or store, sending one across a task boundary, capturing one in a
+task or closure, and yielding one are all compile errors, so a view never
+outlives its root's borrow. The copying `slice` stays available when you
+need an owned sub-sequence. The full design is
 [`design/second-class-refs.md`](design/second-class-refs.md).
 
 The full contract — the rules, the exact diagnostics, the tiers, and where the

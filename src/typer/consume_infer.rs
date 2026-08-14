@@ -93,6 +93,33 @@ impl crate::typer::Typer {
                 break;
             }
         }
+        for f in fns {
+            if !f.is_generator {
+                continue;
+            }
+            for (i, p) in f.params.iter().enumerate() {
+                if p.access_mod.is_some() || annotated_non_consumable(&p.ty) {
+                    continue;
+                }
+                if let Some(accs) = self.fn_param_access.get_mut(&f.name)
+                    && let Some(slot) = accs.get_mut(i)
+                    && slot.is_none()
+                {
+                    *slot = Some(ast::AccessMod::Take);
+                    let n_slots = accs.len();
+                    let sites = self
+                        .fn_param_consume_sites
+                        .entry(f.name)
+                        .or_insert_with(|| vec![None; n_slots]);
+                    if sites.len() < n_slots {
+                        sites.resize(n_slots, None);
+                    }
+                    if let Some(s) = sites.get_mut(i) {
+                        *s = Some((f.span, false));
+                    }
+                }
+            }
+        }
         self.infer_mutating_params(fns, &method_items);
     }
 

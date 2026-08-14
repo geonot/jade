@@ -68,6 +68,7 @@ struct Collected {
 struct Scanner<'a> {
     out: Collected,
     trusted_apertures: &'a HashSet<Symbol>,
+    param_names: HashSet<Symbol>,
 }
 
 impl Scanner<'_> {
@@ -220,7 +221,11 @@ impl Scanner<'_> {
         match e {
             ast::Expr::Call(callee, args, _) => {
                 if let ast::Expr::Ident(name, _) = callee.as_ref() {
-                    self.out.callees.insert(*name);
+                    if self.param_names.contains(name) {
+                        self.out.caps.insert(Capability::IndirectCall);
+                    } else {
+                        self.out.callees.insert(*name);
+                    }
                 } else {
                     self.scan_expr(callee);
                 }
@@ -451,6 +456,7 @@ pub(in crate::typer) fn analyze(
         let mut scanner = Scanner {
             out: Collected::default(),
             trusted_apertures: &trusted_apertures,
+            param_names: it.fun.params.iter().map(|p| p.name).collect(),
         };
         scanner.scan_block(&it.fun.body);
         let mut collected = scanner.out;

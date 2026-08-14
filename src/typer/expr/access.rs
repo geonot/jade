@@ -406,12 +406,23 @@ impl Typer {
                 }
 
                 let peeled_ty = resolved_ty.clone();
+                if matches!(&peeled_ty, Type::View(_)) && (field == "length" || field == "count") {
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Field(Box::new(hobj), *field, 0),
+                        ty: Type::I64,
+                        span: *span,
+                    });
+                }
                 let struct_name = match &peeled_ty {
                     Type::Struct(name, _) => Some(*name),
 
                     Type::Row(store) => Some(Symbol::intern(&format!("__store_{store}"))),
                     Type::Ptr(inner) => match inner.as_ref() {
                         Type::Struct(name, _) => Some(*name),
+                        _ => None,
+                    },
+                    Type::View(inner) => match self.infer_ctx.shallow_resolve(inner) {
+                        Type::Struct(name, _) => Some(name),
                         _ => None,
                     },
                     _ => None,

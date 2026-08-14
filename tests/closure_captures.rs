@@ -203,3 +203,43 @@ fn string_capture_in_a_task_is_not_truncated() {
         "40",
     );
 }
+
+#[test]
+fn generator_arguments_are_consumed_at_creation() {
+    accepts_and_prints(
+        "*emit(xs as Vec of i64)\n    for x in xs\n        yield x\n\n*main\n    xs is vector(1, 2, 3)\n    g is emit(xs)\n    log(g.next())\n    log(g.next())\n    log(g.next())\n",
+        "1\n2\n3",
+    );
+    rejects(
+        "*emit(xs as Vec of i64)\n    for x in xs\n        yield x\n\n*main\n    xs is vector(1, 2, 3)\n    g is emit(xs)\n    log(g.next())\n    log(xs.length)\n",
+        &["use of moved value `xs`", "emit"],
+    );
+    rejects(
+        "*eat(v as take Vec of i64) returns i64\n    v.sum()\n\n*emit(xs as Vec of i64)\n    for x in xs\n        yield x\n\n*main\n    xs is vector(1, 2, 3)\n    g is emit(xs)\n    log(g.next())\n    log(eat(take xs))\n    log(g.next())\n",
+        &["use of moved value `xs`"],
+    );
+}
+
+#[test]
+fn calling_through_a_function_parameter_taints_needs() {
+    rejects(
+        "*apply(f as (i64) returns i64, x as i64) returns i64 needs pure\n    f(x)\n\n*main\n    log(apply(|x| x + 1, 5))\n",
+        &["a call through a function value"],
+    );
+    rejects(
+        "*helper(f as (i64) returns i64) returns i64\n    f(1)\n\n*outer(g as (i64) returns i64) returns i64 needs pure\n    helper(g)\n\n*main\n    log(outer(|x| x))\n",
+        &["a call through a function value", "outer -> helper"],
+    );
+    accepts_and_prints(
+        "*apply(f as (i64) returns i64, x as i64) returns i64\n    f(x)\n\n*main\n    log(apply(|x| x + 1, 5))\n",
+        "6",
+    );
+}
+
+#[test]
+fn frozen_payloads_to_actor_handlers_are_rejected_with_guidance() {
+    rejects(
+        "actor Sink\n    total as i64\n\n    @add v as Vec of i64\n        total is total + v.sum()\n\n*main\n    s is spawn Sink\n    xs is vector(1, 2)\n    fz is freeze xs\n    s.add(fz)\n    stop s\n    join s\n",
+        &["cannot send a frozen value", "send a copy"],
+    );
+}

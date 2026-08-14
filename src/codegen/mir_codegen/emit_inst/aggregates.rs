@@ -372,6 +372,36 @@ impl<'ctx> Compiler<'ctx> {
                         ));
                     }
 
+                    if let Type::View(velem) = &inst.ty {
+                        let velem = (**velem).clone();
+                        if base_val.get_type().is_pointer_type() {
+                            return Ok(Some(self.view_elem_from_vec(
+                                base_val.into_pointer_value(),
+                                &velem,
+                                idx_val,
+                            )?));
+                        }
+                        if base_val.get_type().is_array_type() {
+                            let arr_ty = base_val.get_type().into_array_type();
+                            let alloca = self.entry_alloca(arr_ty.into(), "vw.iarr");
+                            b!(self.bld.build_store(alloca, base_val));
+                            let i64t = self.ctx.i64_type();
+                            let zero = i64t.const_int(0, false);
+                            let lty = self.llvm_ty(&velem);
+                            let base = unsafe {
+                                b!(self.bld.build_gep(
+                                    arr_ty,
+                                    alloca,
+                                    &[zero, idx_val.into_int_value()],
+                                    "vw.iel"
+                                ))
+                            };
+                            let _ = lty;
+                            let one = i64t.const_int(1, false);
+                            return Ok(Some(self.view_pack(base, one)?));
+                        }
+                    }
+
                     if base_val.get_type().is_array_type() {
                         let arr_ty = base_val.get_type().into_array_type();
                         let arr_len = arr_ty.len() as u64;

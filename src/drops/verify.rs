@@ -309,6 +309,9 @@ fn owning_allocs(func: &mir::Function, consuming: &ConsumingMap) -> HashMap<Valu
                 InstKind::VecNew(_) | InstKind::MapInit => {
                     owning.insert(dest, inst.ty.clone());
                 }
+                InstKind::ClosureCreate(_, captures) if !captures.is_empty() => {
+                    owning.insert(dest, inst.ty.clone());
+                }
                 InstKind::Clone(_, _) if matches!(inst.ty, Type::Vec(_) | Type::Map(_, _)) => {
                     owning.insert(dest, inst.ty.clone());
                 }

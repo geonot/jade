@@ -72,6 +72,21 @@ impl Typer {
             let mut hargs: Vec<hir::Expr> = Vec::with_capacity(args.len());
             for (i, arg) in args.iter().enumerate() {
                 let harg = self.lower_expr_expected(arg, Some(&handler_ptys[i]))?;
+                if matches!(self.infer_ctx.shallow_resolve(&harg.ty), Type::Frozen(_))
+                    && !matches!(
+                        self.infer_ctx.shallow_resolve(&handler_ptys[i]),
+                        Type::Frozen(_)
+                    )
+                {
+                    return Err(format!(
+                        "{}: cannot send a frozen value to `.{}()`: an actor handler \
+                         owns its payload, and the compiler cannot yet prove this \
+                         handler never writes it; declare the handler parameter \
+                         `Frozen of ...` to accept it, or send a copy",
+                        span.loc(),
+                        method,
+                    ));
+                }
                 let _ = self.infer_ctx.unify_at(
                     &handler_ptys[i],
                     &harg.ty,

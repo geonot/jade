@@ -548,6 +548,24 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(self.view_len_val(obj_val)?.into());
         }
 
+        if let Some(Type::View(inner)) = &obj_ty
+            && let Type::Struct(sname, _) = inner.as_ref()
+        {
+            let sname = sname.as_str();
+            let st = self
+                .module
+                .get_struct_type(&sname)
+                .ok_or_else(|| format!("view field read on unknown struct `{sname}`"))?;
+            let len = self.view_len_val(obj_val)?;
+            let zero = self.ctx.i64_type().const_int(0, false);
+            self.emit_vec_bounds_check(zero, len)?;
+            let data = self.view_ptr(obj_val)?;
+            let idx = self.field_index(&sname, field);
+            let fgep = b!(self.bld.build_struct_gep(st, data, idx, "vw.fld"));
+            let fld_ty = self.llvm_ty(result_ty);
+            return Ok(b!(self.bld.build_load(fld_ty, fgep, "vw.fldv")));
+        }
+
         if obj_val.is_struct_value() {
             let sv = obj_val.into_struct_value();
 

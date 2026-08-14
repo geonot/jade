@@ -1,4 +1,73 @@
 # Changelog
+- **[149]** (2026-08-13) the ownership surfaces finish their designs: views bind and lend with root-locking, one frozen value feeds every task in a `together`, closure calls reach the capability row, and generators stop aliasing their arguments
+
+The remaining sequenced steps of [148]'s three features, plus the residues its
+probing left open. Full suite 2210 tests across 52 binaries; the whole-corpus
+ASan+LSan sweep stays at zero memory corruption (929 clean runs, and the leak
+tail is one program smaller than [148]'s — the closure-temp drops below).
+
+- **Views bind, lock their root, and lend (M-13 steps 2–3).** `v is
+  xs.view(1, 3)` is legal and registers a borrow of `xs` (or `xs.items`, or a
+  frozen root) in the same lattice stack iteration borrows use — generalized
+  with a `BorrowKind` so every conflict site (moves, mutating methods,
+  assignments, call arguments, reassignment of the root) names what holds the
+  borrow: a `for` loop, a bound view, or a frozen share. The borrow dies with
+  the view's block; rebinding the view releases and re-registers it; a bind
+  from another view inherits its root; views of temporaries reject ("the data
+  it points into dies with this statement"); view-typed parameters have no
+  local root, the call-level borrow covering them. `for p in pts.views()` is
+  lending iteration — the binder is a per-element view, iteration borrows the
+  vector, and `views()` anywhere else is rejected as an iteration form. Field
+  reads through an element view (`pts.at_view(i).x`, `p.x` in the loop) GEP
+  through the view pointer with a non-empty check — no element copy, closing
+  the field half of `M-4r`. Partial moves out of a view reject at the move
+  chokepoint ("a borrowed window that owns nothing"); tuple binds and
+  constructor inits (including *inferred* struct fields, a hole [148] missed)
+  reject views; `Type::View` joined the consuming-inference whitelist.
+- **One frozen value feeds every task in a `together` (M-14 step 2).** Frozen
+  captures inside a `together` no longer move: each `dispatch` captures the
+  same value by pointer — sound because tasks join before the owner's scope
+  ends and there is no state to race on — and a `FrozenShare` borrow rejects
+  any move of the shared value until the join, with the owner readable
+  afterwards and dropping exactly once. The exception requires the frozen
+  value to be bound *outside* the `together` (a body-local's drop would race
+  the join; those still move into one task). Pipes peel frozen arguments like
+  direct calls — `fz ~ total` works, `fz ~ grow` rejects with the frozen
+  wording — and actor sends of frozen payloads reject with guidance
+  ("declare the handler parameter `Frozen of ...`, or send a copy") instead
+  of a bare unification mismatch.
+- **Closure calls reach the capability row (M-16 step 2).** Calling through a
+  function-typed parameter inside a `needs`-annotated function is now a
+  capability error: the scanner marks calls whose callee is a parameter, the
+  row derives a conservative `indirect-call` pseudo-capability that no
+  annotation can declare, the fixpoint propagates it like any capability, and
+  the diagnostic explains ("the callee's capabilities cannot be classified
+  yet; call a named function instead") with the introduction path. Lambda
+  bodies were already scanned at their definition site, so a closure's own
+  effects were never lost — the taint closes the false *acceptance* on the
+  caller side.
+- **Generators stop aliasing their arguments (M-16 step 3, creation half).**
+  The same probe that exposed closure aliasing reproduced on generators:
+  `g is emit(xs)` left `xs` usable (pushes were visible through the frame)
+  and consuming `xs` then resuming SIGSEGVed. A generator's aggregate
+  arguments are now inferred consuming — the frame outlives the call, so the
+  frame owns them — making both shapes ordinary use-after-move errors with
+  the generator named as the consumer. Suspended-frame drops (freeing what a
+  half-run generator still holds) remain open at `M-16r`.
+- **Closure temporaries joined the drop-obligation set.** `ClosureCreate`
+  with captures now seeds `M-9r2`'s must-hold dataflow, so an
+  expression-position capturing closure (`apply(|x| x + n, 7)`) frees its
+  environment at function exit instead of leaking it (the env-drop call is
+  visible in the caller's IR). Per-iteration closure temps in loops remain
+  the documented loop-reallocation residue — measured by address-space-limited
+  runs (20M loop-iteration capturing closures still exceed a 200 MB cap,
+  while the capture-free loop runs clean).
+- Docs: the tour's Views and Frozen sections show bind-position views,
+  lending iteration, and the shared-`together` example (compiled);
+  the Generators section states the move-in rule; `memory-model.md` §12,
+  M11, and M12 updated; the three design docs' status headers record steps
+  2–3; roadmap entries M-13r/M-14r/M-16r rewritten to what actually remains.
+
 - **[148]** (2026-08-13) the three designed ownership surfaces become real: `freeze` makes deep immutability a type, `View of T` makes zero-copy windows second-class, closures stop aliasing the frame and own their environments — and probing found ctor captures double-freeing, closure captures use-after-freeing, and task capture slots truncating anything wider than a word
 
 Step 1 of all three [147] designs, implemented in one pass with the

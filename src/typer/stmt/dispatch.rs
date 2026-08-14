@@ -346,14 +346,62 @@ impl Typer {
                     r
                 };
 
+                let mut view_bind_root: Option<Option<crate::typer::place::Place>> = None;
                 if crate::typer::expr::views::type_contains_view(&resolved_bind_ty) {
-                    return Err(format!(
-                        "{}: a view cannot be bound to `{}`: a view lives only within \
-                         its statement — use it directly in the expression or call, or \
-                         copy the data instead (`slice` copies)",
-                        b.span.loc(),
-                        b.name,
-                    ));
+                    if !matches!(&resolved_bind_ty, Type::View(_)) || b.access_mod.is_some() {
+                        return Err(format!(
+                            "{}: a view cannot be bound to `{}` this way: only a plain \
+                             bind of a whole `View of T` is allowed — a view nested in \
+                             another type, or a `copy`/`take`/`const` view bind, cannot \
+                             exist; copy the data instead (`slice` copies)",
+                            b.span.loc(),
+                            b.name,
+                        ));
+                    }
+                    let src = Self::peel_move_wrappers(&value);
+                    let root: Option<crate::typer::place::Place> = match &src.kind {
+                        hir::ExprKind::VecMethod(obj, m, _)
+                            if matches!(m.as_str().as_ref(), "view" | "at_view" | "view_full") =>
+                        {
+                            match crate::typer::place::place_of_expr(obj) {
+                                Some(p) => Some(p),
+                                None => {
+                                    return Err(format!(
+                                        "{}: cannot bind a view of a temporary: the \
+                                         data it points into dies with this statement; \
+                                         bind the container first, then view it",
+                                        b.span.loc(),
+                                    ));
+                                }
+                            }
+                        }
+                        hir::ExprKind::StringMethod(obj, m, _)
+                            if AsRef::<str>::as_ref(&m.as_str()) == "view" =>
+                        {
+                            match crate::typer::place::place_of_expr(obj) {
+                                Some(p) => Some(p),
+                                None => {
+                                    return Err(format!(
+                                        "{}: cannot bind a view of a temporary: the \
+                                         data it points into dies with this statement; \
+                                         bind the string first, then view it",
+                                        b.span.loc(),
+                                    ));
+                                }
+                            }
+                        }
+                        hir::ExprKind::Var(vid, _) => self.view_roots.get(vid).cloned(),
+                        _ => {
+                            return Err(format!(
+                                "{}: a view can be bound only directly from its \
+                                 creation (`xs.view(a, b)`, `xs.at_view(i)`, \
+                                 `s.view(a, b)`) or from another view binding; for \
+                                 anything else, copy the data (`slice` copies)",
+                                b.span.loc(),
+                            ));
+                        }
+                    };
+                    view_bind_root = Some(root);
                 }
 
                 let is_element_read = match &value.kind {
@@ -458,7 +506,7 @@ impl Typer {
                         None
                     };
                 let id = self.fresh_id();
-                if let Some(existing) = self.find_var(&b.name.as_str()) {
+                if let Some(existing) = self.find_var(&b.name.as_str()).cloned() {
                     let id = existing.def_id;
 
                     if self.const_vars.contains(&id) {
@@ -467,6 +515,27 @@ impl Typer {
                             b.name.as_str()
                         ));
                     }
+                    let rebind_place = crate::typer::place::Place::var(id, b.name);
+                    if let Some(entry) = self
+                        .iter_borrow_conflict(&rebind_place)
+                        .filter(|e| {
+                            !matches!(
+                                e.kind,
+                                crate::typer::BorrowKind::ViewBind { binder, .. } if binder == id
+                            )
+                        })
+                        .cloned()
+                    {
+                        return Err(format!(
+                            "{}: cannot reassign `{}` while {}: the old value would be \
+                             dropped out from under the borrow; {}",
+                            b.span.loc(),
+                            b.name,
+                            entry.clause(&rebind_place),
+                            entry.help(),
+                        ));
+                    }
+                    self.release_view_binds(id);
                     let existing_ty = existing.ty.clone();
                     let value = self.maybe_coerce_to(value, &existing_ty);
 
@@ -486,6 +555,9 @@ impl Typer {
                             crate::typer::MoveReason::AssignMove(b.name, b.span),
                             b.span,
                         )?;
+                    }
+                    if let Some(root_opt) = view_bind_root {
+                        self.register_view_bind(id, root_opt, b.span);
                     }
                     Ok(hir::Stmt::Bind(hir::Bind {
                         def_id: id,
@@ -534,6 +606,9 @@ impl Typer {
                             b.span,
                         )?;
                     }
+                    if let Some(root_opt) = view_bind_root {
+                        self.register_view_bind(id, root_opt, b.span);
+                    }
                     Ok(hir::Stmt::Bind(hir::Bind {
                         def_id: id,
                         name: b.name,
@@ -556,6 +631,17 @@ impl Typer {
                         .map(|_| self.infer_ctx.fresh_var())
                         .collect(),
                 };
+                for t in &tys {
+                    if crate::typer::expr::views::type_contains_view(
+                        &self.infer_ctx.shallow_resolve(t),
+                    ) {
+                        return Err(format!(
+                            "{}: a view cannot be bound through a tuple bind; bind it \
+                             alone, directly from its creation",
+                            span.loc(),
+                        ));
+                    }
+                }
                 let bindings: Vec<(DefId, Symbol, Type)> = names
                     .iter()
                     .enumerate()
@@ -657,15 +743,13 @@ impl Typer {
                 let hv = self.maybe_coerce_to(hv, &ht.ty);
 
                 if let Some(pl) = crate::typer::place::place_of_expr(&ht) {
-                    if let Some((borrowed, loop_span)) = self.iter_borrow_conflict(&pl) {
+                    if let Some(entry) = self.iter_borrow_conflict(&pl) {
                         return Err(format!(
-                            "{}: cannot assign to `{}` while the `for` loop at {} is \
-                             iterating `{}`; iterate by index, or collect the changes \
-                             and apply them after the loop",
+                            "{}: cannot assign to `{}` while {}; {}",
                             span.loc(),
                             pl.render(),
-                            loop_span.loc(),
-                            borrowed.render(),
+                            entry.clause(&pl),
+                            entry.help(),
                         ));
                     }
                     if !pl.is_root() {
@@ -804,7 +888,19 @@ impl Typer {
             }
 
             ast::Stmt::For(f) => {
-                let iter = self.lower_expr(&f.iter)?;
+                let views_iter = matches!(
+                    &f.iter,
+                    ast::Expr::Method(_, m, args, _)
+                        if m.as_str() == "views" && args.is_empty()
+                );
+                let iter = if views_iter {
+                    let ast::Expr::Method(obj, _, _, _) = &f.iter else {
+                        unreachable!()
+                    };
+                    self.lower_expr(obj)?
+                } else {
+                    self.lower_expr(&f.iter)?
+                };
                 let end = f.end.as_ref().map(|e| self.lower_expr(e)).transpose()?;
                 let step = f.step.as_ref().map(|e| self.lower_expr(e)).transpose()?;
                 let resolved_iter_ty = self.infer_ctx.shallow_resolve(&iter.ty);
@@ -838,27 +934,41 @@ impl Typer {
                         Type::Frozen(inner) => self.infer_ctx.shallow_resolve(inner),
                         other => other.clone(),
                     };
-                    match &iter_shape {
-                        Type::Array(et, _) => *et.clone(),
-                        Type::Ptr(et) => *et.clone(),
-                        Type::Vec(et) => *et.clone(),
-                        Type::View(et) => *et.clone(),
-                        Type::String => Type::I64,
-                        _ => {
-                            let iter_ty = iter.ty.clone();
-                            if let Type::Struct(tn, _) = iter_ty
-                                && self.type_implements_trait(&tn.as_str(), "Iter")
-                            {
-                                let elem_ty = self.iter_element_type(&tn.as_str());
-                                return self.desugar_for_iter(
-                                    f,
-                                    iter,
-                                    tn.as_str(),
-                                    elem_ty,
-                                    ret_ty,
-                                );
+                    if views_iter {
+                        match &iter_shape {
+                            Type::Vec(et) | Type::Array(et, _) => Type::View(et.clone()),
+                            other => {
+                                return Err(format!(
+                                    "{}: `.views()` iterates a `Vec` or array by \
+                                     element views; `{}` has neither",
+                                    f.span.loc(),
+                                    other,
+                                ));
                             }
-                            self.infer_ctx.fresh_var()
+                        }
+                    } else {
+                        match &iter_shape {
+                            Type::Array(et, _) => *et.clone(),
+                            Type::Ptr(et) => *et.clone(),
+                            Type::Vec(et) => *et.clone(),
+                            Type::View(et) => *et.clone(),
+                            Type::String => Type::I64,
+                            _ => {
+                                let iter_ty = iter.ty.clone();
+                                if let Type::Struct(tn, _) = iter_ty
+                                    && self.type_implements_trait(&tn.as_str(), "Iter")
+                                {
+                                    let elem_ty = self.iter_element_type(&tn.as_str());
+                                    return self.desugar_for_iter(
+                                        f,
+                                        iter,
+                                        tn.as_str(),
+                                        elem_ty,
+                                        ret_ty,
+                                    );
+                                }
+                                self.infer_ctx.fresh_var()
+                            }
                         }
                     }
                 };
@@ -901,7 +1011,11 @@ impl Typer {
                 let iter_guard = if is_collection_for
                     && let Some(pl) = crate::typer::place::place_of_expr(&iter)
                 {
-                    self.iter_borrowed.push((pl, f.span));
+                    self.iter_borrowed.push(crate::typer::BorrowEntry {
+                        place: pl,
+                        span: f.span,
+                        kind: crate::typer::BorrowKind::Iter,
+                    });
                     true
                 } else {
                     false
@@ -1212,7 +1326,11 @@ impl Typer {
                 }
                 let before: std::collections::BTreeSet<Symbol> =
                     self.current_fn_error_types.clone();
+                self.together_outer_ids.push(self.in_scope_def_ids());
+                let borrow_mark = self.iter_borrowed.len();
                 let hbody = self.lower_block(body, ret_ty);
+                self.iter_borrowed.truncate(borrow_mark);
+                self.together_outer_ids.pop();
                 if name.is_some() {
                     self.scope_names.pop();
                 }

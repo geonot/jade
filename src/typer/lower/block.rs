@@ -647,6 +647,29 @@ impl Typer {
     ) -> Result<(), String> {
         self.reject_view_captures(body, outer_ids, at)?;
         for (id, name) in self.collect_aggregate_captures(body, outer_ids) {
+            let in_together_outer = self
+                .together_outer_ids
+                .last()
+                .is_some_and(|outer| outer.contains(&id));
+            let var_ty = self.find_var_by_id(id).map(|info| info.ty.clone());
+            let is_shared_frozen = in_together_outer
+                && var_ty
+                    .is_some_and(|t| matches!(self.infer_ctx.shallow_resolve(&t), Type::Frozen(_)));
+            if is_shared_frozen {
+                let pl = crate::typer::place::Place::var(id, name);
+                let already = self.iter_borrowed.iter().any(|e| {
+                    matches!(e.kind, crate::typer::BorrowKind::FrozenShare)
+                        && e.place.root == pl.root
+                });
+                if !already {
+                    self.iter_borrowed.push(crate::typer::BorrowEntry {
+                        place: pl,
+                        span: at,
+                        kind: crate::typer::BorrowKind::FrozenShare,
+                    });
+                }
+                continue;
+            }
             self.mark_var_moved_checked(id, name, crate::typer::MoveReason::TaskCapture(at), at)?;
         }
         Ok(())
@@ -1032,21 +1055,14 @@ impl Typer {
             if !mutates.get(p.slot).copied().unwrap_or(false) {
                 continue;
             }
-            if let Some((borrowed_place, loop_span)) = self.iter_borrow_conflict(&p.place) {
-                let what = if borrowed_place.proj == p.place.proj {
-                    "it".to_string()
-                } else {
-                    format!("`{}`", borrowed_place.render())
-                };
+            if let Some(entry) = self.iter_borrow_conflict(&p.place) {
                 return Err(format!(
-                    "{}: cannot pass `{}` to `{}`, which mutates it, while the `for` \
-                     loop at {} is iterating {}; iterate by index, or collect the \
-                     changes and apply them after the loop",
+                    "{}: cannot pass `{}` to `{}`, which mutates it, while {}; {}",
                     span.loc(),
                     p.place.render(),
                     shown_callee,
-                    loop_span.loc(),
-                    what,
+                    entry.clause(&p.place),
+                    entry.help(),
                 ));
             }
         }
@@ -1096,23 +1112,16 @@ impl Typer {
                         ));
                     }
                     if let Some(pl) = crate::typer::place::place_of_expr(recv)
-                        && let Some((borrowed, loop_span)) = self.iter_borrow_conflict(&pl)
+                        && let Some(entry) = self.iter_borrow_conflict(&pl)
                     {
-                        let what = if borrowed.proj == pl.proj {
-                            "it".to_string()
-                        } else {
-                            format!("`{}`", borrowed.render())
-                        };
                         return Err(format!(
-                            "{}: cannot call `{}` on `{}` while the `for` loop at {} is \
-                             iterating {} — the iteration would observe (or outlive) the \
-                             modification; iterate by index, or collect the changes and \
-                             apply them after the loop",
+                            "{}: cannot call `{}` on `{}` while {} — the borrow would \
+                             observe (or outlive) the modification; {}",
                             expr.span.loc(),
                             m,
                             pl.render(),
-                            loop_span.loc(),
-                            what,
+                            entry.clause(&pl),
+                            entry.help(),
                         ));
                     }
                 }
@@ -1187,22 +1196,16 @@ impl Typer {
                 }
                 if recv_mutated
                     && let Some(pl) = crate::typer::place::place_of_expr(recv)
-                    && let Some((borrowed, loop_span)) = self.iter_borrow_conflict(&pl)
+                    && let Some(entry) = self.iter_borrow_conflict(&pl)
                 {
-                    let what = if borrowed.proj == pl.proj {
-                        "it".to_string()
-                    } else {
-                        format!("`{}`", borrowed.render())
-                    };
                     return Err(format!(
-                        "{}: cannot call `{}` on `{}` while the `for` loop at {} is \
-                         iterating {} — the method mutates its receiver; iterate by \
-                         index, or collect the changes and apply them after the loop",
+                        "{}: cannot call `{}` on `{}` while {} — the method mutates \
+                         its receiver; {}",
                         expr.span.loc(),
                         m_name,
                         pl.render(),
-                        loop_span.loc(),
-                        what,
+                        entry.clause(&pl),
+                        entry.help(),
                     ));
                 }
                 if let Some(access) = self.fn_param_access.get(&mangled).cloned() {
@@ -1414,6 +1417,20 @@ impl Typer {
 
     fn record_ctor_capture(&mut self, value: &hir::Expr) -> Result<(), String> {
         let src = Self::peel_move_wrappers(value);
+        {
+            let was_strict = self.infer_ctx.is_strict();
+            self.infer_ctx.set_strict(false);
+            let resolved = self.infer_ctx.resolve(&src.ty);
+            self.infer_ctx.set_strict(was_strict);
+            if crate::typer::expr::views::type_contains_view(&resolved) {
+                return Err(format!(
+                    "{}: a view cannot be stored in a constructed value — views are \
+                     second-class borrows that never escape; store the owning \
+                     container or a copied slice instead",
+                    src.span.loc(),
+                ));
+            }
+        }
         if let hir::ExprKind::Var(id, vname) = &src.kind {
             let resolved = self.infer_ctx.resolve(&src.ty);
             if self.type_is_aggregate(&resolved) {

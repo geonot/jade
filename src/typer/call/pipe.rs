@@ -46,10 +46,13 @@ impl Typer {
                     span,
                 });
             }
-            if let Some((id, _, ret)) = self.fns.get(name).cloned() {
+            if let Some((id, param_tys, ret)) = self.fns.get(name).cloned() {
                 let mut all_args = vec![hleft];
                 for a in extra_args {
                     all_args.push(self.lower_expr(a)?);
+                }
+                for (i, ha) in all_args.iter_mut().enumerate() {
+                    self.peel_frozen_arg(*name, i, param_tys.get(i), ha, span)?;
                 }
                 return Ok(hir::Expr {
                     kind: hir::ExprKind::Pipe(Box::new(all_args.remove(0)), id, *name, all_args),

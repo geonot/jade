@@ -7,10 +7,17 @@
 > classify by category (scalars copy, `String`s clone, aggregates move through
 > the place lattice), the closure value is an aggregate owning its
 > environment, and environments carry their own drop function. Pinned by
-> `tests/closure_captures.rs`. Caps integration (step 2), generator-frame
-> drops (step 3), and by-view capture (step 4) remain — tracked as `M-16r` in
-> [`../roadmap.md`](../roadmap.md#memory-and-ownership). Lambda syntax is
-> `|x| x * 2`; a capturing closure is any lambda with free variables.
+> `tests/closure_captures.rs`. [149] added the caps edge (step 2: calling
+> through a function-typed parameter inside a `needs`-annotated function
+> derives a conservative indirect-call taint with the introduction path
+> named) and the creation half of step 3 (a generator's aggregate arguments
+> are inferred consuming, so the frame owns them — the aliasing SIGSEGV is a
+> use-after-move error now). Remaining: suspended-frame drops for generators
+> dropped mid-iteration, by-view capture (step 4), and per-iteration closure
+> temporaries in loops, which still leak their environments — tracked as
+> `M-16r` in [`../roadmap.md`](../roadmap.md#memory-and-ownership). Lambda
+> syntax is `|x| x * 2`; a capturing closure is any lambda with free
+> variables.
 
 ## The rule, in one sentence
 

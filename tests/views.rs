@@ -119,10 +119,50 @@ fn out_of_range_view_traps_at_runtime() {
 }
 
 #[test]
-fn binding_a_view_is_rejected() {
+fn binding_a_view_locks_the_root_for_the_block() {
+    accepts_and_prints(
+        "*main\n    xs is vector(10, 20, 30, 40)\n    v is xs.view(1, 3)\n    log(v.length)\n    log(v.get(0))\n    total is 0\n    for x in v\n        total is total + x\n    log(total)\n",
+        "2\n20\n50",
+    );
     rejects(
-        "*main\n    xs is vector(1, 2, 3)\n    v is xs.view(0, 2)\n    log(v.length)\n",
-        &["a view cannot be bound", "lives only within its statement"],
+        "*main\n    xs is vector(1, 2, 3)\n    v is xs.view(0, 2)\n    xs.push(4)\n    log(v.length)\n",
+        &["cannot call `push` on `xs`", "the view bound at"],
+    );
+    rejects(
+        "*main\n    xs is vector(1, 2, 3)\n    v is xs.view(0, 2)\n    ys is xs\n    log(v.length)\n",
+        &["cannot move `xs`", "the view bound at"],
+    );
+}
+
+#[test]
+fn view_bind_dies_with_its_block_and_unlocks_the_root() {
+    accepts_and_prints(
+        "*main\n    xs is vector(1, 2, 3)\n    if true\n        v is xs.view(0, 2)\n        log(v.length)\n    xs.push(4)\n    log(xs.length)\n",
+        "2\n4",
+    );
+}
+
+#[test]
+fn view_bind_of_a_temporary_is_rejected() {
+    rejects(
+        "*main\n    v is vector(1, 2).view(0, 1)\n    log(v.length)\n",
+        &["view of a temporary"],
+    );
+}
+
+#[test]
+fn view_alias_bind_inherits_the_root_lock() {
+    accepts_and_prints(
+        "*total(v as View of i64) returns i64\n    t is 0\n    for x in v\n        t is t + x\n    t\n\n*main\n    xs is vector(1, 2, 3, 4)\n    v is xs.view(1, 3)\n    w is v\n    log(total(w))\n    v is xs.view(0, 2)\n    log(total(v))\n",
+        "5\n3",
+    );
+}
+
+#[test]
+fn bound_view_of_frozen_data_reads() {
+    accepts_and_prints(
+        "*main\n    xs is vector(1, 2, 3)\n    fz is freeze xs\n    v is fz.view(0, 2)\n    log(v.length)\n",
+        "2",
     );
 }
 
@@ -171,5 +211,45 @@ fn view_of_strings_copies_elements_out() {
     accepts_and_prints(
         "*first_of(v as View of String) returns String\n    v.get(0)\n\n*main\n    names is vector('ada', 'brin')\n    log(first_of(names.view(0, 2)))\n    log(names.length)\n",
         "ada\n2",
+    );
+}
+
+#[test]
+fn views_lending_iteration_binds_element_views() {
+    accepts_and_prints(
+        "type Point\n    x as i64\n    y as i64\n\n*main\n    pts is vector(Point(x is 1, y is 2), Point(x is 3, y is 4))\n    total is 0\n    for p in pts.views()\n        total is total + p.x\n    log(total)\n",
+        "4",
+    );
+    rejects(
+        "*main\n    xs is vector(1, 2, 3)\n    for v in xs.views()\n        xs.push(9)\n",
+        &["cannot call `push` on `xs`", "is iterating it"],
+    );
+    rejects(
+        "*main\n    xs is vector(1, 2)\n    v is xs.views()\n    log(1)\n",
+        &["no method 'views' on Vec"],
+    );
+}
+
+#[test]
+fn field_reads_through_element_views_are_zero_copy_reads() {
+    accepts_and_prints(
+        "type Point\n    x as i64\n    y as i64\n\n*main\n    pts is vector(Point(x is 1, y is 2), Point(x is 3, y is 4))\n    log(pts.at_view(1).x)\n    v is pts.at_view(0)\n    log(v.y)\n",
+        "3\n2",
+    );
+}
+
+#[test]
+fn view_cannot_be_stored_through_an_inferred_struct_field() {
+    rejects(
+        "type Holder\n    w\n\n*main\n    xs is vector(1, 2, 3)\n    h is Holder(w is xs.view(0, 2))\n    log(1)\n",
+        &["a view cannot be stored in a constructed value"],
+    );
+}
+
+#[test]
+fn moving_a_field_out_of_a_view_is_rejected() {
+    rejects(
+        "type Bag\n    items as Vec of i64\n\n*main\n    bags is vector(Bag(items is vector(1, 2)))\n    v is bags.at_view(0)\n    stolen is v.items\n    log(stolen.length)\n",
+        &["cannot move `v.items` out of `v`", "borrowed window"],
     );
 }
