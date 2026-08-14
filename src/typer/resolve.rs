@@ -497,8 +497,45 @@ impl Typer {
             }
         }
 
+        let mut methods_filled: Vec<ast::Fn> = ib.methods.clone();
+        if let Some(ref trait_name) = ib.trait_name
+            && let Some(td) = self.trait_defs.get(trait_name)
+        {
+            let mut subst: HashMap<Symbol, Type> = HashMap::new();
+            for (tp, ta) in td.type_params.iter().zip(ib.trait_type_args.iter()) {
+                subst.insert(*tp, ta.clone());
+            }
+            for (an, at) in &ib.assoc_type_bindings {
+                subst.insert(*an, at.clone());
+            }
+            for m in &mut methods_filled {
+                let Some(tm) = td.methods.iter().find(|tm| tm.name == m.name) else {
+                    continue;
+                };
+                for (ip, tp) in m.params.iter_mut().zip(tm.params.iter()).skip(1) {
+                    if ip.ty.is_none()
+                        && let Some(tt) = &tp.ty
+                    {
+                        let want =
+                            Self::subst_self_ty(Self::substitute_type(tt, &subst), ib.type_name);
+                        if !type_is_open(&want) {
+                            ip.ty = Some(want);
+                        }
+                    }
+                }
+                if m.ret.is_none()
+                    && let Some(tr) = &tm.ret
+                {
+                    let want = Self::subst_self_ty(Self::substitute_type(tr, &subst), ib.type_name);
+                    if !type_is_open(&want) {
+                        m.ret = Some(want);
+                    }
+                }
+            }
+        }
+
         let is_static_trait = ib.trait_name.map(|t| t.as_str() == "From").unwrap_or(false);
-        for m in &ib.methods {
+        for m in &methods_filled {
             self.methods
                 .entry(ib.type_name)
                 .or_default()
@@ -659,13 +696,28 @@ impl Typer {
                 };
                 let want = resolve_trait_ty(tt);
                 if type_is_open(&want) {
+                    let got = resolve_impl_ty(it);
+                    if !open_type_admits(&want, &got) {
+                        return Err(format!(
+                            "{}: parameter `{}` of method `{}` in impl {} for {} has type \
+                             `{}`, which cannot instantiate the trait's declared `{}` at {}",
+                            m.span.loc(),
+                            ip.name,
+                            m.name,
+                            trait_name,
+                            ib.type_name,
+                            got,
+                            want,
+                            tm.span.loc(),
+                        ));
+                    }
                     continue;
                 }
                 let got = resolve_impl_ty(it);
                 if want != got {
                     return Err(format!(
                         "{}: parameter `{}` of method `{}` in impl {} for {} has type \
-                         {:?}, but the trait declares {:?} at {}",
+                         `{}`, but the trait declares `{}` at {}",
                         m.span.loc(),
                         ip.name,
                         m.name,
@@ -680,12 +732,12 @@ impl Typer {
 
             if let (Some(tr), Some(ir)) = (&tm.ret, &m.ret) {
                 let want = resolve_trait_ty(tr);
-                if !type_is_open(&want) {
-                    let got = resolve_impl_ty(ir);
-                    if want != got {
+                let got = resolve_impl_ty(ir);
+                if type_is_open(&want) {
+                    if !open_type_admits(&want, &got) {
                         return Err(format!(
-                            "{}: method `{}` of impl {} for {} returns {:?}, but the trait \
-                             declares {:?} at {}",
+                            "{}: method `{}` of impl {} for {} returns `{}`, which cannot \
+                             instantiate the trait's declared `{}` at {}",
                             m.span.loc(),
                             m.name,
                             trait_name,
@@ -695,6 +747,18 @@ impl Typer {
                             tm.span.loc(),
                         ));
                     }
+                } else if want != got {
+                    return Err(format!(
+                        "{}: method `{}` of impl {} for {} returns `{}`, but the trait \
+                         declares `{}` at {}",
+                        m.span.loc(),
+                        m.name,
+                        trait_name,
+                        ib.type_name,
+                        got,
+                        want,
+                        tm.span.loc(),
+                    ));
                 }
             }
         }
@@ -762,6 +826,45 @@ impl Typer {
             }
         }
     }
+}
+
+fn open_type_admits(want: &Type, got: &Type) -> bool {
+    fn freshen(
+        t: &Type,
+        ctx: &mut super::unify::InferCtx,
+        map: &mut HashMap<Symbol, Type>,
+    ) -> Type {
+        match t {
+            Type::Param(n) => map.entry(*n).or_insert_with(|| ctx.fresh_var()).clone(),
+            Type::Array(i, n) => Type::Array(Box::new(freshen(i, ctx, map)), *n),
+            Type::Vec(i) => Type::Vec(Box::new(freshen(i, ctx, map))),
+            Type::Ptr(i) => Type::Ptr(Box::new(freshen(i, ctx, map))),
+            Type::Channel(i) => Type::Channel(Box::new(freshen(i, ctx, map))),
+            Type::Coroutine(i) => Type::Coroutine(Box::new(freshen(i, ctx, map))),
+            Type::Generator(i) => Type::Generator(Box::new(freshen(i, ctx, map))),
+            Type::View(i) => Type::View(Box::new(freshen(i, ctx, map))),
+            Type::Frozen(i) => Type::Frozen(Box::new(freshen(i, ctx, map))),
+            Type::Alias(n, i) => Type::Alias(*n, Box::new(freshen(i, ctx, map))),
+            Type::Newtype(n, i) => Type::Newtype(*n, Box::new(freshen(i, ctx, map))),
+            Type::Map(k, v) => Type::Map(
+                Box::new(freshen(k, ctx, map)),
+                Box::new(freshen(v, ctx, map)),
+            ),
+            Type::Tuple(ts) => Type::Tuple(ts.iter().map(|t| freshen(t, ctx, map)).collect()),
+            Type::Fn(ps, r) => Type::Fn(
+                ps.iter().map(|t| freshen(t, ctx, map)).collect(),
+                Box::new(freshen(r, ctx, map)),
+            ),
+            Type::Struct(n, args) => {
+                Type::Struct(*n, args.iter().map(|t| freshen(t, ctx, map)).collect())
+            }
+            other => other.clone(),
+        }
+    }
+    let mut scratch = super::unify::InferCtx::new();
+    let mut map = HashMap::new();
+    let want_f = freshen(want, &mut scratch, &mut map);
+    scratch.unify(&want_f, got).is_ok()
 }
 
 fn type_is_open(t: &Type) -> bool {

@@ -1,4 +1,38 @@
 # Changelog
+- **[156]** (2026-08-14) types pass, part 4 — the section clears: trait impls inherit the trait's declaration, impossible instantiations are rejected, and diagnostics stop leaking compiler internals
+
+T-5r2 and T-2 close, finishing the Types/inference/diagnostics roadmap
+section (only the T-1r2 residue list remains). Full suite is 2237 tests
+across 54 binaries; fmt/clippy clean.
+
+- **T-5r2: unannotated impl signatures now inherit the trait's declaration.**
+  An impl method omitting annotations was skipped by conformance checking and
+  free to *infer* a signature the trait never promised — an ill-typed body
+  compiled silently as long as nothing called it (a call site would eventually
+  collide, but the impl itself was never held to the trait). At impl
+  ingestion, unannotated parameters and returns are now filled from the
+  trait's substituted declaration (`Self` and trait type arguments applied),
+  so the body type-checks against the promise with zero annotations — the
+  inference-friendly reading of "the trait is the source of truth". The
+  other skip — trait-side types still generic after substitution (`Vec of
+  T`) — is now checked by instantiability: the trait type's parameters are
+  freshened into a scratch unifier and the impl's annotation must unify
+  (`v as i64` against `Vec of T` is rejected as "cannot instantiate", where
+  before it was accepted without a look). Pinned in `tests/traits.rs`.
+- **T-2: a hygiene gate for diagnostics.** `tests/diagnostic_hygiene.rs`
+  compiles a battery of failing programs across the typer's surfaces and
+  asserts stderr never contains `__G_`, `__poly_`, `TypeVar(`, `Symbol(`,
+  `Param(`, `DefId`, a raw `?N` inference variable, or a Rust backtrace.
+  What the gate flushed out is fixed: mismatch *notes* printed raw inference
+  variables (``found `?2` because of line 9``) — unresolved variables now
+  render as `_` inside compound types and as prose when bare; the [156]
+  conformance messages print surface syntax (`Vec of T`, `i64`) instead of
+  debug formatting (`Vec(Param(Symbol(T)))`); and field errors on
+  monomorphized structs render the origin spelling — `type 'Pair<i64,
+  string>' has no field 'third'`, not `Pair_i64_string` — via [154]'s
+  mono-origin table. ICE-class messages keep raw symbols deliberately;
+  they report compiler bugs, not user errors.
+
 - **[155]** (2026-08-14) types pass, part 3 — T-13r closes: url/uuid/bytes drop the last scalar-length byte bounds, `Bytes.to_string` stops eating bytes, and `Bytes.slice` turns out to have returned zeros since it was written
 
 The byte-buffer bridge residue from [145]. All three modules now use

@@ -388,16 +388,20 @@ impl InferCtx {
                     && origin.span.line != span.line
                 {
                     msg.push_str(&format!(
-                        "\n  note: expected `{}` because of line {} ({})",
-                        ra, origin.span.line, origin.reason
+                        "\n  note: expected {} because of line {} ({})",
+                        Self::user_type_string(&ra),
+                        origin.span.line,
+                        origin.reason
                     ));
                 }
                 if let Some(origin) = &b_origin
                     && origin.span.line != span.line
                 {
                     msg.push_str(&format!(
-                        "\n  note: found `{}` because of line {} ({})",
-                        rb, origin.span.line, origin.reason
+                        "\n  note: found {} because of line {} ({})",
+                        Self::user_type_string(&rb),
+                        origin.span.line,
+                        origin.reason
                     ));
                 }
 
@@ -693,8 +697,8 @@ impl InferCtx {
                 }
             }
             _ => {
-                let da = format!("{a}");
-                let db = format!("{b}");
+                let da = format!("{}", Self::scrub_vars(&a));
+                let db = format!("{}", Self::scrub_vars(&b));
                 if da == db {
                     Err(format!(
                         "type mismatch: expected `{da}` (a {}), found `{db}` (a {}) — two \
@@ -706,6 +710,39 @@ impl InferCtx {
                     Err(format!("type mismatch: expected `{da}`, found `{db}`"))
                 }
             }
+        }
+    }
+
+    pub(crate) fn scrub_vars(t: &Type) -> Type {
+        match t {
+            Type::TypeVar(_) => Type::Param("_".into()),
+            Type::Array(i, n) => Type::Array(Box::new(Self::scrub_vars(i)), *n),
+            Type::Vec(i) => Type::Vec(Box::new(Self::scrub_vars(i))),
+            Type::Ptr(i) => Type::Ptr(Box::new(Self::scrub_vars(i))),
+            Type::Channel(i) => Type::Channel(Box::new(Self::scrub_vars(i))),
+            Type::Coroutine(i) => Type::Coroutine(Box::new(Self::scrub_vars(i))),
+            Type::Generator(i) => Type::Generator(Box::new(Self::scrub_vars(i))),
+            Type::View(i) => Type::View(Box::new(Self::scrub_vars(i))),
+            Type::Frozen(i) => Type::Frozen(Box::new(Self::scrub_vars(i))),
+            Type::Alias(n, i) => Type::Alias(*n, Box::new(Self::scrub_vars(i))),
+            Type::Newtype(n, i) => Type::Newtype(*n, Box::new(Self::scrub_vars(i))),
+            Type::Map(k, v) => {
+                Type::Map(Box::new(Self::scrub_vars(k)), Box::new(Self::scrub_vars(v)))
+            }
+            Type::Tuple(ts) => Type::Tuple(ts.iter().map(Self::scrub_vars).collect()),
+            Type::Fn(ps, r) => Type::Fn(
+                ps.iter().map(Self::scrub_vars).collect(),
+                Box::new(Self::scrub_vars(r)),
+            ),
+            Type::Struct(n, args) => Type::Struct(*n, args.iter().map(Self::scrub_vars).collect()),
+            other => other.clone(),
+        }
+    }
+
+    fn user_type_string(t: &Type) -> String {
+        match t {
+            Type::TypeVar(_) => "a still-unresolved type".to_string(),
+            other => format!("`{}`", Self::scrub_vars(other)),
         }
     }
 

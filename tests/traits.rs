@@ -368,3 +368,76 @@ impl Adder for F
         "diagnostic must flag the arity mismatch: {stderr}"
     );
 }
+
+#[test]
+fn unannotated_impl_signature_inherits_the_trait_declaration() {
+    expect(
+        "
+trait Greet
+    *greet(self, name as String) returns String
+
+type Cat
+    id as i64
+
+impl Greet for Cat
+    *greet(self, name)
+        name + '!'
+
+*main()
+    c is Cat(id is 1)
+    log(c.greet('mia'))
+",
+        "mia!",
+    );
+}
+
+#[test]
+fn unannotated_impl_body_conflicting_with_the_trait_is_rejected_even_uncalled() {
+    let stderr = expect_compile_fail(
+        "
+trait Greet
+    *greet(self, name as String) returns String
+
+type Cat
+    id as i64
+
+impl Greet for Cat
+    *greet(self, name)
+        name + 1
+
+*main()
+    c is Cat(id is 1)
+    log(c.id)
+",
+    );
+    assert!(
+        stderr.contains("type mismatch"),
+        "the trait's parameter type must be imposed on the unannotated impl so the \
+         conflicting body fails even with no call site: {stderr}"
+    );
+}
+
+#[test]
+fn impl_type_that_cannot_instantiate_an_open_trait_type_is_rejected() {
+    let stderr = expect_compile_fail(
+        "
+trait Wrap
+    *rewrap(self, v as Vec of T) returns Vec of T
+
+type Holder
+    id as i64
+
+impl Wrap for Holder
+    *rewrap(self, v as i64) returns i64
+        v
+
+*main()
+    log(1)
+",
+    );
+    assert!(
+        stderr.contains("cannot instantiate"),
+        "a shape that no instantiation of the trait's generic type can produce must be \
+         rejected instead of skipped: {stderr}"
+    );
+}

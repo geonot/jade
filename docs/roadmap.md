@@ -56,7 +56,17 @@ the residue filed as T-1r2. [155] closed T-13r: `url`, `uuid`, and `bytes`
 dropped the last scalar-`.length` byte bounds, `Bytes.to_string` emits raw
 bytes instead of `?`, and `Bytes.slice` — which had returned zeros since it
 was written (its length guard dropped every copy) — is fixed; both modules
-gained behavior suites in the stdlib gate.
+gained behavior suites in the stdlib gate. [156] closed T-5r2 and T-2:
+unannotated impl signatures now inherit the trait's substituted declaration
+(a conflicting body fails even with no call site), impl types that cannot
+instantiate an open trait type are rejected via a scratch unifier instead of
+skipped, and diagnostics stopped leaking internals — inference variables
+render as `_` (or prose when bare), conformance errors print surface type
+syntax, field errors on monomorphized structs render the origin spelling
+(`Pair<i64, string>`), and `tests/diagnostic_hygiene.rs` sweeps a battery of
+failing programs asserting no `__G_`/`?N`/debug-format symbol ever reaches
+stderr (ICE-class messages keep raw symbols deliberately — they report
+compiler bugs, not user errors).
 Items below are what remains.
 
 ---
@@ -351,22 +361,6 @@ longer abort the compile. What remains, all reproduced on 2026-08-14:
   neither the structs table nor a generic template knows them.
 - `Map<K, V>` parses, but `map()` literals and the runtime are String-keyed;
   a non-String key annotation only produces a unification error at the bind.
-
-### T-2 (m) Mangled internal names can reach user diagnostics
-
-The old T-1 instance is gone and the [143] ownership diagnostics strip the
-`__G_` specialization suffix before printing, but no sweep asserts that *no*
-diagnostic prints a mangled symbol; codegen-level errors still name raw
-symbols.
-
-### T-5r2 (m) Trait/impl conformance skips inference-eligible signatures
-
-[143] parsed `! E` on trait methods; [145] enforces conformance: an impl may
-neither widen nor narrow the trait's declared error row, and annotated return
-types and parameter counts must match (both sites named in the diagnostic,
-`Self` and trait type arguments substituted). Unannotated impl parameters and
-returns are still accepted by adoption, and trait-side types that stay generic
-after substitution are skipped rather than deferred to inference.
 
 ---
 

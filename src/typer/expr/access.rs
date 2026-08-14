@@ -435,12 +435,17 @@ impl Typer {
                             (self.infer_ctx.shallow_resolve(fty), i)
                         } else {
                             let raw = name.as_str();
-                            let display: String =
-                                if let Some(stripped) = raw.strip_prefix("__store_") {
-                                    format!("{} (query result)", stripped)
-                                } else {
-                                    raw.to_string()
-                                };
+                            let display: String = if let Some(stripped) =
+                                raw.strip_prefix("__store_")
+                            {
+                                format!("{} (query result)", stripped)
+                            } else if let Some((base, args)) = self.infer_ctx.mono_origin(name) {
+                                let rendered: Vec<String> =
+                                    args.iter().map(|a| format!("{a}")).collect();
+                                format!("{}<{}>", base, rendered.join(", "))
+                            } else {
+                                raw.to_string()
+                            };
                             if raw.starts_with("__store_") && (field == "length" || field == "len")
                             {
                                 let store = raw.trim_start_matches("__store_");
