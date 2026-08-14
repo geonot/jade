@@ -8,9 +8,12 @@
 > element views — the `M-4r` fix; [150] completed it with read-only *method
 > calls* through element views (the receiver passes the element pointer, so
 > the call operates on the original, per the design). Pinned by
-> `tests/views.rs`. Remaining: the std adoption sweep with benchmarks
-> (step 4) — tracked as `M-13r` in
-> [`../roadmap.md`](../roadmap.md#memory-and-ownership).
+> `tests/views.rs`; [152] shipped step 4, the std adoption sweep — `strings`,
+> `csv`, `json`, and `sort` rewrote their byte loops span-based, a whole
+> `String` coerces into `View of u8` parameters, and read-only `sort` APIs
+> take views, benchmark-gated (csv 315x, strings 30x, json 17x, identical
+> checksums). Residual std byte-loops outside those four modules are noted
+> at `M-13r` in [`../roadmap.md`](../roadmap.md#memory-and-ownership).
 
 The premise stays fixed: **no lifetime syntax, ever.** Jinn's borrows today
 are invisible because they are statement-scoped — a method call or field read

@@ -1,4 +1,50 @@
 # Changelog
+- **[152]** (2026-08-13) the std adoption sweep lands: csv parses 315x faster, strings 30x, json 17x — span-based byte-indexed rewrites of the four M-13r modules, whole-String view coercion, and `toml.parse_frozen`
+
+M-13r step 4 and M-14r step 3, gated by [151]'s behavior pins and benchmarks.
+Every checksum is identical before and after; the full suite is 2224 tests,
+and the whole-corpus ASan+LSan sweep stays at **zero memory corruption** with
+the leak tail unchanged.
+
+- **What the copying idioms actually cost.** The sweep's scouting corrected
+  the roadmap's own account of the byte/scalar seam: `slice`, `char_at`, and
+  `view` were always byte-indexed (docs/strings.md had it right) — the real
+  defect was `.length`, a *scalar count that scans the whole string on every
+  call*, used as the bound of nearly every std byte-loop. `while i <
+  s.length` made csv/json/strings parsing O(n²) in the input *and*
+  under-scanned non-ASCII text (`strings.trim` corrupted multi-byte strings
+  by slicing to a scalar bound). Per-byte accumulation (`out + s.slice(i,
+  i+1)`) stacked a second quadratic on top.
+- **The rewrite.** All four modules now bound byte loops with `.byte_count`
+  (O(1)) and build results from *spans* — one slice per token, segment, or
+  unchanged run instead of one per byte: `csv.parse`/`Reader.next_row`
+  (quoted fields concatenate only around escaped quotes),
+  `json.parse_string`/`__escape`, `strings.replace`/`split_lines`/
+  `split_whitespace`/`title_case`/`snake_to_camel`/`camel_to_snake`/
+  `trim*`/`count`. `strings.to_lower`/`to_upper` delegate to the builtin
+  single-pass methods (same ASCII-fold semantics), and `strings.reverse` is
+  now scalar-aware (`reverse('héllo')` is `'olléh'`, not byte salad).
+  Measured at `--opt 3` against [151]'s `pre-adoption` tag, checksums
+  identical: csv_parse 1.26s -> 4.0ms (315x), json_parse 1.14s -> 66ms
+  (17x), std_string_ops 193ms -> 6.5ms (30x), sort_strings 42ms -> 36ms.
+- **Views where lending fits.** A whole `String` now coerces into a
+  `View of u8` parameter (the byte-window sibling of the existing
+  `Vec`/array coercion, pinned in `tests/views.rs`), `strings.__contains_byte`
+  takes `View of u8`, and `sort.is_sorted`/`binary_search` take
+  `View of i64` — callers pass vectors, arrays, views, or (for u8) strings
+  unchanged. `sort`'s string ordering dropped its scalar-bounded manual
+  compare for the builtin byte-lexicographic `<` (memcmp; also *correct* on
+  multi-byte scalars where the old loop mis-ordered).
+- **`toml.parse_frozen` (M-14r step 3).** The config-loader pattern from
+  `design/freeze.md`: parse once, return `Frozen of TomlTable`, read through
+  the ordinary accessors, share across a `together` without copies. Pinned in
+  `tests/stdlib/toml_tests.jn` (new, with parse/section pins); the tour's
+  Frozen section names the pattern.
+- Non-ASCII behavior pins joined `strings_tests.jn` (trim/split/replace/case
+  over multi-byte text, scalar-aware reverse); sort gained view-parameter and
+  byte-lex pins. Remaining adoption residue (url/toml/http/regex/date still
+  carry `.length`-bounded byte loops) stays in `M-13r`'s note in the roadmap.
+
 - **[151]** (2026-08-13) the adoption sweep's gates find six live compiler bugs: match arms lost their values to trailing drops, match-payload rewraps double-freed, String captures aliased, nested-loop method mutations vanished, float `neq` ignored NaN, and stdlib behavior tests join the gates
 
 Preparing M-13r's std adoption sweep demanded behavior pins for `csv` and

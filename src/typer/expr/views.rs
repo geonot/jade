@@ -35,6 +35,30 @@ impl Typer {
         let Type::View(want_elem) = self.infer_ctx.shallow_resolve(pt) else {
             return;
         };
+        let is_string = matches!(self.infer_ctx.shallow_resolve(&ha.ty), Type::String);
+        if is_string {
+            if self
+                .infer_ctx
+                .unify_at(&want_elem, &Type::U8, span, "view parameter element")
+                .is_err()
+            {
+                return;
+            }
+            let old = std::mem::replace(
+                ha,
+                hir::Expr {
+                    kind: hir::ExprKind::Void,
+                    ty: Type::Void,
+                    span,
+                },
+            );
+            *ha = hir::Expr {
+                kind: hir::ExprKind::StringMethod(Box::new(old), "view_full".into(), vec![]),
+                ty: Type::View(want_elem),
+                span,
+            };
+            return;
+        }
         let have_elem = match self.infer_ctx.shallow_resolve(&ha.ty) {
             Type::Vec(e) | Type::Array(e, _) => e,
             _ => return,

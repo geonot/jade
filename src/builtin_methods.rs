@@ -178,6 +178,7 @@ pub enum StrMethod {
     Lines,
     IsEmpty,
     View,
+    ViewFull,
     CloneOwned,
 }
 
@@ -204,6 +205,7 @@ impl StrMethod {
             "lines" => Self::Lines,
             "is_empty" => Self::IsEmpty,
             "view" => Self::View,
+            "view_full" => Self::ViewFull,
             "__clone" => Self::CloneOwned,
             _ => return None,
         })
@@ -223,7 +225,7 @@ impl StrMethod {
             | Self::Repeat
             | Self::CloneOwned => Type::String,
             Self::Split | Self::Lines => Type::Vec(Box::new(Type::String)),
-            Self::View => Type::View(Box::new(Type::U8)),
+            Self::View | Self::ViewFull => Type::View(Box::new(Type::U8)),
         }
     }
 

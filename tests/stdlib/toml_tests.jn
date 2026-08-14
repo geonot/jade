@@ -1,0 +1,19 @@
+use std/toml
+
+test 'parse and get'
+    t is toml.parse('name = "app"\nport = 8080\nok = true\n')
+    assert toml.get(t, 'name') equals 'app'
+    assert toml.get_int(t, 'port') equals 8080
+    assert toml.get_bool(t, 'ok')
+    assert toml.has(t, 'name')
+    assert not toml.has(t, 'missing')
+
+test 'sections prefix keys'
+    t is toml.parse('[server]\nhost = "localhost"\n[db]\nurl = "sqlite:mem"\n')
+    assert toml.get(t, 'server.host') equals 'localhost'
+    assert toml.get(t, 'db.url') equals 'sqlite:mem'
+
+test 'parse_frozen loads shareable config'
+    cfg is toml.parse_frozen('name = "app"\nretries = 3\n')
+    assert toml.get(cfg, 'name') equals 'app'
+    assert toml.get_int(cfg, 'retries') equals 3

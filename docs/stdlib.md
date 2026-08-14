@@ -138,6 +138,7 @@ the rest.
 | Surface | Mechanism |
 | --- | --- |
 | Stable stdlib subset | `tests/std_stable_subset.rs` — frontend gate plus import-and-link gate |
+| Stdlib behavior | `tests/stdlib_behavior.rs` — compiles and runs every `tests/stdlib/*_tests.jn` suite (assert-level pins for the high-traffic modules) |
 | Experimental accuracy | `std_experimental_list_is_accurate` — excluded modules must still fail |
 | `apps/` corpus | `tests/apps_build.rs` — builds and runs all 21 projects |
 | Language corpus | `tests/corpus_differential.rs` — compiles **and runs** `snippets/` and `tests/programs/` at `--opt 0` and `--opt 3`, diffing stdout and exit code |

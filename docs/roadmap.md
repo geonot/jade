@@ -204,7 +204,7 @@ annotation, are policy decisions deferred until the package/visibility surface
 exists (`design/lamp.md`); `fmt` insertion additionally needs inference results
 at format time.
 
-### M-13r (m) Second-class references: method reads through views, std adoption
+### M-13r — closed by [152]; residue: the rest of std's byte loops
 
 [148] shipped step 1 of [`design/second-class-refs.md`](design/second-class-refs.md)
 (`View of T`, creation methods, `View` parameters with whole-container
@@ -219,12 +219,15 @@ element copy — closing `M-4r`'s field half. `tests/views.rs` pins all of it. [
 added read-only *method calls* through element views — the receiver passes
 the element pointer, so the call operates on the original, and
 mutating/consuming methods reject with the view named — closing `M-4r`.
-Remaining: the std adoption sweep (`strings`, `csv`, `json`, `sort`) with
-benchmarks (step 4). Adoption is its own careful pass: verified in [151], `.length` is a
-*scalar* count (an O(n) scan per call) while `char_at`, `slice`, and `view`
-are all *byte*-indexed, so std's `while i < s.length` byte-loops are
-quadratic *and* under-scan non-ASCII text; the sweep walks straight through
-`T-13r`'s seam and must be benchmark- and behavior-gated.
+[152] completed step 4: the four modules were rewritten span-based with
+`.byte_count` bounds (csv_parse 315x, std_string_ops 30x, json_parse 17x,
+checksums identical under [151]'s benchmark gate), a whole `String` coerces
+into `View of u8` parameters, `strings.__contains_byte` and
+`sort.is_sorted`/`binary_search` take view parameters, and `sort` uses the
+builtin byte-lex `<`. Residue: the same `.length`-bounded byte-loop idiom
+survives outside the sweep's scope — `url`, `toml`, `http`, `regex`, `date`,
+`path`, `args`, and friends are correct on ASCII but quadratic and
+scalar-bounded; convert them with the same span recipe when they matter.
 
 ### M-14r (m) `freeze`: actor-handler classification, function-exit dispatch, std adoption
 
@@ -241,8 +244,10 @@ to single-task moves (their drop would race the join); function-exit
 `dispatch` sharing (the design's second scope supplier); actor sends of
 frozen values are conservatively rejected with guidance unless the handler
 declares `Frozen of ...` — accepting them for provably read-only handlers
-needs handler write-inference; and step 3's std adoption (config-style
-loaders returning frozen values).
+needs handler write-inference. Step 3's std adoption landed in [152] as
+`toml.parse_frozen` (`Frozen of TomlTable`, read through the ordinary
+accessors); what remains of step 3 is the docs pattern for model-weight
+sharing beyond the tour's `together` example.
 
 ### M-16r (m) Closures: caps edges, generators, temp environments
 

@@ -5,10 +5,12 @@
 > full write rejection shipped in [148]; [149] added the multi-capture
 > exception — every `dispatch` in a `together` shares one frozen value bound
 > outside it, locked against moves until the join — plus frozen-aware pipes.
-> Pinned by `tests/freeze.rs`. Remaining: function-exit `dispatch` sharing,
-> actor handlers accepting frozen payloads without a `Frozen of ...`
-> annotation (handler write-inference), and std adoption (step 3) — tracked
-> as `M-14r` in [`../roadmap.md`](../roadmap.md#memory-and-ownership).
+> Pinned by `tests/freeze.rs`; [152] shipped step 3's std adoption —
+> `toml.parse_frozen` returns a `Frozen of TomlTable` read through the
+> ordinary accessors. Remaining: function-exit `dispatch` sharing and actor
+> handlers accepting frozen payloads without a `Frozen of ...` annotation
+> (handler write-inference) — tracked as `M-14r` in
+> [`../roadmap.md`](../roadmap.md#memory-and-ownership).
 
 Large read-only data — configuration, lookup tables, model weights — must
 today be copied into every task that reads it or funnelled through one actor.

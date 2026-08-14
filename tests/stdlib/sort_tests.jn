@@ -52,3 +52,18 @@ test 'sort_strings'
     assert a.get(0) equals 'apple'
     assert a.get(1) equals 'banana'
     assert a.get(2) equals 'cherry'
+
+test 'is_sorted and binary_search accept views'
+    a is vec(1, 3, 5, 7, 9)
+    assert sort.is_sorted(a)
+    assert sort.is_sorted(a.view(1, 4))
+    assert sort.binary_search(a.view(0, 3), 5) equals 2
+    assert sort.binary_search(a, 9) equals 4
+
+test 'sort_strings byte-lex order'
+    w is vec('pear', 'apple', 'fig', 'apple')
+    sort.sort_strings(w)
+    assert w.get(0) equals 'apple'
+    assert w.get(1) equals 'apple'
+    assert w.get(2) equals 'fig'
+    assert w.get(3) equals 'pear'

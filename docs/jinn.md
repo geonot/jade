@@ -1386,7 +1386,10 @@ left to race on:
 
 Moving the shared value away while the `together` runs is a compile error;
 after it joins, the owner keeps reading it, and one drop at the owner's scope
-end frees it. The design is [`design/freeze.md`](design/freeze.md).
+end frees it. The standard library follows the pattern for configuration:
+`toml.parse_frozen(text)` returns a `Frozen of TomlTable`, ready to be read
+through `toml.get`/`get_int`/`get_bool` and shared across a `together`
+without copies. The design is [`design/freeze.md`](design/freeze.md).
 
 ### Views
 
@@ -1394,7 +1397,8 @@ end frees it. The design is [`design/freeze.md`](design/freeze.md).
 into `xs`'s buffer. `s.view(a, b)` does the same over a string's bytes, and
 `xs.at_view(i)` views one element. A view supports `.length`, `.get(i)`, and
 iteration, and a `View of T` parameter accepts a whole `Vec`, a sub-slice
-view, or an array — the callee cannot tell and cannot keep it:
+view, or an array — and a `View of u8` parameter additionally accepts a whole
+`String` as its byte window. The callee cannot tell and cannot keep it:
 
 ```jinn
 *total(v as View of i64) returns i64

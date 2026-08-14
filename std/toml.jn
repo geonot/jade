@@ -153,6 +153,10 @@ type TomlParser
         p.__parse_line()
     TomlTable(keys is p.keys, vals is p.vals)
 
+*parse_frozen(text as String) returns Frozen of TomlTable
+    t is parse(text)
+    freeze t
+
 *get(table as TomlTable, key as String) returns String
     loop table.keys
         if $ equals key
@@ -236,7 +240,7 @@ type TomlParser
 
 *stringify(table as TomlTable) returns String
     result is ""
-    section_names is vec()
+    section_names as Vec of String is vec()
     loop table.keys
         key is $
         dot_pos is __find_last_dot(key)

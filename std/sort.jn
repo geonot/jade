@@ -19,23 +19,23 @@
         lo is lo + 1
         hi is hi - 1
 
-*is_sorted(arr as Vec of i64) returns bool
+*is_sorted(v as View of i64) returns bool
     i is 1
-    while i < arr.length
-        if arr.get(i) < arr.get(i - 1)
+    while i < v.length
+        if v.get(i) < v.get(i - 1)
             return false
         i is i + 1
     true
 
-*binary_search(arr as Vec of i64, target as i64) returns i64
+*binary_search(v as View of i64, target as i64) returns i64
     lo is 0
-    hi is arr.length - 1
+    hi is v.length - 1
     while lo <= hi
         mid is (lo + hi) / 2
-        v is arr.get(mid)
-        if v equals target
+        x is v.get(mid)
+        if x equals target
             return mid
-        if v < target
+        if x < target
             lo is mid + 1
         else
             hi is mid - 1
@@ -62,7 +62,7 @@ extern *jinn_sort_f64(data as %f64, len as i64)
         while i <= hi
             key is arr.get(i)
             j is i - 1
-            while j >= lo and __str_lt(key, arr.get(j))
+            while j >= lo and key < arr.get(j)
                 arr.set(j + 1, arr.get(j))
                 j is j - 1
             arr.set(j + 1, key)
@@ -72,9 +72,9 @@ extern *jinn_sort_f64(data as %f64, len as i64)
     i is lo
     j is hi
     while i <= j
-        while __str_lt(arr.get(i), pivot)
+        while arr.get(i) < pivot
             i is i + 1
-        while __str_lt(pivot, arr.get(j))
+        while pivot < arr.get(j)
             j is j - 1
         if i <= j
             tmp is arr.get(i)
@@ -86,18 +86,6 @@ extern *jinn_sort_f64(data as %f64, len as i64)
         __string_introsort(arr, lo, j)
     if i < hi
         __string_introsort(arr, i, hi)
-
-*__str_lt(a as String, b as String) returns bool
-    n is a.length < b.length ? a.length ! b.length
-    i is 0
-    while i < n
-        ca is a.char_at(i)
-        cb is b.char_at(i)
-        if ca neq cb
-            return ca < cb
-        i is i + 1
-    a.length < b.length
-
 
 *sort_by(arr as Vec of i64, cmp)
     n is arr.length

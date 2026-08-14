@@ -191,6 +191,11 @@ impl<'ctx> Compiler<'ctx> {
                                     return Ok(Some(self.view_from_string(recv_val, start, end)?));
                                 }
                             }
+                            StrMethod::ViewFull => {
+                                let data = self.string_data(recv_val)?.into_pointer_value();
+                                let len = self.string_len(recv_val)?.into_int_value();
+                                return Ok(Some(self.view_pack(data, len)?));
+                            }
                             StrMethod::CloneOwned => {
                                 return Ok(Some(self.clone_value(recv_val, &Type::String)?));
                             }

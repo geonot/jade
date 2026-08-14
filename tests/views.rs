@@ -268,3 +268,19 @@ fn readonly_method_calls_through_element_views() {
         ],
     );
 }
+
+#[test]
+fn whole_string_coerces_into_view_of_u8_parameter() {
+    accepts_and_prints(
+        "*count_l(v as View of u8) returns i64\n    n is 0\n    for b in v\n        if b equals 108\n            n is n + 1\n    n\n\n*main\n    s is 'hello world'\n    log(count_l(s))\n    log(count_l(s.view(0, 5)))\n    log(s.byte_count)\n",
+        "3\n2\n11",
+    );
+}
+
+#[test]
+fn string_view_coercion_rejects_non_u8_element() {
+    rejects(
+        "*first(v as View of i64) returns i64\n    v.get(0)\n\n*main\n    s is 'hello'\n    log(first(s))\n",
+        &["type mismatch"],
+    );
+}

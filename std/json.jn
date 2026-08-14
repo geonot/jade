@@ -49,7 +49,7 @@ type JsonParser
     pos as i64
 
     *peek_byte
-        if self.pos >= self.src.length
+        if self.pos >= self.src.byte_count
             return -1
         self.src.char_at(self.pos)
 
@@ -59,7 +59,7 @@ type JsonParser
         ch
 
     *skip_ws
-        while self.pos < self.src.length
+        while self.pos < self.src.byte_count
             ch is self.src.char_at(self.pos)
             match ch
                 SPACE ? self.pos is self.pos + 1
@@ -87,12 +87,26 @@ type JsonParser
 
     *parse_string returns String
         self.expect_byte(QUOTE)
+        n is self.src.byte_count
+        start is self.pos
         result is ''
-        while self.pos < self.src.length
-            ch is self.advance_byte()
+        had_parts is false
+        while self.pos < n
+            ch is self.src.char_at(self.pos)
             if ch equals QUOTE
+                if not had_parts
+                    out is self.src.slice(start, self.pos)
+                    self.pos is self.pos + 1
+                    return out
+                if self.pos > start
+                    result is result + self.src.slice(start, self.pos)
+                self.pos is self.pos + 1
                 return result
             if ch equals BACKSLASH
+                if self.pos > start
+                    result is result + self.src.slice(start, self.pos)
+                had_parts is true
+                self.pos is self.pos + 1
                 esc is self.advance_byte()
                 match esc
                     QUOTE ? result is result + '"'
@@ -118,8 +132,9 @@ type JsonParser
                         else
                             result is result + "?"
                     _ ? result is result + self.src.slice(self.pos - 1, self.pos)
+                start is self.pos
             else
-                result is result + self.src.slice(self.pos - 1, self.pos)
+                self.pos is self.pos + 1
         assert(false)
         ""
 
@@ -127,27 +142,27 @@ type JsonParser
         start is self.pos
         if self.peek_byte() equals MINUS
             self.pos is self.pos + 1
-        while self.pos < self.src.length
+        while self.pos < self.src.byte_count
             ch is self.src.char_at(self.pos)
             if ch >= ZERO and ch <= NINE
                 self.pos is self.pos + 1
             else
                 break
-        if self.pos < self.src.length and self.peek_byte() equals DOT
+        if self.pos < self.src.byte_count and self.peek_byte() equals DOT
             self.pos is self.pos + 1
-            while self.pos < self.src.length
+            while self.pos < self.src.byte_count
                 ch is self.src.char_at(self.pos)
                 if ch >= ZERO and ch <= NINE
                     self.pos is self.pos + 1
                 else
                     break
-        if self.pos < self.src.length
+        if self.pos < self.src.byte_count
             ch is self.peek_byte()
             if ch equals LOWER_E or ch equals UPPER_E
                 self.pos is self.pos + 1
                 if self.peek_byte() equals PLUS or self.peek_byte() equals MINUS
                     self.pos is self.pos + 1
-                while self.pos < self.src.length
+                while self.pos < self.src.byte_count
                     ch is self.src.char_at(self.pos)
                     if ch >= ZERO and ch <= NINE
                         self.pos is self.pos + 1
@@ -225,22 +240,29 @@ type JsonParser
         JObject(o) ? __stringify_object(o.keys, o.vals)
 
 *__escape(s as String) returns String
+    n is s.byte_count
     result is '"'
+    start is 0
     i is 0
-    while i < s.length
+    while i < n
         ch is s.char_at(i)
-        match ch
-            QUOTE ? result is result + '\\"'
-            BACKSLASH ? result is result + "\\\\"
-            LF ? result is result + "\\n"
-            CR ? result is result + "\\r"
-            TAB ? result is result + "\\t"
-            _ ?
-                if ch < 32
-                    result is result + "\\u00" + __json_hex_byte(ch)
-                else
-                    result is result + s.slice(i, i + 1)
+        plain is true
+        if ch equals QUOTE or ch equals BACKSLASH or ch < 32
+            plain is false
+        if not plain
+            if i > start
+                result is result + s.slice(start, i)
+            match ch
+                QUOTE ? result is result + '\\"'
+                BACKSLASH ? result is result + "\\\\"
+                LF ? result is result + "\\n"
+                CR ? result is result + "\\r"
+                TAB ? result is result + "\\t"
+                _ ? result is result + "\\u00" + __json_hex_byte(ch)
+            start is i + 1
         i is i + 1
+    if start < n
+        result is result + s.slice(start, n)
     result + '"'
 
 *__stringify_array(items as Vec of JsonValue) returns String

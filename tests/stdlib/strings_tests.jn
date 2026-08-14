@@ -53,3 +53,31 @@ test 'split_lines'
     assert parts.length equals 3
     assert parts.get(0) equals 'a'
     assert parts.get(2) equals 'c'
+
+test 'non-ascii trim preserves multibyte content'
+    assert strings.trim('  héllo wörld  ') equals 'héllo wörld'
+    assert strings.trim_right(' héllo ') equals ' héllo'
+
+test 'reverse is scalar-aware'
+    assert strings.reverse('abc') equals 'cba'
+    assert strings.reverse('héllo') equals 'olléh'
+    assert strings.reverse('') equals ''
+
+test 'case fold leaves non-ascii intact'
+    assert strings.to_lower('HÉLLO') equals 'hÉllo'
+    assert strings.to_upper('héllo') equals 'HéLLO'
+
+test 'split_lines non-ascii and crlf'
+    parts is strings.split_lines('héllo\r\nwörld')
+    assert parts.length equals 2
+    assert parts.get(0) equals 'héllo'
+    assert parts.get(1) equals 'wörld'
+
+test 'replace multibyte'
+    assert strings.replace('héllo héllo', 'héllo', 'x') equals 'x x'
+    assert strings.count('héllo héllo', 'héllo') equals 2
+
+test 'title_case and snake helpers'
+    assert strings.title_case('hello world') equals 'Hello World'
+    assert strings.title_case('HELLO-world') equals 'Hello-World'
+    assert strings.trim_chars('xxhixx', 'x') equals 'hi'
