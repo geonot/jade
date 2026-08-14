@@ -1,4 +1,56 @@
 # Changelog
+- **[153]** (2026-08-14) types pass, part 1: tuples get one canonical layout — the phi-shape merge error and a silent heterogeneous-tuple corruption die together, unannotated signatures resolve before callers read them, and a type named `E` unifies with itself
+
+First slice of the Types/inference/diagnostics section (T-10 closed, T-15
+closed, T-1r reduced). Includes the compiler changes checkpointed in the
+untagged `updates` commit (39c1a65). Full suite is 2229 tests; the
+whole-corpus ASan+LSan sweep is now 1020 runs — **every corpus program
+compiles for the first time** — with zero memory corruption; fib/spectral/csv
+benchmarks are unchanged (checksums identical).
+
+- **T-10's diagnostic was the visible edge of a silent wrong-code bug.**
+  Codegen's `ArrayInit` built *every* tuple as an LLVM `[N x T]` array typed
+  by the first element. For a heterogeneous tuple like `(Tok, i64)` that
+  stores the i64 at the enum's unpadded size (offset 12) while the canonical
+  `{ %Tok, i64 }` layout — used by returns, calls, and phis — reads it at
+  offset 16, so every lexer-style `(token, position)` return came back as
+  `position >> 32`, i.e. 0. Homogeneous tuples happened to have identical
+  layouts, which is why the corpus never caught it: the only witness was
+  `compiler_pipeline.jn`, which failed to *compile* on the downstream
+  phi-shape mismatch (the T-10 diagnostic), and once the merge was made
+  representable the wrong position surfaced as a non-advancing parser
+  recursing to stack overflow. Tuples now lower to their canonical
+  `llvm_ty` struct at construction, tuple field reads handle anonymous
+  structs positionally, and a new `coerce_aggregate_value` helper coerces
+  mismatched aggregate shapes *element-wise* (recursing through nested
+  aggregates, byte-reinterpreting only same-size leaves) — it replaces both
+  the phi-shape diagnostic and the byte-reinterpret return coercion, which
+  was this same layout bug in a second costume. `compiler_pipeline.jn`
+  compiles, runs, and joins the snapshot + differential harnesses (the
+  `UNSUPPORTED` lists are empty); the layout and merge behaviors are pinned
+  in `tests/semantics_regression.rs`.
+- **T-15: unsolved exported signatures resolved after callers had already
+  read them.** `build_fn_scheme` ran only for functions in `inferable_fns`
+  (unannotated *parameters*), so a function with annotated parameters and an
+  unannotated return kept its raw inference variable in the `fns` registry —
+  callers in other modules read it before resolution and saw it defaulted to
+  i64 ([151] watched `csv.parse` callers read garbage this way). The scheme
+  pass now covers every non-generic function and writes the
+  canonicalized/resolved parameter and return types back to the registry, so
+  the annotation-free path is authoritative across module boundaries. Pinned
+  two-file in `tests/module_resolution.rs` and same-module in
+  `tests/semantics_regression.rs`.
+- **T-1r, the harshest spelling: a user type actually named `E` never
+  unified with its own annotation.** The parser reads any single uppercase
+  letter in type position as a type parameter, so `items as Vec of E`
+  produced `Param("E")` while the value had `Enum("E")` — rejected with
+  `expected E, found E`. Unification now identifies a `Param` with a
+  same-named declared enum or struct, and the equal-Display fallback
+  diagnostic names the *kinds* (`the type parameter E` vs `the enum E`) so
+  the residue of T-1r can't hide behind identical spellings again. Pinned in
+  `tests/semantics_regression.rs`; phantom/return-only parameters and
+  turbofish remain open in the roadmap entry.
+
 - **[152]** (2026-08-13) the std adoption sweep lands: csv parses 315x faster, strings 30x, json 17x — span-based byte-indexed rewrites of the four M-13r modules, whole-String view coercion, and `toml.parse_frozen`
 
 M-13r step 4 and M-14r step 3, gated by [151]'s behavior pins and benchmarks.

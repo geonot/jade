@@ -12,10 +12,7 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-const UNSUPPORTED: &[(&str, &str)] = &[(
-    "compiler_pipeline",
-    "joins values of different shapes at a control-flow merge",
-)];
+const UNSUPPORTED: &[(&str, &str)] = &[];
 
 fn run_program(src: &Path) -> Result<String, String> {
     let dir = tempfile::tempdir().unwrap();

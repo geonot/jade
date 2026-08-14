@@ -458,3 +458,38 @@ fn single_letter_enum_names_unify_with_their_declared_type() {
          (`expected E, found E`)"
     );
 }
+
+#[test]
+fn heterogeneous_tuple_layout_survives_returns_and_merges() {
+    let c = compile(
+        "enum Tok\n    TNum(i64)\n    TStar\n    TEnd\n\n*lex_one(src as String, pos as i64)\n    if pos >= src.length\n        return (TEnd, pos)\n    ch is src.char_at(pos)\n    if ch >= 48 and ch <= 57\n        return (TNum(ch - 48), pos + 1)\n    if ch equals 42\n        return (TStar, pos + 1)\n    (TEnd, pos)\n\n*main\n    t1, p1 is lex_one('3*4', 0)\n    log(p1)\n    match t1\n        TNum(n) ? log(n)\n        _ ? log(-1)\n    t2, p2 is lex_one('3*4', p1)\n    log(p2)\n    match t2\n        TStar ? log(999)\n        _ ? log(-2)\n    0\n",
+    );
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "1\n3\n2\n999",
+        "tuples were built as [N x first-elem-type] arrays, so a (enum, i64) tuple stored \
+         its i64 at the enum-size offset (12) while the canonical {{enum, i64}} return \
+         layout reads it at 16 — every position came back as pos >> 32 (usually 0)"
+    );
+}
+
+#[test]
+fn recursive_enum_rebound_in_loop_merges_correctly() {
+    let c = compile(
+        "enum Node\n    NNum(i64)\n    NMul(Node, Node)\n\n*eval(n as Node)\n    match n\n        NNum(v) ? v\n        NMul(a, b) ? eval(a) * eval(b)\n\n*build(k as i64)\n    left is NNum(3)\n    i is 0\n    loop\n        if i >= k\n            return left\n        left is NMul(left, NNum(2))\n        i is i + 1\n\n*main\n    log(eval(build(2)))\n    0\n",
+    );
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "12",
+        "a recursive enum payload rebound inside a loop merges values whose LLVM shapes \
+         differed per path; before [153] this was a hard codegen error, and the first \
+         spill-based fix byte-reinterpreted mismatched layouts instead of coercing \
+         element-wise"
+    );
+}

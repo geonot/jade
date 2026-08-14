@@ -234,6 +234,60 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
+    pub(in crate::codegen) fn coerce_aggregate_value(
+        &self,
+        v: BasicValueEnum<'ctx>,
+        target: BasicTypeEnum<'ctx>,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        if v.get_type() == target {
+            return Ok(v);
+        }
+        if v.is_array_value() && target.is_struct_type() {
+            let av = v.into_array_value();
+            let st = target.into_struct_type();
+            if av.get_type().len() == st.count_fields() {
+                let alloca = self.entry_alloca(target, "coerce.tmp");
+                for i in 0..st.count_fields() {
+                    let ev = b!(self.bld.build_extract_value(av, i, "coerce.e"));
+                    let fty = st
+                        .get_field_type_at_index(i)
+                        .ok_or("ICE: struct field index out of range in coercion")?;
+                    let ev = self.coerce_aggregate_value(ev, fty)?;
+                    let p = b!(self.bld.build_struct_gep(st, alloca, i, "coerce.f"));
+                    b!(self.bld.build_store(p, ev));
+                }
+                return Ok(b!(self.bld.build_load(target, alloca, "coerce.v")));
+            }
+        }
+        if v.is_struct_value() && target.is_struct_type() {
+            let sv = v.into_struct_value();
+            let st = target.into_struct_type();
+            if sv.get_type().count_fields() == st.count_fields() {
+                let alloca = self.entry_alloca(target, "coerce.tmp");
+                for i in 0..st.count_fields() {
+                    let ev = b!(self.bld.build_extract_value(sv, i, "coerce.e"));
+                    let fty = st
+                        .get_field_type_at_index(i)
+                        .ok_or("ICE: struct field index out of range in coercion")?;
+                    let ev = self.coerce_aggregate_value(ev, fty)?;
+                    let p = b!(self.bld.build_struct_gep(st, alloca, i, "coerce.f"));
+                    b!(self.bld.build_store(p, ev));
+                }
+                return Ok(b!(self.bld.build_load(target, alloca, "coerce.v")));
+            }
+        }
+        if self.type_store_size(v.get_type()) == self.type_store_size(target) {
+            let alloca = self.entry_alloca(v.get_type(), "coerce.bits");
+            b!(self.bld.build_store(alloca, v));
+            return Ok(b!(self.bld.build_load(target, alloca, "coerce.v")));
+        }
+        Err(format!(
+            "ICE: cannot coerce value of LLVM type {} to {}",
+            v.get_type(),
+            target
+        ))
+    }
+
     pub(in crate::codegen) fn struct_is_pod(&self, ty: &Type) -> bool {
         match ty {
             Type::Struct(name, _) => match self.structs.get(name) {
@@ -623,6 +677,13 @@ impl<'ctx> Compiler<'ctx> {
                     }
                 }
                 let idx = self.field_index(name, field);
+                let val = b!(self.bld.build_extract_value(sv, idx, field));
+                return Ok(val);
+            }
+
+            if let Some(rest) = field.strip_prefix('_')
+                && let Ok(idx) = rest.parse::<u32>()
+            {
                 let val = b!(self.bld.build_extract_value(sv, idx, field));
                 return Ok(val);
             }

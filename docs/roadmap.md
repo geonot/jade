@@ -41,7 +41,13 @@ M-13r's adoption sweep — found and fixed six compiler defects (match arms
 losing their values to trailing drops, match-payload rewraps double-freeing,
 String captures aliasing, nested-loop method mutations lost, float `neq`
 non-IEEE, one-sided int→float literal coercion) and wired `tests/stdlib/`
-into the gates; it added `M-17` and `T-15` below.
+into the gates; it added `M-17` below and `T-15` (since closed). The
+2026-08-14 types pass ([153]) closed T-10 (tuples now lower to their canonical
+LLVM struct layout everywhere — the phi-shape diagnostic's trigger is gone,
+and a silent heterogeneous-tuple corruption it was masking is fixed and
+pinned) and T-15 (unannotated signatures resolve before callers read them),
+and reduced T-1r (single-letter type names no longer shadow-collide with the
+parser's type-parameter reading).
 Items below are what remains.
 
 ---
@@ -161,14 +167,14 @@ bodies, so defer-reads-then-drop ordering holds on early returns too. Residue:
 method-call results (`p.split('/')` on an early-return path), `String` temps,
 loop-iteration reallocation, and the conditional-path leaks of `M-7r` are
 outside the obligation set; `ci/sanitize-corpus.sh` measures that surface
-(49 of 510 corpus programs leak, 76 B–49 KB per run, zero corruption).
+(45 of 510 corpus programs leak, 74 B–1.2 MB per run, zero corruption).
 
 ### M-10r (m) Sanitizer sweep residue: fiber annotations and the leak tail
 
 [147] closed M-10: `ci/sanitize-corpus.sh` compiles and runs the whole
 executable corpus — `tests/programs`, every `apps/` entry, every snippet, 510
-programs — under ASan+LSan at `--opt 0` and `--opt 3` (919 clean runs, zero
-memory corruption, the two compile failures are `T-10`'s pinned program), and
+programs — under ASan+LSan at `--opt 0` and `--opt 3` (1020 runs since [153]
+closed T-10 — every corpus program now compiles — zero memory corruption), and
 `ci/fuzz-ownership.py` mutates ownership-relevant syntax (duplicated
 arguments, inserted/swapped `take`/`copy`, late uses, rebinds) and asserts the
 compiler either rejects with a diagnostic or the binary runs memory-safe under
@@ -314,7 +320,12 @@ the caller's order (old T-14).
 
 Method bodies on generic types are emitted since [143], but a generic struct
 still has several mutually non-unifying spellings, and return-position-only and
-phantom type parameters cannot be used, with no turbofish to escape.
+phantom type parameters cannot be used, with no turbofish to escape. [153]
+fixed the harshest collision: the parser reads any single uppercase letter in
+type position as a type parameter, so a user enum or struct actually *named*
+`E` never unified with its own annotation (`expected E, found E`); declared
+names now win over the parameter reading during unification, and the
+same-name/different-kind fallback diagnostic says which is which.
 
 ### T-2 (m) Mangled internal names can reach user diagnostics
 
@@ -332,14 +343,6 @@ types and parameter counts must match (both sites named in the diagnostic,
 returns are still accepted by adoption, and trait-side types that stay generic
 after substitution are skipped rather than deferred to inference.
 
-### T-10 (M) Control-flow merges of differently-shaped values are unrepresentable — *verified*
-
-`tests/programs/compiler_pipeline.jn` does not compile: a recursive enum payload
-rebound inside a loop produces a merge whose incoming values have different
-shapes (array on one path, tuple on another). This is a diagnostic naming the
-function and the construct, not an ICE, and the harness asserts that exact
-diagnostic — so it reports both a regression to a panic and a fix.
-
 ### T-13r (m) String-as-byte-buffer residue in std
 
 [145] decided T-13: `chr(code)` UTF-8-encodes a Unicode scalar (invalid and
@@ -353,16 +356,6 @@ non-ASCII input, `to_lower`/`to_upper` dropping trailing bytes, and
 byte loops). Residue: the `.slice(i, s.length)` scalar-bound idiom survives on
 ASCII-expected text paths (`url` parsing, `uuid.parse`), and `Bytes.to_string`
 is still lossy, so `std/bytes.jn` cannot yet serve as the byte-buffer bridge.
-
-### T-15 (M) Unsolved exported signatures default silently and callers read garbage
-
-Found by [151]: an unannotated std function whose return type carried an
-unsolved element variable (`csv.parse` before annotation) type-checked with a
-warning, and *callers* saw the variable defaulted to i64 — every method on
-the runtime-String elements then read garbage (huge checksums, no
-diagnostic). `--strict-types` already errors; the default must either resolve
-across the module boundary or reject at the definition. `csv` and `json` are
-fully annotated now; the compiler-side gap remains.
 
 ---
 

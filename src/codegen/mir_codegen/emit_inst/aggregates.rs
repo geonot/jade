@@ -169,6 +169,26 @@ impl<'ctx> Compiler<'ctx> {
                     }
                     let elem_vals: Vec<BasicValueEnum<'ctx>> =
                         elems.iter().map(|v| self.val(*v)).collect();
+                    if matches!(&inst.ty, Type::Tuple(_)) {
+                        let st_ty = self.llvm_ty(&inst.ty).into_struct_type();
+                        let alloca = self.entry_alloca(st_ty.into(), "tup");
+                        for (i, v) in elem_vals.iter().enumerate() {
+                            let ptr =
+                                b!(self.bld.build_struct_gep(st_ty, alloca, i as u32, "tup.f"));
+                            let field_ty =
+                                st_ty.get_field_type_at_index(i as u32).ok_or_else(|| {
+                                    format!("ICE: tuple field {i} out of range for {st_ty}")
+                                })?;
+                            let fv = if v.get_type() == field_ty {
+                                *v
+                            } else {
+                                self.coerce_aggregate_value(*v, field_ty)?
+                            };
+                            b!(self.bld.build_store(ptr, fv));
+                        }
+                        let tup = b!(self.bld.build_load(st_ty, alloca, "tup.val"));
+                        return Ok(Some(tup));
+                    }
                     let elem_ty = elem_vals[0].get_type();
                     let arr_ty = elem_ty.array_type(elems.len() as u32);
                     let alloca = self.entry_alloca(arr_ty.into(), "arr");

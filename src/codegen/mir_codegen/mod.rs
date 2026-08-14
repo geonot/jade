@@ -688,26 +688,17 @@ impl<'ctx> Compiler<'ctx> {
                                     || phi_ty.is_array_type())
                                     && (val_ty.is_struct_type() || val_ty.is_array_type());
                                 if !is_void_sentinel && both_aggregate {
-                                    let spill_ty = if self.type_store_size(val_ty)
-                                        >= self.type_store_size(phi_ty)
-                                    {
-                                        val_ty
-                                    } else {
-                                        phi_ty
-                                    };
-                                    let slot = self.entry_alloca(spill_ty, "phi.shape");
                                     match llvm_bb.get_terminator() {
                                         Some(t) => self.bld.position_before(&t),
                                         None => self.bld.position_at_end(*llvm_bb),
                                     }
-                                    self.bld
-                                        .build_store(slot, *llvm_val)
-                                        .expect("ICE: phi shape spill store");
-                                    let loaded = self
-                                        .bld
-                                        .build_load(phi_ty, slot, "phi.shape.load")
-                                        .expect("ICE: phi shape spill load");
-                                    return Some((loaded, *llvm_bb));
+                                    match self.coerce_aggregate_value(*llvm_val, phi_ty) {
+                                        Ok(coerced) => return Some((coerced, *llvm_bb)),
+                                        Err(e) => {
+                                            phi_shape_error_local.get_or_insert(e);
+                                            return None;
+                                        }
+                                    }
                                 }
                                 if !is_void_sentinel {
                                     phi_shape_error_local.get_or_insert_with(|| {
@@ -845,10 +836,12 @@ impl<'ctx> Compiler<'ctx> {
                     let expected = self.llvm_ty(ret_ty);
                     if v.get_type() == expected {
                         b!(self.bld.build_return(Some(&v)));
-                    } else if matches!(ret_ty, Type::Tuple(_)) && v.is_array_value() {
-                        let alloca = self.entry_alloca(v.get_type(), "tup.coerce");
-                        b!(self.bld.build_store(alloca, v));
-                        let coerced = b!(self.bld.build_load(expected, alloca, "tup.ret"));
+                    } else if matches!(
+                        ret_ty,
+                        Type::Tuple(_) | Type::Struct(_, _) | Type::Enum(_) | Type::Array(_, _)
+                    ) && (v.is_array_value() || v.is_struct_value())
+                    {
+                        let coerced = self.coerce_aggregate_value(v, expected)?;
                         b!(self.bld.build_return(Some(&coerced)));
                     } else {
                         let default = self.default_val(ret_ty);
