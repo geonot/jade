@@ -254,7 +254,15 @@ impl Typer {
             .iter()
             .map(|p| self.infer_ctx.canonicalize_type(&p.ty))
             .collect();
-        let ret_ty = self.infer_ctx.canonicalize_type(&hfn.ret);
+        let ret_ty = if self.inferable_fns.contains_key(&name) {
+            self.infer_ctx.canonicalize_type(&hfn.ret)
+        } else {
+            self.infer_ctx.resolve(&hfn.ret)
+        };
+        if let Some(entry) = self.fns.get_mut(&name) {
+            entry.1 = param_tys.clone();
+            entry.2 = ret_ty.clone();
+        }
         let fn_ty = crate::types::Type::Fn(param_tys.clone(), Box::new(ret_ty.clone()));
         let scheme = self.generalize(&fn_ty);
         if scheme.is_poly() {

@@ -657,6 +657,7 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         self.phi_shape_error = None;
+        let mut phi_shape_error_local: Option<String> = None;
         for pp in &self.pending_phis {
             let phi_ty = pp.phi.as_basic_value().get_type();
             let incoming: Vec<(BasicValueEnum<'ctx>, LLVMBlock<'ctx>)> =
@@ -682,8 +683,34 @@ impl<'ctx> Compiler<'ctx> {
                             } else {
                                 let is_void_sentinel = llvm_val.get_type().is_int_type()
                                     && llvm_val.get_type().into_int_type().get_bit_width() == 8;
+                                let val_ty = llvm_val.get_type();
+                                let both_aggregate = (phi_ty.is_struct_type()
+                                    || phi_ty.is_array_type())
+                                    && (val_ty.is_struct_type() || val_ty.is_array_type());
+                                if !is_void_sentinel && both_aggregate {
+                                    let spill_ty = if self.type_store_size(val_ty)
+                                        >= self.type_store_size(phi_ty)
+                                    {
+                                        val_ty
+                                    } else {
+                                        phi_ty
+                                    };
+                                    let slot = self.entry_alloca(spill_ty, "phi.shape");
+                                    match llvm_bb.get_terminator() {
+                                        Some(t) => self.bld.position_before(&t),
+                                        None => self.bld.position_at_end(*llvm_bb),
+                                    }
+                                    self.bld
+                                        .build_store(slot, *llvm_val)
+                                        .expect("ICE: phi shape spill store");
+                                    let loaded = self
+                                        .bld
+                                        .build_load(phi_ty, slot, "phi.shape.load")
+                                        .expect("ICE: phi shape spill load");
+                                    return Some((loaded, *llvm_bb));
+                                }
                                 if !is_void_sentinel {
-                                    self.phi_shape_error.get_or_insert_with(|| {
+                                    phi_shape_error_local.get_or_insert_with(|| {
                                         format!(
                                             "{}: this function joins values of different \
                                      shapes at a control-flow merge, which the code \
@@ -729,6 +756,7 @@ impl<'ctx> Compiler<'ctx> {
                 pp.phi.add_incoming(&[(*val, *bb)]);
             }
         }
+        self.phi_shape_error = phi_shape_error_local;
         if let Some(msg) = self.phi_shape_error.take() {
             return Err(msg);
         }

@@ -124,3 +124,31 @@ fn unimported_sibling_module_is_an_error_naming_use() {
         "diagnostic must name the fix: {stderr}"
     );
 }
+
+#[test]
+fn unannotated_return_resolves_before_callers_read_it() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("parselib.jn"),
+        "*parse\n    rows is vec()\n    row is vec()\n    row.push('xyz')\n    rows.push(row)\n    rows\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("main.jn"),
+        "use parselib\n\n*main\n    rows is parselib.parse()\n    total is 0\n    loop rows\n        row is $\n        loop row\n            total is total + $.byte_count\n    log(total)\n",
+    )
+    .unwrap();
+    let out = compile(dir.path(), "main.jn");
+    assert!(
+        out.status.success(),
+        "must compile: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        run(dir.path()),
+        "3",
+        "before [153] the callee's fns-registry entry kept a raw type variable; the loop \
+         binder froze its i64 default and byte_count read vec headers as integers — silent \
+         garbage in the hundreds of quintillions"
+    );
+}

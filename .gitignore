@@ -32,3 +32,6 @@ benchmarks/results*.json
 # not source, and shipping an ELF in the repo makes review harder.
 apps/*/dist/
 apps/alpha_release_demo/alpha_demo
+
+.ryu
+.ryu/**

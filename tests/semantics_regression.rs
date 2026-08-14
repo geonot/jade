@@ -428,3 +428,33 @@ fn int_literals_coerce_against_float_calls_on_either_side_and_negated() {
     assert!(run.status.success(), "{}", exit_desc(&run));
     assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "1\n1\n1");
 }
+
+#[test]
+fn unannotated_fn_return_type_is_authoritative_across_calls() {
+    let c = compile(
+        "*f\n    v is vec()\n    v.push(1)\n    v\n\n*main\n    a is f()\n    log(a.get(0) + 1)\n    b is f()\n    b.push('str')\n    log(b.get(1))\n",
+    );
+    assert!(!c.ok(), "conflicting element type must not compile");
+    let stderr = c.stderr();
+    assert!(
+        stderr.contains("expected `i64`, found `string`") && !stderr.contains("?"),
+        "diagnostic must name the resolved type, not a raw type variable: {stderr}"
+    );
+}
+
+#[test]
+fn single_letter_enum_names_unify_with_their_declared_type() {
+    let c = compile(
+        "type Arr\n    items as Vec of E\n\nenum E\n    N(i64)\n    L(Arr)\n\n*main\n    items is vec()\n    items.push(N(41))\n    a is Arr(items is items)\n    log(a.items.length)\n    match a.items.get(0)\n        N(n) ? log(n + 1)\n        _ ? log(-1)\n",
+    );
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "1\n42",
+        "the parser reads any single uppercase letter in type position as a type parameter; \
+         before [153] a declared enum named E never unified with its own annotation \
+         (`expected E, found E`)"
+    );
+}

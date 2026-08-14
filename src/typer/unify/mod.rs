@@ -626,6 +626,14 @@ impl InferCtx {
                 }
                 Ok(())
             }
+            (Type::Param(na), Type::Enum(nb)) | (Type::Enum(nb), Type::Param(na)) if na == nb => {
+                Ok(())
+            }
+            (Type::Param(na), Type::Struct(nb, _)) | (Type::Struct(nb, _), Type::Param(na))
+                if na == nb =>
+            {
+                Ok(())
+            }
             (Type::Newtype(na, ia), Type::Newtype(nb, ib)) if na == nb => self.unify(ia, ib),
             (Type::Row(sa), Type::Row(sb)) => {
                 if sa == sb {
@@ -636,7 +644,31 @@ impl InferCtx {
                     ))
                 }
             }
-            _ => Err(format!("type mismatch: expected `{a}`, found `{b}`")),
+            _ => {
+                let da = format!("{a}");
+                let db = format!("{b}");
+                if da == db {
+                    Err(format!(
+                        "type mismatch: expected `{da}` (a {}), found `{db}` (a {}) — two \
+                         different types share this name",
+                        Self::type_kind_word(&a),
+                        Self::type_kind_word(&b),
+                    ))
+                } else {
+                    Err(format!("type mismatch: expected `{da}`, found `{db}`"))
+                }
+            }
+        }
+    }
+
+    fn type_kind_word(t: &Type) -> &'static str {
+        match t {
+            Type::Param(_) => "type parameter",
+            Type::Enum(_) => "declared enum",
+            Type::Struct(_, _) => "declared type",
+            Type::Newtype(_, _) => "newtype",
+            Type::Alias(_, _) => "alias",
+            _ => "type",
         }
     }
 

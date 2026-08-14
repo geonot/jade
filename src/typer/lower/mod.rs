@@ -422,9 +422,7 @@ impl Typer {
                     }
                 }
                 for (_, _, hfn, fname) in &scc_fns {
-                    if self.inferable_fns.contains_key(fname) {
-                        self.build_fn_scheme(*fname, hfn);
-                    }
+                    self.build_fn_scheme(*fname, hfn);
                 }
                 for (_, _, hfn, fname) in scc_fns {
                     if self.fn_schemes.get(&fname).is_some_and(|s| !s.0.is_empty()) {
@@ -436,9 +434,7 @@ impl Typer {
                 for name in scc {
                     if let Some(f) = fn_lookup.get(name) {
                         let hfn = self.lower_fn(f)?;
-                        if self.inferable_fns.contains_key(&f.name) {
-                            self.build_fn_scheme(f.name, &hfn);
-                        }
+                        self.build_fn_scheme(f.name, &hfn);
                         if self
                             .fn_schemes
                             .get(&f.name)
@@ -457,9 +453,7 @@ impl Typer {
         for f in &non_generic_fns {
             if !lowered_fn_names.contains(&f.name) {
                 let hfn = self.lower_fn(f)?;
-                if self.inferable_fns.contains_key(&f.name) {
-                    self.build_fn_scheme(f.name, &hfn);
-                }
+                self.build_fn_scheme(f.name, &hfn);
                 if self
                     .fn_schemes
                     .get(&f.name)
