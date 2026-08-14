@@ -191,6 +191,9 @@ impl<'ctx> Compiler<'ctx> {
                                     return Ok(Some(self.view_from_string(recv_val, start, end)?));
                                 }
                             }
+                            StrMethod::CloneOwned => {
+                                return Ok(Some(self.clone_value(recv_val, &Type::String)?));
+                            }
                         }
                     }
 
@@ -683,6 +686,25 @@ impl<'ctx> Compiler<'ctx> {
                                         entry_bld.position_at_end(entry_bb);
                                     }
                                     entry_bld.build_store(tmp, recv_val).unwrap();
+                                } else if let Some(inst) = recv_val.as_instruction_value() {
+                                    let def_bb = inst
+                                        .get_parent()
+                                        .expect("ICE: receiver instruction has no parent");
+                                    let def_bld = self.ctx.create_builder();
+                                    let mut anchor = inst.get_next_instruction();
+                                    while let Some(a) = anchor {
+                                        if a.get_opcode() == inkwell::values::InstructionOpcode::Phi
+                                        {
+                                            anchor = a.get_next_instruction();
+                                        } else {
+                                            break;
+                                        }
+                                    }
+                                    match anchor {
+                                        Some(a) => def_bld.position_before(&a),
+                                        None => def_bld.position_at_end(def_bb),
+                                    }
+                                    def_bld.build_store(tmp, recv_val).unwrap();
                                 } else {
                                     b!(self.bld.build_store(tmp, recv_val));
                                 }

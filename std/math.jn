@@ -4,6 +4,7 @@ E is 2.71828182845904523536
 TAU is 6.28318530717958647692
 INF is 1.0 / 0.0
 NEG_INF is -1.0 / 0.0
+NAN is 0.0 / 0.0
 
 extern *sqrt(x as f64) returns f64
 extern *floor(x as f64) returns f64

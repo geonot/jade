@@ -30,7 +30,7 @@ type RNG
         self.next_u64()
 
     *next_f64
-        (self.next_u64() >> 11) as f64 * 5.421010862427522e-20
+        (self.next_u64() >>> 11) as f64 * 5.421010862427522e-20
 
     *range(lo, hi)
         span is hi - lo

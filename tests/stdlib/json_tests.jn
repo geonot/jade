@@ -1,0 +1,62 @@
+use std/json
+
+test 'parse scalars'
+    assert json.stringify(json.parse('42')) equals '42'
+    assert json.stringify(json.parse('-3.25e2')) equals '-325'
+    assert json.stringify(json.parse('2.5')) equals '2.5'
+    assert json.stringify(json.parse('true')) equals 'true'
+    assert json.stringify(json.parse('false')) equals 'false'
+    assert json.stringify(json.parse('null')) equals 'null'
+    assert json.stringify(json.parse('"hi"')) equals '"hi"'
+
+test 'parse string escapes'
+    assert json.stringify(json.parse('"a\\nb"')) equals '"a\\nb"'
+    assert json.stringify(json.parse('"q\\"q"')) equals '"q\\"q"'
+    assert json.stringify(json.parse('"s\\\\t"')) equals '"s\\\\t"'
+    assert json.stringify(json.parse('"u\\u0041z"')) equals '"uAz"'
+    assert json.stringify(json.parse('"a\\/b"')) equals '"a/b"'
+
+test 'parse structures roundtrip'
+    src is '\{"a":1,"b":[1,2,\{"c":"x"\}],"d":null\}'
+    assert json.stringify(json.parse(src)) equals src
+    assert json.stringify(json.parse('[]')) equals '[]'
+    assert json.stringify(json.parse('\{\}')) equals '\{\}'
+    assert json.stringify(json.parse('[ 1 , 2 ]')) equals '[1,2]'
+
+test 'accessors'
+    v is json.parse('\{"name":"ada","age":36,"ok":true\}')
+    assert json.get_str(v, 'name') equals 'ada'
+    assert json.get_num(v, 'age') equals 36.0
+    assert json.get_bool(v, 'ok')
+    assert json.get_str(v, 'missing') equals ''
+    assert json.has(v, 'name')
+    assert not json.has(v, 'missing')
+    assert json.length(v) equals 3
+
+test 'array index'
+    a is json.parse('[10,20,30]')
+    assert json.stringify(json.index(a, 1)) equals '20'
+    assert json.stringify(json.index(a, 9)) equals 'null'
+    assert json.length(a) equals 3
+
+test 'set remove push'
+    o is json.obj()
+    o is json.set(o, 'k', json.parse('1'))
+    o is json.set(o, 'k', json.parse('2'))
+    assert json.stringify(o) equals '\{"k":2\}'
+    o is json.set(o, 'j', json.parse('3'))
+    o is json.remove(o, 'k')
+    assert json.stringify(o) equals '\{"j":3\}'
+    a is json.arr()
+    a is json.push(a, json.parse('7'))
+    assert json.stringify(a) equals '[7]'
+
+test 'escape on stringify'
+    v is json.parse('\{"k":"line1\\nline2"\}')
+    assert json.stringify(v) equals '\{"k":"line1\\nline2"\}'
+
+test 'pretty'
+    p is json.pretty(json.parse('[1,\{"k":"v"\}]'))
+    assert p equals '[\n  1,\n  \{\n    "k": "v"\n  \}\n]'
+    assert json.pretty(json.parse('42')) equals '42'
+    assert json.pretty(json.parse('[]')) equals '[]'

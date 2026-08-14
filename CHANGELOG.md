@@ -1,4 +1,71 @@
 # Changelog
+- **[151]** (2026-08-13) the adoption sweep's gates find six live compiler bugs: match arms lost their values to trailing drops, match-payload rewraps double-freed, String captures aliased, nested-loop method mutations vanished, float `neq` ignored NaN, and stdlib behavior tests join the gates
+
+Preparing M-13r's std adoption sweep demanded behavior pins for `csv` and
+`json` (which had none) and benchmarks for the four target modules (which had
+none). Writing those pins and benchmarks — before touching a line of std —
+surfaced six distinct compiler defects and a string of std defects, every one
+a silent wrong answer or a memory error on plausible code. All are fixed and
+pinned; the full suite is 2222 tests across 53 binaries, and the post-fix
+whole-corpus ASan+LSan sweep reports **zero memory corruption** with the leak
+tail unchanged in character.
+
+- **A value-position `match` lost every arm to one trailing drop (MIR
+  lowering).** When an arm block's tail expression only *read* a local
+  (`result + "]"`), the typer's scope-end drop landed after the tail, and
+  `lower_block_expr` took the last statement's value — the drop's void — as
+  the arm value, poisoning the merge phi so *every* arm returned `""`.
+  `json.pretty` returned an empty string for any array or object; any
+  String-valued match with a block arm was affected. Block-expression values
+  now come from the last non-drop statement (`tests/semantics_regression.rs`).
+- **Consuming a match-payload bind was invisible to the subject
+  (typer).** `match obj ... JObj(o) ? ... JObj(o)` — the `json.set` idiom —
+  re-wrapped the payload while `obj`'s drop stayed live: a double free at
+  scope exit, SIGSEGV in four lines of user code. Pattern binds now link to
+  their subject's place; consuming the bind consumes the subject through the
+  same funnel (use-after is an ordinary moved-value diagnostic naming the
+  ctor site), and the scope-drop collector expands bind links the same way.
+  Residue (subjects that are temporaries are unlinked; moving one bind of a
+  multi-field payload leaks the others) is filed as `M-17`.
+- **String captures aliased instead of cloning (typer).** A `String` variable
+  captured by a constructor, variant, `vector()`/array/tuple literal, or
+  channel send copied the 24-byte header — two owners of one heap buffer, a
+  double free the corpus never saw because its strings fit SSO inline. Strings
+  are contractually non-consumable parameters, so the sound semantics is a
+  clone: capture sites now wrap bare String vars in an internal `__clone`
+  method (temporaries still move; `Map.set`/`push` were already sound).
+- **Mutating methods in nested loops lost scalar-field writes (codegen).** The
+  by-value receiver spill emitted its store at the first call site's insertion
+  point — inside the inner loop — so every iteration re-stored the stale
+  pre-loop struct: `sb.write_byte(..)` in a `while` inside a `while` kept one
+  byte; heap-indirect writes (vec pushes) survived, which is why it read as
+  flaky rather than broken. The store now lands right after the receiver's
+  defining instruction. `tests/programs/expected/ecs.out` was re-recorded: its
+  snapshot had baked the bug in (the fifth loop rebind was lost).
+- **Float `neq` compiled to ordered ONE (codegen).** `NaN neq NaN` was false,
+  so `math.is_nan` — `x neq x` — never returned true. `neq` on floats is now
+  IEEE-754 UNE in both codegen and store filters.
+- **Int literals only coerced to float on the left (typer, T-14 residue).**
+  `sign(0) equals 0` and `x equals -1` against an f64 both rejected; the
+  promotion now applies to either side and through unary minus.
+- **std defects the new pins caught:** `csv.get_column`/`to_records` did not
+  compile when called (aggregate-element binds, invisible to the `--lib` gate
+  because the functions were unannotated — the general hazard is filed as
+  `T-15`); `csv` and `json` internals carried unsolved element types that
+  callers saw defaulted to i64, reading garbage through every method (both
+  modules are now fully annotated); `random.next_f64` used an arithmetic
+  shift, going negative half the time; `path.with_ext`/`with_name` prefixed
+  bare names with `./`; `std/math` lacked `NAN`; `json.keys` now returns a
+  copy instead of moving the object's key vector.
+- **Gates and benchmarks.** `tests/stdlib/` was never wired into any gate and
+  three of its suites had rotted (math, path, random — all green now);
+  `tests/stdlib_behavior.rs` runs all twelve suites via `par_map` in ~2s.
+  New `csv_tests.jn`/`json_tests.jn` pin parser, writer, accessor, and
+  `pretty` behavior. New benchmarks `csv_parse`, `json_parse`, `std_string_ops`,
+  `sort_strings` measure the copying idioms; the `pre-adoption` history tag
+  is the sweep's before/after gate (csv_parse 1.26s, json_parse 1.14s,
+  std_string_ops 193ms, sort_strings 42ms under the harness).
+
 - **[150]** (2026-08-13) M-4r closes: read-only method calls through element views operate on the original
 
 The last read shape the view surface did not cover. A user method called

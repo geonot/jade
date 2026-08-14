@@ -189,6 +189,7 @@ pub struct Typer {
     pub(crate) const_vars: std::collections::HashSet<DefId>,
 
     pub(crate) defer_read_vars: std::collections::HashMap<DefId, crate::ast::Span>,
+    pub(crate) payload_bind_subjects: std::collections::HashMap<DefId, place::Place>,
 
     pub(crate) suppress_moved_field_check: u32,
     pub(crate) current_method_type: Option<String>,
@@ -313,6 +314,7 @@ impl Typer {
             instantiated_generics: std::collections::HashSet::new(),
             const_vars: std::collections::HashSet::new(),
             defer_read_vars: std::collections::HashMap::new(),
+            payload_bind_subjects: std::collections::HashMap::new(),
             suppress_moved_field_check: 0,
             current_method_type: None,
             modules: std::collections::HashSet::new(),
@@ -735,7 +737,11 @@ impl Typer {
             ));
         }
         if self.suppress_move_marking == 0 {
+            let subject = self.payload_bind_subjects.get(&pl.root).cloned();
             self.moves.record(pl, reason);
+            if let Some(subj_pl) = subject {
+                self.mark_place_moved_checked(subj_pl, reason, at)?;
+            }
         }
         Ok(())
     }

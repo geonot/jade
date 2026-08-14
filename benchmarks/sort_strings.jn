@@ -1,0 +1,38 @@
+use std/sort
+use std/strings
+
+*build_words(n as i64) returns Vec of String
+    words is vec('')
+    words.pop()
+    seed is 12345
+    i is 0
+    while i < n
+        seed is (seed * 1103515245 + 12345) mod 2147483648
+        sb is strings.builder()
+        len is 4 + (seed mod 13)
+        j is 0
+        s is seed
+        while j < len
+            s is (s * 1103515245 + 12345) mod 2147483648
+            sb.write_byte(97 + (s mod 26))
+            j is j + 1
+        words.push(sb.to_string())
+        i is i + 1
+    words
+
+*main
+    words is build_words(20000)
+    sort.sort_strings(words)
+    bad is 0
+    i is 1
+    while i < words.length
+        prev is words.get(i - 1)
+        cur is words.get(i)
+        if cur < prev
+            bad is bad + 1
+        i is i + 1
+    checksum is 0
+    loop words
+        checksum is checksum + $.byte_count
+    log(bad)
+    log(checksum)

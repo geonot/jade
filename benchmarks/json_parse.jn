@@ -1,0 +1,41 @@
+use std/json
+use std/strings
+
+*build_doc(n as i64) returns String
+    sb is strings.builder()
+    sb.write('[')
+    i is 0
+    while i < n
+        if i > 0
+            sb.write(',')
+        sb.write('\{"id":')
+        sb.write(to_string(i))
+        sb.write(',"name":"user ')
+        sb.write(to_string(i mod 89))
+        sb.write(' \\"quoted\\"","score":')
+        sb.write(to_string(i * 17 mod 401))
+        sb.write('.5,"active":')
+        if i mod 2 equals 0
+            sb.write('true')
+        else
+            sb.write('false')
+        sb.write(',"tags":["a","b","c"]\}')
+        i is i + 1
+    sb.write(']')
+    sb.to_string()
+
+*main
+    doc is build_doc(600)
+    total is 0.0
+    rep is 0
+    while rep < 3
+        v is json.parse(doc)
+        n is json.length(v)
+        k is 0
+        while k < n
+            total is total + json.get_num(json.index(v, k), 'score')
+            k is k + 1
+        out is json.stringify(v)
+        total is total + (out.byte_count as f64)
+        rep is rep + 1
+    log(total)

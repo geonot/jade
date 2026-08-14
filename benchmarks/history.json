@@ -4723,5 +4723,60 @@
         }
       }
     }
+  },
+  {
+    "tag": "pre-adoption",
+    "timestamp": "2026-08-13T21:00:59.912720",
+    "platform": "Linux-7.1.5-arch1-2-x86_64-with-glibc2.44",
+    "cpu": {
+      "model": "Intel(R) Core(TM) i7-8650U CPU @ 1.90GHz",
+      "governor": "powersave",
+      "cores": 8
+    },
+    "python": "3.14.6",
+    "results": {
+      "O3": {
+        "csv_parse": {
+          "jinn_ms": 1264.37,
+          "jinn_stddev_ms": 50.434,
+          "jinn_variance_ms2": 2543.638,
+          "jinn_min_ms": 1248.56,
+          "jinn_max_ms": 1385.74,
+          "jinn_mean_ms": 1285.79,
+          "jinn_iqr_ms": 7.661,
+          "output": "152373"
+        },
+        "json_parse": {
+          "jinn_ms": 1141.52,
+          "jinn_stddev_ms": 12.88,
+          "jinn_variance_ms2": 165.888,
+          "jinn_min_ms": 1115.79,
+          "jinn_max_ms": 1152.77,
+          "jinn_mean_ms": 1137.75,
+          "jinn_iqr_ms": 14.282,
+          "output": "515490.000000"
+        },
+        "sort_strings": {
+          "jinn_ms": 42.08,
+          "jinn_stddev_ms": 1.459,
+          "jinn_variance_ms2": 2.128,
+          "jinn_min_ms": 40.17,
+          "jinn_max_ms": 44.42,
+          "jinn_mean_ms": 42.11,
+          "jinn_iqr_ms": 1.717,
+          "output": "0\n199370"
+        },
+        "std_string_ops": {
+          "jinn_ms": 193.28,
+          "jinn_stddev_ms": 2.085,
+          "jinn_variance_ms2": 4.349,
+          "jinn_min_ms": 190.39,
+          "jinn_max_ms": 196.2,
+          "jinn_mean_ms": 192.84,
+          "jinn_iqr_ms": 2.589,
+          "output": "219342"
+        }
+      }
+    }
   }
 ]

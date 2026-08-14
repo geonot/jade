@@ -1,0 +1,82 @@
+use std/csv
+
+test 'parse simple rows'
+    rows is csv.parse('a,b,c\n1,2,3\n')
+    assert rows.length equals 2
+    assert rows.get(0).length equals 3
+    assert rows.get(0).get(0) equals 'a'
+    assert rows.get(0).get(2) equals 'c'
+    assert rows.get(1).get(1) equals '2'
+
+test 'parse without trailing newline'
+    rows is csv.parse('x,y\n1,2')
+    assert rows.length equals 2
+    assert rows.get(1).get(1) equals '2'
+
+test 'parse empty fields'
+    rows is csv.parse('a,,c\n,,\n')
+    assert rows.length equals 2
+    assert rows.get(0).get(1) equals ''
+    assert rows.get(1).length equals 3
+    assert rows.get(1).get(0) equals ''
+
+test 'parse quoted fields'
+    rows is csv.parse('"hello, world",plain\n')
+    assert rows.get(0).length equals 2
+    assert rows.get(0).get(0) equals 'hello, world'
+    assert rows.get(0).get(1) equals 'plain'
+
+test 'parse escaped quotes'
+    rows is csv.parse('"say ""hi""",x\n')
+    assert rows.get(0).get(0) equals 'say "hi"'
+
+test 'parse quoted newline'
+    rows is csv.parse('"line1\nline2",b\n')
+    assert rows.length equals 1
+    assert rows.get(0).get(0) equals 'line1\nline2'
+
+test 'parse crlf'
+    rows is csv.parse('a,b\r\n1,2\r\n')
+    assert rows.length equals 2
+    assert rows.get(0).get(1) equals 'b'
+    assert rows.get(1).get(0) equals '1'
+
+test 'parse empty input'
+    rows is csv.parse('')
+    assert rows.length equals 0
+
+test 'stringify and escape'
+    rows is csv.parse('a,b\n1,2\n')
+    out is csv.stringify(rows)
+    assert out equals 'a,b\n1,2\n'
+    assert csv.escape_field('plain') equals 'plain'
+    assert csv.escape_field('a,b') equals '"a,b"'
+    assert csv.escape_field('say "hi"') equals '"say ""hi"""'
+
+test 'get_column'
+    rows is csv.parse('name,age\nada,36\nbrin,41\n')
+    ages is csv.get_column(rows, 'age')
+    assert ages.length equals 2
+    assert ages.get(0) equals '36'
+    assert ages.get(1) equals '41'
+    missing is csv.get_column(rows, 'city')
+    assert missing.length equals 0
+
+test 'to_records'
+    recs is csv.to_records(csv.parse('name,age\nada,36\n'))
+    assert recs.length equals 1
+    assert recs.get(0).get('name') equals 'ada'
+    assert recs.get(0).get('age') equals '36'
+
+test 'reader next_row'
+    rd is csv.reader('a,b\n"q,q",2\nlast,3')
+    assert rd.has_next()
+    r0 is rd.next_row()
+    assert r0.length equals 2
+    assert r0.get(0) equals 'a'
+    r1 is rd.next_row()
+    assert r1.get(0) equals 'q,q'
+    r2 is rd.next_row()
+    assert r2.get(0) equals 'last'
+    assert r2.get(1) equals '3'
+    assert not rd.has_next()

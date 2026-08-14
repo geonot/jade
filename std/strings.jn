@@ -105,7 +105,7 @@ type StringBuilder
 
 
 *split_lines(s as String) returns Vec of String
-    out is vec()
+    out as Vec of String is vec()
     cur is ""
     i is 0
     while i < s.length
@@ -126,7 +126,7 @@ type StringBuilder
     out
 
 *split_whitespace(s as String) returns Vec of String
-    out is vec()
+    out as Vec of String is vec()
     cur is ""
     i is 0
     while i < s.length

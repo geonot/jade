@@ -1,9 +1,9 @@
 
-*parse(text as String)
-    rows is vec()
+*parse(text as String) returns Vec of Vec of String
+    rows as Vec of Vec of String is vec()
     if text.length equals 0
         return rows
-    row is vec()
+    row as Vec of String is vec()
     i is 0
     in_quotes is false
     field_start is 0
@@ -56,7 +56,7 @@
         rows.push(row)
     rows
 
-*stringify(rows)
+*stringify(rows as Vec of Vec of String) returns String
     result is ""
     loop rows
         loop $
@@ -95,18 +95,22 @@
         i is i + 1
     result + '"'
 
-*get_column(rows, header as String)
+*get_column(rows as Vec of Vec of String, header as String) returns Vec of String
+    empty as Vec of String is vec()
     if rows.length < 1
-        return vec()
-    headers is rows.get(0)
+        return empty
     col_idx is -1
-    loop headers
-        if $ equals header
-            col_idx is $$
-            break
+    loop rows
+        if $$ equals 0
+            row is $
+            loop row
+                if $ equals header
+                    col_idx is $$
+                    break
+        break
     if col_idx < 0
-        return vec()
-    result is vec()
+        return empty
+    result as Vec of String is vec()
     loop rows
         if $$ > 0
             if col_idx < $.length
@@ -115,15 +119,15 @@
                 result.push("")
     result
 
-*to_records(rows)
+*to_records(rows as Vec of Vec of String) returns Vec of Map of String
+    records as Vec of Map of String is vec()
     if rows.length < 2
-        return vec()
-    headers is rows.get(0)
-    records is vec()
+        return records
+    headers is copy rows.get(0)
     loop rows
         if $$ > 0
             row is $
-            record is map()
+            record as Map of String is map()
             loop headers
                 if $$ < row.length
                     record.set($, row.get($$))
@@ -143,11 +147,11 @@ type Reader
             return false
         self.pos < self.text.length
 
-    *next_row
+    *next_row returns Vec of String
         if self.pos >= self.text.length
             self.done is true
             return vec()
-        row is vec()
+        row as Vec of String is vec()
         field is ""
         in_quotes is false
         while self.pos < self.text.length

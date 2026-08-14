@@ -158,8 +158,8 @@ type JsonParser
 
     *parse_object returns JsonValue
         self.expect_byte(LBRACE)
-        keys is vec()
-        vals is vec()
+        keys as Vec of String is vec()
+        vals as Vec of JsonValue is vec()
         self.skip_ws()
         if self.peek_byte() equals RBRACE
             self.advance_byte()
@@ -180,7 +180,7 @@ type JsonParser
 
     *parse_array returns JsonValue
         self.expect_byte(LBRACKET)
-        items is vec()
+        items as Vec of JsonValue is vec()
         self.skip_ws()
         if self.peek_byte() equals RBRACKET
             self.advance_byte()
@@ -334,7 +334,7 @@ type JsonParser
         JBool(b) ? b
         _ ? false
 
-*index(arr as JsonValue, idx) returns JsonValue
+*index(arr as JsonValue, idx as i64) returns JsonValue
     match arr
         JArray(a) ?
             if idx >= 0 and idx < a.items.length
@@ -342,7 +342,7 @@ type JsonParser
             JNull
         _ ? JNull
 
-*length(value as JsonValue)
+*length(value as JsonValue) returns i64
     match value
         JArray(a) ? a.items.length
         JObject(o) ? o.keys.length
@@ -371,16 +371,18 @@ type JsonParser
             false
         _ ? false
 
-*keys(obj as JsonValue)
+*keys(obj as JsonValue) returns Vec of String
     match obj
-        JObject(o) ? o.keys
+        JObject(o) ?
+            ks is copy o.keys
+            ks
         _ ? vec()
 
 *remove(obj as JsonValue, key as String) returns JsonValue
     match obj
         JObject(o) ?
-            new_keys is vec()
-            new_vals is vec()
+            new_keys as Vec of String is vec()
+            new_vals as Vec of JsonValue is vec()
             loop o.keys
                 if $ neq key
                     new_keys.push($)
@@ -396,11 +398,14 @@ type JsonParser
         _ ? arr
 
 
-*obj
-    JObject(JsonObject(keys is vec(), vals is vec()))
+*obj returns JsonValue
+    keys as Vec of String is vec()
+    vals as Vec of JsonValue is vec()
+    JObject(JsonObject(keys is keys, vals is vals))
 
-*arr
-    JArray(JsonArray(items is vec()))
+*arr returns JsonValue
+    items as Vec of JsonValue is vec()
+    JArray(JsonArray(items is items))
 
 
 *__json_hex_to_int(s as String) returns i64

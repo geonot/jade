@@ -1,0 +1,31 @@
+use std/strings
+
+*build_text(lines as i64) returns String
+    sb is strings.builder()
+    i is 0
+    while i < lines
+        sb.write('  The Quick Brown Fox ')
+        sb.write(to_string(i))
+        sb.write(' jumps_over the-Lazy DOG number ')
+        sb.write(to_string(i * 13 mod 997))
+        sb.write('   \n')
+        i is i + 1
+    sb.to_string()
+
+*main
+    text is build_text(400)
+    total is 0
+    rep is 0
+    while rep < 3
+        lines is strings.split_lines(text)
+        loop lines
+            t is strings.trim($)
+            total is total + t.byte_count
+            words is strings.split_whitespace(t)
+            total is total + words.length
+            lower is strings.to_lower(t)
+            total is total + lower.byte_count
+            r is strings.replace(t, 'the', 'THE')
+            total is total + r.byte_count
+        rep is rep + 1
+    log(total)

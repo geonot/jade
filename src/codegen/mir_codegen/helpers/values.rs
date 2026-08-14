@@ -298,7 +298,7 @@ impl<'ctx> Compiler<'ctx> {
         if l.get_type().is_float_type() {
             let pred = match op {
                 mir::CmpOp::Eq => inkwell::FloatPredicate::OEQ,
-                mir::CmpOp::Ne => inkwell::FloatPredicate::ONE,
+                mir::CmpOp::Ne => inkwell::FloatPredicate::UNE,
                 mir::CmpOp::Lt => inkwell::FloatPredicate::OLT,
                 mir::CmpOp::Gt => inkwell::FloatPredicate::OGT,
                 mir::CmpOp::Le => inkwell::FloatPredicate::OLE,

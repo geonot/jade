@@ -123,6 +123,8 @@ impl Typer {
                     let hval = self.maybe_coerce_to(hval, &elem_ty);
                     let resolved_elem = self.infer_ctx.shallow_resolve(&elem_ty);
                     self.enforce_cross_thread_safe(&resolved_elem, span, "channel .send()")?;
+                    let mut hval = hval;
+                    self.clone_string_capture(&mut hval);
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::ChannelSend(Box::new(hobj), Box::new(hval)),
                         ty: Type::Bool,

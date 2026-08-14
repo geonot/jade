@@ -11,7 +11,7 @@ test 'join3'
 
 test 'dir'
     assert path.dir('/foo/bar/baz') equals '/foo/bar'
-    assert path.dir('file.txt') equals ''
+    assert path.dir('file.txt') equals '.'
 
 test 'base'
     assert path.base('/foo/bar.txt') equals 'bar.txt'

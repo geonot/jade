@@ -247,10 +247,7 @@ impl Lowerer {
                                 }
                             }
                         }
-                        let mut arm_last = self.emit(InstKind::Void, Type::Void, arm.span);
-                        for s in &arm.body {
-                            arm_last = self.lower_stmt(s);
-                        }
+                        let arm_last = self.lower_block_expr(&arm.body);
                         if !self.current_block_has_terminator() {
                             if has_result {
                                 phi_entries.push((arm_last, self.current_block));
@@ -505,10 +502,7 @@ impl Lowerer {
                             self.switch_to(body_bb);
                             self.seal_block(body_bb);
                         }
-                        let mut arm_last = self.emit(InstKind::Void, Type::Void, arm.span);
-                        for s in &arm.body {
-                            arm_last = self.lower_stmt(s);
-                        }
+                        let arm_last = self.lower_block_expr(&arm.body);
                         if !self.current_block_has_terminator() {
                             if has_result {
                                 phi_entries.push((arm_last, self.current_block));

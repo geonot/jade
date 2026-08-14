@@ -341,6 +341,11 @@ impl Typer {
             let pat = self.lower_pat(&a.pat, &subj_ty)?;
             let mut pat_binds = std::collections::HashSet::new();
             Self::collect_pat_bind_ids(&pat, &mut pat_binds);
+            if let Some(subj_pl) = crate::typer::place::place_of_expr(&subject) {
+                for bid in &pat_binds {
+                    self.payload_bind_subjects.insert(*bid, subj_pl.clone());
+                }
+            }
             let guard = a
                 .guard
                 .as_ref()

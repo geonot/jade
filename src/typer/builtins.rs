@@ -261,6 +261,8 @@ impl Typer {
                         .infer_ctx
                         .unify_at(&elem_ty, &a.ty, span, "vec element");
                 }
+                let mut hargs = hargs;
+                self.clone_string_captures_in_elems(&mut hargs);
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::VecNew(hargs),
                     ty: Type::Vec(Box::new(elem_ty)),

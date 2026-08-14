@@ -111,6 +111,8 @@ impl Typer {
                 })
             })
             .collect::<Result<_, String>>()?;
+        let mut hinits = hinits;
+        self.clone_string_captures_in_inits(&mut hinits);
         Ok(Some(hir::Expr {
             kind: hir::ExprKind::VariantCtor(enum_name, name.into(), tag, hinits),
             ty: Type::Enum(enum_name),
@@ -206,6 +208,7 @@ impl Typer {
                 });
             }
 
+            self.clone_string_captures_in_inits(&mut hinits);
             return Ok(hir::Expr {
                 kind: hir::ExprKind::Struct(mangled, hinits),
                 ty: Type::Struct(mangled, vec![]),
@@ -322,6 +325,8 @@ impl Typer {
                     })
                 })
                 .collect::<Result<_, String>>()?;
+            let mut hinits = hinits;
+            self.clone_string_captures_in_inits(&mut hinits);
             return Ok(hir::Expr {
                 kind: hir::ExprKind::VariantCtor(enum_name, name.into(), tag, hinits),
                 ty: Type::Enum(enum_name),
@@ -426,6 +431,7 @@ impl Typer {
                 }
             }
 
+            self.clone_string_captures_in_inits(&mut hinits_g);
             return Ok(hir::Expr {
                 kind: hir::ExprKind::Struct(mangled, hinits_g),
                 ty: Type::Struct(mangled, vec![]),
@@ -457,6 +463,7 @@ impl Typer {
         let arg_tys: Vec<Type> = hinits.iter().map(|fi| fi.value.ty.clone()).collect();
         if let Ok(Some(mangled)) = self.try_monomorphize_generic_variant(name, Some(&arg_tys)) {
             let (_, tag) = self.variant_tags.get(name).cloned().unwrap_or((mangled, 0));
+            self.clone_string_captures_in_inits(&mut hinits);
             return Ok(hir::Expr {
                 kind: hir::ExprKind::VariantCtor(mangled, name.into(), tag, hinits),
                 ty: Type::Enum(mangled),
@@ -552,6 +559,7 @@ impl Typer {
                         })
                         .collect();
                     let mangled_name = self.monomorphize_struct(name, &fields, &arg_tys, span)?;
+                    self.clone_string_captures_in_inits(&mut hinits);
                     return Ok(hir::Expr {
                         kind: hir::ExprKind::Struct(mangled_name, hinits),
                         ty: Type::Struct(mangled_name, vec![]),
@@ -590,6 +598,7 @@ impl Typer {
             return Err(self.unknown_constructor_error(name, span));
         }
 
+        self.clone_string_captures_in_inits(&mut hinits);
         Ok(hir::Expr {
             kind: hir::ExprKind::Struct(name.into(), hinits),
             ty: Type::Struct(name.into(), vec![]),

@@ -206,7 +206,10 @@ impl Lowerer {
     pub(super) fn lower_block_expr(&mut self, stmts: &[hir::Stmt]) -> ValueId {
         let mut last = self.emit(InstKind::Void, Type::Void, Span::dummy());
         for stmt in stmts {
-            last = self.lower_stmt(stmt);
+            let v = self.lower_stmt(stmt);
+            if !matches!(stmt, hir::Stmt::Drop(..)) {
+                last = v;
+            }
         }
         last
     }

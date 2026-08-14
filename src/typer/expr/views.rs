@@ -57,6 +57,49 @@ impl Typer {
         };
     }
 
+    pub(in crate::typer) fn clone_string_capture(&mut self, e: &mut hir::Expr) {
+        let peeled = crate::typer::Typer::peel_move_wrappers(e);
+        if !matches!(peeled.kind, hir::ExprKind::Var(..)) {
+            return;
+        }
+        let was_strict = self.infer_ctx.is_strict();
+        self.infer_ctx.set_strict(false);
+        let resolved = self.infer_ctx.resolve(&e.ty);
+        self.infer_ctx.set_strict(was_strict);
+        if !matches!(resolved, Type::String) {
+            return;
+        }
+        let span = e.span;
+        let old = std::mem::replace(
+            e,
+            hir::Expr {
+                kind: hir::ExprKind::Void,
+                ty: Type::Void,
+                span,
+            },
+        );
+        *e = hir::Expr {
+            kind: hir::ExprKind::StringMethod(Box::new(old), "__clone".into(), vec![]),
+            ty: Type::String,
+            span,
+        };
+    }
+
+    pub(in crate::typer) fn clone_string_captures_in_inits(
+        &mut self,
+        inits: &mut [hir::FieldInit],
+    ) {
+        for fi in inits.iter_mut() {
+            self.clone_string_capture(&mut fi.value);
+        }
+    }
+
+    pub(in crate::typer) fn clone_string_captures_in_elems(&mut self, elems: &mut [hir::Expr]) {
+        for e in elems.iter_mut() {
+            self.clone_string_capture(e);
+        }
+    }
+
     pub(in crate::typer) fn reject_view_annotation(
         &mut self,
         ty: &Type,

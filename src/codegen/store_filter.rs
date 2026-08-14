@@ -385,7 +385,7 @@ impl<'ctx> Compiler<'ctx> {
                 use inkwell::FloatPredicate;
                 let pred = match op {
                     BinOp::Eq => FloatPredicate::OEQ,
-                    BinOp::Ne => FloatPredicate::ONE,
+                    BinOp::Ne => FloatPredicate::UNE,
                     BinOp::Lt => FloatPredicate::OLT,
                     BinOp::Gt => FloatPredicate::OGT,
                     BinOp::Le => FloatPredicate::OLE,

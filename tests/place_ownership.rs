@@ -354,3 +354,27 @@ fn lib_compile_warns_on_inferred_consuming_boundary() {
         "explicit take must not warn:\n{stderr}"
     );
 }
+
+#[test]
+fn match_payload_rewrap_returns_owned_value_and_runs_clean() {
+    accepts_and_prints(
+        "type Obj\n    keys as Vec of String\n\nenum JV\n    JNum(i64)\n    JObj(Obj)\n\n*set(obj as JV, key as String) returns JV\n    match obj\n        JObj(o) ?\n            o.keys.push(key)\n            JObj(o)\n        _ ? obj\n\n*main\n    o is JObj(Obj(keys is vec()))\n    o is set(o, 'k')\n    o is set(o, 'j')\n    match o\n        JObj(x) ? log(x.keys.length)\n        _ ? log(-1)\n",
+        "2",
+    );
+}
+
+#[test]
+fn match_payload_string_return_moves_out_of_the_subject() {
+    accepts_and_prints(
+        "enum V\n    S(String)\n    N(i64)\n\n*unwrap(v as V) returns String\n    match v\n        S(s) ? s\n        N(n) ? 'none'\n\n*main\n    v is S('a-long-enough-string-to-defeat-sso-inline-storage')\n    log(unwrap(v))\n",
+        "a-long-enough-string-to-defeat-sso-inline-storage",
+    );
+}
+
+#[test]
+fn subject_use_after_payload_consumed_is_rejected() {
+    rejects(
+        "type Obj\n    keys as Vec of String\n\nenum JV\n    JNum(i64)\n    JObj(Obj)\n\n*main\n    v is JObj(Obj(keys is vec()))\n    match v\n        JObj(o) ?\n            w is JObj(o)\n            log(w.length)\n        _ ? nop\n    match v\n        JObj(o2) ? log(o2.keys.length)\n        _ ? nop\n",
+        &["use of moved value `v`", "moved into a constructor"],
+    );
+}

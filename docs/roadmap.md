@@ -36,6 +36,12 @@ three live memory-unsoundness classes it uncovered on the way: ctor/container
 captures of bound aggregates double-freed at scope exit, closure captures
 aliased the enclosing frame (use-after-free after any invalidating operation),
 and scope-task capture slots truncated every capture wider than 8 bytes.
+The 2026-08-13 gates pass ([151]) — pins and benchmarks written *ahead of*
+M-13r's adoption sweep — found and fixed six compiler defects (match arms
+losing their values to trailing drops, match-payload rewraps double-freeing,
+String captures aliasing, nested-loop method mutations lost, float `neq`
+non-IEEE, one-sided int→float literal coercion) and wired `tests/stdlib/`
+into the gates; it added `M-17` and `T-15` below.
 Items below are what remains.
 
 ---
@@ -214,10 +220,11 @@ added read-only *method calls* through element views — the receiver passes
 the element pointer, so the call operates on the original, and
 mutating/consuming methods reject with the view named — closing `M-4r`.
 Remaining: the std adoption sweep (`strings`, `csv`, `json`, `sort`) with
-benchmarks (step 4). Adoption is its own careful pass: `s.slice` is
-*scalar*-indexed while `s.view` is *byte*-indexed, so converting std's ~160
-slice sites walks straight through `T-13r`'s byte/scalar seam and must be
-benchmark- and behavior-gated.
+benchmarks (step 4). Adoption is its own careful pass: verified in [151], `.length` is a
+*scalar* count (an O(n) scan per call) while `char_at`, `slice`, and `view`
+are all *byte*-indexed, so std's `while i < s.length` byte-loops are
+quadratic *and* under-scan non-ASCII text; the sweep walks straight through
+`T-13r`'s seam and must be benchmark- and behavior-gated.
 
 ### M-14r (m) `freeze`: actor-handler classification, function-exit dispatch, std adoption
 
@@ -269,6 +276,15 @@ class as `M-9r2`'s loop-iteration reallocation); locals that alias a
 function-typed parameter are invisible to the caps taint; by-view capture
 for provably in-frame closures (step 4); and `copy x` at the capture site is
 spelled "bind `copy x` to a fresh name first" rather than inline.
+
+### M-17 (m) Payload-bind subject links: temporaries and partial payloads
+
+[151] made consuming a match-payload bind consume the *subject* (the
+`json.set` rewrap idiom double-freed before). Two edges remain: a subject
+that is a temporary (`match f() ...`) has no place to link, so consuming its
+payload bind is invisible to the temp's drop; and moving one bind of a
+multi-field payload suppresses the whole subject's drop, leaking the fields
+the pattern did not consume. Both are leak-or-reject shaped, not corruption.
 
 ---
 
@@ -332,6 +348,16 @@ non-ASCII input, `to_lower`/`to_upper` dropping trailing bytes, and
 byte loops). Residue: the `.slice(i, s.length)` scalar-bound idiom survives on
 ASCII-expected text paths (`url` parsing, `uuid.parse`), and `Bytes.to_string`
 is still lossy, so `std/bytes.jn` cannot yet serve as the byte-buffer bridge.
+
+### T-15 (M) Unsolved exported signatures default silently and callers read garbage
+
+Found by [151]: an unannotated std function whose return type carried an
+unsolved element variable (`csv.parse` before annotation) type-checked with a
+warning, and *callers* saw the variable defaulted to i64 — every method on
+the runtime-String elements then read garbage (huge checksums, no
+diagnostic). `--strict-types` already errors; the default must either resolve
+across the module boundary or reject at the definition. `csv` and `json` are
+fully annotated now; the compiler-side gap remains.
 
 ---
 

@@ -327,3 +327,104 @@ fn vec_slice_copies_the_requested_window() {
          mallocs)"
     );
 }
+
+#[test]
+fn match_arm_block_with_trailing_drop_yields_the_tail_value() {
+    let c = compile(
+        "*f(flag as bool) returns String\n    match flag\n        true ?\n            result is \"[\"\n            result + \"]\"\n        false ? \"no\"\n\n*main\n    log(f(true))\n    log(f(false))\n",
+    );
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "[]\nno",
+        "a value-position match arm whose block tail only reads a local gets a typer-appended \
+         scope-end drop after the tail; MIR lowering took the last statement's value, so the \
+         drop's void fed the merge phi and every arm of the match silently returned \"\""
+    );
+}
+
+#[test]
+fn match_arm_block_value_survives_loop_accumulation_and_recursion() {
+    let c = compile(
+        "enum E\n    N(i64)\n    L(Vec of i64)\n\n*p(v as E) returns String\n    match v\n        N(n) ? to_string(n)\n        L(xs) ?\n            result is \"[\"\n            loop xs\n                result is result + to_string($)\n            result + \"]\"\n\n*main\n    log(p(N(42)))\n    log(p(L(vec(7, 8))))\n",
+    );
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "42\n[78]");
+}
+
+const HEAP_STR_SETUP: &str = "use std/strings\n\n*heap_str returns String\n    sb is strings.builder()\n    sb.write('a very long heap string well beyond any sso inline capacity limit')\n    sb.to_string()\n";
+
+#[test]
+fn string_var_captures_clone_instead_of_aliasing() {
+    let src = format!(
+        "{HEAP_STR_SETUP}\ntype Holder\n    src as String\n    pos as i64\n\n*eat(text as String) returns i64\n    p is Holder(src is text, pos is 0)\n    p.src.byte_count\n\n*main\n    s is heap_str()\n    log(eat(s))\n    v is vector(s, 'x')\n    log(v.length)\n    t is (s, 1)\n    a is [s, 'y']\n    log(s.byte_count)\n"
+    );
+    let c = compile(&src);
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(
+        run.status.success(),
+        "capturing a String var into a ctor/vector/tuple/array must clone, not alias \
+         (double free otherwise): {}",
+        exit_desc(&run)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "65\n2\n65");
+}
+
+#[test]
+fn channel_send_of_string_var_clones() {
+    let src = format!(
+        "{HEAP_STR_SETUP}\n*main\n    s is heap_str()\n    ch is channel of String(2)\n    ch.send(s)\n    send ch, s\n    r1 is ch.recv()\n    r2 is ch.recv()\n    log(r1.byte_count)\n    log(r2.byte_count)\n    log(s.byte_count)\n"
+    );
+    let c = compile(&src);
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "65\n65\n65");
+}
+
+#[test]
+fn mutating_method_in_nested_loop_persists_scalar_field_writes() {
+    let c = compile(
+        "type B\n    n as i64\n    parts as Vec of i64\n\n    *inc\n        self.n is self.n + 1\n        self.parts.push(self.n)\n\n*mk returns B\n    B(n is 0, parts is vec())\n\n*main\n    i is 0\n    while i < 2\n        b is mk()\n        j is 0\n        while j < 3\n            b.inc()\n            j is j + 1\n        log(b.n)\n        log(b.parts.length)\n        i is i + 1\n",
+    );
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "3\n3\n3\n3",
+        "the receiver spill for a method call inside an inner loop re-stored the stale \
+         pre-loop struct value every iteration, losing every scalar-field write after the first"
+    );
+}
+
+#[test]
+fn float_neq_is_ieee_unordered() {
+    let c = compile(
+        "*main\n    n is 0.0 / 0.0\n    log(n neq n)\n    log(n equals n)\n    log(1.5 neq 1.5)\n",
+    );
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "1\n0\n0",
+        "NaN neq NaN must be true (UNE), NaN equals NaN false (OEQ)"
+    );
+}
+
+#[test]
+fn int_literals_coerce_against_float_calls_on_either_side_and_negated() {
+    let c = compile(
+        "*sign(x)\n    if x > 0.0\n        return 1.0\n    if x < 0.0\n        return -1.0\n    0.0\n\n*main\n    log(sign(-7) equals -1)\n    log(sign(0) equals 0)\n    log(0 equals sign(0))\n",
+    );
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "1\n1\n1");
+}

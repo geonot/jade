@@ -1474,6 +1474,21 @@ impl Typer {
         }
     }
 
+    fn expand_payload_bind_links(&self, ids: &mut std::collections::HashSet<crate::hir::DefId>) {
+        let mut added: Vec<crate::hir::DefId> = Vec::new();
+        for id in ids.iter() {
+            let mut cur = *id;
+            while let Some(pl) = self.payload_bind_subjects.get(&cur) {
+                if ids.contains(&pl.root) || added.contains(&pl.root) {
+                    break;
+                }
+                added.push(pl.root);
+                cur = pl.root;
+            }
+        }
+        ids.extend(added);
+    }
+
     pub(in crate::typer) fn emit_scope_drops_excluding(
         &mut self,
         stmts: &mut Vec<hir::Stmt>,
@@ -1487,6 +1502,7 @@ impl Typer {
 
         let mut consumed: std::collections::HashSet<crate::hir::DefId> = exclude.clone();
         self.collect_block_consumed_ids(stmts, &mut consumed);
+        self.expand_payload_bind_links(&mut consumed);
 
         let mut resolved_entries: Vec<(crate::intern::Symbol, crate::typer::VarInfo, Type)> =
             Vec::with_capacity(scope_entries.len());

@@ -55,6 +55,8 @@ impl Typer {
                     .unify_at(&et, &elem.ty, *span, "array element");
             }
             let len = helems.len();
+            let mut helems = helems;
+            self.clone_string_captures_in_elems(&mut helems);
             return Ok(hir::Expr {
                 kind: hir::ExprKind::Array(helems),
                 ty: Type::Array(Box::new(et), len),
@@ -248,6 +250,8 @@ impl Typer {
                     .map(|e| self.lower_expr(e))
                     .collect::<Result<_, _>>()?;
                 let tys: Vec<Type> = helems.iter().map(|e| e.ty.clone()).collect();
+                let mut helems = helems;
+                self.clone_string_captures_in_elems(&mut helems);
                 Ok(hir::Expr {
                     kind: hir::ExprKind::Tuple(helems),
                     ty: Type::Tuple(tys),

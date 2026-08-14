@@ -83,13 +83,18 @@ DOT   is 46
     s is stem(p)
     d is dir(p)
     if new_ext.length equals 0
-        return join(d, s)
+        return __rejoin(p, d, s)
     if new_ext.char_at(0) neq DOT
-        return join(d, s + "." + new_ext)
-    join(d, s + new_ext)
+        return __rejoin(p, d, s + "." + new_ext)
+    __rejoin(p, d, s + new_ext)
 
 *with_name(p as String, new_name as String) returns String
-    join(dir(p), new_name)
+    __rejoin(p, dir(p), new_name)
+
+*__rejoin(p as String, d as String, name as String) returns String
+    if d equals "." and not p.starts_with("./")
+        return name
+    join(d, name)
 
 *segments(p as String) returns Vec of String
     p.split("/")
