@@ -171,6 +171,7 @@ impl Parser {
             return Err(self.error("expected 'where'"));
         }
         let mut flat: Vec<(LogicalOp, StoreFilterCond)> = Vec::new();
+        let mut groups: Vec<(usize, usize)> = Vec::new();
         loop {
             let logical = if flat.is_empty() {
                 LogicalOp::And
@@ -187,13 +188,43 @@ impl Parser {
                     _ => break,
                 }
             };
-            self.parse_filter_group(logical, &mut flat)?;
+            self.parse_filter_group(logical, &mut flat, &mut groups)?;
         }
-        let seen_and = flat.iter().skip(1).any(|(l, _)| *l == LogicalOp::And);
-        let seen_or = flat.iter().skip(1).any(|(l, _)| *l == LogicalOp::Or);
-        if seen_and && seen_or {
-            return Err(self
-                .error("mixed 'and'/'or' in a where clause is ambiguous; group with parentheses"));
+        if groups.len() > 1 {
+            return Err(self.error(
+                "a filter may contain at most one `in [..]` clause; a second one \
+                 cannot be expressed in a flat and/or chain",
+            ));
+        }
+        if let Some(&(gs, ge)) = groups.first() {
+            if flat
+                .iter()
+                .enumerate()
+                .any(|(i, (l, _))| i > 0 && (i < gs || i >= ge) && *l == LogicalOp::Or)
+            {
+                return Err(self.error(
+                    "mixing `or` with an `in [..]` clause is ambiguous; split the filter \
+                     or rewrite the `in` as explicit `or` comparisons",
+                ));
+            }
+            if gs > 0 {
+                let grp: Vec<(LogicalOp, StoreFilterCond)> = flat.drain(gs..ge).collect();
+                for (l, _) in flat.iter_mut() {
+                    *l = LogicalOp::And;
+                }
+                let mut hoisted = grp;
+                hoisted.append(&mut flat);
+                flat = hoisted;
+                flat[0].0 = LogicalOp::And;
+            }
+        } else {
+            let seen_and = flat.iter().skip(1).any(|(l, _)| *l == LogicalOp::And);
+            let seen_or = flat.iter().skip(1).any(|(l, _)| *l == LogicalOp::Or);
+            if seen_and && seen_or {
+                return Err(self.error(
+                    "mixed 'and'/'or' in a where clause is ambiguous; group with parentheses",
+                ));
+            }
         }
         let (_, head) = flat.remove(0);
         Ok(StoreFilter {
@@ -210,6 +241,7 @@ impl Parser {
         &mut self,
         logical: LogicalOp,
         out: &mut Vec<(LogicalOp, StoreFilterCond)>,
+        groups: &mut Vec<(usize, usize)>,
     ) -> Result<(), ParseError> {
         if self.check(Token::LParen) {
             self.advance();
@@ -231,18 +263,19 @@ impl Parser {
                         _ => break,
                     }
                 };
-                self.parse_filter_group(inner, out)?;
+                self.parse_filter_group(inner, out, groups)?;
             }
             self.expect(Token::RParen)?;
             return Ok(());
         }
-        self.parse_filter_cond(logical, out)
+        self.parse_filter_cond(logical, out, groups)
     }
 
     fn parse_filter_cond(
         &mut self,
         logical: LogicalOp,
         out: &mut Vec<(LogicalOp, StoreFilterCond)>,
+        groups: &mut Vec<(usize, usize)>,
     ) -> Result<(), ParseError> {
         let field = self.ident()?;
         if let Token::Ident(word) = self.peek().clone() {
@@ -388,6 +421,14 @@ impl Parser {
             if values.is_empty() {
                 return Err(self.error("'in' filter requires at least one value"));
             }
+            if values.len() > 1 && logical == LogicalOp::Or {
+                return Err(self.error(
+                    "mixing `or` with an `in [..]` clause is ambiguous; split the filter \
+                     or rewrite the `in` as explicit `or` comparisons",
+                ));
+            }
+            let start = out.len();
+            let many = values.len() > 1;
             for (i, v) in values.into_iter().enumerate() {
                 out.push((
                     if i == 0 { logical } else { LogicalOp::Or },
@@ -398,6 +439,9 @@ impl Parser {
                         pred: crate::ast::FilterPred::Cmp,
                     },
                 ));
+            }
+            if many {
+                groups.push((start, out.len()));
             }
             return Ok(());
         }

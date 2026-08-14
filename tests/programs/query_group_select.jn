@@ -1,0 +1,25 @@
+store sales @simple
+    city as String
+    amt as i64
+
+*main
+    insert sales 'nyc', 10
+    insert sales 'nyc', 30
+    insert sales 'sf', 5
+    insert sales 'sf', 7
+    insert sales 'la', 100
+    rows is sales query
+        where amt < 50
+        group city
+        select city, count, sum(amt), avg(amt), min(amt), max(amt)
+    log rows.length
+    total is 0
+    cnt is 0
+    for row in rows
+        total is total + row[2]
+        cnt is cnt + row[1]
+    log cnt
+    log total
+    defaulted is sales query
+        group city
+    log defaulted.length

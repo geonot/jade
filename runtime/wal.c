@@ -9,22 +9,72 @@
 #define JINN_WAL_SYNC_FDATASYNC  1
 #define JINN_WAL_SYNC_FSYNC      2
 #define JINN_WAL_SYNC_GROUP      3
-static int  jinn_wal_sync_policy = -1;
-static int jinn_wal_get_policy(void) {
-    if (jinn_wal_sync_policy >= 0) return jinn_wal_sync_policy;
+static int jinn_wal_env_policy = -2;
+static int jinn_wal_get_env_policy(void) {
+    if (jinn_wal_env_policy >= -1) return jinn_wal_env_policy;
     const char *env = getenv("JINN_WAL_SYNC");
     if (!env || !*env) {
-        jinn_wal_sync_policy = JINN_WAL_SYNC_FDATASYNC;
+        jinn_wal_env_policy = -1;
     } else if (strcmp(env, "none") == 0) {
-        jinn_wal_sync_policy = JINN_WAL_SYNC_NONE;
+        jinn_wal_env_policy = JINN_WAL_SYNC_NONE;
     } else if (strcmp(env, "fsync") == 0) {
-        jinn_wal_sync_policy = JINN_WAL_SYNC_FSYNC;
+        jinn_wal_env_policy = JINN_WAL_SYNC_FSYNC;
     } else if (strcmp(env, "group") == 0) {
-        jinn_wal_sync_policy = JINN_WAL_SYNC_GROUP;
+        jinn_wal_env_policy = JINN_WAL_SYNC_GROUP;
     } else {
-        jinn_wal_sync_policy = JINN_WAL_SYNC_FDATASYNC;
+        jinn_wal_env_policy = JINN_WAL_SYNC_FDATASYNC;
     }
-    return jinn_wal_sync_policy;
+    return jinn_wal_env_policy;
+}
+static int jinn_wal_get_policy(void) {
+    int env = jinn_wal_get_env_policy();
+    return env >= 0 ? env : JINN_WAL_SYNC_FDATASYNC;
+}
+
+#define JINN_WAL_POLICY_SLOTS 128
+static struct {
+    FILE *wal;
+    int   policy;
+} jinn_wal_policies[JINN_WAL_POLICY_SLOTS];
+static _Atomic(int32_t) jinn_wal_policy_lock = 0;
+static void jinn_wal_policy_acquire(void) {
+    while (atomic_exchange_explicit(&jinn_wal_policy_lock, 1, memory_order_acquire) != 0) {
+#if defined(__x86_64__)
+        __builtin_ia32_pause();
+#elif defined(__aarch64__)
+        __asm__ volatile("yield");
+#endif
+    }
+}
+static void jinn_wal_policy_release(void) {
+    atomic_store_explicit(&jinn_wal_policy_lock, 0, memory_order_release);
+}
+void jinn_wal_set_policy(FILE *wal, int policy) {
+    if (!wal) return;
+    jinn_wal_policy_acquire();
+    for (int i = 0; i < JINN_WAL_POLICY_SLOTS; i++) {
+        if (jinn_wal_policies[i].wal == wal || jinn_wal_policies[i].wal == NULL) {
+            jinn_wal_policies[i].wal = wal;
+            jinn_wal_policies[i].policy = policy;
+            break;
+        }
+    }
+    jinn_wal_policy_release();
+}
+static int jinn_wal_effective_policy(FILE *wal) {
+    int env = jinn_wal_get_env_policy();
+    if (env >= 0) return env;
+    int policy = JINN_WAL_SYNC_FDATASYNC;
+    jinn_wal_policy_acquire();
+    for (int i = 0; i < JINN_WAL_POLICY_SLOTS; i++) {
+        if (jinn_wal_policies[i].wal == NULL) break;
+        if (jinn_wal_policies[i].wal == wal) {
+            policy = jinn_wal_policies[i].policy;
+            break;
+        }
+    }
+    jinn_wal_policy_release();
+    return policy;
 }
 static int jinn_wal_force(FILE *wal, int policy) {
     if (!wal) return -1;
@@ -221,7 +271,7 @@ int jinn_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload_
         fseek(wal, 0, SEEK_END);
         return -1;
     }
-    if (jinn_wal_force(wal, jinn_wal_get_policy()) != 0) {
+    if (jinn_wal_force(wal, jinn_wal_effective_policy(wal)) != 0) {
         fprintf(stderr, "jinn: wal: sync failed — record may not be durable\n");
         return -1;
     }
@@ -245,7 +295,7 @@ void jinn_wal_checkpoint(FILE *wal) {
         return;
     }
     fseek(wal, 8, SEEK_SET);
-    int policy = jinn_wal_get_policy();
+    int policy = jinn_wal_effective_policy(wal);
     if (jinn_wal_force(wal, policy == JINN_WAL_SYNC_NONE
                                 ? JINN_WAL_SYNC_NONE
                                 : JINN_WAL_SYNC_FDATASYNC) != 0) {
@@ -254,7 +304,20 @@ void jinn_wal_checkpoint(FILE *wal) {
 }
 
 void jinn_wal_close(FILE *wal) {
-    if (wal) fclose(wal);
+    if (!wal) return;
+    jinn_wal_policy_acquire();
+    for (int i = 0; i < JINN_WAL_POLICY_SLOTS; i++) {
+        if (jinn_wal_policies[i].wal == wal) {
+            for (int j = i; j + 1 < JINN_WAL_POLICY_SLOTS; j++) {
+                jinn_wal_policies[j] = jinn_wal_policies[j + 1];
+                if (jinn_wal_policies[j].wal == NULL) break;
+            }
+            jinn_wal_policies[JINN_WAL_POLICY_SLOTS - 1].wal = NULL;
+            break;
+        }
+    }
+    jinn_wal_policy_release();
+    fclose(wal);
 }
 typedef struct JinnTxnFile {
     FILE  *fp;
@@ -427,7 +490,7 @@ void jinn_txn_commit(void) {
                     }
             }
         }
-        if (t->wal && jinn_wal_get_policy() != JINN_WAL_SYNC_NONE) {
+        if (t->wal && jinn_wal_effective_policy(t->wal) != JINN_WAL_SYNC_NONE) {
             jinn_wal_commit_group(t->wal);
         } else if (t->wal) {
             fflush(t->wal);

@@ -41,6 +41,23 @@ impl Lowerer {
                 ty,
                 span,
             ),
+            ExprKind::StoreAllWhere(store_name, filter) => {
+                let filter_val = self.lower_expr(&filter.value);
+                let mut args = vec![filter_val];
+                let op_str = crate::hir::store_filter_pred_str(filter.pred, filter.op);
+                let mut name = format!("__store_allq_{store_name}__{}__{op_str}", filter.field);
+                for (lop, cond) in &filter.extra {
+                    let lop_str = match lop {
+                        ast::LogicalOp::And => "and",
+                        ast::LogicalOp::Or => "or",
+                    };
+                    let eop_str = crate::hir::store_filter_pred_str(cond.pred, cond.op);
+                    name.push_str(&format!("__{lop_str}__{}__{eop_str}", cond.field));
+                    let ev = self.lower_expr(&cond.value);
+                    args.push(ev);
+                }
+                self.emit(InstKind::Call(Symbol::intern(&name), args), ty, span)
+            }
             ExprKind::ViewCount(store_name, filter) => {
                 let filter_val = self.lower_expr(&filter.value);
                 let mut args = vec![filter_val];
@@ -140,6 +157,30 @@ impl Lowerer {
                     ty,
                     span,
                 )
+            }
+
+            ExprKind::StoreQueryGroup(store_name, key_field, aggs, filter) => {
+                let mut name = format!("__store_qgroup_{store_name}__{key_field}__{}", aggs.len());
+                for (agg, val) in aggs {
+                    let val = val.map(|v| v.to_string()).unwrap_or_default();
+                    name.push_str(&format!("__{}__{val}", agg.as_str()));
+                }
+                let mut args = Vec::new();
+                if let Some(filter) = filter {
+                    let op_str = crate::hir::store_filter_pred_str(filter.pred, filter.op);
+                    name.push_str(&format!("__where__{}__{op_str}", filter.field));
+                    args.push(self.lower_expr(&filter.value));
+                    for (lop, cond) in &filter.extra {
+                        let lop_str = match lop {
+                            ast::LogicalOp::And => "and",
+                            ast::LogicalOp::Or => "or",
+                        };
+                        let eop_str = crate::hir::store_filter_pred_str(cond.pred, cond.op);
+                        name.push_str(&format!("__{lop_str}__{}__{eop_str}", cond.field));
+                        args.push(self.lower_expr(&cond.value));
+                    }
+                }
+                self.emit(InstKind::Call(Symbol::intern(&name), args), ty, span)
             }
 
             ExprKind::StoreSum(store_name, field) => self.emit(

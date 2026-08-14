@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ci/sanitize-corpus.sh — whole-corpus ASan(+LSan) sweep (roadmap M-10).
+# ci/sanitize-corpus.sh — whole-corpus ASan(+LSan) sweep (roadmap O-2).
 #
 # Compiles every conformance program (tests/programs), every app entry
 # (apps/*/project.jn), and every snippet under ASan at --opt 0 and --opt 3,
@@ -13,14 +13,13 @@
 #   LEAK          LeakSanitizer-only report. Reported with counts but does
 #                 not fail the sweep by default (JINN_SAN_STRICT=1 makes it
 #                 gate): the per-value leak residue is a known, tracked gap
-#                 (roadmap M-9r) and gating on it would make the sweep
+#                 (roadmap O-2) and gating on it would make the sweep
 #                 permanently red while it is worked down.
-#   segv?         died on a signal with NO sanitizer report. On this runtime
-#                 that is almost always ASan's stack-bounds tracking losing
-#                 the plot across the coroutine context switch (the runtime
-#                 lacks __sanitizer_start_switch_fiber annotations — the
-#                 ASan sibling of N-5's TSan gap); flaky and actor-heavy.
-#                 Reported, non-gating, and worth re-running by hand.
+#   segv?         died on a signal with NO sanitizer report. The runtime's
+#                 context switches carry __sanitizer_start_switch_fiber
+#                 annotations (the jinn_coro_swap_* helpers), so this should
+#                 now be rare; a persistent segv? is worth a hand re-run.
+#                 Reported, non-gating.
 #   compile/link  did not build — reported, but the test suite owns
 #                 compile gating; the sweep's job is memory errors
 #   prog          nonzero exit without a sanitizer report (program-level

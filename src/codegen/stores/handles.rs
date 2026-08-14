@@ -458,6 +458,21 @@ impl<'ctx> Compiler<'ctx> {
                 "wal.new"
             )))
             .into_pointer_value();
+        let policy = self.store_defs.get(store_name).and_then(|sd| {
+            sd.decorators.iter().find_map(|d| match d {
+                crate::ast::StoreDecorator::Volatile => Some(0u64),
+                crate::ast::StoreDecorator::Durable => Some(2u64),
+                crate::ast::StoreDecorator::Relaxed => Some(3u64),
+                _ => None,
+            })
+        });
+        if let Some(policy) = policy {
+            let set_policy_fn = crate::codegen::fn_or_die(&self.module, "jinn_wal_set_policy");
+            let pol = self.ctx.i32_type().const_int(policy, false);
+            b!(self
+                .bld
+                .build_call(set_policy_fn, &[new_wal.into(), pol.into()], ""));
+        }
         b!(self.bld.build_store(wal_global.as_pointer_value(), new_wal));
         b!(self.bld.build_unconditional_branch(cont_bb));
 

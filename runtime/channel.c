@@ -203,7 +203,7 @@ int jinn_chan_send(jinn_chan_t *ch, const void *data) {
         waitq_push(&ch->send_waitq, &ch->send_waitq_tail, &self->wq_node);
         w->held_lock = &ch->lock;
         w->last_action = SCHED_ACTION_PARK;
-        jinn_context_swap(&self->ctx, &w->sched_ctx);
+        jinn_coro_swap_out(self, &w->sched_ctx);
     }
 }
 int64_t jinn_chan_pending(jinn_chan_t *ch) {
@@ -274,7 +274,7 @@ int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
 
         w->held_lock = &ch->lock;
         w->last_action = SCHED_ACTION_PARK;
-        jinn_context_swap(&self->ctx, &w->sched_ctx);
+        jinn_coro_swap_out(self, &w->sched_ctx);
     }
 }
 int jinn_chan_try_recv(jinn_chan_t *ch, void *data_out) {

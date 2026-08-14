@@ -16,9 +16,8 @@ Known gaps between this contract and the implementation are tracked in
 are tracked per **place** (`root.field.elem…`) with overlap and disjointness
 queries: overlapping call arguments, iteration borrows of field places and
 maps, and moves through projections are checked, and disjoint sibling places
-stay independent. What remains open is expression-position ergonomics —
-element reads still deep-copy (`M-4r`), and zero-copy views need second-class
-borrows (`M-13`).
+stay independent. Element reads in expression position (`get`) copy by
+contract; the zero-copy spelling is a view (§12).
 
 ## 1. Design pillars
 
@@ -56,7 +55,7 @@ leaf struct changes the assignment semantics of every struct that embeds it.
 Since [147] a type can pin its category — `type Point @value` / `type Bag
 @aggregate` — and a definition whose fields contradict the assertion is a
 compile error naming the field that flips it. Types without an assertion still
-transition silently; the embedding-site diagnostic remains open (`M-11`).
+transition silently; the embedding-site diagnostic remains open (`O-5`).
 
 ## 3. Bindings and moves
 
@@ -282,7 +281,7 @@ arguments are inferred consuming (the frame outlives the call), so using the
 original after creation is a use-after-move — previously the frame aliased the
 caller's value and resuming after a consuming call read freed memory. Captures
 still held by a generator dropped mid-suspension are not yet freed
-(suspended-frame drops, `M-16r`).
+(suspended-frame drops, `O-7`).
 
 ### M12 — closures capture exactly like tasks
 
@@ -443,8 +442,8 @@ A plain scalar is POD, copies freely, and crosses without issue. See
 - **No reference cycles are constructible.** Every aggregate has exactly one
   owner at any moment and no shared handles exist, so an ownership cycle cannot
   be expressed and cycle leaks are impossible by construction. This holds only
-  as far as there are no leaks by other means, which is what `M-10`'s
-  whole-corpus sanitizer sweep exists to check.
+  as far as there are no leaks by other means, which is what the whole-corpus
+  sanitizer sweep (`ci/sanitize-corpus.sh`, roadmap `O-2`) exists to check.
 - **No refcount traffic exists on any path**, hot or cold. The only atomic
   refcounts are the runtime-internal `Channel` and `ActorRef` handles.
 - **`jinn check` and `jinn build` agree.** The ownership analysis runs in both
@@ -475,7 +474,7 @@ keeps it afterwards and drops it once. Frozen values created *inside* the
 `together` body still move into a single task (their drop would race the
 join). Actor sends of frozen values are rejected with guidance unless the
 handler declares `Frozen of ...` — handler write-inference is not yet
-classified ([`design/freeze.md`](design/freeze.md), roadmap `M-14r`).
+classified ([`design/freeze.md`](design/freeze.md), roadmap `O-8`).
 
 **`View of T`** is a two-word borrowed window (`ptr + len`) created by
 `xs.view(a, b)`, `xs.at_view(i)`, and `s.view(a, b)` (string bytes), or by
@@ -491,14 +490,14 @@ block. Views of temporaries cannot be bound; a bind from another view
 inherits its root; view-typed parameters have no local root (the caller's
 call-borrow covers them). `for x in xs.views()` is lending iteration —
 the binder is a per-element view — and a field read through an element view
-reads through the pointer, no element copy (the `M-4r` fix). Moving a field
+reads through the pointer, no element copy. Moving a field
 out of a view is rejected; `.get` on value-category elements copies out
 (clone for `String`). Read-only *method calls* through an element view pass
 the element pointer as the receiver — the call operates on the original, and
 mutating or consuming methods through a view are compile errors ([150]).
-The std adoption sweep remains
+The rest of std's byte loops remain
 ([`design/second-class-refs.md`](design/second-class-refs.md), roadmap
-`M-13r`).
+`O-9`).
 
 ## 13. What this document does not cover
 
@@ -551,4 +550,4 @@ Beyond the suites, `ci/sanitize-corpus.sh` compiles and runs the whole
 executable corpus (conformance programs, apps, snippets) under ASan+LSan at
 `--opt 0` and `--opt 3`, and `ci/fuzz-ownership.py` mutates ownership-relevant
 syntax and asserts the compiler either rejects the mutant with a diagnostic or
-the compiled result stays memory-safe (`M-10`).
+the compiled result stays memory-safe (roadmap `O-2` tracks the leak tail).

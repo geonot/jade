@@ -156,7 +156,7 @@ static void *jinn_worker_loop(void *arg) {
         w->held_locks = NULL;
         w->held_locks_n = 0;
         jinn_scope_set_current((jinn_scope_t *)c->scope);
-        jinn_context_swap(&w->sched_ctx, &c->ctx);
+        jinn_coro_swap_in(&w->sched_ctx, c);
 
         w->current = NULL;
         jinn_scope_set_current(NULL);
@@ -304,7 +304,7 @@ void jinn_sched_park(void) {
     c->state = JINN_CORO_SUSPENDED;
     w->held_lock = NULL;
     w->last_action = SCHED_ACTION_PARK;
-    jinn_context_swap(&c->ctx, &w->sched_ctx);
+    jinn_coro_swap_out(c, &w->sched_ctx);
 }
 void jinn_sched_unpark(jinn_coro_t *c) {
     if (!c) return;

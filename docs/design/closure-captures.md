@@ -15,7 +15,7 @@
 > use-after-move error now). Remaining: suspended-frame drops for generators
 > dropped mid-iteration, by-view capture (step 4), and per-iteration closure
 > temporaries in loops, which still leak their environments — tracked as
-> `M-16r` in [`../roadmap.md`](../roadmap.md#memory-and-ownership). Lambda
+> `O-7` in [`../roadmap.md`](../roadmap.md#memory-and-ownership). Lambda
 > syntax is `|x| x * 2`; a capturing closure is any lambda with free
 > variables.
 
@@ -80,7 +80,7 @@ A generator's frame is a closure environment plus a resume point, so the
 same rules apply verbatim: creation classifies free variables, aggregates
 move into the frame, the frame is single-owner, and dropping a suspended
 generator drops its captures at the suspension point (the drop-obligation
-verifier's leak side must count suspended frames — extend `M-9r`'s dataflow
+verifier's leak side must count suspended frames — extend `O-2`'s dataflow
 across yield edges before generators ship). `yield` of a view is rejected
 (second-classness); `yield` of an aggregate moves it out of the frame.
 
@@ -109,5 +109,5 @@ diagnostic says why.
 1. Parse capturing closures; classification + move-capture through the place
    lattice; closure value as aggregate. (Blocked only on parser work.)
 2. Escape/caps integration: closure-typed call edges in the caps fixpoint.
-3. Generators: frame captures + suspended-frame drops (`M-9r` extension).
-4. After `M-13` ships: by-view capture for provably in-frame closures.
+3. Generators: frame captures + suspended-frame drops (`O-2` extension).
+4. By-view capture for provably in-frame closures, now that views exist.

@@ -9,7 +9,7 @@
 > `toml.parse_frozen` returns a `Frozen of TomlTable` read through the
 > ordinary accessors. Remaining: function-exit `dispatch` sharing and actor
 > handlers accepting frozen payloads without a `Frozen of ...` annotation
-> (handler write-inference) — tracked as `M-14r` in
+> (handler write-inference) — tracked as `O-8` in
 > [`../roadmap.md`](../roadmap.md#memory-and-ownership).
 
 Large read-only data — configuration, lookup tables, model weights — must

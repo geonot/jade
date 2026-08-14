@@ -5,7 +5,7 @@
 > codegen with bounds checks, and the full escape rejection shipped in [148];
 > [149] added bind-position views with root-locking through the borrow
 > lattice, `views()` lending iteration, and zero-copy *field* reads through
-> element views — the `M-4r` fix; [150] completed it with read-only *method
+> element views — closing the element-read deep-copy gap; [150] completed it with read-only *method
 > calls* through element views (the receiver passes the element pointer, so
 > the call operates on the original, per the design). Pinned by
 > `tests/views.rs`; [152] shipped step 4, the std adoption sweep — `strings`,
@@ -13,7 +13,7 @@
 > `String` coerces into `View of u8` parameters, and read-only `sort` APIs
 > take views, benchmark-gated (csv 315x, strings 30x, json 17x, identical
 > checksums). Residual std byte-loops outside those four modules are noted
-> at `M-13r` in [`../roadmap.md`](../roadmap.md#memory-and-ownership).
+> at `O-9` in [`../roadmap.md`](../roadmap.md#memory-and-ownership).
 
 The premise stays fixed: **no lifetime syntax, ever.** Jinn's borrows today
 are invisible because they are statement-scoped — a method call or field read
@@ -36,7 +36,7 @@ today:
   window (`ptr + len`) into `xs`'s buffer. `s.view(a, b)` does the same for
   string bytes. The existing `slice` stays as the copying form.
 - **Element views.** `xs.at_view(i)` and map `m.get_view(k)` produce a view of
-  one element where `get` deep-copies (`M-4r`). Reading a scalar field from a
+  one element where `get` deep-copies by contract. Reading a scalar field from a
   view is free; calling a *read-only* method through it operates on the
   original, not a copy.
 - **Lending parameters.** A parameter used only for reading already borrows;
@@ -55,7 +55,7 @@ place named in the diagnostic:
 1. storing a view in a struct field, enum payload, container, or store;
 2. returning a view or yielding it out of a generator whose consumer outlives
    the frame (`views()` is compiler-provided, not user-definable, until
-   generators get their own audit — `M-16`);
+   generators get their own audit — `O-7`);
 3. sending a view across a channel, into an actor, or capturing it in a
    `dispatch`/`together`/`spawn` block;
 4. rebinding a view to outlive its statement... except a plain `bind`, which
@@ -88,8 +88,9 @@ root-locking holds.
 
 ## What this buys, concretely
 
-- `M-4r` closes: nested-container reads stop paying hidden O(n) copies, and
-  read-only method calls on element reads stop operating on silent copies.
+- Element-read deep copies close: nested-container reads stop paying hidden
+  O(n) copies, and read-only method calls on element reads stop operating on
+  silent copies.
 - Zero-copy parsers (`csv`, `json`, `url`) — today every token is a `String`
   copy of a slice.
 - Lending iteration over large elements without per-step copies.

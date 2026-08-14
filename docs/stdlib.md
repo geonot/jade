@@ -91,8 +91,8 @@ suggests. Missing runtime C symbols, codegen ICEs, and LLVM verification
 failures all live entirely past the frontend, and a frontend-only definition
 once certified ten modules that a five-line importer could not compile at all.
 More generally: **a frontend gate certifies that code type-checks, nothing
-more** — `--emit-hir` does not even run codegen, and it still exits 0 on some
-programs the full pipeline rejects (`T-3`).
+more** — `--emit-hir` does not even run codegen, so anything past the frontend
+(codegen, missing runtime symbols, the link itself) can still fail.
 
 Alpha-stable is not a guarantee that every function returns the right answer,
 and not yet a guarantee of API stability across versions.

@@ -36,7 +36,19 @@ fn type_fingerprint_tag(ty: &Type) -> String {
 
 pub(crate) fn store_schema_fingerprint(sd: &hir::StoreDef) -> i64 {
     let mut h = FNV_OFFSET;
-    let mut decs: Vec<String> = sd.decorators.iter().map(|d| format!("{d:?}")).collect();
+    let mut decs: Vec<String> = sd
+        .decorators
+        .iter()
+        .filter(|d| {
+            !matches!(
+                d,
+                crate::ast::StoreDecorator::Durable
+                    | crate::ast::StoreDecorator::Relaxed
+                    | crate::ast::StoreDecorator::Volatile
+            )
+        })
+        .map(|d| format!("{d:?}"))
+        .collect();
     decs.sort();
     for d in &decs {
         h = fnv1a(h, d.as_bytes());

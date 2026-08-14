@@ -1,0 +1,33 @@
+store owners
+    name as String
+    &pets as [pets] @cascade
+
+store pets
+    name as String
+    &owner as owners
+    &toys as [toys] @cascade
+
+store toys
+    label as String
+    &pet as pets
+
+*main
+    insert owners 'alice'
+    insert owners 'bob'
+    insert pets 'rex', 1
+    insert pets 'spot', 2
+    insert pets 'fido', 1
+    insert toys 'ball', 1
+    insert toys 'bone', 3
+    o is first owners where name eq 'alice'
+    log o.pets.length
+    for p in o.pets
+        log p.name
+    b is first owners where name eq 'bob'
+    log b.pets.length
+    delete owners where name eq 'alice'
+    log count pets
+    log count toys
+    destroy owners where name eq 'bob'
+    log count pets
+    log count owners

@@ -4237,6 +4237,151 @@ fn query_block_executes_full_program() {
 }
 
 #[test]
+fn query_group_default_count() {
+    expect_store(
+        "store sales @simple\n    city as String\n    amt as i64\n\n*main\n    insert sales 'nyc', 10\n    insert sales 'la', 20\n    insert sales 'nyc', 30\n    g is sales query\n        group city\n    log g.length\n    total is 0\n    for row in g\n        total is total + row[1]\n    log total\n",
+        "2\n3",
+    );
+}
+
+#[test]
+fn query_group_select_aggregates_with_filter() {
+    expect_store(
+        "store sales @simple\n    city as String\n    amt as i64\n\n*main\n    insert sales 'nyc', 10\n    insert sales 'nyc', 30\n    insert sales 'sf', 5\n    insert sales 'sf', 7\n    insert sales 'la', 100\n    rows is sales query\n        where amt < 50\n        group city\n        select city, count, sum(amt), avg(amt)\n    log rows.length\n    total is 0\n    cnt is 0\n    for row in rows\n        total is total + row[2]\n        cnt is cnt + row[1]\n    log cnt\n    log total\n",
+        "2\n4\n52",
+    );
+}
+
+#[test]
+fn query_group_min_max() {
+    expect_store(
+        "store sales @simple\n    city as String\n    amt as i64\n\n*main\n    insert sales 'nyc', 10\n    insert sales 'nyc', 30\n    rows is sales query\n        group city\n        select city, min(amt), max(amt)\n    for row in rows\n        log row[1]\n        log row[2]\n",
+        "10\n30",
+    );
+}
+
+#[test]
+fn query_group_int_key_float_avg() {
+    expect_store(
+        "store m @simple\n    bucket as i64\n    v as f64\n\n*main\n    insert m 1, 2.0\n    insert m 1, 4.0\n    rows is m query\n        group bucket\n        select bucket, avg(v)\n    for row in rows\n        log row[1]\n",
+        "3.000000",
+    );
+}
+
+#[test]
+fn query_select_without_group_errors() {
+    let err = expect_compile_fail(
+        "store u @simple\n    name as String\n    age as i64\n\n*main\n    r is u query\n        where age > 0\n        select name, count\n    log r.length\n",
+    );
+    assert!(
+        err.contains("`select` requires a `group` clause"),
+        "expected select-requires-group error, got: {err}"
+    );
+}
+
+#[test]
+fn query_group_with_delete_errors() {
+    let err = expect_compile_fail(
+        "store u @simple\n    name as String\n    age as i64\n\n*main\n    r is u query\n        where age > 0\n        group name\n        delete\n    log r.length\n",
+    );
+    assert!(
+        err.contains("cannot combine with `delete` or `set`"),
+        "expected group-delete conflict error, got: {err}"
+    );
+}
+
+#[test]
+fn query_group_non_key_bare_field_errors() {
+    let err = expect_compile_fail(
+        "store u @simple\n    name as String\n    age as i64\n\n*main\n    r is u query\n        group name\n        select name, age\n    log r.length\n",
+    );
+    assert!(
+        err.contains("is not the group key"),
+        "expected non-key field error, got: {err}"
+    );
+}
+
+#[test]
+fn query_group_unknown_aggregate_errors() {
+    let err = expect_compile_fail(
+        "store u @simple\n    name as String\n    age as i64\n\n*main\n    r is u query\n        group name\n        select name, median(age)\n    log r.length\n",
+    );
+    assert!(
+        err.contains("unknown aggregate"),
+        "expected unknown-aggregate error, got: {err}"
+    );
+}
+
+#[test]
+fn query_group_agg_on_string_field_errors() {
+    let err = expect_compile_fail(
+        "store u @simple\n    name as String\n    age as i64\n\n*main\n    r is u query\n        group age\n        select age, sum(name)\n    log r.length\n",
+    );
+    assert!(
+        err.contains("requires a numeric field"),
+        "expected numeric-field error, got: {err}"
+    );
+}
+
+#[test]
+fn query_group_statement_position_errors() {
+    let err = expect_compile_fail(
+        "store u @simple\n    name as String\n    age as i64\n\n*main\n    u query\n        group name\n    log 1\n",
+    );
+    assert!(
+        err.contains("bind it with `is`"),
+        "expected bind-result error, got: {err}"
+    );
+}
+
+#[test]
+fn query_group_key_must_be_first_select_item() {
+    let err = expect_compile_fail(
+        "store u @simple\n    name as String\n    age as i64\n\n*main\n    r is u query\n        group name\n        select count, name\n    log r.length\n",
+    );
+    assert!(
+        err.contains("first `select` item must be the group key"),
+        "expected key-first error, got: {err}"
+    );
+}
+
+#[test]
+fn store_filter_in_composes_with_and() {
+    expect_store(
+        "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'alice', 30\n    insert users 'bob', 25\n    insert users 'carol', 30\n    n is count users where age in [30, 31] and name equals 'alice'\n    log n\n    m is count users where name equals 'carol' and age in [30, 31]\n    log m\n",
+        "1\n1",
+    );
+}
+
+#[test]
+fn store_filter_in_with_or_is_rejected() {
+    let err = expect_compile_fail(
+        "store users\n    name as String\n    age as i64\n\n*main\n    n is count users where age in [30, 31] or name equals 'alice'\n    log n\n",
+    );
+    assert!(
+        err.contains("mixing `or` with an `in [..]` clause"),
+        "expected or-with-in rejection, got: {err}"
+    );
+}
+
+#[test]
+fn store_durability_decorators_compile_and_run() {
+    expect_store(
+        "store ledger @durable\n    amount as i64\n\nstore cache @volatile\n    v as i64\n\nstore batchy @relaxed\n    v as i64\n\n*main\n    insert ledger 100\n    insert cache 1\n    insert batchy 2\n    log count ledger\n    log count cache\n    log count batchy\n",
+        "1\n1\n1",
+    );
+}
+
+#[test]
+fn store_durability_decorators_are_mutually_exclusive() {
+    let err = expect_compile_fail("store x @durable @volatile\n    v as i64\n\n*main\n    log 1\n");
+    assert!(
+        err.contains("cannot be combined"),
+        "expected exclusion error, got: {err}"
+    );
+}
+
+#[test]
 fn query_block_sort_clause_errors() {
     let err = expect_compile_fail(
         "store u\n    name as String\n    age as i64\n\n*main\n    insert u 'A', 1\n    r is u query\n        where age > 0\n        sort age\n    log r.name\n",

@@ -20,5 +20,6 @@ mod packages;
 
 #[allow(unused_imports)]
 pub(super) use dag::*;
+pub(crate) use modules::resolve_modules;
 pub(super) use modules::*;
 pub(super) use packages::*;

@@ -11,8 +11,8 @@ Read [`lamp.md`](lamp.md) first for what consumes all of this.
 
 Current reality, stated plainly so the gap is visible:
 
-- **Capability checking is live for `needs` upper bounds** (closed old `C-1`,
-  [145]). Effects are classified at the extern leaves (`src/cap_sites.rs`; an
+- **Capability checking is live for `needs` upper bounds.** Effects are
+  classified at the extern leaves (`src/cap_sites.rs`; an
   unclassified extern call or `syscall`/`asm` is `ffi.unsafe`), std-vetted
   aperture entries give `io.*`/`fs.*` path-scoped signatures, and the fixpoint
   in `src/typer/caps.rs` covers free functions, generics, and type/impl
@@ -24,7 +24,7 @@ Current reality, stated plainly so the gap is visible:
 - **The interface file is a v1 header.** `src/interface.rs` holds
   `InterfaceFile { version, module, functions }` over a closed `IType` enum,
   with no ownership, no effect rows, no Perceus obligations, and no hashing.
-  Reading it is off by default (`X-5`).
+  Reading it is off by default (`X-4`).
 - **Config blocks do not exist.** The manifest is parsed ad hoc.
 
 ---

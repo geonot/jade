@@ -84,6 +84,9 @@ jinn_coro_t *jinn_coro_create(void (*entry)(void*), void *arg) {
     c->on_exit_arg = NULL;
     c->scope       = NULL;
     c->txn_state   = NULL;
+#ifdef JINN_SAN_TSAN_FIBERS
+    c->san_fiber = __tsan_create_fiber(0);
+#endif
     atomic_store(&c->cancelled, 0);
     uintptr_t stack_top = (uintptr_t)base + total;
     stack_top &= ~(uintptr_t)15;
@@ -109,6 +112,9 @@ jinn_coro_t *jinn_coro_create(void (*entry)(void*), void *arg) {
 }
 void jinn_coro_destroy(jinn_coro_t *c) {
     if (!c) return;
+#ifdef JINN_SAN_TSAN_FIBERS
+    if (c->san_fiber) __tsan_destroy_fiber(c->san_fiber);
+#endif
     if (c->stack_base) {
         if (!stack_cache_push(c->stack_base, c->stack_size)) {
             munmap(c->stack_base, c->stack_size);
@@ -119,11 +125,20 @@ void jinn_coro_destroy(jinn_coro_t *c) {
 
 _Thread_local jinn_coro_t *tl_gen_coro = NULL;
 static void jinn_coro_trampoline(void) {
+#ifdef JINN_SAN_ASAN_FIBERS
+    const void *san_old_bottom = NULL;
+    size_t san_old_size = 0;
+    __sanitizer_finish_switch_fiber(NULL, &san_old_bottom, &san_old_size);
+#endif
     jinn_coro_t *self;
     jinn_coro_t *gen = tl_gen_coro;
     if (gen) {
         tl_gen_coro = NULL;
         self = gen;
+#ifdef JINN_SAN_ASAN_FIBERS
+        self->san_ret_bottom = san_old_bottom;
+        self->san_ret_size = san_old_size;
+#endif
         self->entry(self->arg);
         for (;;) {}
     }
@@ -131,6 +146,10 @@ static void jinn_coro_trampoline(void) {
     jinn_worker_t *w = tl_worker;
     self = w ? w->current : NULL;
     if (!self) return;
+#ifdef JINN_SAN_ASAN_FIBERS
+    self->san_ret_bottom = san_old_bottom;
+    self->san_ret_size = san_old_size;
+#endif
     self->entry(self->arg);
     jinn_coro_exit();
 }
@@ -147,7 +166,7 @@ static void jinn_coro_exit(void) {
     self->state = JINN_CORO_DONE;
     w->held_lock = NULL;
     w->last_action = SCHED_ACTION_DESTROY;
-    jinn_context_swap(&self->ctx, &w->sched_ctx);
+    jinn_coro_swap_out_final(self, &w->sched_ctx);
     __builtin_unreachable();
 }
 void jinn_coro_yield(void) {
@@ -157,7 +176,7 @@ void jinn_coro_yield(void) {
     c->state = JINN_CORO_READY;
     w->held_lock = NULL;
     w->last_action = SCHED_ACTION_REQUEUE;
-    jinn_context_swap(&c->ctx, &w->sched_ctx);
+    jinn_coro_swap_out(c, &w->sched_ctx);
 }
 jinn_coro_t *jinn_current_coro(void) {
     jinn_worker_t *w = tl_worker;
@@ -186,14 +205,14 @@ void jinn_gen_resume(void *gen_blk) {
     jinn_context_t caller_ctx;
     *(jinn_context_t **)((char *)gen_blk + GEN_CALLER_CTX_OFF) = &caller_ctx;
     tl_gen_coro = c;
-    jinn_context_swap(&caller_ctx, &c->ctx);
+    jinn_coro_swap_in(&caller_ctx, c);
     tl_gen_coro = NULL;
 }
 
 void jinn_gen_suspend(void *gen_blk) {
     jinn_coro_t *c = *(jinn_coro_t **)((char *)gen_blk + GEN_CORO_OFF);
     jinn_context_t *caller_ctx = *(jinn_context_t **)((char *)gen_blk + GEN_CALLER_CTX_OFF);
-    jinn_context_swap(&c->ctx, caller_ctx);
+    jinn_coro_swap_out(c, caller_ctx);
 }
 void jinn_gen_destroy(void *gen_blk) {
     jinn_coro_t *c = *(jinn_coro_t **)((char *)gen_blk + GEN_CORO_OFF);

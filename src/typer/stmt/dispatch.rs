@@ -774,34 +774,13 @@ impl Typer {
                         .ok_or_else(|| format!("unknown store '{store_name}'"))?
                         .clone();
 
-                    let mut where_exprs: Vec<(ast::Expr, ast::Span)> = Vec::new();
-                    let mut has_delete = false;
-                    let mut sets: Vec<(Symbol, ast::Expr)> = Vec::new();
-                    for clause in clauses {
-                        match clause {
-                            ast::QueryClause::Where(expr, cspan) => {
-                                where_exprs.push((expr.clone(), *cspan));
-                            }
-                            ast::QueryClause::Delete(_) => {
-                                has_delete = true;
-                            }
-                            ast::QueryClause::Set(field, val, _) => {
-                                sets.push((*field, val.clone()));
-                            }
-                            ast::QueryClause::Sort(_, _, _) => {
-                                return Err("query 'sort' clause is not yet implemented".into());
-                            }
-                            ast::QueryClause::Limit(_, _) => {
-                                return Err("query 'limit' clause is not yet implemented".into());
-                            }
-                            ast::QueryClause::Take(_, _) => {
-                                return Err("query 'take' clause is not yet implemented".into());
-                            }
-                            ast::QueryClause::Skip(_, _) => {
-                                return Err("query 'skip' clause is not yet implemented".into());
-                            }
-                        }
+                    let parts = Self::partition_query_clauses(clauses)?;
+                    if parts.group.is_some() {
+                        return Err("a `group` query produces a result; bind it with `is`".into());
                     }
+                    let where_exprs = parts.where_exprs;
+                    let has_delete = parts.has_delete;
+                    let sets = parts.sets;
 
                     if !where_exprs.is_empty() && has_delete {
                         let ast_filter = Self::merge_where_clauses(&where_exprs)?;

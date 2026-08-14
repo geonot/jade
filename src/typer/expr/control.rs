@@ -181,33 +181,34 @@ impl Typer {
                     .ok_or_else(|| format!("unknown store '{store_name}'"))?
                     .clone();
 
-                let mut where_exprs: Vec<(ast::Expr, ast::Span)> = Vec::new();
-                let mut has_delete = false;
-                let mut sets: Vec<(Symbol, ast::Expr)> = Vec::new();
-                for clause in clauses {
-                    match clause {
-                        ast::QueryClause::Where(expr, cspan) => {
-                            where_exprs.push((expr.clone(), *cspan));
-                        }
-                        ast::QueryClause::Delete(_) => {
-                            has_delete = true;
-                        }
-                        ast::QueryClause::Set(field, val, _) => {
-                            sets.push((*field, val.clone()));
-                        }
-                        ast::QueryClause::Sort(_, _, _) => {
-                            return Err("query 'sort' clause is not yet implemented".into());
-                        }
-                        ast::QueryClause::Limit(_, _) => {
-                            return Err("query 'limit' clause is not yet implemented".into());
-                        }
-                        ast::QueryClause::Take(_, _) => {
-                            return Err("query 'take' clause is not yet implemented".into());
-                        }
-                        ast::QueryClause::Skip(_, _) => {
-                            return Err("query 'skip' clause is not yet implemented".into());
-                        }
+                let parts = Self::partition_query_clauses(clauses)?;
+                let where_exprs = parts.where_exprs;
+                let has_delete = parts.has_delete;
+                let sets = parts.sets;
+
+                if let Some(key) = parts.group {
+                    if has_delete || !sets.is_empty() {
+                        return Err("a `group` query cannot combine with `delete` or `set`".into());
                     }
+                    let hfilter = if where_exprs.is_empty() {
+                        None
+                    } else {
+                        let ast_filter = Self::merge_where_clauses(&where_exprs)?;
+                        Some(self.lower_store_filter(&ast_filter, &schema, &store_name.as_str())?)
+                    };
+                    return self.lower_query_group(
+                        store_name,
+                        &schema,
+                        key,
+                        parts.select,
+                        hfilter,
+                        *span,
+                    );
+                }
+                if parts.select.is_some() {
+                    return Err("`select` requires a `group` clause; bind fields from the \
+                                query result instead"
+                        .into());
                 }
 
                 if where_exprs.is_empty() {
@@ -242,4 +243,166 @@ impl Typer {
             _ => unreachable!(),
         }
     }
+
+    pub(in crate::typer) fn partition_query_clauses(
+        clauses: &[ast::QueryClause],
+    ) -> Result<QueryParts, String> {
+        let mut parts = QueryParts {
+            where_exprs: Vec::new(),
+            has_delete: false,
+            sets: Vec::new(),
+            group: None,
+            select: None,
+        };
+        for clause in clauses {
+            match clause {
+                ast::QueryClause::Where(expr, cspan) => {
+                    parts.where_exprs.push((expr.clone(), *cspan));
+                }
+                ast::QueryClause::Delete(_) => {
+                    parts.has_delete = true;
+                }
+                ast::QueryClause::Set(field, val, _) => {
+                    parts.sets.push((*field, val.clone()));
+                }
+                ast::QueryClause::Group(field, _) => {
+                    if parts.group.is_some() {
+                        return Err("a query block may have at most one `group` clause".into());
+                    }
+                    parts.group = Some(*field);
+                }
+                ast::QueryClause::Select(items, _) => {
+                    if parts.select.is_some() {
+                        return Err("a query block may have at most one `select` clause".into());
+                    }
+                    parts.select = Some(items.clone());
+                }
+                ast::QueryClause::Sort(_, _, _) => {
+                    return Err("query 'sort' clause is not yet implemented".into());
+                }
+                ast::QueryClause::Limit(_, _) => {
+                    return Err("query 'limit' clause is not yet implemented".into());
+                }
+                ast::QueryClause::Take(_, _) => {
+                    return Err("query 'take' clause is not yet implemented".into());
+                }
+                ast::QueryClause::Skip(_, _) => {
+                    return Err("query 'skip' clause is not yet implemented".into());
+                }
+            }
+        }
+        Ok(parts)
+    }
+
+    fn lower_query_group(
+        &mut self,
+        store_name: Symbol,
+        schema: &[(Symbol, Type)],
+        key: Symbol,
+        select: Option<Vec<ast::SelectItem>>,
+        hfilter: Option<hir::StoreFilter>,
+        span: ast::Span,
+    ) -> Result<hir::Expr, String> {
+        let field_ty = |fld: &Symbol| {
+            schema
+                .iter()
+                .find(|(n, _)| n == fld)
+                .map(|(_, t)| t.clone())
+        };
+        let key_ty = field_ty(&key)
+            .ok_or_else(|| format!("group: unknown field '{key}' in store '{store_name}'"))?;
+
+        let items = select.unwrap_or_else(|| {
+            vec![
+                ast::SelectItem::Field(key, span),
+                ast::SelectItem::Agg(Symbol::intern("count"), None, span),
+            ]
+        });
+        match items.first() {
+            Some(ast::SelectItem::Field(f, _)) if *f == key => {}
+            _ => {
+                return Err(format!(
+                    "the first `select` item must be the group key `{key}`"
+                ));
+            }
+        }
+        if items.len() < 2 {
+            return Err(
+                "`select` must include at least one aggregate: `count`, `sum(f)`, \
+                        `avg(f)`, `min(f)`, or `max(f)`"
+                    .into(),
+            );
+        }
+
+        let mut aggs: Vec<(hir::GroupAgg, Option<Symbol>)> = Vec::new();
+        let mut elem_tys: Vec<Type> = vec![key_ty];
+        for item in &items[1..] {
+            match item {
+                ast::SelectItem::Field(f, _) => {
+                    return Err(format!(
+                        "`{f}` is not the group key; aggregate it (e.g. `sum({f})`) or \
+                         group by it"
+                    ));
+                }
+                ast::SelectItem::Agg(name, arg, _) => {
+                    let agg = match &*name.as_str() {
+                        "count" => hir::GroupAgg::Count,
+                        "sum" => hir::GroupAgg::Sum,
+                        "avg" => hir::GroupAgg::Avg,
+                        "min" => hir::GroupAgg::Min,
+                        "max" => hir::GroupAgg::Max,
+                        other => {
+                            return Err(format!(
+                                "unknown aggregate `{other}`; expected `count`, `sum`, \
+                                 `avg`, `min`, or `max`"
+                            ));
+                        }
+                    };
+                    if agg == hir::GroupAgg::Count {
+                        if arg.is_some() {
+                            return Err("`count` in a select takes no field argument".into());
+                        }
+                        aggs.push((agg, None));
+                        elem_tys.push(Type::I64);
+                        continue;
+                    }
+                    let vf = arg.ok_or_else(|| {
+                        format!("`{name}` requires a field argument, e.g. `{name}(amount)`")
+                    })?;
+                    let vty = field_ty(&vf).ok_or_else(|| {
+                        format!("{name}: unknown field '{vf}' in store '{store_name}'")
+                    })?;
+                    if !matches!(vty, Type::I64 | Type::F64 | Type::F32) {
+                        return Err(format!(
+                            "`{name}({vf})` requires a numeric field; `{vf}` is {vty}"
+                        ));
+                    }
+                    let out_ty = if agg == hir::GroupAgg::Avg {
+                        Type::F64
+                    } else {
+                        match vty {
+                            Type::F64 | Type::F32 => Type::F64,
+                            _ => Type::I64,
+                        }
+                    };
+                    aggs.push((agg, Some(vf)));
+                    elem_tys.push(out_ty);
+                }
+            }
+        }
+
+        Ok(hir::Expr {
+            kind: hir::ExprKind::StoreQueryGroup(store_name, key, aggs, hfilter.map(Box::new)),
+            ty: Type::Vec(Box::new(Type::Tuple(elem_tys))),
+            span,
+        })
+    }
+}
+
+pub(in crate::typer) struct QueryParts {
+    pub(in crate::typer) where_exprs: Vec<(ast::Expr, ast::Span)>,
+    pub(in crate::typer) has_delete: bool,
+    pub(in crate::typer) sets: Vec<(Symbol, ast::Expr)>,
+    pub(in crate::typer) group: Option<Symbol>,
+    pub(in crate::typer) select: Option<Vec<ast::SelectItem>>,
 }

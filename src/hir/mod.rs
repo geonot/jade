@@ -239,11 +239,20 @@ pub struct StoreField {
 }
 
 #[derive(Debug, Clone)]
+pub struct StoreRelation {
+    pub field: Symbol,
+    pub target: Symbol,
+    pub is_has_many: bool,
+    pub cascade: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct StoreDef {
     pub def_id: DefId,
     pub name: Symbol,
     pub decorators: Vec<ast::StoreDecorator>,
     pub fields: Vec<StoreField>,
+    pub relations: Vec<StoreRelation>,
     pub methods: Vec<Fn>,
     pub span: Span,
 }
@@ -468,11 +477,18 @@ pub enum ExprKind {
     StoreQuery(Symbol, Box<StoreFilter>),
     StoreCount(Symbol),
     StoreAll(Symbol),
+    StoreAllWhere(Symbol, Box<StoreFilter>),
     StoreGet(Symbol, Box<Expr>),
     StoreFirst(Symbol, Box<StoreFilter>),
     StoreExists(Symbol, Box<StoreFilter>),
     StoreDistinct(Symbol, Symbol),
     StoreGroup(Symbol, Symbol, GroupAgg, Option<Symbol>),
+    StoreQueryGroup(
+        Symbol,
+        Symbol,
+        Vec<(GroupAgg, Option<Symbol>)>,
+        Option<Box<StoreFilter>>,
+    ),
     StoreSum(Symbol, Symbol),
     StoreAvg(Symbol, Symbol),
     StoreMin(Symbol, Symbol),

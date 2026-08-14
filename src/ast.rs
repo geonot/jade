@@ -571,6 +571,14 @@ pub enum QueryClause {
     Skip(Expr, Span),
     Set(Symbol, Expr, Span),
     Delete(Span),
+    Group(Symbol, Span),
+    Select(Vec<SelectItem>, Span),
+}
+
+#[derive(Debug, Clone)]
+pub enum SelectItem {
+    Field(Symbol, Span),
+    Agg(Symbol, Option<Symbol>, Span),
 }
 
 #[derive(Debug, Clone)]
@@ -644,6 +652,9 @@ pub enum StoreDecorator {
     Mem,
     Transient,
     Versioned,
+    Durable,
+    Relaxed,
+    Volatile,
     Vector(u64),
     Compact(u64),
     Graph,

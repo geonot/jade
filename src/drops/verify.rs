@@ -317,7 +317,7 @@ fn owning_allocs(func: &mir::Function, consuming: &ConsumingMap) -> HashMap<Valu
                 }
                 InstKind::Call(name, _)
                     if matches!(inst.ty, Type::Vec(_) | Type::Map(_, _))
-                        && consuming.contains_key(name) =>
+                        && (consuming.contains_key(name) || is_store_vec_alloc(&name.as_str())) =>
                 {
                     owning.insert(dest, inst.ty.clone());
                 }
@@ -326,6 +326,15 @@ fn owning_allocs(func: &mir::Function, consuming: &ConsumingMap) -> HashMap<Valu
         }
     }
     owning
+}
+
+fn is_store_vec_alloc(name: &str) -> bool {
+    name.starts_with("__store_all_")
+        || name.starts_with("__store_allq_")
+        || name.starts_with("__store_distinct_")
+        || name.starts_with("__store_group_")
+        || name.starts_with("__store_qgroup_")
+        || name.starts_with("__store_history_")
 }
 
 fn reads_without_taking(kind: &InstKind) -> bool {

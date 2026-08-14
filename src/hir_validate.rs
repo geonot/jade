@@ -391,6 +391,8 @@ impl HirValidator {
             hir::ExprKind::StoreGet(_, key) => self.validate_expr(key),
             hir::ExprKind::StoreFirst(_, _) => {}
             hir::ExprKind::StoreExists(_, _) => {}
+            hir::ExprKind::StoreQueryGroup(_, _, _, _) => {}
+            hir::ExprKind::StoreAllWhere(_, _) => {}
             hir::ExprKind::StoreDistinct(_, _)
             | hir::ExprKind::StoreGroup(_, _, _, _)
             | hir::ExprKind::StoreSum(_, _)

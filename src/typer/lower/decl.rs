@@ -198,6 +198,29 @@ impl Typer {
                 span: f.span,
             });
         }
+        let mut relations = Vec::new();
+        for f in &sd.fields {
+            if !f.is_relation {
+                continue;
+            }
+            let target = match &f.ty {
+                Some(Type::Struct(n, _)) => *n,
+                Some(Type::Row(n)) => *n,
+                Some(Type::Enum(n)) => *n,
+                Some(Type::Param(n)) => *n,
+                Some(Type::Alias(n, _)) => *n,
+                _ => f.name,
+            };
+            relations.push(hir::StoreRelation {
+                field: f.name,
+                target,
+                is_has_many: f.is_has_many,
+                cascade: f
+                    .decorators
+                    .iter()
+                    .any(|d| matches!(d, ast::FieldDecorator::Cascade)),
+            });
+        }
         let mut hir_methods = Vec::new();
         for m in &sd.methods {
             let hm = self.lower_method_by_ptr(&sd.name.as_str(), m)?;
@@ -208,6 +231,7 @@ impl Typer {
             name: sd.name,
             decorators: sd.decorators.clone(),
             fields,
+            relations,
             methods: hir_methods,
             span: sd.span,
         })

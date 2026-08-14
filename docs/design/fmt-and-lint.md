@@ -1,11 +1,12 @@
 # `jinn fmt` and `jinn lint` — design
 
-> **Status: design.** What exists today is a naive reprinter — `src/fmt.rs`
-> lexes, parses to `ast::Program`, and pretty-prints the AST back to source. Its
-> grammar coverage has drifted: 164 of 688 corpus files stop compiling after
-> formatting, 41 of them in `std/` (`X-1` in
-> [`../roadmap.md`](../roadmap.md#tooling)). `--check`, `--diff`, `--stdin`, a
-> `jinn lint` subcommand, and the rule engine below do not exist.
+> **Status: design; the formatter half is partially implemented.** `src/fmt.rs`
+> lexes, parses to `ast::Program`, and pretty-prints the AST back to source,
+> covering the corpus grammar: a CI gate formats every corpus file and fails if
+> any stops frontend-checking, and `--write` refuses output that no longer
+> parses (residue at `X-1` in [`../roadmap.md`](../roadmap.md#tooling)).
+> `--check`, `--diff`, `--stdin`, a `jinn lint` subcommand, and the rule engine
+> below do not exist.
 
 The target: take any well-formed Jinn source — including un-idiomatic or
 C-transliterated code — and turn it into clean, idiomatic Jinn **without

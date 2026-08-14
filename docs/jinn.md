@@ -1133,9 +1133,10 @@ transaction
 ### Filter vocabulary
 
 Statement filters accept, besides the comparisons composed with `and`/`or`:
-`between lo and hi`, membership `in [v1, v2]` (an equality chain), the text
-predicates `contains`, `starts_with`, `ends_with`, and their ASCII
-case-insensitive forms `iequals`, `icontains`, `istarts_with`, `iends_with`.
+`between lo and hi`, membership `in [v1, v2]` (an equality chain, combinable
+with `and` but not `or`), the text predicates `contains`, `starts_with`,
+`ends_with`, and their ASCII case-insensitive forms `iequals`, `icontains`,
+`istarts_with`, `iends_with`.
 
 <!-- doctest:prelude
 store users
@@ -1161,6 +1162,90 @@ insert users 'Alice', 30
 r is users query
     where name.icontains('ALI') and age in [30, 31]
 log r.age
+```
+
+### Grouping and aggregates
+
+A query block groups with `group <field>` and projects aggregates with
+`select`. The first `select` item must be the group key; the rest are
+aggregates over each group — `count`, `sum(f)`, `avg(f)`, `min(f)`, `max(f)`
+(numeric fields only; `avg` is always `f64`). The result is a `Vec` of tuples
+in `select` order, and a `where` clause filters rows before they are grouped.
+`group` without a `select` defaults to a per-key `count`.
+
+<!-- doctest:prelude
+store sales
+    city as String
+    amt as i64
+-->
+```jinn
+insert sales 'nyc', 10
+insert sales 'nyc', 30
+insert sales 'sf', 5
+rows is sales query
+    where amt < 50
+    group city
+    select city, count, sum(amt), avg(amt)
+for row in rows
+    log('{row[0]}: {row[1]} sales totaling {row[2]}')
+```
+
+Whole-store one-shot aggregates stay available as methods:
+`sales.sum(amt)`, `.avg(amt)`, `.min(amt)`, `.max(amt)`, `.distinct(city)`,
+and the chained `sales.group(city).count()`.
+
+### Relations
+
+A field declared with a leading `&` is a relation; the name after `as` is the
+target store. `&owner as owners` (belongs-to) stores the target row's sid and
+traverses on field access; `&pets as [pets]` (has-many) is the inverse — it
+adds no column, and traversing it returns a `Vec` of the target rows whose
+belongs-to column points back at this row. Has-many traversal requires the
+target store to declare the belongs-to side.
+
+`@cascade` on either side of a relation makes deleting an owner row delete its
+children: `delete` cascades as soft deletes, `destroy` cascades as hard
+deletes, and chains of `@cascade` relations cascade transitively. The cascade
+graph must be acyclic — a cycle is a compile error.
+
+```jinn
+store owners
+    name as String
+    &pets as [pets] @cascade
+
+store pets
+    name as String
+    &owner as owners
+
+insert owners 'alice'
+insert pets 'rex', 1
+o is first owners where name eq 'alice'
+log o.pets.length
+for p in o.pets
+    log p.owner.name
+delete owners where name eq 'alice'
+log count pets
+```
+
+### Durability
+
+Each store chooses its own WAL sync policy with a decorator: `@durable`
+(fsync after every record), `@relaxed` (syncs batched at transaction
+commits), or `@volatile` (never synced; crash durability is not promised).
+Unannotated stores sync with `fdatasync` per record. The `JINN_WAL_SYNC`
+environment variable, when set, overrides every store's policy — it is a
+testing override, not the configuration surface.
+
+```jinn
+store ledger @durable
+    amount as i64
+
+store scratch @volatile
+    v as i64
+
+insert ledger 100
+insert scratch 1
+log count ledger
 ```
 
 ### Constraint failures are errors

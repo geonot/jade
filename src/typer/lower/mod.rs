@@ -123,7 +123,7 @@ impl Typer {
                         fields.push(("updated".into(), Type::I64));
                         fields.push(("deleted".into(), Type::I64));
                     }
-                    let mut relations: Vec<(Symbol, Symbol, bool)> = Vec::new();
+                    let mut relations: Vec<(Symbol, Symbol, bool, bool)> = Vec::new();
                     for f in &sd.fields {
                         if f.is_relation {
                             let target = match &f.ty {
@@ -134,7 +134,11 @@ impl Typer {
                                 Some(Type::Alias(n, _)) => *n,
                                 _ => f.name,
                             };
-                            relations.push((f.name, target, f.is_has_many));
+                            let cascade = f
+                                .decorators
+                                .iter()
+                                .any(|d| matches!(d, ast::FieldDecorator::Cascade));
+                            relations.push((f.name, target, f.is_has_many, cascade));
                             if !f.is_has_many {
                                 fields.push((f.name, Type::I64));
                             }
@@ -209,6 +213,8 @@ impl Typer {
                 }
             }
         }
+
+        self.validate_store_relations();
 
         for name in alias_map.keys() {
             let mut visited = std::collections::HashSet::new();
@@ -770,5 +776,96 @@ impl Typer {
             );
         }
         Ok(program)
+    }
+
+    fn validate_store_relations(&mut self) {
+        let mut edges: Vec<(Symbol, Symbol)> = Vec::new();
+        for (store, rels) in &self.store_relations {
+            for (field, target, is_has_many, cascade) in rels {
+                if !cascade {
+                    continue;
+                }
+                if !self.store_relations.contains_key(target) {
+                    self.type_errors.push(format!(
+                        "@cascade on `{store}.{field}`: unknown store '{target}'"
+                    ));
+                    continue;
+                }
+                let (owner, child) = if *is_has_many {
+                    (*store, *target)
+                } else {
+                    (*target, *store)
+                };
+                let owner_simple = self
+                    .store_decorators
+                    .get(&owner)
+                    .map(|ds| ds.contains(&crate::ast::StoreDecorator::Simple))
+                    .unwrap_or(false);
+                if owner_simple {
+                    self.type_errors.push(format!(
+                        "@cascade on `{store}.{field}`: store '{owner}' is @simple and \
+                         has no sid to cascade through"
+                    ));
+                    continue;
+                }
+                if *is_has_many {
+                    let has_back = self
+                        .store_relations
+                        .get(target)
+                        .map(|rs| rs.iter().any(|(_, t, hm, _)| !hm && t == store))
+                        .unwrap_or(false);
+                    if !has_back {
+                        self.type_errors.push(format!(
+                            "@cascade on `{store}.{field}`: store '{target}' has no \
+                             belongs-to relation back to '{store}'; declare \
+                             `&<name> as {store}` in `store {target}`"
+                        ));
+                        continue;
+                    }
+                }
+                edges.push((owner, child));
+            }
+        }
+        let mut adj: indexmap::IndexMap<Symbol, Vec<Symbol>> = indexmap::IndexMap::new();
+        for (o, c) in &edges {
+            adj.entry(*o).or_default().push(*c);
+        }
+        fn dfs(
+            node: Symbol,
+            adj: &indexmap::IndexMap<Symbol, Vec<Symbol>>,
+            visiting: &mut Vec<Symbol>,
+            done: &mut std::collections::HashSet<Symbol>,
+        ) -> Option<Vec<Symbol>> {
+            if done.contains(&node) {
+                return None;
+            }
+            if let Some(pos) = visiting.iter().position(|n| *n == node) {
+                let mut cycle = visiting[pos..].to_vec();
+                cycle.push(node);
+                return Some(cycle);
+            }
+            visiting.push(node);
+            if let Some(next) = adj.get(&node) {
+                for n in next {
+                    if let Some(c) = dfs(*n, adj, visiting, done) {
+                        return Some(c);
+                    }
+                }
+            }
+            visiting.pop();
+            done.insert(node);
+            None
+        }
+        let mut done = std::collections::HashSet::new();
+        for node in adj.keys() {
+            let mut visiting = Vec::new();
+            if let Some(cycle) = dfs(*node, &adj, &mut visiting, &mut done) {
+                self.type_errors.push(format!(
+                    "@cascade cycle: {} — cascading deletes must form a DAG",
+                    Symbol::join_vec(&cycle, " -> ")
+                ));
+                return;
+            }
+        }
     }
 }

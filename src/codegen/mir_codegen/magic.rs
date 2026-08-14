@@ -182,6 +182,9 @@ impl<'ctx> Compiler<'ctx> {
         if let Some(store_name) = name.strip_prefix("__store_count_") {
             return self.emit_store_count(store_name).map(Some);
         }
+        if let Some(rest) = name.strip_prefix("__store_allq_") {
+            return self.emit_store_all_where(rest, args).map(Some);
+        }
         if let Some(store_name) = name.strip_prefix("__store_all_") {
             return self.emit_store_all(store_name).map(Some);
         }
@@ -226,6 +229,9 @@ impl<'ctx> Compiler<'ctx> {
         }
         if let Some(rest) = name.strip_prefix("__store_group_") {
             return self.emit_store_group(rest).map(Some);
+        }
+        if let Some(rest) = name.strip_prefix("__store_qgroup_") {
+            return self.emit_store_query_group(rest, args).map(Some);
         }
         if let Some(rest) = name.strip_prefix("__store_sum_") {
             return self.emit_store_agg(rest, "sum").map(Some);

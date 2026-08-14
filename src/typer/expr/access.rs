@@ -379,21 +379,9 @@ impl Typer {
 
                 if let Type::Row(store) = &resolved_ty
                     && let Some(rels) = self.store_relations.get(store)
-                    && let Some((_, target, is_has_many)) =
-                        rels.iter().find(|(n, _, _)| n == field).copied()
+                    && let Some((_, target, is_has_many, _)) =
+                        rels.iter().find(|(n, _, _, _)| n == field).copied()
                 {
-                    if is_has_many {
-                        return Err(format!(
-                            "{}: `{}.{}` is a has-many relation and is not directly \
-                             traversable — query the related store instead, e.g. \
-                             `all {} where <foreign-key> eq {}.sid`",
-                            span.loc(),
-                            store,
-                            field,
-                            target,
-                            store,
-                        ));
-                    }
                     if !self.store_schemas.contains_key(&target) {
                         return Err(format!(
                             "{}: relation `{}.{}` targets unknown store `{}`",
@@ -402,6 +390,63 @@ impl Typer {
                             field,
                             target,
                         ));
+                    }
+                    if is_has_many {
+                        let fk_field = self.store_relations.get(&target).and_then(|rs| {
+                            rs.iter()
+                                .find(|(_, t, hm, _)| !hm && t == store)
+                                .map(|(f, _, _, _)| *f)
+                        });
+                        let Some(fk_field) = fk_field else {
+                            return Err(format!(
+                                "{}: `{}.{}` cannot be traversed — store `{}` has no \
+                                 belongs-to relation back to `{}`; declare \
+                                 `&<name> as {}` in `store {}`",
+                                span.loc(),
+                                store,
+                                field,
+                                target,
+                                store,
+                                store,
+                                target,
+                            ));
+                        };
+                        let struct_name = Symbol::intern(&format!("__store_{store}"));
+                        let sid_sym: Symbol = "sid".into();
+                        let sid_idx = self
+                            .structs
+                            .get(&struct_name)
+                            .and_then(|fs| fs.iter().position(|(n, _)| *n == sid_sym));
+                        let Some(sid_idx) = sid_idx else {
+                            return Err(format!(
+                                "{}: `{}.{}` cannot be traversed — store `{}` is @simple \
+                                 and has no sid",
+                                span.loc(),
+                                store,
+                                field,
+                                store,
+                            ));
+                        };
+                        let sid = hir::Expr {
+                            kind: hir::ExprKind::Field(Box::new(hobj.clone()), sid_sym, sid_idx),
+                            ty: Type::I64,
+                            span: *span,
+                        };
+                        let filter = hir::StoreFilter {
+                            field: fk_field,
+                            op: crate::ast::BinOp::Eq,
+                            value: sid,
+                            span: *span,
+                            extra: vec![],
+                            pred: crate::ast::FilterPred::Cmp,
+                        };
+                        let elem =
+                            Type::Struct(Symbol::intern(&format!("__store_{target}")), vec![]);
+                        return Ok(hir::Expr {
+                            kind: hir::ExprKind::StoreAllWhere(target, Box::new(filter)),
+                            ty: Type::Vec(Box::new(elem)),
+                            span: *span,
+                        });
                     }
                     let struct_name = Symbol::intern(&format!("__store_{store}"));
                     let idx = self

@@ -657,6 +657,12 @@ impl Typer {
             }
             hir::ExprKind::StoreFirst(_, filter) => self.resolve_filter(filter),
             hir::ExprKind::StoreExists(_, filter) => self.resolve_filter(filter),
+            hir::ExprKind::StoreQueryGroup(_, _, _, filter) => {
+                if let Some(f) = filter {
+                    self.resolve_filter(f);
+                }
+            }
+            hir::ExprKind::StoreAllWhere(_, filter) => self.resolve_filter(filter),
             hir::ExprKind::StoreGet(_, key) => self.resolve_expr(key),
             hir::ExprKind::StoreDistinct(_, _)
             | hir::ExprKind::StoreGroup(_, _, _, _)

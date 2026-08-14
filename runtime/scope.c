@@ -240,7 +240,7 @@ static int jinn_scope_join_no_free(jinn_scope_t *s) {
         s->parent = self;
         w->held_lock = &s->lock;
         w->last_action = SCHED_ACTION_PARK;
-        jinn_context_swap(&self->ctx, &w->sched_ctx);
+        jinn_coro_swap_out(self, &w->sched_ctx);
     }
     return atomic_load_explicit(&s->has_error, memory_order_acquire) ? 1 : 0;
 }

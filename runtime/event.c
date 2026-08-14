@@ -195,7 +195,7 @@ void jinn_io_waiter_park(void *waiter) {
     self->state = JINN_CORO_SUSPENDED;
     w->held_lock = &wt->lock;
     w->last_action = SCHED_ACTION_PARK;
-    jinn_context_swap(&self->ctx, &w->sched_ctx);
+    jinn_coro_swap_out(self, &w->sched_ctx);
 }
 #else
 void *jinn_event_loop_create(int max_events) { (void)max_events; return NULL; }

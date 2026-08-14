@@ -60,7 +60,8 @@ pub(super) fn compile_and_link(
     loaded.insert(Symbol::intern(&input_canon.to_string_lossy()));
     let (packages, pkg_id_map) = load_packages_with_ids(base_dir);
     let mut std_files: HashSet<Symbol> = HashSet::new();
-    resolve_modules(&mut prog, base_dir, &mut loaded, &packages, &mut std_files);
+    resolve_modules(&mut prog, base_dir, &mut loaded, &packages, &mut std_files)
+        .unwrap_or_else(|e| die(&e));
 
     if !standalone && !test_mode {
         let has_main = prog

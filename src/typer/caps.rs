@@ -385,7 +385,10 @@ impl Scanner<'_> {
                         | ast::QueryClause::Take(e, _)
                         | ast::QueryClause::Skip(e, _)
                         | ast::QueryClause::Set(_, e, _) => self.scan_expr(e),
-                        ast::QueryClause::Sort(_, _, _) | ast::QueryClause::Delete(_) => {}
+                        ast::QueryClause::Sort(_, _, _)
+                        | ast::QueryClause::Delete(_)
+                        | ast::QueryClause::Group(_, _)
+                        | ast::QueryClause::Select(_, _) => {}
                     }
                 }
             }

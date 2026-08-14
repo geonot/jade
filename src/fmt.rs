@@ -514,6 +514,21 @@ fn format_query_block(out: &mut String, src: &Expr, clauses: &[QueryClause], lev
             QueryClause::Skip(e, _) => out.push_str(&format!("skip {}", format_expr(e))),
             QueryClause::Set(f, e, _) => out.push_str(&format!("set {f} is {}", format_expr(e))),
             QueryClause::Delete(_) => out.push_str("delete"),
+            QueryClause::Group(f, _) => out.push_str(&format!("group {f}")),
+            QueryClause::Select(items, _) => {
+                let rendered: Vec<String> = items
+                    .iter()
+                    .map(|it| match it {
+                        crate::ast::SelectItem::Field(f, _) => f.to_string(),
+                        crate::ast::SelectItem::Agg(a, Some(v), _) => format!("{a}({v})"),
+                        crate::ast::SelectItem::Agg(a, None, _) if &*a.as_str() == "count" => {
+                            "count".to_string()
+                        }
+                        crate::ast::SelectItem::Agg(a, None, _) => format!("{a}()"),
+                    })
+                    .collect();
+                out.push_str(&format!("select {}", rendered.join(", ")));
+            }
         }
         out.push('\n');
     }
@@ -567,6 +582,9 @@ fn format_store_decorator(d: &StoreDecorator) -> String {
         StoreDecorator::Mem => "@mem".into(),
         StoreDecorator::Transient => "@transient".into(),
         StoreDecorator::Versioned => "@versioned".into(),
+        StoreDecorator::Durable => "@durable".into(),
+        StoreDecorator::Relaxed => "@relaxed".into(),
+        StoreDecorator::Volatile => "@volatile".into(),
         StoreDecorator::Vector(n) => format!("@vector({n})"),
         StoreDecorator::Compact(n) => format!("@compact({n})"),
         StoreDecorator::Graph => "@graph".into(),

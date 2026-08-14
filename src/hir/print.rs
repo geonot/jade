@@ -648,6 +648,7 @@ impl PrettyPrinter {
             ExprKind::StoreQuery(name, _) => format!("store_query {name} ..."),
             ExprKind::StoreCount(name) => format!("store_count {name}"),
             ExprKind::StoreAll(name) => format!("store_all {name}"),
+            ExprKind::StoreAllWhere(name, _) => format!("store_all_where {name} ..."),
             ExprKind::StoreGet(name, key) => format!("store_get {name} {}", self.expr_str(key)),
             ExprKind::StoreFirst(name, _) => format!("store_first {name} ..."),
             ExprKind::StoreExists(name, _) => format!("store_exists {name} ..."),
@@ -657,6 +658,23 @@ impl PrettyPrinter {
                 agg.as_str(),
                 val.map(|v| v.to_string()).unwrap_or_default()
             ),
+            ExprKind::StoreQueryGroup(name, key, aggs, filter) => {
+                let agg_str: Vec<String> = aggs
+                    .iter()
+                    .map(|(a, v)| {
+                        format!(
+                            "{}({})",
+                            a.as_str(),
+                            v.map(|s| s.to_string()).unwrap_or_default()
+                        )
+                    })
+                    .collect();
+                format!(
+                    "store_qgroup {name}.{key} [{}]{}",
+                    agg_str.join(", "),
+                    if filter.is_some() { " where ..." } else { "" }
+                )
+            }
             ExprKind::StoreSum(name, field) => format!("store_sum {name}.{field}"),
             ExprKind::StoreAvg(name, field) => format!("store_avg {name}.{field}"),
             ExprKind::StoreMin(name, field) => format!("store_min {name}.{field}"),

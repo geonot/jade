@@ -98,6 +98,37 @@ impl Parser {
                 let val = self.parse_expr()?;
                 Ok(QueryClause::Set(field, val, sp))
             }
+            "group" => {
+                let field = self.ident()?;
+                Ok(QueryClause::Group(field, sp))
+            }
+            "select" => {
+                let mut items = Vec::new();
+                loop {
+                    let isp = self.span();
+                    let name = self.ident()?;
+                    if self.check(Token::LParen) {
+                        self.advance();
+                        let arg = if self.check(Token::RParen) {
+                            None
+                        } else {
+                            Some(self.ident()?)
+                        };
+                        self.expect(Token::RParen)?;
+                        items.push(crate::ast::SelectItem::Agg(name, arg, isp));
+                    } else if &*name.as_str() == "count" {
+                        items.push(crate::ast::SelectItem::Agg(name, None, isp));
+                    } else {
+                        items.push(crate::ast::SelectItem::Field(name, isp));
+                    }
+                    if self.check(Token::Comma) {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                Ok(QueryClause::Select(items, sp))
+            }
             _ => Err(self.error(&format!("unknown query clause: {kw}"))),
         }
     }

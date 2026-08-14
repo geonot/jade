@@ -27,6 +27,7 @@ fn utf16_range(src: &str, line1: u32, col1: u32, len: u32) -> Range {
 pub struct ServerState {
     pub files: HashMap<String, String>,
     pub workspace_index: HashMap<String, Vec<WorkspaceSymbol>>,
+    pub typed: HashMap<String, super::typed::TypedAnalysis>,
 }
 
 pub struct WorkspaceSymbol {
@@ -47,6 +48,14 @@ impl ServerState {
         Self {
             files: HashMap::new(),
             workspace_index: HashMap::new(),
+            typed: HashMap::new(),
+        }
+    }
+
+    fn refresh_typed(&mut self, uri: &str) {
+        if let Some(src) = self.files.get(uri) {
+            let ta = super::typed::analyze_typed(uri, src);
+            self.typed.insert(uri.to_string(), ta);
         }
     }
 
@@ -132,6 +141,7 @@ pub fn handle_did_open(
     let uri = p.text_document.uri.clone();
     state.files.insert(uri.clone(), p.text_document.text);
     state.update_index(&uri);
+    state.refresh_typed(&uri);
     Some((uri.clone(), build_diagnostics(state, &uri)))
 }
 
@@ -145,12 +155,14 @@ pub fn handle_did_change(
         state.files.insert(uri.clone(), change.text);
     }
     state.update_index(&uri);
+    state.refresh_typed(&uri);
     Some((uri.clone(), build_diagnostics(state, &uri)))
 }
 
 pub fn handle_did_close(state: &mut ServerState, params: Value) {
     if let Ok(p) = serde_json::from_value::<DidCloseTextDocumentParams>(params) {
         state.files.remove(&p.text_document.uri);
+        state.typed.remove(&p.text_document.uri);
     }
 }
 
@@ -163,6 +175,20 @@ pub fn handle_hover(state: &ServerState, params: Value) -> Value {
         Some(s) => s,
         None => return Value::Null,
     };
+    if let Some(t) = state.typed.get(&p.text_document.uri)
+        && let Some(off) =
+            super::typed::position_to_offset(src, p.position.line, p.position.character)
+        && let Some(text) = t.hover_at(off)
+    {
+        let hover = Hover {
+            contents: MarkupContent {
+                kind: "markdown",
+                value: format!("```jinn\n{text}\n```"),
+            },
+            range: None,
+        };
+        return serde_json::to_value(hover).expect("ICE: LSP serialization");
+    }
     let line1 = p.position.line + 1;
     let col1 = p.position.character + 1;
     let ident = match analysis::find_ident_at(src, line1, col1) {
@@ -192,6 +218,18 @@ pub fn handle_definition(state: &ServerState, params: Value) -> Value {
         Some(s) => s,
         None => return Value::Null,
     };
+    if let Some(t) = state.typed.get(&p.text_document.uri)
+        && let Some(off) =
+            super::typed::position_to_offset(src, p.position.line, p.position.character)
+        && let Some(id) = t.def_id_at(off)
+        && let Some(&(s, e)) = t.def_sites.get(&id)
+    {
+        let loc = Location {
+            uri: p.text_document.uri,
+            range: byte_range(src, s, e),
+        };
+        return serde_json::to_value(loc).expect("ICE: LSP serialization");
+    }
     let line1 = p.position.line + 1;
     let col1 = p.position.character + 1;
     let ident = match analysis::find_ident_at(src, line1, col1) {
@@ -318,6 +356,28 @@ pub fn handle_rename(state: &ServerState, params: Value) -> Value {
         Some(s) => s,
         None => return Value::Null,
     };
+    if let Some(t) = state.typed.get(&p.text_document.uri)
+        && t.typed
+        && let Some(off) =
+            super::typed::position_to_offset(src, p.position.line, p.position.character)
+        && let Some(id) = t.def_id_at(off)
+        && let Some(occs) = t.occurrences.get(&id)
+    {
+        let mut spans: Vec<(usize, usize)> = occs.clone();
+        spans.sort();
+        spans.dedup();
+        let edits: Vec<TextEdit> = spans
+            .into_iter()
+            .map(|(s, e)| TextEdit {
+                range: byte_range(src, s, e),
+                new_text: p.new_name.clone(),
+            })
+            .collect();
+        let mut changes: HashMap<String, Vec<TextEdit>> = HashMap::new();
+        changes.insert(p.text_document.uri.clone(), edits);
+        let edit = WorkspaceEdit { changes };
+        return serde_json::to_value(edit).expect("ICE: LSP serialization");
+    }
     let line1 = p.position.line + 1;
     let col1 = p.position.character + 1;
     let ident = match analysis::find_ident_at(src, line1, col1) {
@@ -421,13 +481,34 @@ pub fn handle_signature_help(state: &ServerState, params: Value) -> Value {
     serde_json::to_value(sig_help).expect("ICE: LSP serialization")
 }
 
+fn byte_range(src: &str, start: usize, end: usize) -> Range {
+    let (sl, sc) = super::typed::offset_to_position(src, start);
+    let (el, ec) = super::typed::offset_to_position(src, end);
+    Range {
+        start: PositionOut {
+            line: sl,
+            character: sc,
+        },
+        end: PositionOut {
+            line: el,
+            character: ec,
+        },
+    }
+}
+
 fn build_diagnostics(state: &ServerState, uri: &str) -> Vec<Diagnostic> {
+    if let Some(t) = state.typed.get(uri) {
+        return render_diagnostics(&t.diagnostics);
+    }
     let analysis = match state.analysis_for(uri) {
         Some(a) => a,
         None => return Vec::new(),
     };
-    analysis
-        .diagnostics
+    render_diagnostics(&analysis.diagnostics)
+}
+
+fn render_diagnostics(diags: &[analysis::LspDiag]) -> Vec<Diagnostic> {
+    diags
         .iter()
         .map(|d| {
             let line0 = d.line.saturating_sub(1);

@@ -66,7 +66,7 @@ Load-bearing design facts:
   (`fs.read`/`fs.write './<name>.store'`), and actor handlers participate as
   scan roots — a send joins the handler's row through the method-name bucket,
   and a spawn joins every handler of the spawned actor. The remaining gaps
-  are `C-1r` in [`roadmap.md`](roadmap.md#effects-and-capabilities).
+  are `E-2` and `E-3` in [`roadmap.md`](roadmap.md#types-errors-and-effects).
 - **`src/comptime/` is constant folding of inferred-pure functions** (HIR→HIR),
   not user-facing metaprogramming.
 - **MIR verify runs in release**, not just debug. It checks phi and edge types,
@@ -94,7 +94,7 @@ Load-bearing design facts:
 
 **There is none.** `src/incr.rs` was deleted. `src/cache.rs` is the *package*
 cache despite the name; the only compile-time reuse is `.jni` interface files
-(`src/interface.rs`), and reading those is off by default (`X-5`).
+(`src/interface.rs`), and reading those is off by default (`X-4`).
 
 The deleted design is recorded here so the next attempt does not rebuild the
 same broken shape. Its call sites only ever logged a dirty count,
@@ -194,8 +194,9 @@ python3 run_benchmarks.py --bench=fib --runs=3
 `ci/sanitize.sh` builds an instrumented runtime into its own target directory
 and sweeps nine targeted programs, rather than doing a `cargo clean` plus two
 full suite runs. It found a real data race in actor-drain code the day it was
-rewritten. Its TSan half is not yet fully meaningful — coroutines migrate
-between OS threads, so it needs `__tsan_switch_to_fiber` annotations (`N-5`).
+rewritten. Context switches carry ASan and TSan fiber annotations (the
+`jinn_coro_swap_*` helpers in `runtime/jinn_rt.h`), so both halves survive
+coroutine migration between OS threads.
 
 **A gate certifies exactly what it runs.** A frontend-only gate certifies that
 code type-checks; it says nothing about codegen, linking, or behaviour. When a

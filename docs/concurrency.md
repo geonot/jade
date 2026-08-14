@@ -425,5 +425,8 @@ program through `jinnc`, in
 Multithreaded MPMC stress, crash consistency, and tail-latency characterization
 live in [`../tests/channel_stress.rs`](../tests/channel_stress.rs). Under the
 sanitize job the C runtime is TSan-instrumented, so those tests double as the
-channel's data-race check — with the caveat in `N-5` that whole-program TSan
-needs fiber annotations before its results can be trusted.
+channel's data-race check. Every context switch carries
+`__tsan_switch_to_fiber` and `__sanitizer_start_switch_fiber` annotations
+(the `jinn_coro_swap_*` helpers in `runtime/jinn_rt.h` are the only way the
+runtime switches), so whole-program TSan and ASan results are meaningful
+across coroutine migrations.

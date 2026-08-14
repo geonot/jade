@@ -35,13 +35,13 @@ pub(in crate::driver) fn should_import_decl(d: &Decl, imports: &Option<Vec<Symbo
     }
 }
 
-pub(in crate::driver) fn resolve_modules(
+pub(crate) fn resolve_modules(
     prog: &mut Program,
     base_dir: &std::path::Path,
     loaded: &mut HashSet<Symbol>,
     packages: &HashMap<Symbol, PathBuf>,
     std_files: &mut HashSet<Symbol>,
-) {
+) -> Result<(), String> {
     let uses: Vec<(Vec<Symbol>, Option<Vec<Symbol>>)> = prog
         .decls
         .iter()
@@ -115,10 +115,9 @@ pub(in crate::driver) fn resolve_modules(
             }
         }
 
-        let (candidate, from_std) = candidates
-            .into_iter()
-            .find(|(c, _)| c.exists())
-            .unwrap_or_else(|| die(&format!("module not found: {key}")));
+        let Some((candidate, from_std)) = candidates.into_iter().find(|(c, _)| c.exists()) else {
+            return Err(format!("module not found: {key}"));
+        };
 
         let jni_path = candidate.with_extension("jni");
         if jni_path.exists()
@@ -137,7 +136,7 @@ pub(in crate::driver) fn resolve_modules(
         }
 
         let src = fs::read_to_string(&candidate)
-            .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", candidate.display())));
+            .map_err(|e| format!("cannot read {}: {e}", candidate.display()))?;
         let file_sym = Symbol::intern(&candidate.display().to_string());
         if from_std {
             std_files.insert(file_sym);
@@ -145,10 +144,10 @@ pub(in crate::driver) fn resolve_modules(
         let tokens = Lexer::new(&src)
             .with_file(file_sym)
             .tokenize()
-            .unwrap_or_else(|e| die(&format!("{}: {e}", candidate.display())));
+            .map_err(|e| format!("{}: {e}", candidate.display()))?;
         let mut mod_prog = Parser::new(tokens)
             .parse_program()
-            .unwrap_or_else(|e| die(&format!("{}: {e}", candidate.display())));
+            .map_err(|e| format!("{}: {e}", candidate.display()))?;
 
         let own_decl_count = mod_prog.decls.len();
         resolve_modules(
@@ -157,7 +156,7 @@ pub(in crate::driver) fn resolve_modules(
             loaded,
             packages,
             std_files,
-        );
+        )?;
 
         let all_decls = std::mem::take(&mut mod_prog.decls);
         let mut own_importable: Vec<Decl> = Vec::new();
@@ -198,6 +197,7 @@ pub(in crate::driver) fn resolve_modules(
             prog.decls.push(d);
         }
     }
+    Ok(())
 }
 
 pub(in crate::driver) fn find_project_entry() -> PathBuf {

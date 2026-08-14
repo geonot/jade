@@ -18,11 +18,10 @@ and unwrap, and `defer` on error exits.
 Error propagation from a child task to its enclosing scope (§8) is implemented
 and specified in [`concurrency.md`](concurrency.md#error-propagation-from-children).
 
-Open gaps, tracked in [`roadmap.md`](roadmap.md#types-inference-and-diagnostics):
-instantiation-site diagnostics; `From` resolution by name pattern; `! E` is a
-parse error in a trait method signature, so no trait method can be fallible
-(`T-5`); and a bare `! E` whose body yields a non-unit value reaches codegen and
-panics instead of being diagnosed in the typer (`T-4`).
+Open gaps, tracked as `E-1` in
+[`roadmap.md`](roadmap.md#types-errors-and-effects): `From` conversion is
+resolved by a name-pattern lookup rather than trait-impl resolution, and
+error-row diagnostics at generic instantiation sites are rough.
 
 ---
 

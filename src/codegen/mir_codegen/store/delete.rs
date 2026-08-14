@@ -6,6 +6,122 @@ impl<'ctx> Compiler<'ctx> {
         encoded_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
+        let vals: Vec<BasicValueEnum<'ctx>> = args.iter().map(|a| self.val(*a)).collect();
+        self.emit_store_delete_vals(encoded_name, &vals)
+    }
+
+    fn cascade_children(&self, store_name: &str) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = Vec::new();
+        if let Some(sd) = self.store_defs.get(store_name) {
+            for r in &sd.relations {
+                if r.is_has_many
+                    && r.cascade
+                    && let Some(child_sd) = self.store_defs.get(&*r.target.as_str())
+                    && let Some(back) = child_sd
+                        .relations
+                        .iter()
+                        .find(|b| !b.is_has_many && &*b.target.as_str() == store_name)
+                {
+                    out.push((r.target.to_string(), back.field.to_string()));
+                }
+            }
+        }
+        for (cname, csd) in &self.store_defs {
+            for r in &csd.relations {
+                if !r.is_has_many && r.cascade && &*r.target.as_str() == store_name {
+                    out.push((cname.to_string(), r.field.to_string()));
+                }
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    fn ensure_cascade_delete_fn(
+        &mut self,
+        child: &str,
+        fk: &str,
+        hard: bool,
+    ) -> Result<inkwell::values::FunctionValue<'ctx>, String> {
+        let name = format!(
+            "__cascade_{}_{child}__{fk}",
+            if hard { "dst" } else { "del" }
+        );
+        if let Some(f) = self.module.get_function(&name) {
+            return Ok(f);
+        }
+        let i64t = self.ctx.i64_type();
+        let fn_ty = self.ctx.void_type().fn_type(&[i64t.into()], false);
+        let f = self.module.add_function(&name, fn_ty, None);
+        let saved_block = self.bld.get_insert_block();
+        let saved_fn = self.cur_fn;
+        let entry = self.ctx.append_basic_block(f, "entry");
+        self.bld.position_at_end(entry);
+        self.cur_fn = Some(f);
+        let sid = f
+            .get_nth_param(0)
+            .ok_or_else(|| "ICE: cascade fn has no param".to_string())?;
+        let rest = format!("{child}__{fk}__eq");
+        if hard {
+            self.emit_store_hard_delete_vals(&rest, &[sid])?;
+        } else {
+            self.emit_store_delete_vals(&rest, &[sid])?;
+        }
+        b!(self.bld.build_return(None));
+        self.cur_fn = saved_fn;
+        if let Some(bb) = saved_block {
+            self.bld.position_at_end(bb);
+        }
+        Ok(f)
+    }
+
+    fn emit_cascade_calls(
+        &mut self,
+        edges: &[(String, String)],
+        sid_buf: PointerValue<'ctx>,
+        nsid_ptr: PointerValue<'ctx>,
+        hard: bool,
+    ) -> Result<(), String> {
+        let mut fns = Vec::new();
+        for (child, fk) in edges {
+            fns.push(self.ensure_cascade_delete_fn(child, fk, hard)?);
+        }
+        let i64t = self.ctx.i64_type();
+        let fv = self.cur_fn.expect("ICE: cur_fn not set");
+        let j_ptr = self.entry_alloca(i64t.into(), "csc.j");
+        b!(self.bld.build_store(j_ptr, i64t.const_int(0, false)));
+        let loop_bb = self.ctx.append_basic_block(fv, "csc.loop");
+        let body_bb = self.ctx.append_basic_block(fv, "csc.body");
+        let done_bb = self.ctx.append_basic_block(fv, "csc.done");
+        b!(self.bld.build_unconditional_branch(loop_bb));
+        self.bld.position_at_end(loop_bb);
+        let j = b!(self.bld.build_load(i64t, j_ptr, "csc.jv")).into_int_value();
+        let n = b!(self.bld.build_load(i64t, nsid_ptr, "csc.nv")).into_int_value();
+        let cmp = b!(self
+            .bld
+            .build_int_compare(inkwell::IntPredicate::SLT, j, n, "csc.cmp"));
+        b!(self.bld.build_conditional_branch(cmp, body_bb, done_bb));
+        self.bld.position_at_end(body_bb);
+        let slot = unsafe { b!(self.bld.build_gep(i64t, sid_buf, &[j], "csc.slot")) };
+        let sid = b!(self.bld.build_load(i64t, slot, "csc.sid")).into_int_value();
+        for f in &fns {
+            b!(self.bld.build_call(*f, &[sid.into()], ""));
+        }
+        let j1 = b!(self
+            .bld
+            .build_int_add(j, i64t.const_int(1, false), "csc.j1"));
+        b!(self.bld.build_store(j_ptr, j1));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+        self.bld.position_at_end(done_bb);
+        Ok(())
+    }
+
+    fn emit_store_delete_vals(
+        &mut self,
+        encoded_name: &str,
+        vals: &[BasicValueEnum<'ctx>],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         let (store_name, _, _, _, _) = Self::parse_encoded_filter(encoded_name)?;
         let sd = self
             .store_defs
@@ -15,12 +131,12 @@ impl<'ctx> Compiler<'ctx> {
         let is_simple = sd.decorators.contains(&crate::ast::StoreDecorator::Simple);
 
         if is_simple || sd.fields.iter().all(|f| f.name != "deleted") {
-            return self.emit_store_hard_delete(encoded_name, args);
+            return self.emit_store_hard_delete_vals(encoded_name, vals);
         }
 
         let (store_name, field_name, op, primary_pred, extra_specs) =
             Self::parse_encoded_filter(encoded_name)?;
-        if args.is_empty() {
+        if vals.is_empty() {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
         }
         let (sd, st, rec_size, fp) = self.setup_store_access(store_name)?;
@@ -48,10 +164,38 @@ impl<'ctx> Compiler<'ctx> {
 
         let deleted_idx = sd.fields.iter().position(|f| f.name == "deleted").unwrap();
 
-        let filter_val = self.val(args[0]);
+        let filter_val = vals[0];
 
         let count = self.store_read_count(fp)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
+
+        let edges = self.cascade_children(store_name);
+        let sid_pos = sd.fields.iter().position(|f| f.name == "sid");
+        let cascade = if !edges.is_empty()
+            && let Some(sidx) = sid_pos
+        {
+            let i64t = self.ctx.i64_type();
+            let malloc_fn = self.ensure_malloc();
+            let bufsz = b!(self.bld.build_int_add(
+                b!(self
+                    .bld
+                    .build_int_mul(count, i64t.const_int(8, false), "csc.sz")),
+                i64t.const_int(8, false),
+                "csc.sz1"
+            ));
+            let sid_buf = self
+                .call_result(b!(self.bld.build_call(
+                    malloc_fn,
+                    &[bufsz.into()],
+                    "csc.buf"
+                )))
+                .into_pointer_value();
+            let nsid_ptr = self.entry_alloca(i64t.into(), "csc.n");
+            b!(self.bld.build_store(nsid_ptr, i64t.const_int(0, false)));
+            Some((sid_buf, nsid_ptr, sidx))
+        } else {
+            None
+        };
 
         self.ensure_time_fn();
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
@@ -111,7 +255,7 @@ impl<'ctx> Compiler<'ctx> {
                     .find(|(_, f)| f.name == *efield)
                     .map(|(i, f)| (i, f.ty.clone()))
                     .unwrap_or((0, Type::I64));
-                let ev = self.val(args[1 + ei]);
+                let ev = vals[1 + ei];
                 (*lop, fi, ft, *eop, *epred, ev)
             })
             .collect();
@@ -134,6 +278,19 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(del_gep, now));
 
         self.wal_write_delete(store_name, rec_ptr, rec_size)?;
+        if let Some((sid_buf, nsid_ptr, sidx)) = cascade {
+            let sid_gep = b!(self
+                .bld
+                .build_struct_gep(st, rec_ptr, sidx as u32, "csc.sgep"));
+            let sid_v = b!(self.bld.build_load(i64t, sid_gep, "csc.sv")).into_int_value();
+            let n = b!(self.bld.build_load(i64t, nsid_ptr, "csc.nl")).into_int_value();
+            let slot = unsafe { b!(self.bld.build_gep(i64t, sid_buf, &[n], "csc.sl")) };
+            b!(self.bld.build_store(slot, sid_v));
+            let n1 = b!(self
+                .bld
+                .build_int_add(n, i64t.const_int(1, false), "csc.n1"));
+            b!(self.bld.build_store(nsid_ptr, n1));
+        }
         b!(self.bld.build_unconditional_branch(next_bb));
 
         self.bld.position_at_end(next_bb);
@@ -205,6 +362,12 @@ impl<'ctx> Compiler<'ctx> {
             ));
         }
 
+        if let Some((sid_buf, nsid_ptr, _)) = cascade {
+            self.emit_cascade_calls(&edges, sid_buf, nsid_ptr, false)?;
+            let free_fn = self.ensure_free();
+            b!(self.bld.build_call(free_fn, &[sid_buf.into()], ""));
+        }
+
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 
@@ -213,9 +376,18 @@ impl<'ctx> Compiler<'ctx> {
         encoded_name: &str,
         args: &[mir::ValueId],
     ) -> Result<BasicValueEnum<'ctx>, String> {
+        let vals: Vec<BasicValueEnum<'ctx>> = args.iter().map(|a| self.val(*a)).collect();
+        self.emit_store_hard_delete_vals(encoded_name, &vals)
+    }
+
+    fn emit_store_hard_delete_vals(
+        &mut self,
+        encoded_name: &str,
+        vals: &[BasicValueEnum<'ctx>],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
         let (store_name, field_name, primary_op, primary_pred, extra_conds) =
             Self::parse_encoded_filter(encoded_name)?;
-        if args.is_empty() {
+        if vals.is_empty() {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
         }
 
@@ -242,10 +414,37 @@ impl<'ctx> Compiler<'ctx> {
             .map(|(i, f)| (i, f.ty.clone()))
             .ok_or_else(|| format!("unknown field '{field_name}' in store '{store_name}'"))?;
 
-        let filter_val = self.val(args[0]);
+        let filter_val = vals[0];
 
         let count = self.store_read_count(fp)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
+
+        let edges = self.cascade_children(store_name);
+        let sid_pos = sd.fields.iter().position(|f| f.name == "sid");
+        let cascade = if !edges.is_empty()
+            && let Some(sidx) = sid_pos
+        {
+            let malloc_fn = self.ensure_malloc();
+            let bufsz = b!(self.bld.build_int_add(
+                b!(self
+                    .bld
+                    .build_int_mul(count, i64t.const_int(8, false), "csc.sz")),
+                i64t.const_int(8, false),
+                "csc.sz1"
+            ));
+            let sid_buf = self
+                .call_result(b!(self.bld.build_call(
+                    malloc_fn,
+                    &[bufsz.into()],
+                    "csc.buf"
+                )))
+                .into_pointer_value();
+            let nsid_ptr = self.entry_alloca(i64t.into(), "csc.n");
+            b!(self.bld.build_store(nsid_ptr, i64t.const_int(0, false)));
+            Some((sid_buf, nsid_ptr, sidx))
+        } else {
+            None
+        };
 
         let filename = format!("{store_name}.store\0");
         let file_str = b!(self.bld.build_global_string_ptr(&filename, "del.path"));
@@ -400,7 +599,7 @@ impl<'ctx> Compiler<'ctx> {
                         .find(|(_, f)| f.name == *fname)
                         .map(|(i, f)| (i, f.ty.clone()))
                         .unwrap_or((0, Type::I64));
-                    let ev = self.val(args[1 + ei]);
+                    let ev = vals[1 + ei];
                     (*lop, fi, ft, *cop, *cpred, ev)
                 })
                 .collect();
@@ -429,6 +628,19 @@ impl<'ctx> Compiler<'ctx> {
             {
                 b!(self.bld.build_call(hook_fn, &[], ""));
             }
+        }
+        if let Some((sid_buf, nsid_ptr, sidx)) = cascade {
+            let sid_gep = b!(self
+                .bld
+                .build_struct_gep(st, rec_ptr, sidx as u32, "csc.sgep"));
+            let sid_v = b!(self.bld.build_load(i64t, sid_gep, "csc.sv")).into_int_value();
+            let n = b!(self.bld.build_load(i64t, nsid_ptr, "csc.nl")).into_int_value();
+            let slot = unsafe { b!(self.bld.build_gep(i64t, sid_buf, &[n], "csc.sl")) };
+            b!(self.bld.build_store(slot, sid_v));
+            let n1 = b!(self
+                .bld
+                .build_int_add(n, i64t.const_int(1, false), "csc.n1"));
+            b!(self.bld.build_store(nsid_ptr, n1));
         }
         b!(self.bld.build_unconditional_branch(skip_bb));
 
@@ -506,6 +718,12 @@ impl<'ctx> Compiler<'ctx> {
         self.invalidate_store_indexes(store_name)?;
 
         self.store_unlock(store_name, committed_fp)?;
+
+        if let Some((sid_buf, nsid_ptr, _)) = cascade {
+            self.emit_cascade_calls(&edges, sid_buf, nsid_ptr, true)?;
+            b!(self.bld.build_call(free_fn, &[sid_buf.into()], ""));
+        }
+
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 }

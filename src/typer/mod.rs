@@ -149,7 +149,7 @@ pub struct Typer {
         IndexMap<Symbol, (DefId, Vec<(Symbol, Type)>, Vec<(Symbol, Vec<Type>, u32)>)>,
     pub(crate) store_schemas: IndexMap<Symbol, Vec<(Symbol, Type)>>,
     pub(crate) store_decorators: IndexMap<Symbol, Vec<crate::ast::StoreDecorator>>,
-    pub(crate) store_relations: IndexMap<Symbol, Vec<(Symbol, Symbol, bool)>>,
+    pub(crate) store_relations: IndexMap<Symbol, Vec<(Symbol, Symbol, bool, bool)>>,
     pub(crate) store_error_def: Option<crate::ast::ErrDef>,
     pub(crate) view_defs: IndexMap<Symbol, (Symbol, Vec<crate::ast::QueryClause>)>,
     pub(crate) mono_depth: u32,

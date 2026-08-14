@@ -25,7 +25,8 @@ use cmd_init::cmd_init;
 use cmd_pkg::{cmd_fetch, cmd_package, cmd_publish, cmd_update};
 use pipeline::compile_and_link;
 use project::ProjectConfig;
-use sources::{find_project_entry, load_packages, resolve_modules};
+pub(crate) use sources::resolve_modules;
+use sources::{find_project_entry, load_packages};
 
 fn init_tracing(cli: &Cli) {
     use tracing_subscriber::EnvFilter;
@@ -253,7 +254,8 @@ pub fn run() {
                 }
                 let packages = load_packages(base_dir);
                 let mut std_files: HashSet<Symbol> = HashSet::new();
-                resolve_modules(&mut prog, base_dir, &mut loaded, &packages, &mut std_files);
+                resolve_modules(&mut prog, base_dir, &mut loaded, &packages, &mut std_files)
+                    .unwrap_or_else(|e| die(&e));
                 let mut typer = Typer::new();
                 typer.set_source_dir(base_dir.to_path_buf());
                 typer.set_std_files(std_files);
@@ -394,7 +396,8 @@ pub fn run() {
     let packages = load_packages(base_dir);
 
     let mut std_files: HashSet<Symbol> = HashSet::new();
-    resolve_modules(&mut prog, base_dir, &mut loaded, &packages, &mut std_files);
+    resolve_modules(&mut prog, base_dir, &mut loaded, &packages, &mut std_files)
+        .unwrap_or_else(|e| die(&e));
 
     if !cli.lib && !cli.test && !cli.standalone {
         let has_main = prog

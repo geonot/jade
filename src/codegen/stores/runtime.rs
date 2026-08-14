@@ -76,6 +76,15 @@ impl<'ctx> Compiler<'ctx> {
             self.module
                 .add_function("jinn_wal_open", ft, Some(Linkage::External));
         }
+        if self.module.get_function("jinn_wal_set_policy").is_none() {
+            let i32t = self.ctx.i32_type();
+            let ft = self
+                .ctx
+                .void_type()
+                .fn_type(&[ptr.into(), i32t.into()], false);
+            self.module
+                .add_function("jinn_wal_set_policy", ft, Some(Linkage::External));
+        }
         if self.module.get_function("jinn_store_recover").is_none() {
             let i64t = self.ctx.i64_type();
             let ft = i64t.fn_type(

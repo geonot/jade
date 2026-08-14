@@ -9,7 +9,7 @@ void jinn_actor_park(void *mailbox_ptr) {
     jinn_coro_t *self = w->current;
     self->state = JINN_CORO_SUSPENDED;
     self->wait_chan = mailbox_ptr;
-    jinn_context_swap(&self->ctx, &w->sched_ctx);
+    jinn_coro_swap_out(self, &w->sched_ctx);
 }
 void jinn_actor_wake(void *mailbox_ptr) {
     (void)mailbox_ptr;
@@ -99,7 +99,7 @@ void jinn_actor_join(void *join_slot_ptr) {
         j->waitq = self;
         wk->held_lock = &j->lock;
         wk->last_action = SCHED_ACTION_PARK;
-        jinn_context_swap(&self->ctx, &wk->sched_ctx);
+        jinn_coro_swap_out(self, &wk->sched_ctx);
 
     }
 }

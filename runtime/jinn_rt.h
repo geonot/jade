@@ -91,6 +91,10 @@ struct jinn_coro {
     _Atomic(int32_t)   cancelled;
     jinn_waitq_node_t  wq_node;
     void              *txn_state;
+    const void        *san_ret_bottom;
+    size_t             san_ret_size;
+    void              *san_fiber;
+    void              *san_ret_fiber;
 };
 #define JINN_STACK_SIZE  (64 * 1024)
 #define JINN_GUARD_SIZE  4096
@@ -105,6 +109,67 @@ void jinn_gen_destroy(void *gen_blk);
 extern _Thread_local jinn_coro_t *tl_gen_coro;
 
 void jinn_context_swap(jinn_context_t *from, jinn_context_t *to);
+
+#ifndef __has_feature
+#define __has_feature(x) 0
+#endif
+#if defined(__SANITIZE_ADDRESS__) || __has_feature(address_sanitizer)
+#define JINN_SAN_ASAN_FIBERS 1
+void __sanitizer_start_switch_fiber(void **fake_stack_save, const void *bottom,
+                                    size_t size);
+void __sanitizer_finish_switch_fiber(void *fake_stack_save,
+                                     const void **bottom_old, size_t *size_old);
+#endif
+#if defined(__SANITIZE_THREAD__) || __has_feature(thread_sanitizer)
+#define JINN_SAN_TSAN_FIBERS 1
+void *__tsan_get_current_fiber(void);
+void *__tsan_create_fiber(unsigned flags);
+void __tsan_destroy_fiber(void *fiber);
+void __tsan_switch_to_fiber(void *fiber, unsigned flags);
+#endif
+
+static inline void jinn_coro_swap_in(jinn_context_t *from, jinn_coro_t *c) {
+#ifdef JINN_SAN_TSAN_FIBERS
+    c->san_ret_fiber = __tsan_get_current_fiber();
+#endif
+#ifdef JINN_SAN_ASAN_FIBERS
+    void *san_fake = NULL;
+    __sanitizer_start_switch_fiber(&san_fake,
+                                   (const char *)c->stack_base + JINN_GUARD_SIZE,
+                                   (size_t)c->stack_size - JINN_GUARD_SIZE);
+#endif
+#ifdef JINN_SAN_TSAN_FIBERS
+    __tsan_switch_to_fiber(c->san_fiber, 0);
+#endif
+    jinn_context_swap(from, &c->ctx);
+#ifdef JINN_SAN_ASAN_FIBERS
+    __sanitizer_finish_switch_fiber(san_fake, NULL, NULL);
+#endif
+}
+
+static inline void jinn_coro_swap_out(jinn_coro_t *c, jinn_context_t *to) {
+#ifdef JINN_SAN_ASAN_FIBERS
+    void *san_fake = NULL;
+    __sanitizer_start_switch_fiber(&san_fake, c->san_ret_bottom, c->san_ret_size);
+#endif
+#ifdef JINN_SAN_TSAN_FIBERS
+    __tsan_switch_to_fiber(c->san_ret_fiber, 0);
+#endif
+    jinn_context_swap(&c->ctx, to);
+#ifdef JINN_SAN_ASAN_FIBERS
+    __sanitizer_finish_switch_fiber(san_fake, &c->san_ret_bottom, &c->san_ret_size);
+#endif
+}
+
+static inline void jinn_coro_swap_out_final(jinn_coro_t *c, jinn_context_t *to) {
+#ifdef JINN_SAN_ASAN_FIBERS
+    __sanitizer_start_switch_fiber(NULL, c->san_ret_bottom, c->san_ret_size);
+#endif
+#ifdef JINN_SAN_TSAN_FIBERS
+    __tsan_switch_to_fiber(c->san_ret_fiber, 0);
+#endif
+    jinn_context_swap(&c->ctx, to);
+}
 #define JINN_DEQUE_INIT_CAP 1024
 
 typedef struct jinn_deque_buf jinn_deque_buf_t;
@@ -423,6 +488,7 @@ void jinn_txn_track_aux(FILE *fp, void (*cb)(void *), void *arg);
 void jinn_txn_swap_fp(FILE *oldfp, FILE *newfp);
 void jinn_wal_commit_group(FILE *wal);
 FILE *jinn_wal_open(const char *path);
+void  jinn_wal_set_policy(FILE *wal, int policy);
 int  jinn_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload_len);
 void jinn_wal_write_must(FILE *wal, uint8_t op, const void *payload, uint32_t payload_len);
 void jinn_wal_checkpoint(FILE *wal);

@@ -372,4 +372,185 @@ impl<'ctx> Compiler<'ctx> {
 
         Ok(vec_hdr.into())
     }
+
+    pub(in crate::codegen) fn emit_store_all_where(
+        &mut self,
+        encoded_name: &str,
+        args: &[mir::ValueId],
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let (store_name, field_name, op, primary_pred, extra_specs) =
+            Self::parse_encoded_filter(encoded_name)?;
+        if args.is_empty() {
+            return Err(format!("malformed store allq args: {encoded_name}"));
+        }
+        let sd = self
+            .store_defs
+            .get(store_name)
+            .ok_or_else(|| format!("unknown store '{store_name}'"))?
+            .clone();
+
+        let ensure_fn_name = format!("__store_ensure_{store_name}");
+        if let Some(ensure_fn) = self.module.get_function(&ensure_fn_name) {
+            b!(self.bld.build_call(ensure_fn, &[], ""));
+        } else {
+            let ensure_fn = self.gen_store_ensure_open(&sd)?;
+            b!(self.bld.build_call(ensure_fn, &[], ""));
+        }
+
+        let fp = self.load_store_fp(store_name)?;
+        let i64t = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+
+        let rec_name = format!("__store_{store_name}_rec");
+        let rec_st = self
+            .module
+            .get_struct_type(&rec_name)
+            .expect("ICE: struct type not declared");
+        let rec_size = self.store_record_size(&sd);
+
+        let jinn_name = format!("__store_{store_name}");
+        let jinn_st = self
+            .module
+            .get_struct_type(&jinn_name)
+            .expect("ICE: struct type not declared");
+        let jinn_size = self.type_store_size(jinn_st.into());
+
+        let (field_idx, field_ty) = sd
+            .fields
+            .iter()
+            .enumerate()
+            .find(|(_, f)| f.name == field_name)
+            .map(|(i, f)| (i, f.ty.clone()))
+            .ok_or_else(|| format!("unknown field '{field_name}' in store '{store_name}'"))?;
+        let filter_val = self.val(args[0]);
+        let extras: Vec<(
+            crate::ast::LogicalOp,
+            usize,
+            Type,
+            crate::ast::BinOp,
+            crate::ast::FilterPred,
+            BasicValueEnum<'ctx>,
+        )> = extra_specs
+            .iter()
+            .enumerate()
+            .map(|(ei, (lop, efield, eop, epred))| {
+                let (fi, ft) = sd
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .find(|(_, f)| f.name.as_str() == *efield)
+                    .map(|(i, f)| (i, f.ty.clone()))
+                    .unwrap_or((0, Type::I64));
+                let ev = self.val(args[1 + ei]);
+                (*lop, fi, ft, *eop, *epred, ev)
+            })
+            .collect();
+
+        let count = self.store_read_count(fp)?;
+        let raw_buf = self.store_load_records(fp, count, rec_size)?;
+
+        let header_ty = self.vec_header_type();
+        let malloc_fn = self.ensure_malloc();
+        let vec_hdr = self
+            .call_result(b!(self.bld.build_call(
+                malloc_fn,
+                &[i64t.const_int(24, false).into()],
+                "allq.vec"
+            )))
+            .into_pointer_value();
+        let d0 = b!(self.bld.build_struct_gep(header_ty, vec_hdr, 0, "allq.v.d"));
+        b!(self.bld.build_store(d0, ptr_ty.const_null()));
+        let d1 = b!(self.bld.build_struct_gep(header_ty, vec_hdr, 1, "allq.v.l"));
+        b!(self.bld.build_store(d1, i64t.const_int(0, false)));
+        let d2 = b!(self.bld.build_struct_gep(header_ty, vec_hdr, 2, "allq.v.c"));
+        b!(self.bld.build_store(d2, i64t.const_int(0, false)));
+
+        let deleted_idx = sd.fields.iter().position(|f| f.name == "deleted");
+
+        let fv = self.cur_fn.expect("ICE: cur_fn not set");
+        let idx_ptr = self.entry_alloca(i64t.into(), "allq.idx");
+        b!(self.bld.build_store(idx_ptr, i64t.const_int(0, false)));
+
+        let loop_bb = self.ctx.append_basic_block(fv, "allq.loop");
+        let body_bb = self.ctx.append_basic_block(fv, "allq.body");
+        let live_bb = self.ctx.append_basic_block(fv, "allq.live");
+        let push_bb = self.ctx.append_basic_block(fv, "allq.push");
+        let next_bb = self.ctx.append_basic_block(fv, "allq.next");
+        let done_bb = self.ctx.append_basic_block(fv, "allq.done");
+
+        b!(self.bld.build_unconditional_branch(loop_bb));
+        self.bld.position_at_end(loop_bb);
+        let idx = b!(self.bld.build_load(i64t, idx_ptr, "allq.i")).into_int_value();
+        let cmp =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::ULT, idx, count, "allq.cmp"));
+        b!(self.bld.build_conditional_branch(cmp, body_bb, done_bb));
+
+        self.bld.position_at_end(body_bb);
+        let raw_off = b!(self
+            .bld
+            .build_int_mul(idx, i64t.const_int(rec_size, false), "allq.roff"));
+        let raw_ptr = unsafe {
+            b!(self
+                .bld
+                .build_gep(self.ctx.i8_type(), raw_buf, &[raw_off], "allq.rptr"))
+        };
+
+        if let Some(del_idx) = deleted_idx {
+            let del_gep =
+                b!(self
+                    .bld
+                    .build_struct_gep(rec_st, raw_ptr, del_idx as u32, "allq.del"));
+            let del_val = b!(self.bld.build_load(i64t, del_gep, "allq.del.val")).into_int_value();
+            let is_deleted = b!(self.bld.build_int_compare(
+                inkwell::IntPredicate::NE,
+                del_val,
+                i64t.const_int(0, false),
+                "allq.is_del"
+            ));
+            b!(self
+                .bld
+                .build_conditional_branch(is_deleted, next_bb, live_bb));
+        } else {
+            b!(self.bld.build_unconditional_branch(live_bb));
+        }
+
+        self.bld.position_at_end(live_bb);
+        let matched = self.eval_store_filter_pred(
+            raw_ptr,
+            rec_st,
+            field_idx,
+            &field_ty,
+            op,
+            primary_pred,
+            filter_val,
+            &extras,
+        )?;
+        b!(self.bld.build_conditional_branch(matched, push_bb, next_bb));
+
+        self.bld.position_at_end(push_bb);
+        let jinn_val = self.load_store_record_as_jinn(rec_st, raw_ptr, &sd)?;
+        self.vec_push_raw_with_floor(
+            vec_hdr,
+            jinn_val,
+            jinn_st.into(),
+            jinn_size,
+            self.empty_vec_growth_floor,
+        )?;
+        b!(self.bld.build_unconditional_branch(next_bb));
+
+        self.bld.position_at_end(next_bb);
+        let next_idx = b!(self
+            .bld
+            .build_int_add(idx, i64t.const_int(1, false), "allq.next"));
+        b!(self.bld.build_store(idx_ptr, next_idx));
+        b!(self.bld.build_unconditional_branch(loop_bb));
+
+        self.bld.position_at_end(done_bb);
+        let free_fn = self.ensure_free();
+        b!(self.bld.build_call(free_fn, &[raw_buf.into()], ""));
+
+        Ok(vec_hdr.into())
+    }
 }

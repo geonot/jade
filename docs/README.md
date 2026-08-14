@@ -35,13 +35,14 @@ and each is pinned by a conformance suite.
 | Document | Covers |
 | --- | --- |
 | [`internals.md`](internals.md) | Building, the compilation pipeline, the source trees, the incremental-compilation post-mortem, how to write tests that scale, the gates, and project conventions. |
-| [`roadmap.md`](roadmap.md) | Every known open item, with a reproduction where one exists. |
+| [`roadmap.md`](roadmap.md) | Every known open item, and where the language stands relative to alpha. |
 | [`SECURITY.md`](SECURITY.md) | Reporting a vulnerability; what is and is not in scope. |
 
 ## Design — specified, not built
 
-Nothing in `design/` is implemented. Each document states what exists today
-before specifying the target.
+Design documents are specified ahead of implementation. Each states what
+exists today before specifying the target; where early steps have shipped, the
+document's status header says which.
 
 | Document | Covers |
 | --- | --- |
@@ -49,6 +50,6 @@ before specifying the target.
 | [`design/compiler-prereqs.md`](design/compiler-prereqs.md) | The compiler machinery lamp assumes: capabilities as an effect pass, path-scoped package identity, interface v2 with the three-hash ladder, and config blocks. |
 | [`design/fmt-and-lint.md`](design/fmt-and-lint.md) | The formatter and linter: lossless syntax tree, tiered rule engine, and the verifier that makes behaviour preservation checkable rather than hoped for. |
 | [`design/libjn.md`](design/libjn.md) | A C standard library in Jinn, and the language gaps it is a forcing function for. |
-| [`design/second-class-refs.md`](design/second-class-refs.md) | Borrowed views in parameter, expression, and yield positions — never storable, so no lifetime syntax; the honest fix for element-read deep copies (`M-13`). |
-| [`design/freeze.md`](design/freeze.md) | One-way deep immutability for sharing read-only data across tasks without copies or refcounts (`M-14`). |
-| [`design/closure-captures.md`](design/closure-captures.md) | Capture rules for closures and generators — specified before implementation, as `M-16` requires. |
+| [`design/second-class-refs.md`](design/second-class-refs.md) | Borrowed views in parameter, expression, and yield positions — never storable, so no lifetime syntax; the honest fix for element-read deep copies. |
+| [`design/freeze.md`](design/freeze.md) | One-way deep immutability for sharing read-only data across tasks without copies or refcounts. |
+| [`design/closure-captures.md`](design/closure-captures.md) | Capture rules for closures and generators, specified before implementation. |

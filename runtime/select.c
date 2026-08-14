@@ -244,7 +244,7 @@ int jinn_select(jinn_select_case_t *cases, int n, int has_default) {
         pw->held_locks = locks;
         pw->held_locks_n = n_locks;
         pw->last_action = SCHED_ACTION_PARK;
-        jinn_context_swap(&self->ctx, &pw->sched_ctx);
+        jinn_coro_swap_out(self, &pw->sched_ctx);
         lock_all(cases, lock_order, n);
         for (int i = 0; i < n; i++) {
             jinn_select_case_t *c = &cases[i];
