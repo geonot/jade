@@ -32,6 +32,7 @@ fn is_useless_top_expr(e: &Expr) -> bool {
         | Expr::IndexPlaceholder(..)
         | Expr::Ref(..)
         | Expr::Deref(..)
+        | Expr::Freeze(..)
         | Expr::ListComp(..)
         | Expr::StoreQuery(..)
         | Expr::StoreCount(..)

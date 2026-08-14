@@ -40,7 +40,9 @@ impl InferCtx {
             | Type::Ptr(inner)
             | Type::Coroutine(inner)
             | Type::Generator(inner)
-            | Type::Channel(inner) => self.occurs_in(v, inner),
+            | Type::Channel(inner)
+            | Type::View(inner)
+            | Type::Frozen(inner) => self.occurs_in(v, inner),
             Type::Map(k, val) => self.occurs_in(v, k) || self.occurs_in(v, val),
             Type::Tuple(tys) => tys.iter().any(|t| self.occurs_in(v, t)),
             Type::Fn(params, ret) => {
@@ -64,7 +66,9 @@ impl InferCtx {
                 | Type::Generator(i)
                 | Type::Channel(i)
                 | Type::Alias(_, i)
-                | Type::Newtype(_, i) => scan(i),
+                | Type::Newtype(_, i)
+                | Type::View(i)
+                | Type::Frozen(i) => scan(i),
                 Type::Map(k, v) => scan(k) || scan(v),
                 Type::Tuple(ts) => ts.iter().any(scan),
                 Type::Fn(ps, r) => ps.iter().any(scan) || scan(r),
@@ -103,6 +107,8 @@ impl InferCtx {
             Type::Coroutine(inner) => Type::Coroutine(Box::new(self.canonicalize_type(inner))),
             Type::Generator(inner) => Type::Generator(Box::new(self.canonicalize_type(inner))),
             Type::Channel(inner) => Type::Channel(Box::new(self.canonicalize_type(inner))),
+            Type::View(inner) => Type::View(Box::new(self.canonicalize_type(inner))),
+            Type::Frozen(inner) => Type::Frozen(Box::new(self.canonicalize_type(inner))),
             Type::Struct(n, args) => {
                 Type::Struct(*n, args.iter().map(|t| self.canonicalize_type(t)).collect())
             }
@@ -307,6 +313,8 @@ impl InferCtx {
                 Type::Generator(Box::new(self.resolve_core(inner, warn_only)))
             }
             Type::Channel(inner) => Type::Channel(Box::new(self.resolve_core(inner, warn_only))),
+            Type::View(inner) => Type::View(Box::new(self.resolve_core(inner, warn_only))),
+            Type::Frozen(inner) => Type::Frozen(Box::new(self.resolve_core(inner, warn_only))),
 
             Type::Struct(n, args) => Type::Struct(
                 *n,
@@ -383,6 +391,8 @@ impl InferCtx {
             Type::Coroutine(inner) => Type::Coroutine(Box::new(self.substitute(inner, subst))),
             Type::Generator(inner) => Type::Generator(Box::new(self.substitute(inner, subst))),
             Type::Channel(inner) => Type::Channel(Box::new(self.substitute(inner, subst))),
+            Type::View(inner) => Type::View(Box::new(self.substitute(inner, subst))),
+            Type::Frozen(inner) => Type::Frozen(Box::new(self.substitute(inner, subst))),
             _ => ty.clone(),
         }
     }

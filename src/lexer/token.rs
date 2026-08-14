@@ -84,6 +84,7 @@ pub enum Token {
     Syscall,
     Global,
     Nop,
+    Freeze,
     Plus,
     Minus,
     Star,
@@ -269,6 +270,7 @@ impl std::fmt::Display for Token {
             Self::Syscall => f.write_str("syscall"),
             Self::Global => f.write_str("global"),
             Self::Nop => f.write_str("nop"),
+            Self::Freeze => f.write_str("freeze"),
         }
     }
 }

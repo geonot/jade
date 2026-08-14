@@ -86,6 +86,17 @@ impl Typer {
                 let hi = self.lower_expr(inner)?;
                 let ty = hi.ty.clone();
 
+                if crate::typer::expr::views::type_contains_view(
+                    &self.infer_ctx.shallow_resolve(&ty),
+                ) {
+                    return Err(format!(
+                        "{}: a view cannot be yielded: the consumer resumes after this \
+                         frame is suspended, so the borrow would dangle; yield the \
+                         owning container or a copied slice",
+                        span.loc()
+                    ));
+                }
+
                 if let Some(ref ret) = self.current_fn_ret_ty
                     && let Type::Generator(inner_ty) = ret
                 {

@@ -2,7 +2,7 @@ use crate::intern::Symbol;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-const INTERFACE_VERSION: u32 = 2;
+const INTERFACE_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum IType {
@@ -31,6 +31,8 @@ pub enum IType {
     ActorRef(std::string::String),
     Coroutine(Box<IType>),
     Channel(Box<IType>),
+    View(Box<IType>),
+    Frozen(Box<IType>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,6 +143,8 @@ impl From<&crate::types::Type> for IType {
             Type::Generator(inner) => IType::Coroutine(Box::new(inner.as_ref().into())),
 
             Type::Row(_) => IType::I64,
+            Type::View(inner) => IType::View(Box::new(inner.as_ref().into())),
+            Type::Frozen(inner) => IType::Frozen(Box::new(inner.as_ref().into())),
         }
     }
 }
@@ -179,6 +183,8 @@ impl From<&IType> for crate::types::Type {
             IType::ActorRef(n) => Type::ActorRef(Symbol::intern(n)),
             IType::Coroutine(inner) => Type::Coroutine(Box::new(inner.as_ref().into())),
             IType::Channel(inner) => Type::Channel(Box::new(inner.as_ref().into())),
+            IType::View(inner) => Type::View(Box::new(inner.as_ref().into())),
+            IType::Frozen(inner) => Type::Frozen(Box::new(inner.as_ref().into())),
         }
     }
 }

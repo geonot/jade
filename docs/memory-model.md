@@ -46,9 +46,9 @@ does.
 
 | Category | Members | `b is a` | Drop obligation |
 | --- | --- | --- | --- |
-| **Scalar** | `i8`–`u64`, `f32`/`f64`, `bool`, raw pointers (`%T`), function values, enums with no heap payload | bit-copy; both live | none |
+| **Scalar** | `i8`–`u64`, `f32`/`f64`, `bool`, raw pointers (`%T`), enums with no heap payload | bit-copy; both live | none |
 | **Value** | `String` (24-byte SSO handle), structs and enums containing only scalars and `String` | deep copy; both live, independent | each copy frees its own heap |
-| **Aggregate** | `Vec of T`, `Map of K, V`, generators, coroutines, and any struct or enum with an aggregate-typed field (transitively) | **move**; `a` is dead until reassigned | exactly one owner drops |
+| **Aggregate** | `Vec of T`, `Map of K, V`, generators, coroutines, closures (all function-typed values, since [148]), and any struct or enum with an aggregate-typed field (transitively) | **move**; `a` is dead until reassigned | exactly one owner drops |
 | **Resource** | any `@resource` type | move (linear; copies are rejected) | owner runs `*drop` once |
 
 Category is inferred from field types, transitively: adding a `Vec` field to a
@@ -257,7 +257,7 @@ on send and are owned by the handler invocation. This is what "shared mutable
 state is expressed by message passing" means mechanically: the data is never
 shared, it is *relocated*.
 
-## 6. Scope exit, `defer`, generators
+## 6. Scope exit, `defer`, generators, closures
 
 ### M10 — one drop per owner, after `defer`
 
@@ -278,6 +278,20 @@ outlives the creating statement, so borrowing would be unsound — the same
 reasoning as M8. The frame's owner drops whatever it still holds. Yielded
 aggregate values transfer ownership to the consumer of `next()`; yielded scalars
 and strings copy.
+
+### M12 — closures capture exactly like tasks
+
+Creating a closure (`f is |x| …` with free variables) classifies each captured
+binding by category: scalars copy at creation, `String`s and value structs are
+cloned into the environment, and aggregates **move** in — a later use of the
+original is a use-after-move naming the capture site. There is no capture by
+reference, ever. The closure value is itself an aggregate that owns its
+environment: assigning it moves it, dropping it drops every capture, a
+function-typed parameter borrows it for the call, and it moves into at most
+one task (M8 applies unchanged). A borrowed parameter, a `@resource` value,
+and a view (§12) cannot be captured; the diagnostics name the clone-first
+escape hatch. Environments are never shared: capturing the same aggregate in
+two closures is a double move.
 
 ## 7. Access modifiers and `@resource`
 
@@ -423,7 +437,42 @@ A plain scalar is POD, copies freely, and crosses without issue. See
 - **`jinn check` and `jinn build` agree.** The ownership analysis runs in both
   pipelines, so a program `check` passes must not corrupt memory when built.
 
-## 12. What this document does not cover
+## 12. Frozen values and second-class views ([148])
+
+**`freeze x`** consumes an aggregate operand — a move through the same lattice
+as every other move, with its own `MoveReason::Freeze` diagnostic — and
+produces `Frozen of T`: representationally `T`, deeply immutable forever.
+Freezability is structural (scalars, `String`, `Vec`, `Map`, structs/enums of
+the same, recursively; `@resource` types, channels, actors, coroutines,
+generators, functions, and views are rejected with the offending field path
+named). Reads auto-deref: field and element reads, iteration, read-only
+methods, and read-only parameters accept a frozen value unchanged. Every write
+is a compile error at its natural chokepoint: mutating/consuming method calls
+(builtin table and inferred user-method bits), assignment through a frozen
+component, partial moves (`take fz.field`, aggregate field binds), and passing
+to a parameter the mutation inference marks mutating or consuming — consuming
+is rejected because a move into a mutable owner would thaw. `Frozen of T` in a
+parameter or field position demands immutability at the boundary; `copy` of a
+frozen place produces a fresh mutable value. Scope-shared multi-task capture
+(`together` handing one frozen value to every `dispatch`) is designed but not
+implemented — a frozen value still moves into at most one task
+([`design/freeze.md`](design/freeze.md), roadmap `M-14r`).
+
+**`View of T`** is a two-word borrowed window (`ptr + len`) created by
+`xs.view(a, b)`, `xs.at_view(i)`, and `s.view(a, b)` (string bytes), or by
+passing a whole `Vec`/array to a `View of T` parameter. Views are
+*second-class*: they flow down (calls, expressions, loop bodies) and never
+out — binding, returning, storing in fields/containers/stores, sending,
+task capture, closure capture, and yielding are all rejected at compile time,
+so a view is statement-scoped and M5's statement borrows already keep the
+root alive and stable for its whole life. Reads through a view bounds-check
+against the view's own length; `.get` on value-category elements copies out
+(clone for `String`). Bind-position views with root-locking and lending
+iteration are the next steps
+([`design/second-class-refs.md`](design/second-class-refs.md), roadmap
+`M-13r`).
+
+## 13. What this document does not cover
 
 - MIR lowering of moves, drop hoisting, and field-tombstone tracking — see
   `src/mir/`.
@@ -431,7 +480,7 @@ A plain scalar is POD, copies freely, and crosses without issue. See
 - LLVM parameter attributes (`nocapture`, `readonly`, `dereferenceable`) — see
   `set_ptr_param_attrs` in `src/codegen/support/runtime.rs`.
 
-## 13. Implementation map
+## 14. Implementation map
 
 | Concern | File |
 | --- | --- |
@@ -448,9 +497,13 @@ A plain scalar is POD, copies freely, and crosses without issue. See
 | Drop placement / Perceus | `src/drops/mir_drops.rs` |
 | Drop verification (double-drop, use-after-drop, and since [147] the leak side: every `Vec`/`Map` allocation dropped or moved on every path to return) | `src/drops/verify.rs` (`JINN_MIR_VERIFY=0` opts out) |
 | Category assertions (`@value`/`@aggregate`) | `src/typer/resolve.rs` (`check_category_assertion`) |
+| `freeze` lowering, freezability, write rejection | `src/typer/expr/freeze.rs` |
+| View methods, coercion, escape rejection | `src/typer/expr/views.rs`, `src/typer/call/method_call.rs`, `src/codegen/view.rs` |
+| Closure capture classification | `src/typer/expr/lambda.rs`, `src/typer/lower/block.rs` (`mark_closure_captures`) |
+| Closure environments (owned, cloned values, env drop fn) | `src/codegen/mir_codegen/helpers/runtime.rs` (`emit_closure_create`), `src/codegen/drop/mod.rs` (`drop_closure`) |
 | Boundary ownership (`--lib` warnings, `.jni` `consumes`/`mutates` bits) | `src/typer/consume_infer.rs` (`boundary_ownership_warnings`), `src/interface.rs` |
 
-## 14. Conformance
+## 15. Conformance
 
 Every rule above is pinned by a test that compiles and runs a real program
 through `jinnc`, or asserts a specific diagnostic lead line:
@@ -462,6 +515,9 @@ through `jinnc`, or asserts a specific diagnostic lead line:
 | `tests/semantics_regression.rs` | the §10 rejection table |
 | `tests/ownership_fuzz.rs` | randomized ownership-relevant programs |
 | `tests/place_ownership.rs` | the [146] place lattice and the [147] closures: quaternary-arm and pipe moves, idiomatic field-store/field-write inference, category assertions, boundary warnings, `std/arena` |
+| `tests/freeze.rs` | §12 frozen values: reads, every write rejection, freezability, `Frozen of T` boundaries |
+| `tests/views.rs` | §12 views: creation, reads, bounds traps, every escape rejection |
+| `tests/closure_captures.rs` | M12: capture classification, owned environments, closure moves |
 
 Beyond the suites, `ci/sanitize-corpus.sh` compiles and runs the whole
 executable corpus (conformance programs, apps, snippets) under ASan+LSan at

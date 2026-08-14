@@ -60,6 +60,10 @@ impl Typer {
                     hargs.push(self.lower_expr_expected(arg, expected)?);
                 }
 
+                for (i, ha) in hargs.iter_mut().enumerate() {
+                    self.peel_frozen_arg(*name, i, inst_params.get(i), ha, span)?;
+                    self.coerce_arg_to_view(inst_params.get(i), ha, span);
+                }
                 for (i, ha) in hargs.iter().enumerate() {
                     if let Some(pt) = inst_params.get(i) {
                         let r =
@@ -168,6 +172,10 @@ impl Typer {
                             hargs.push(self.lower_expr_expected(def_expr, expected)?);
                         }
                     }
+                }
+                for (i, ha) in hargs.iter_mut().enumerate() {
+                    self.peel_frozen_arg(*name, i, param_tys.get(i), ha, span)?;
+                    self.coerce_arg_to_view(param_tys.get(i), ha, span);
                 }
                 for (i, ha) in hargs.iter().enumerate() {
                     if let Some(pt) = param_tys.get(i) {
@@ -338,6 +346,29 @@ impl Typer {
 
                 let resolved_ty = self.infer_ctx.shallow_resolve(&v.ty);
                 if let Type::Fn(ptys, ret) = &resolved_ty {
+                    if let Some(entry) = self.moves.whole(v.def_id) {
+                        let why = match &entry.reason {
+                            crate::typer::MoveReason::ClosureCapture(at) => {
+                                format!("it was captured by the closure created at {}", at.loc())
+                            }
+                            crate::typer::MoveReason::AssignMove(to, at) => {
+                                format!("it moved at {} (`{} is {}`)", at.loc(), to, name)
+                            }
+                            crate::typer::MoveReason::TaskCapture(at) => {
+                                format!("it moved into the task started at {}", at.loc())
+                            }
+                            _ => "it was moved earlier".to_string(),
+                        };
+                        return Err(format!(
+                            "{}: cannot call `{}`: {} — a closure owns its environment \
+                             and moves like any aggregate; call it before the move, or \
+                             rebind `{}` first",
+                            span.loc(),
+                            name,
+                            why,
+                            name,
+                        ));
+                    }
                     let ret = *ret.clone();
                     let ptys = ptys.clone();
                     let fn_expr = hir::Expr {

@@ -557,11 +557,15 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_store(gen_ptr_alloca, gen_ptr_param));
             self.set_var("__coro_ctx", gen_ptr_alloca, Type::Ptr(Box::new(Type::I64)));
 
+            let param_slot_tys: Vec<inkwell::types::BasicTypeEnum<'ctx>> =
+                func.params.iter().map(|p| self.llvm_ty(&p.ty)).collect();
+            let (param_offs, _) = self.gen_capture_offsets(&param_slot_tys);
             for (i, param) in func.params.iter().enumerate() {
-                let off = Self::GEN_SIZE + (i as u64) * 8;
-                let slot_ptr = self.gen_field_ptr(gen_ptr_param, off, "cap.slot")?;
-                let llvm_ty = self.llvm_ty(&param.ty);
-                let loaded = b!(self.bld.build_load(llvm_ty, slot_ptr, &param.name.as_str()));
+                let slot_ptr = self.gen_field_ptr(gen_ptr_param, param_offs[i], "cap.slot")?;
+                let loaded =
+                    b!(self
+                        .bld
+                        .build_load(param_slot_tys[i], slot_ptr, &param.name.as_str()));
                 self.value_map.insert(param.value, loaded);
                 self.value_types.insert(param.value, param.ty.clone());
             }

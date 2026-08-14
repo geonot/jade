@@ -544,6 +544,10 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
+        if matches!(&obj_ty, Some(Type::View(_))) && matches!(field, "length" | "count") {
+            return Ok(self.view_len_val(obj_val)?.into());
+        }
+
         if obj_val.is_struct_value() {
             let sv = obj_val.into_struct_value();
 

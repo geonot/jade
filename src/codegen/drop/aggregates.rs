@@ -136,7 +136,7 @@ impl<'ctx> Compiler<'ctx> {
                 Self::type_references_struct(k, name) || Self::type_references_struct(v, name)
             }
             Type::Tuple(tys) => tys.iter().any(|t| Self::type_references_struct(t, name)),
-            Type::Alias(_, inner) | Type::Newtype(_, inner) => {
+            Type::Alias(_, inner) | Type::Newtype(_, inner) | Type::Frozen(inner) => {
                 Self::type_references_struct(inner, name)
             }
             _ => false,

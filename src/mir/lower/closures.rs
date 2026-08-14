@@ -18,9 +18,11 @@ impl Lowerer {
         let param_names: HashSet<Symbol> = params.iter().map(|p| p.name).collect();
         let mut refs = HashSet::new();
         collect_var_refs_block(body, &mut refs);
+        let mut ref_names: Vec<Symbol> = refs.into_iter().collect();
+        ref_names.sort_by_key(|n| n.as_str().to_string());
 
         let mut capture_info: Vec<(Symbol, ValueId, Type)> = Vec::new();
-        for name in &refs {
+        for name in &ref_names {
             if !param_names.contains(name)
                 && let Some(cap_ty) = self.var_types.get(name).cloned()
             {
@@ -319,7 +321,15 @@ fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut HashSet<Symbol>) {
                 collect_var_refs_expr(expr, refs);
             }
         }
-        ExprKind::Block(stmts) | ExprKind::Lambda(_, stmts) => collect_var_refs_block(stmts, refs),
+        ExprKind::Block(stmts) => collect_var_refs_block(stmts, refs),
+        ExprKind::Lambda(inner_params, stmts) => {
+            let mut inner = HashSet::new();
+            collect_var_refs_block(stmts, &mut inner);
+            for p in inner_params {
+                inner.remove(&p.name);
+            }
+            refs.extend(inner);
+        }
         _ => {}
     }
 }

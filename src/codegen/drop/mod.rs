@@ -46,7 +46,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::Enum(name) => {
                 self.call_enum_drop_fn(val, &name.as_str())?;
             }
-            Type::Alias(_, inner) | Type::Newtype(_, inner) => {
+            Type::Alias(_, inner) | Type::Newtype(_, inner) | Type::Frozen(inner) => {
                 self.drop_value(val, inner)?;
             }
 
@@ -57,8 +57,34 @@ impl<'ctx> Compiler<'ctx> {
             Type::Channel(_) => {
                 self.drop_ptr_allocated(val)?;
             }
+            Type::Fn(_, _) => {
+                self.drop_closure(val)?;
+            }
             _ => {}
         }
+        Ok(())
+    }
+
+    fn drop_closure(&mut self, val: BasicValueEnum<'ctx>) -> Result<(), String> {
+        if !val.is_struct_value() {
+            return Ok(());
+        }
+        let sv = val.into_struct_value();
+        let env = b!(self.bld.build_extract_value(sv, 1, "cld.env")).into_pointer_value();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        let is_null = b!(self.bld.build_is_null(env, "cld.isnull"));
+        let fv = self.current_fn();
+        let drop_bb = self.ctx.append_basic_block(fv, "cld.drop");
+        let done_bb = self.ctx.append_basic_block(fv, "cld.done");
+        b!(self.bld.build_conditional_branch(is_null, done_bb, drop_bb));
+        self.bld.position_at_end(drop_bb);
+        let drop_fn_ptr = b!(self.bld.build_load(ptr_ty, env, "cld.dropfn")).into_pointer_value();
+        let ft = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
+        b!(self
+            .bld
+            .build_indirect_call(ft, drop_fn_ptr, &[env.into()], "cld.call"));
+        b!(self.bld.build_unconditional_branch(done_bb));
+        self.bld.position_at_end(done_bb);
         Ok(())
     }
 }

@@ -31,6 +31,8 @@ pub enum Type {
     Newtype(Symbol, Box<Type>),
     Generator(Box<Type>),
     Row(Symbol),
+    View(Box<Type>),
+    Frozen(Box<Type>),
 }
 
 impl Type {
@@ -68,16 +70,17 @@ impl Type {
     }
 
     pub fn is_ptr_represented(&self) -> bool {
-        matches!(
-            self,
+        match self {
             Self::Ptr(_)
-                | Self::ActorRef(_)
-                | Self::Coroutine(_)
-                | Self::Channel(_)
-                | Self::Vec(_)
-                | Self::Map(_, _)
-                | Self::Generator(_)
-        )
+            | Self::ActorRef(_)
+            | Self::Coroutine(_)
+            | Self::Channel(_)
+            | Self::Vec(_)
+            | Self::Map(_, _)
+            | Self::Generator(_) => true,
+            Self::Frozen(inner) => inner.is_ptr_represented(),
+            _ => false,
+        }
     }
 
     pub fn is_trivially_droppable(&self) -> bool {
@@ -97,10 +100,12 @@ impl Type {
             | Self::TypeVar(_)
             | Self::Ptr(_)
             | Self::ActorRef(_)
-            | Self::Channel(_) => true,
+            | Self::Channel(_)
+            | Self::View(_) => true,
             Self::Array(inner, _) => inner.is_trivially_droppable(),
             Self::Vec(_) | Self::Map(_, _) => false,
             Self::Tuple(tys) => tys.iter().all(|t| t.is_trivially_droppable()),
+            Self::Frozen(inner) => inner.is_trivially_droppable(),
             _ => false,
         }
     }
@@ -114,7 +119,9 @@ impl Type {
             Self::Vec(elem) | Self::Array(elem, _) => elem.is_value_clonable(),
             Self::Tuple(tys) => tys.iter().all(|t| t.is_value_clonable()),
             Self::Struct(_, _) => true,
-            Self::Alias(_, inner) | Self::Newtype(_, inner) => inner.is_value_clonable(),
+            Self::Alias(_, inner) | Self::Newtype(_, inner) | Self::Frozen(inner) => {
+                inner.is_value_clonable()
+            }
             _ => false,
         }
     }
@@ -191,6 +198,8 @@ impl std::fmt::Display for Type {
             Self::Newtype(name, inner) => write!(f, "newtype {name} is {inner}"),
             Self::Generator(inner) => write!(f, "Generator of {inner}"),
             Self::Row(name) => write!(f, "Row<{name}>"),
+            Self::View(inner) => write!(f, "View of {inner}"),
+            Self::Frozen(inner) => write!(f, "Frozen of {inner}"),
         }
     }
 }
@@ -214,6 +223,8 @@ impl Type {
             Type::Channel(inner) => Type::Channel(Box::new(inner.canonical())),
             Type::Generator(inner) => Type::Generator(Box::new(inner.canonical())),
             Type::Newtype(n, inner) => Type::Newtype(*n, Box::new(inner.canonical())),
+            Type::View(inner) => Type::View(Box::new(inner.canonical())),
+            Type::Frozen(inner) => Type::Frozen(Box::new(inner.canonical())),
             other => other.clone(),
         }
     }
@@ -235,7 +246,9 @@ impl Type {
             | Self::Vec(inner)
             | Self::Ptr(inner)
             | Self::Coroutine(inner)
-            | Self::Channel(inner) => inner.has_type_var(),
+            | Self::Channel(inner)
+            | Self::View(inner)
+            | Self::Frozen(inner) => inner.has_type_var(),
             Self::Map(k, v) => k.has_type_var() || v.has_type_var(),
             Self::Tuple(tys) => tys.iter().any(|t| t.has_type_var()),
             Self::Fn(params, ret) => params.iter().any(|t| t.has_type_var()) || ret.has_type_var(),
@@ -252,7 +265,9 @@ impl Type {
             | Self::Vec(inner)
             | Self::Ptr(inner)
             | Self::Coroutine(inner)
-            | Self::Channel(inner) => inner.free_type_vars(out),
+            | Self::Channel(inner)
+            | Self::View(inner)
+            | Self::Frozen(inner) => inner.free_type_vars(out),
             Self::Map(k, v) => {
                 k.free_type_vars(out);
                 v.free_type_vars(out);

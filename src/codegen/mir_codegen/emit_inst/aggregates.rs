@@ -365,6 +365,13 @@ impl<'ctx> Compiler<'ctx> {
                         return Ok(Some((self.string_char_at(base_val, idx_val))?));
                     }
 
+                    if let Some(Type::View(elem_ty)) = base_ty {
+                        let elem_ty = (**elem_ty).clone();
+                        return Ok(Some(
+                            self.view_get(base_val, &elem_ty, idx_val, !unchecked)?,
+                        ));
+                    }
+
                     if base_val.get_type().is_array_type() {
                         let arr_ty = base_val.get_type().into_array_type();
                         let arr_len = arr_ty.len() as u64;

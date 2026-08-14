@@ -1064,20 +1064,30 @@ fn format_expr(e: &Expr) -> String {
             out
         }
         Expr::Block(_, _) => "do ... end".into(),
-        Expr::Lambda(params, _, body, _) => {
-            let ps: Vec<String> = params.iter().map(|p| p.name.to_string()).collect();
-
-            let body_txt = match body.last() {
-                Some(Stmt::Expr(e)) => format_expr(e),
-                Some(Stmt::Ret(Some(e), _)) => format_expr(e),
-                _ => "0".to_string(),
+        Expr::Lambda(params, ret, body, _) => {
+            let ps: Vec<String> = params
+                .iter()
+                .map(|p| match &p.ty {
+                    Some(t) => format!("{} as {}", p.name, format_type(t)),
+                    None => p.name.to_string(),
+                })
+                .collect();
+            let ret_txt = match ret {
+                Some(t) => format!(" returns {}", format_type(t)),
+                None => String::new(),
             };
-            format!("|{}| {}", ps.join(", "), body_txt)
+            let body_txt = match (body.len(), body.last()) {
+                (1, Some(Stmt::Expr(e))) => format_expr(e),
+                (1, Some(Stmt::Ret(Some(e), _))) => format_expr(e),
+                _ => "do ... end".to_string(),
+            };
+            format!("|{}|{} {}", ps.join(", "), ret_txt, body_txt)
         }
         Expr::Placeholder(_) => "$".into(),
         Expr::IndexPlaceholder(_) => "$$".into(),
         Expr::Ref(e, _) => format!("%{}", format_expr(e)),
         Expr::Deref(e, _) => format!("@{}", format_expr(e)),
+        Expr::Freeze(e, _) => format!("freeze {}", format_expr(e)),
         Expr::Embed(path, _) => format!("embed '{path}'"),
         Expr::ListComp(body, bind, iter, _, _, _) => {
             format!(

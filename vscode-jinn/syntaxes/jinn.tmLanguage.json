@@ -68,7 +68,7 @@
         },
         {
           "name": "keyword.operator.word.jn",
-          "match": "\\b(is|neq|eq|and|or|not|xor|as|equals|mod|pow|returns|lt|gt|lte|gte|nlt|ngt|ngte|nlte|in|strict)\\b"
+          "match": "\\b(is|neq|eq|and|or|not|xor|as|equals|mod|pow|returns|lt|gt|lte|gte|nlt|ngt|ngte|nlte|in|strict|freeze)\\b"
         },
         {
           "name": "keyword.declaration.jn",

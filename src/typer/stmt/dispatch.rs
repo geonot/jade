@@ -346,6 +346,16 @@ impl Typer {
                     r
                 };
 
+                if crate::typer::expr::views::type_contains_view(&resolved_bind_ty) {
+                    return Err(format!(
+                        "{}: a view cannot be bound to `{}`: a view lives only within \
+                         its statement — use it directly in the expression or call, or \
+                         copy the data instead (`slice` copies)",
+                        b.span.loc(),
+                        b.name,
+                    ));
+                }
+
                 let is_element_read = match &value.kind {
                     hir::ExprKind::VecMethod(_, mname, _)
                     | hir::ExprKind::MapMethod(_, mname, _) => matches!(
@@ -632,6 +642,15 @@ impl Typer {
                 self.suppress_moved_field_check += 1;
                 let ht = self.lower_expr(target)?;
                 self.suppress_moved_field_check -= 1;
+                if let Some(frozen_name) = self.frozen_assign_offender(&ht) {
+                    return Err(format!(
+                        "{}: cannot assign through `{}`: it is frozen, and a frozen \
+                         value can never be written; mutate before the `freeze`, or \
+                         rebuild a new value and freeze that",
+                        span.loc(),
+                        frozen_name,
+                    ));
+                }
                 let hv = self.lower_expr_expected(value, Some(&ht.ty))?;
                 let r = self.infer_ctx.unify_at(&ht.ty, &hv.ty, *span, "assignment");
                 self.collect_unify_error(r);
@@ -815,10 +834,15 @@ impl Typer {
                 let bind_ty = if end.is_some() || iter_is_int {
                     Type::I64
                 } else {
-                    match &iter.ty {
+                    let iter_shape = match &iter.ty {
+                        Type::Frozen(inner) => self.infer_ctx.shallow_resolve(inner),
+                        other => other.clone(),
+                    };
+                    match &iter_shape {
                         Type::Array(et, _) => *et.clone(),
                         Type::Ptr(et) => *et.clone(),
                         Type::Vec(et) => *et.clone(),
+                        Type::View(et) => *et.clone(),
                         Type::String => Type::I64,
                         _ => {
                             let iter_ty = iter.ty.clone();

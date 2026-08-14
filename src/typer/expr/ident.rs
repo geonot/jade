@@ -200,6 +200,28 @@ impl Typer {
                                 name,
                                 name,
                             ),
+                            crate::typer::MoveReason::ClosureCapture(at) => format!(
+                                "{}: `{}` used after being captured by the closure created \
+                                 at {} — a closure owns its environment, so an aggregate \
+                                 moves into it; capture a clone (bind `copy {}` to a fresh \
+                                 name and use that inside the closure), or read `{}` before \
+                                 the closure is created",
+                                span.loc(),
+                                name,
+                                at.loc(),
+                                name,
+                                name,
+                            ),
+                            crate::typer::MoveReason::Freeze(at) => format!(
+                                "{}: `{}` used after being frozen at {} — `freeze` consumes \
+                                 its operand and there is no thaw; read through the frozen \
+                                 value instead, or freeze a clone (bind `copy {}` to a \
+                                 fresh name and freeze that)",
+                                span.loc(),
+                                name,
+                                at.loc(),
+                                name,
+                            ),
                         });
                     }
                     let ty = match (&scheme_clone, expected) {

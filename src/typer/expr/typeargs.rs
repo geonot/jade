@@ -86,6 +86,8 @@ impl Typer {
                 match &*outer_name {
                     "Vec" => Some(Type::Vec(Box::new(inner_ty))),
                     "Ptr" => Some(Type::Ptr(Box::new(inner_ty))),
+                    "View" => Some(Type::View(Box::new(inner_ty))),
+                    "Frozen" => Some(Type::Frozen(Box::new(inner_ty))),
                     other => Some(Type::Struct(Symbol::intern(other), vec![inner_ty])),
                 }
             }

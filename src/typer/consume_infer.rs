@@ -36,6 +36,8 @@ fn annotated_non_consumable(ty: &Option<Type>) -> bool {
                 | Type::Bool
                 | Type::Void
                 | Type::Ptr(_)
+                | Type::View(_)
+                | Type::Frozen(_)
         ),
     }
 }
@@ -640,6 +642,10 @@ impl crate::typer::Typer {
                 }
             }
             Expr::Yield(v, _) => {
+                escaping.record(Self::expr_alias(v, alias), v.span(), cond);
+                self.scan_expr_sinks(v, alias, ctx, escaping, cond);
+            }
+            Expr::Freeze(v, _) => {
                 escaping.record(Self::expr_alias(v, alias), v.span(), cond);
                 self.scan_expr_sinks(v, alias, ctx, escaping, cond);
             }

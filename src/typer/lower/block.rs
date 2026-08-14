@@ -420,16 +420,20 @@ impl Typer {
                 self.collect_consumed_in_expr(t, out);
                 self.collect_consumed_in_expr(e, out);
             }
-            hir::ExprKind::Tuple(xs)
-            | hir::ExprKind::Array(xs)
-            | hir::ExprKind::VecNew(xs)
-            | hir::ExprKind::Builtin(_, xs) => {
+            hir::ExprKind::Tuple(xs) | hir::ExprKind::Array(xs) | hir::ExprKind::VecNew(xs) => {
+                for x in xs {
+                    self.collect_ctor_captured_id(x, out);
+                    self.collect_consumed_in_expr(x, out);
+                }
+            }
+            hir::ExprKind::Builtin(_, xs) => {
                 for x in xs {
                     self.collect_consumed_in_expr(x, out);
                 }
             }
             hir::ExprKind::Struct(_, inits) | hir::ExprKind::VariantCtor(_, _, _, inits) => {
                 for fi in inits {
+                    self.collect_ctor_captured_id(&fi.value, out);
                     self.collect_consumed_in_expr(&fi.value, out);
                 }
             }
@@ -444,6 +448,28 @@ impl Typer {
                 self.collect_consumed_in_expr(callee, out);
                 for a in args {
                     self.collect_consumed_in_expr(a, out);
+                }
+            }
+            hir::ExprKind::Lambda(params, body) => {
+                let mut ids: std::collections::HashSet<crate::hir::DefId> =
+                    std::collections::HashSet::new();
+                for st in body {
+                    Self::collect_hir_var_ids_stmt_inner(st, &mut ids, true);
+                }
+                for p in params {
+                    ids.remove(&p.def_id);
+                }
+                for id in ids {
+                    let Some(ty) = self.find_var_by_id(id).map(|info| info.ty.clone()) else {
+                        continue;
+                    };
+                    let was_strict = self.infer_ctx.is_strict();
+                    self.infer_ctx.set_strict(false);
+                    let resolved = self.infer_ctx.resolve(&ty);
+                    self.infer_ctx.set_strict(was_strict);
+                    if self.type_is_aggregate(&resolved) {
+                        out.insert(id);
+                    }
                 }
             }
             hir::ExprKind::Pipe(e, _, name, rest) => {
@@ -488,10 +514,16 @@ impl Typer {
     }
 
     fn expr_type_needs_drop(ty: &Type) -> bool {
-        matches!(
-            ty,
-            Type::Vec(_) | Type::Map(_, _) | Type::String | Type::Struct(_, _) | Type::Enum(_)
-        )
+        match ty {
+            Type::Vec(_)
+            | Type::Map(_, _)
+            | Type::String
+            | Type::Struct(_, _)
+            | Type::Enum(_)
+            | Type::Fn(_, _) => true,
+            Type::Frozen(inner) => Self::expr_type_needs_drop(inner),
+            _ => false,
+        }
     }
 
     pub(in crate::typer) fn type_is_aggregate(&self, ty: &Type) -> bool {
@@ -506,7 +538,11 @@ impl Typer {
         visiting: &mut std::collections::HashSet<crate::intern::Symbol>,
     ) -> bool {
         match ty {
-            Type::Vec(_) | Type::Map(_, _) | Type::Coroutine(_) | Type::Generator(_) => true,
+            Type::Vec(_)
+            | Type::Map(_, _)
+            | Type::Coroutine(_)
+            | Type::Generator(_)
+            | Type::Fn(_, _) => true,
             Type::Struct(name, args) => {
                 if self
                     .struct_attrs
@@ -545,7 +581,7 @@ impl Typer {
                 .iter()
                 .any(|t| self.type_is_aggregate_inner(t, visiting)),
             Type::Array(elem, _) => self.type_is_aggregate_inner(elem, visiting),
-            Type::Alias(_, inner) | Type::Newtype(_, inner) => {
+            Type::Alias(_, inner) | Type::Newtype(_, inner) | Type::Frozen(inner) => {
                 self.type_is_aggregate_inner(inner, visiting)
             }
             _ => false,
@@ -609,8 +645,107 @@ impl Typer {
         outer_ids: &std::collections::HashSet<crate::hir::DefId>,
         at: crate::ast::Span,
     ) -> Result<(), String> {
+        self.reject_view_captures(body, outer_ids, at)?;
         for (id, name) in self.collect_aggregate_captures(body, outer_ids) {
             self.mark_var_moved_checked(id, name, crate::typer::MoveReason::TaskCapture(at), at)?;
+        }
+        Ok(())
+    }
+
+    pub(in crate::typer) fn mark_closure_captures(
+        &mut self,
+        body: &[hir::Stmt],
+        outer_ids: &std::collections::HashSet<crate::hir::DefId>,
+        at: crate::ast::Span,
+    ) -> Result<(), String> {
+        self.reject_view_captures(body, outer_ids, at)?;
+        let mut used: std::collections::HashSet<crate::hir::DefId> =
+            std::collections::HashSet::new();
+        for st in body {
+            Self::collect_hir_var_ids_stmt_inner(st, &mut used, true);
+        }
+        let mut candidates: Vec<(
+            crate::hir::DefId,
+            crate::intern::Symbol,
+            Type,
+            crate::hir::Ownership,
+        )> = self
+            .scopes
+            .iter()
+            .flat_map(|s| s.iter())
+            .filter(|(_, info)| used.contains(&info.def_id) && outer_ids.contains(&info.def_id))
+            .map(|(n, info)| (info.def_id, *n, info.ty.clone(), info.ownership))
+            .collect();
+        candidates.sort_by_key(|(id, _, _, _)| id.0);
+        for (id, name, ty, ownership) in candidates {
+            let was_strict = self.infer_ctx.is_strict();
+            self.infer_ctx.set_strict(false);
+            let resolved = self.infer_ctx.resolve(&ty);
+            self.infer_ctx.set_strict(was_strict);
+            if self.type_has_resource_annotation(&resolved) {
+                return Err(format!(
+                    "{}: a closure cannot capture the @resource value `{}`: a resource \
+                     has exactly one owner and a closure's call site is unknowable; \
+                     pass it to the closure as a parameter instead",
+                    at.loc(),
+                    name,
+                ));
+            }
+            if self.type_is_aggregate(&resolved) {
+                if matches!(ownership, crate::hir::Ownership::Borrowed) {
+                    return Err(format!(
+                        "{}: a closure cannot capture `{}`: it is a borrow, not an \
+                         owner (a parameter borrows unless the function consumes it), \
+                         and a closure owns what it captures; capture a clone (bind \
+                         `copy {}` to a fresh name), or pass it as a parameter",
+                        at.loc(),
+                        name,
+                        name,
+                    ));
+                }
+                self.mark_var_moved_checked(
+                    id,
+                    name,
+                    crate::typer::MoveReason::ClosureCapture(at),
+                    at,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(in crate::typer) fn reject_view_captures(
+        &mut self,
+        body: &[hir::Stmt],
+        outer_ids: &std::collections::HashSet<crate::hir::DefId>,
+        at: crate::ast::Span,
+    ) -> Result<(), String> {
+        let mut used: std::collections::HashSet<crate::hir::DefId> =
+            std::collections::HashSet::new();
+        for st in body {
+            Self::collect_hir_var_ids_stmt_inner(st, &mut used, true);
+        }
+        let candidates: Vec<(crate::intern::Symbol, Type)> = self
+            .scopes
+            .iter()
+            .flat_map(|s| s.iter())
+            .filter(|(_, info)| used.contains(&info.def_id) && outer_ids.contains(&info.def_id))
+            .map(|(n, info)| (*n, info.ty.clone()))
+            .collect();
+        for (name, ty) in candidates {
+            let was_strict = self.infer_ctx.is_strict();
+            self.infer_ctx.set_strict(false);
+            let resolved = self.infer_ctx.resolve(&ty);
+            self.infer_ctx.set_strict(was_strict);
+            if crate::typer::expr::views::type_contains_view(&resolved) {
+                return Err(format!(
+                    "{}: `{}` is a view and cannot be captured by a task: it borrows \
+                     memory owned by this frame; capture the owning container or a \
+                     copied slice",
+                    at.loc(),
+                    name,
+                ));
+            }
         }
         Ok(())
     }
@@ -1263,6 +1398,20 @@ impl Typer {
         Ok(())
     }
 
+    fn collect_ctor_captured_id(
+        &mut self,
+        value: &hir::Expr,
+        out: &mut std::collections::HashSet<crate::hir::DefId>,
+    ) {
+        let src = Self::peel_move_wrappers(value);
+        if let hir::ExprKind::Var(id, _) = &src.kind {
+            let resolved = self.infer_ctx.resolve(&src.ty);
+            if self.type_is_aggregate(&resolved) {
+                out.insert(*id);
+            }
+        }
+    }
+
     fn record_ctor_capture(&mut self, value: &hir::Expr) -> Result<(), String> {
         let src = Self::peel_move_wrappers(value);
         if let hir::ExprKind::Var(id, vname) = &src.kind {
@@ -1464,6 +1613,12 @@ impl Typer {
             hir::ExprKind::Coerce(e, _) | hir::ExprKind::StrictCast(e, _) => {
                 Self::collect_hir_var_ids_expr(e, out);
             }
+            hir::ExprKind::IndirectCall(callee, args) => {
+                Self::collect_hir_var_ids_expr(callee, out);
+                for a in args {
+                    Self::collect_hir_var_ids_expr(a, out);
+                }
+            }
             hir::ExprKind::Ternary(c, t, e) => {
                 Self::collect_hir_var_ids_expr(c, out);
                 Self::collect_hir_var_ids_expr(t, out);
@@ -1472,162 +1627,6 @@ impl Typer {
             hir::ExprKind::ChannelSend(ch, v) => {
                 Self::collect_hir_var_ids_expr(ch, out);
                 Self::collect_hir_var_ids_expr(v, out);
-            }
-            _ => {}
-        }
-    }
-
-    pub(in crate::typer) fn collect_local_binds(
-        body: &[hir::Stmt],
-        out: &mut std::collections::HashMap<crate::hir::DefId, (crate::intern::Symbol, Type)>,
-    ) {
-        for st in body {
-            match st {
-                hir::Stmt::Bind(b) => {
-                    out.insert(b.def_id, (b.name, b.ty.clone()));
-                }
-                hir::Stmt::If(i) => {
-                    Self::collect_local_binds(&i.then, out);
-                    for (_, b) in &i.elifs {
-                        Self::collect_local_binds(b, out);
-                    }
-                    if let Some(b) = &i.els {
-                        Self::collect_local_binds(b, out);
-                    }
-                }
-                hir::Stmt::Match(m) => {
-                    for a in &m.arms {
-                        Self::collect_local_binds(&a.body, out);
-                    }
-                }
-                hir::Stmt::While(w) => Self::collect_local_binds(&w.body, out),
-                hir::Stmt::For(f) => Self::collect_local_binds(&f.body, out),
-                hir::Stmt::Loop(l) => Self::collect_local_binds(&l.body, out),
-                _ => {}
-            }
-        }
-    }
-
-    pub(in crate::typer) fn check_escaping_lambda_captures(
-        &mut self,
-        body: &[hir::Stmt],
-        local_ids: &std::collections::HashMap<crate::hir::DefId, (crate::intern::Symbol, Type)>,
-    ) -> Result<(), String> {
-        let mut lambda_binds: std::collections::HashMap<crate::hir::DefId, &hir::Expr> =
-            std::collections::HashMap::new();
-        Self::collect_lambda_binds(body, &mut lambda_binds);
-        let mut escaping: Vec<(&hir::Expr, crate::ast::Span)> = Vec::new();
-        Self::collect_escaping_lambdas(body, &lambda_binds, &mut escaping);
-        for (lam, at) in escaping {
-            let hir::ExprKind::Lambda(params, lbody) = &lam.kind else {
-                continue;
-            };
-            let mut ids = std::collections::HashSet::new();
-            for st in lbody {
-                Self::collect_hir_var_ids_stmt(st, &mut ids);
-            }
-            for p in params {
-                ids.remove(&p.def_id);
-            }
-            for id in ids {
-                if let Some((vname, vty)) = local_ids.get(&id) {
-                    let resolved = self.infer_ctx.resolve(vty);
-                    if Self::expr_type_needs_drop(&resolved) && !matches!(resolved, Type::String) {
-                        return Err(format!(
-                            "{}: this function returns a lambda that captures the local \
-                             `{}` (a `{}`), whose storage is freed when the function \
-                             returns — calling the lambda later would read freed memory; \
-                             capture a clone (`{}2 is copy {}` before the lambda), return \
-                             the value alongside the lambda, or move ownership into a \
-                             struct that outlives the call",
-                            at.loc(),
-                            vname,
-                            resolved,
-                            vname,
-                            vname,
-                        ));
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn collect_lambda_binds<'a>(
-        body: &'a [hir::Stmt],
-        out: &mut std::collections::HashMap<crate::hir::DefId, &'a hir::Expr>,
-    ) {
-        for st in body {
-            match st {
-                hir::Stmt::Bind(b) => {
-                    if matches!(b.value.kind, hir::ExprKind::Lambda(..)) {
-                        out.insert(b.def_id, &b.value);
-                    }
-                }
-                hir::Stmt::If(i) => {
-                    Self::collect_lambda_binds(&i.then, out);
-                    for (_, blk) in &i.elifs {
-                        Self::collect_lambda_binds(blk, out);
-                    }
-                    if let Some(blk) = &i.els {
-                        Self::collect_lambda_binds(blk, out);
-                    }
-                }
-                hir::Stmt::Match(m) => {
-                    for a in &m.arms {
-                        Self::collect_lambda_binds(&a.body, out);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn collect_escaping_lambdas<'a>(
-        body: &'a [hir::Stmt],
-        binds: &std::collections::HashMap<crate::hir::DefId, &'a hir::Expr>,
-        out: &mut Vec<(&'a hir::Expr, crate::ast::Span)>,
-    ) {
-        for st in body {
-            match st {
-                hir::Stmt::Ret(Some(e), _, sp) => Self::collect_lambda_values(e, *sp, binds, out),
-                hir::Stmt::Expr(e) => Self::collect_lambda_values(e, e.span, binds, out),
-                hir::Stmt::If(i) => {
-                    Self::collect_escaping_lambdas(&i.then, binds, out);
-                    for (_, b) in &i.elifs {
-                        Self::collect_escaping_lambdas(b, binds, out);
-                    }
-                    if let Some(b) = &i.els {
-                        Self::collect_escaping_lambdas(b, binds, out);
-                    }
-                }
-                hir::Stmt::Match(m) => {
-                    for a in &m.arms {
-                        Self::collect_escaping_lambdas(&a.body, binds, out);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn collect_lambda_values<'a>(
-        e: &'a hir::Expr,
-        at: crate::ast::Span,
-        binds: &std::collections::HashMap<crate::hir::DefId, &'a hir::Expr>,
-        out: &mut Vec<(&'a hir::Expr, crate::ast::Span)>,
-    ) {
-        match &e.kind {
-            hir::ExprKind::Lambda(..) => out.push((e, at)),
-            hir::ExprKind::Var(id, _) => {
-                if let Some(lam) = binds.get(id) {
-                    out.push((lam, at));
-                }
-            }
-            hir::ExprKind::Block(stmts) => Self::collect_escaping_lambdas(stmts, binds, out),
-            hir::ExprKind::Ternary(_, a, b) => {
-                Self::collect_lambda_values(a, at, binds, out);
-                Self::collect_lambda_values(b, at, binds, out);
             }
             _ => {}
         }
@@ -1765,6 +1764,7 @@ impl Typer {
                 | Type::Coroutine(_)
                 | Type::Generator(_)
                 | Type::Channel(_)
+                | Type::Fn(_, _)
         ) {
             return true;
         }
@@ -1806,14 +1806,18 @@ impl Typer {
             Type::Tuple(elts) => elts.iter().any(|t| self.needs_drop_inner(t, visiting)),
             Type::Array(elem, _) => self.needs_drop_inner(elem, visiting),
 
-            Type::Alias(_, inner) | Type::Newtype(_, inner) => {
+            Type::Alias(_, inner) | Type::Newtype(_, inner) | Type::Frozen(inner) => {
                 self.needs_drop_inner(inner, visiting)
             }
             _ => false,
         }
     }
 
-    fn struct_field_types(&self, name: &crate::intern::Symbol, args: &[Type]) -> Vec<Type> {
+    pub(in crate::typer) fn struct_field_types(
+        &self,
+        name: &crate::intern::Symbol,
+        args: &[Type],
+    ) -> Vec<Type> {
         if let Some(fields) = self.structs.get(name) {
             if args.is_empty() {
                 return fields.iter().map(|(_, ty)| ty.clone()).collect();
@@ -1864,6 +1868,8 @@ impl Typer {
             Type::Newtype(name, inner) => {
                 Type::Newtype(*name, Box::new(Self::subst_type(inner, subs)))
             }
+            Type::View(inner) => Type::View(Box::new(Self::subst_type(inner, subs))),
+            Type::Frozen(inner) => Type::Frozen(Box::new(Self::subst_type(inner, subs))),
             _ => ty.clone(),
         }
     }

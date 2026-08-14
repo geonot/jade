@@ -237,6 +237,7 @@ pub enum Expr {
     IndexPlaceholder(Span),
     Ref(Box<Expr>, Span),
     Deref(Box<Expr>, Span),
+    Freeze(Box<Expr>, Span),
     Embed(String, Span),
     ListComp(
         Box<Expr>,
@@ -308,6 +309,7 @@ impl Expr {
             | Self::IndexPlaceholder(s)
             | Self::Ref(_, s)
             | Self::Deref(_, s)
+            | Self::Freeze(_, s)
             | Self::Embed(_, s)
             | Self::ListComp(_, _, _, _, _, s)
             | Self::Syscall(_, s)

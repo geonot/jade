@@ -28,8 +28,15 @@ closed M-9r, M-10, and M-15, reduced M-6r, M-8, M-11, and M-12, gave M-13,
 M-14, and M-16 their designs (`design/second-class-refs.md`,
 `design/freeze.md`, `design/closure-captures.md`), and fixed two live
 unsoundness classes (idiomatic field writes invisible to both inference scans;
-early-return drop omission) plus a silently-broken vec-slice codegen — see the
-header below and CHANGELOG [147]. Items below are what remains.
+early-return drop omission) plus a silently-broken vec-slice codegen. The
+2026-08-13 pass ([148]) shipped step 1 of all three designs — `freeze` and
+`Frozen of T` (M-14), `View of T` second-class references (M-13), and
+ownership-correct closure captures with owned environments (M-16) — and fixed
+three live memory-unsoundness classes it uncovered on the way: ctor/container
+captures of bound aggregates double-freed at scope exit, closure captures
+aliased the enclosing frame (use-after-free after any invalidating operation),
+and scope-task capture slots truncated every capture wider than 8 bytes.
+Items below are what remains.
 
 ---
 
@@ -70,6 +77,19 @@ wrong answer on every vec slice, now fixed and pinned. `std/arena` ships the
 blessed replacement for pointer-linked structures (old M-15): a generational
 `Arena of T` whose `Handle`s detect staleness instead of dangling.
 
+[148] built the three surfaces this section had only designed — `freeze`
+(M-14), second-class views (M-13), and ownership-correct closures (M-16) —
+and its probing found and fixed three more live memory bugs: a constructor or
+container literal capturing a bound aggregate left the original's scope-end
+drop in place (silent double-free at exit on `App(cfg is xs)`), closure
+captures aliased the enclosing frame instead of owning anything (the [143]
+"returns a lambda that captures the local" ban treated one symptom; the alias
+itself use-after-freed on any invalidation), and scope-task capture slots
+were hardcoded to 8 bytes, truncating any capture wider than a word (a
+24-byte `String` or a 16-byte closure captured by a `dispatch` block
+corrupted the heap). All three are pinned; the post-pass
+`ci/sanitize-corpus.sh` sweep stays at zero corruption.
+
 ### M-6r (m) Place residue
 
 What place granularity deliberately does not yet do: element indices are
@@ -88,7 +108,8 @@ The silent lost update is now a compile error — including through call
 arguments and nested method receivers since [146] — but every nested-container
 read in expression position still pays a hidden O(n) deep copy, and a
 *read-only* method call on an element read still operates on a copy without a
-diagnostic. The honest fix is `M-13`'s second-class borrows.
+diagnostic. The honest fix is `M-13r`'s remaining steps (field and method
+reads through element views).
 
 ### M-7r (m) Conditional consumption: over-tombstones on one side, leaks on the other
 
@@ -175,33 +196,63 @@ annotation, are policy decisions deferred until the package/visibility surface
 exists (`design/lamp.md`); `fmt` insertion additionally needs inference results
 at format time.
 
-### M-13 (M) Second-class references and slices — *design exists*
+### M-13r (m) Second-class references: bind position, lending iteration, std adoption
 
-There is no way to express a zero-copy sub-slice, a lending iterator, or a
-returned view into an argument. Borrows usable in parameter position,
-expression position, and yield-accessors — but never storable — keep the
-"no lifetime syntax" property while unlocking all three, and give `M-4` its
-honest fix. The design, including sequencing that makes step 1 shippable
-alone, is [`design/second-class-refs.md`](design/second-class-refs.md) ([147]).
+[148] shipped step 1 of [`design/second-class-refs.md`](design/second-class-refs.md):
+`View of T` exists (`{ptr, len}`, trivially droppable, bounds-checked reads),
+created by `xs.view(a, b)`, `xs.at_view(i)`, and `s.view(a, b)` over string
+bytes; a `View of T` parameter accepts a whole `Vec`, an array, or a sub-slice
+view via automatic coercion; views support `.length`, `.get(i)`, and
+iteration; and every escaping position rejects at compile time — binds,
+returns, struct/enum/store fields, nested annotations, container elements,
+task and closure captures, sends, and yields (`tests/views.rs` pins all of
+it). Remaining, in the design's own sequencing: bind-position views with
+root-locking through the place lattice (step 2 — until then a view lives only
+inside its statement, which the existing statement borrows already make
+sound), `views()` lending iteration (step 3), the std adoption sweep with
+benchmarks (step 4), and field/method reads through an element view — the
+part of `M-4r` step 1 does not yet reach.
 
-### M-14 (M) `freeze` and shared immutables — *design exists*
+### M-14r (m) `freeze`: the multi-task sharing exception
 
-Large read-only data shared across tasks (config, model weights, tables) must
-today be copied per task or funnelled through one actor. A one-way transition
-to a deeply-immutable value that may be shared across tasks without copying
-needs no refcount if frozen values are scope-bounded — and `together` already
-supplies the scope. The design is [`design/freeze.md`](design/freeze.md)
-([147]).
+[148] shipped step 1 of [`design/freeze.md`](design/freeze.md): `freeze x`
+consumes its aggregate operand through the move lattice and produces
+`Frozen of T` — structurally checked freezability with the offending field
+path named, auto-deref on every read path, and compile-time rejection of
+every write (mutating and consuming methods, assignment through a frozen
+component, partial moves, mutating/consuming parameters), with `Frozen of T`
+usable in parameter and field position as an API contract
+(`tests/freeze.rs` pins all of it). Remaining: step 2's whole point — the
+capture exception that lets every `dispatch` inside a `together` share one
+frozen value without copying (today a frozen value moves into at most one
+task, like any aggregate); step 3's std adoption; and peeling `Frozen`
+arguments at actor-send and pipe boundaries, which today fail unification
+with a generic type mismatch instead of the frozen-aware diagnostic the
+direct-call path gives.
 
-### M-16 (M) Closure and generator capture rules — *specified, not implemented*
+### M-16r (m) Closures: caps edges, generators, temp environments
 
-Closures (`f is *() …`) do not parse, so no capture rule could be tested. The
-specification the item demanded now exists —
-[`design/closure-captures.md`](design/closure-captures.md) ([147]): captures
-follow task-capture rules (values copy, aggregates move, no capture by
-reference), the closure value is itself an aggregate owning its environment,
-and generators are the same rules plus suspended-frame drops. Implementation
-starts at the parser.
+The premise of M-16 was wrong in the fortunate direction: capturing lambdas
+already parsed and ran — by silently aliasing the enclosing frame, a
+use-after-free whenever a captured aggregate was consumed or reallocated.
+[148] implemented the specification's step 1
+([`design/closure-captures.md`](design/closure-captures.md)): captures
+classify by category (scalars copy, `String`s clone into the environment,
+aggregates move with `MoveReason::ClosureCapture`; views, `@resource` values,
+and borrowed parameters are rejected), the closure value is an aggregate that
+owns a heap environment carrying its own drop function, function-typed
+parameters borrow, and closures move into at most one task
+(`tests/closure_captures.rs` pins it; returning a closure over a local
+aggregate is now sound and pinned in `tests/alpha_review_regressions.rs`).
+Remaining: the caps fixpoint still has no edge for an indirect call through a
+closure value, so a `needs`-annotated function calling one under-reports
+(design step 2); generators still need suspended-frame drops before the same
+rules apply to them (step 3); by-view capture for provably in-frame closures
+(step 4); `copy x` at the capture site is spelled "bind `copy x` to a fresh
+name first" rather than inline; and a closure created in expression position
+with captures (`xs.map` with a capturing lambda argument) leaks its
+environment — closure temps are outside `M-9r2`'s drop-obligation set, and
+the leak tail is measured by `ci/sanitize-corpus.sh`.
 
 ---
 

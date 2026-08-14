@@ -326,7 +326,10 @@ impl Typer {
                         ));
                     }
                 }
-                let resolved_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
+                let resolved_ty = match self.infer_ctx.shallow_resolve(&hobj.ty) {
+                    Type::Frozen(inner) => self.infer_ctx.shallow_resolve(&inner),
+                    other => other,
+                };
 
                 if let Type::Row(store) = &resolved_ty
                     && let Some(rels) = self.store_relations.get(store)
@@ -457,6 +460,8 @@ impl Typer {
                 } else if matches!(&peeled_ty, Type::Vec(_)) && field == "length" {
                     (Type::I64, 0)
                 } else if matches!(&peeled_ty, Type::Map(_, _)) && field == "length" {
+                    (Type::I64, 0)
+                } else if matches!(&peeled_ty, Type::View(_)) && field == "length" {
                     (Type::I64, 0)
                 } else if let Type::Tuple(ref tys) = peeled_ty {
                     if let Ok(idx) = field.as_str().parse::<usize>() {

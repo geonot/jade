@@ -273,6 +273,7 @@ impl Scanner<'_> {
             | ast::Expr::StrictCast(e, _, _)
             | ast::Expr::Ref(e, _)
             | ast::Expr::Deref(e, _)
+            | ast::Expr::Freeze(e, _)
             | ast::Expr::Yield(e, _)
             | ast::Expr::ChannelRecv(e, _)
             | ast::Expr::Field(e, _, _)

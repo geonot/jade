@@ -81,6 +81,8 @@ grammar. [`README.md`](README.md) maps the rest.
     - [Regular expressions](#regular-expressions)
     - [Built-ins](#built-ins)
   - [Memory and ownership](#memory-and-ownership)
+    - [Frozen values](#frozen-values)
+    - [Views](#views)
   - [Idiomatic Jinn](#idiomatic-jinn)
   - [Reserved words](#reserved-words)
 
@@ -502,6 +504,33 @@ function for anything larger.
 ```jinn
 square is |x| x * x
 ```
+
+A lambda may reference bindings from its enclosing scope; the result is a
+closure that **owns its environment**. Captures follow the same category rules
+as every other ownership boundary ([Memory and ownership](#memory-and-ownership)):
+scalars and `String`s copy into the environment at creation, and aggregates
+**move** into it — reading a captured `Vec` afterwards is the ordinary
+use-after-move error, and binding `copy xs` to a fresh name first keeps the
+original. Because the environment is owned, a closure may outlive the frame
+that created it:
+
+```jinn
+*make_adder(base as i64) returns (i64) returns i64
+    |x| x + base
+
+*main
+    add10 is make_adder(10)
+    log(add10(5))              # 15
+```
+
+The closure value is itself an aggregate: assigning it moves it, it moves into
+at most one task, and dropping it drops everything it captured. A function-typed
+parameter (`f as (i64) returns i64`) borrows the closure for the call, so the
+caller keeps it. There is no capture by reference: what looks like "mutating a
+captured variable" in other languages is expressed with actors or by rebuilding
+the value — the closure's copy and the original are independent. The full
+specification is
+[`design/closure-captures.md`](design/closure-captures.md).
 
 The pipeline operator `~` feeds the left value as the first argument of the
 function on the right:
@@ -1297,6 +1326,74 @@ generation) stand in for pointers. A stale handle is detected, not dangling —
 an accidental category flip (adding a `Vec` field to a value type) into a
 compile error at the definition.
 
+### Frozen values
+
+`freeze x` is a one-way transition to deep immutability. It consumes an
+aggregate operand (`x` is tombstoned, like any move) and produces a
+`Frozen of T` — the same bits at runtime, but a type through which every write
+is a compile error: mutating methods, field assignment, moving a part out, and
+passing to a parameter the mutation inference marks mutating are all rejected,
+each diagnostic naming the fix. Every read works through the same syntax —
+fields, elements, iteration, read-only methods, and passing to read-only
+parameters:
+
+```jinn
+type Config
+    retries as i64
+    hosts as Vec of String
+
+*attempts(c as Config) returns i64
+    c.retries + 1
+
+*main
+    cfg is Config(retries is 3, hosts is vector('a', 'b'))
+    frozen is freeze cfg
+    log(frozen.retries)        # reads pass through
+    log(attempts(frozen))      # read-only parameters accept frozen values
+```
+
+`Frozen of T` is a real type: a parameter or field declared `Frozen of T`
+*demands* immutability from its callers. Freezing requires the type to be
+built of data — scalars, `String`, `Vec`, `Map`, and structs or enums of the
+same, recursively; `@resource` types, channels, actors, coroutines, and
+functions are live handles, not data, and are rejected with the offending
+field named. There is no `thaw`: to get a mutable value back, `copy` a part
+out and build anew. The design — including the planned exception that lets
+every `dispatch` in a `together` share one frozen value without copying,
+which is not implemented yet — is [`design/freeze.md`](design/freeze.md).
+
+### Views
+
+`xs.view(a, b)` produces a `View of T`: a zero-copy window (`pointer + length`)
+into `xs`'s buffer. `s.view(a, b)` does the same over a string's bytes, and
+`xs.at_view(i)` views one element. A view supports `.length`, `.get(i)`, and
+iteration, and a `View of T` parameter accepts a whole `Vec`, a sub-slice
+view, or an array — the callee cannot tell and cannot keep it:
+
+```jinn
+*total(v as View of i64) returns i64
+    t is 0
+    for x in v
+        t is t + x
+    t
+
+*main
+    xs is vector(1, 2, 3, 4)
+    log(total(xs))               # the whole vector, no copy
+    log(total(xs.view(1, 3)))    # elements 1 and 2, no copy
+```
+
+What makes views safe without lifetime annotations is *second-classness*: a
+view flows **down** — into calls, expressions, and loop bodies — but never
+**out**. Binding one to a name, returning one, storing one in a struct field,
+container, or store, sending one across a task boundary, and capturing one in
+a closure are all compile errors, so a view can never outlive the statement
+that created it, and the existing borrow rules already keep the owner stable
+for that long. The copying `slice` stays available when you need an owned
+sub-sequence. The full design, including the planned bind-position views and
+lending iteration, is
+[`design/second-class-refs.md`](design/second-class-refs.md).
+
 The full contract — the rules, the exact diagnostics, the tiers, and where the
 implementation does not yet meet the contract — is
 [`memory-model.md`](memory-model.md).
@@ -1368,7 +1465,7 @@ deliberately distinct.
 
 ## Reserved words
 
-**90 spellings, 85 distinct tokens** — the five extras are the comparison
+**91 spellings, 86 distinct tokens** — the five extras are the comparison
 aliases. The list is the `KEYWORDS` table in `src/lexer/mod.rs`; the grammar
 itself is [`jinn.ebnf`](jinn.ebnf), which `tests/ebnf_roundtrip.rs` keeps honest.
 
@@ -1376,7 +1473,7 @@ itself is [`jinn.ebnf`](jinn.ebnf), which `tests/ebnf_roundtrip.rs` keeps honest
 | --- | --- |
 | Comparison and boolean | `is`, `eq`/`equals`, `neq`, `lt`/`ngte`, `gt`/`nlte`, `lte`/`ngt`, `gte`/`nlt`, `and`, `or`, `not`, `xor`, `in`, `pow`, `mod` |
 | Control flow | `if`, `elif`, `else`, `unless`, `until`, `while`, `for`, `loop`, `break`, `continue`, `return`, `match`, `when`, `do`, `end`, `defer`, `yield` |
-| Declarations and types | `type`, `enum`, `trait`, `impl`, `dispatch`, `pub`, `use`, `as`, `from`, `to`, `by`, `of`, `extern`, `asm`, `embed`, `alias`, `global`, `atomic`, `strict`, `returns`, `at`, `nop` |
+| Declarations and types | `type`, `enum`, `trait`, `impl`, `dispatch`, `pub`, `use`, `as`, `from`, `to`, `by`, `of`, `extern`, `asm`, `embed`, `alias`, `global`, `atomic`, `strict`, `returns`, `at`, `nop`, `freeze` |
 | Concurrency | `actor`, `spawn`, `send`, `receive`, `channel`, `close`, `select`, `sim`, `supervisor`, `stop`, `default`, `together` |
 | Stores | `store`, `migration`, `insert`, `delete`, `set`, `transaction`, `view`, `query`, `err` |
 | Diagnostics and meta | `test`, `assert`, `log`, `unreachable`, `build`, `syscall`, `grad`, `einsum` |

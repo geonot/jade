@@ -112,7 +112,9 @@ impl MoveSet {
     pub(crate) fn record(&mut self, place: Place, reason: MoveReason) {
         let entries = self.by_root.entry(place.root).or_default();
         if let Some(existing) = entries.iter_mut().find(|e| e.place.proj == place.proj) {
-            existing.reason = reason;
+            if !matches!(existing.reason, MoveReason::Freeze(_)) {
+                existing.reason = reason;
+            }
         } else {
             entries.push(MovedEntry { place, reason });
         }

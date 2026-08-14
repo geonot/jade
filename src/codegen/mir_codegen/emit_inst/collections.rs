@@ -70,6 +70,9 @@ impl<'ctx> Compiler<'ctx> {
                     let vec_val = self.val(*vec);
                     let i64t = self.ctx.i64_type();
                     let vec_ty = self.value_types.get(vec);
+                    if matches!(vec_ty, Some(Type::View(_))) {
+                        return Ok(Some(self.view_len_val(vec_val)?.into()));
+                    }
                     if matches!(vec_ty, Some(Type::String)) || vec_val.is_struct_value() {
                         self.string_len(vec_val)
                     } else if vec_val.is_pointer_value() {

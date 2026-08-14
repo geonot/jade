@@ -12,6 +12,19 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) const GEN_DONE_OFF: u64 = 17;
     pub(crate) const GEN_SIZE: u64 = 32;
 
+    pub(crate) fn gen_capture_offsets(
+        &self,
+        tys: &[inkwell::types::BasicTypeEnum<'ctx>],
+    ) -> (Vec<u64>, u64) {
+        let mut off = Self::GEN_SIZE;
+        let mut offs = Vec::with_capacity(tys.len());
+        for t in tys {
+            offs.push(off);
+            off += self.type_store_size(*t).next_multiple_of(8);
+        }
+        (offs, off)
+    }
+
     pub(crate) fn gen_field_ptr(
         &self,
         gen_ptr: inkwell::values::PointerValue<'ctx>,

@@ -173,10 +173,10 @@ fn passing_a_struct_that_owns_a_vec_does_not_double_free() {
 }
 
 #[test]
-fn returning_a_closure_over_a_local_aggregate_is_rejected() {
-    compile_fails_with(
-        "*make_closure()\n    v is vec(10, 20, 30)\n    f is |x| v.get(x)\n    return f\n\n*main\n    g is make_closure()\n    log(g(0))\n",
-        "captures the local",
+fn returning_a_closure_over_a_local_aggregate_owns_its_environment() {
+    expect_out(
+        "*make_closure()\n    v is vec(10, 20, 30)\n    f is |x| v.get(x)\n    return f\n\n*main\n    g is make_closure()\n    log(g(0))\n    log(g(2))\n",
+        "10\n30",
     );
 }
 

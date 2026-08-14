@@ -19,6 +19,7 @@ mod string_transform;
 mod strings;
 mod types;
 mod vec;
+mod view;
 
 use crate::intern::Symbol;
 use indexmap::IndexMap;

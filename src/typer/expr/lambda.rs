@@ -33,6 +33,7 @@ impl Typer {
             _ => (None, None),
         };
 
+        let outer_ids = self.in_scope_def_ids();
         self.push_scope();
         let mut hparams = Vec::new();
         let mut ptys = Vec::new();
@@ -76,6 +77,8 @@ impl Typer {
 
         let hbody = self.lower_block_no_scope_with_tail(body, &ret_ty, Some(&ret_ty))?;
         self.pop_scope();
+
+        self.mark_closure_captures(&hbody, &outer_ids, span)?;
 
         if let Some(hir::Stmt::Expr(e)) = hbody.last()
             && e.ty != Type::Void

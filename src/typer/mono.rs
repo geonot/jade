@@ -38,6 +38,8 @@ impl Typer {
             Type::Generator(inner) => {
                 Type::Generator(Box::new(Self::substitute_type(inner, type_map)))
             }
+            Type::View(inner) => Type::View(Box::new(Self::substitute_type(inner, type_map))),
+            Type::Frozen(inner) => Type::Frozen(Box::new(Self::substitute_type(inner, type_map))),
 
             Type::Struct(name, args) => Type::Struct(
                 *name,
@@ -57,7 +59,9 @@ impl Typer {
             | Type::Ptr(inner)
             | Type::Channel(inner)
             | Type::Coroutine(inner)
-            | Type::Generator(inner) => Self::is_concrete_type(inner),
+            | Type::Generator(inner)
+            | Type::View(inner)
+            | Type::Frozen(inner) => Self::is_concrete_type(inner),
             Type::Map(k, v) => Self::is_concrete_type(k) && Self::is_concrete_type(v),
             Type::Tuple(tys) => tys.iter().all(Self::is_concrete_type),
             Type::Struct(_, args) => args.iter().all(Self::is_concrete_type),
@@ -129,6 +133,10 @@ impl Typer {
             }
             Type::Generator(inner) => {
                 Type::Generator(Box::new(self.monomorphize_named_annotation(inner)))
+            }
+            Type::View(inner) => Type::View(Box::new(self.monomorphize_named_annotation(inner))),
+            Type::Frozen(inner) => {
+                Type::Frozen(Box::new(self.monomorphize_named_annotation(inner)))
             }
             Type::Param(name) => {
                 if self.enums.contains_key(name) && !self.generic_enums.contains_key(name) {
@@ -292,7 +300,9 @@ impl Typer {
             | Type::Vec(inner)
             | Type::Ptr(inner)
             | Type::Channel(inner)
-            | Type::Coroutine(inner) => {
+            | Type::Coroutine(inner)
+            | Type::View(inner)
+            | Type::Frozen(inner) => {
                 Self::collect_type_params_from(inner, out);
             }
             Type::Map(k, v) => {

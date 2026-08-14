@@ -17,10 +17,17 @@ impl<'ctx> Compiler<'ctx> {
         };
 
         let cap_vals: Vec<BasicValueEnum<'ctx>> = captures.iter().map(|v| self.val(*v)).collect();
+        let cap_mir_tys: Vec<Type> = captures
+            .iter()
+            .map(|v| self.value_types.get(v).cloned().unwrap_or(Type::I64))
+            .collect();
         let cap_tys: Vec<BasicTypeEnum<'ctx>> = cap_vals.iter().map(|v| v.get_type()).collect();
 
+        let mut env_field_tys: Vec<BasicTypeEnum<'ctx>> = vec![ptr_ty.into()];
+        env_field_tys.extend(cap_tys.iter().copied());
+
         let env_ptr = if !captures.is_empty() {
-            let env_struct_ty = self.ctx.struct_type(&cap_tys, false);
+            let env_struct_ty = self.ctx.struct_type(&env_field_tys, false);
             let env_size = env_struct_ty.size_of().expect("ICE: type has no size");
             let malloc = self.ensure_malloc();
             let ep = b!(self.bld.build_call(malloc, &[env_size.into()], "env.alloc"))
@@ -28,11 +35,28 @@ impl<'ctx> Compiler<'ctx> {
                 .basic()
                 .expect("ICE: call returned void")
                 .into_pointer_value();
+            let drop_fn = self.closure_env_drop_fn(fn_name, &cap_mir_tys, &cap_tys)?;
+            let drop_gep = b!(self
+                .bld
+                .build_struct_gep(env_struct_ty, ep, 0, "env.dropfn"));
+            b!(self
+                .bld
+                .build_store(drop_gep, drop_fn.as_global_value().as_pointer_value()));
             for (i, v) in cap_vals.iter().enumerate() {
-                let gep = b!(self
-                    .bld
-                    .build_struct_gep(env_struct_ty, ep, i as u32, "env.field"));
-                b!(self.bld.build_store(gep, *v));
+                let ty = &cap_mir_tys[i];
+                let stored = if !self.capture_moves_ownership(ty)
+                    && !ty.is_trivially_droppable()
+                    && Self::is_value_clonable(ty)
+                {
+                    self.clone_value(*v, ty)?
+                } else {
+                    *v
+                };
+                let gep =
+                    b!(self
+                        .bld
+                        .build_struct_gep(env_struct_ty, ep, (i + 1) as u32, "env.field"));
+                b!(self.bld.build_store(gep, stored));
             }
             ep
         } else {
@@ -68,7 +92,7 @@ impl<'ctx> Compiler<'ctx> {
 
                 let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> = Vec::new();
                 if n_captures > 0 {
-                    let env_struct_ty = self.ctx.struct_type(&cap_tys, false);
+                    let env_struct_ty = self.ctx.struct_type(&env_field_tys, false);
                     let env_param = wrapper_fv
                         .get_nth_param(0)
                         .expect("ICE: missing param")
@@ -77,7 +101,7 @@ impl<'ctx> Compiler<'ctx> {
                         let gep = b!(self.bld.build_struct_gep(
                             env_struct_ty,
                             env_param,
-                            i as u32,
+                            (i + 1) as u32,
                             "cap.gep"
                         ));
                         let load_ty: BasicTypeEnum<'ctx> = (*inner_param).try_into().unwrap();
@@ -124,6 +148,91 @@ impl<'ctx> Compiler<'ctx> {
         .into_struct_value()
         .into();
         Ok(agg)
+    }
+
+    pub(in crate::codegen) fn capture_moves_ownership(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Vec(_) | Type::Map(_, _) | Type::Coroutine(_) | Type::Generator(_) => true,
+            Type::Fn(_, _) => true,
+            Type::Struct(name, _) => self
+                .structs
+                .get(name)
+                .map(|fields| {
+                    fields
+                        .iter()
+                        .any(|(_, fty)| self.capture_moves_ownership(fty))
+                })
+                .unwrap_or(false),
+            Type::Enum(name) => self
+                .enums
+                .get(name)
+                .map(|variants| {
+                    variants
+                        .iter()
+                        .any(|(_, ftys)| ftys.iter().any(|t| self.capture_moves_ownership(t)))
+                })
+                .unwrap_or(false),
+            Type::Tuple(ts) => ts.iter().any(|t| self.capture_moves_ownership(t)),
+            Type::Array(elem, _) => self.capture_moves_ownership(elem),
+            Type::Alias(_, inner) | Type::Newtype(_, inner) | Type::Frozen(inner) => {
+                self.capture_moves_ownership(inner)
+            }
+            _ => false,
+        }
+    }
+
+    fn closure_env_drop_fn(
+        &mut self,
+        fn_name: &str,
+        cap_mir_tys: &[Type],
+        cap_tys: &[BasicTypeEnum<'ctx>],
+    ) -> Result<inkwell::values::FunctionValue<'ctx>, String> {
+        let drop_name = format!("{fn_name}.env_drop");
+        if let Some(f) = self.module.get_function(&drop_name) {
+            return Ok(f);
+        }
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let ft = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
+        let fv = self
+            .module
+            .add_function(&drop_name, ft, Some(inkwell::module::Linkage::Internal));
+        self.tag_fn(fv);
+
+        let saved_bb = self.bld.get_insert_block();
+        let saved_fn = self.cur_fn;
+        let entry = self.ctx.append_basic_block(fv, "entry");
+        self.cur_fn = Some(fv);
+        self.bld.position_at_end(entry);
+
+        let mut env_field_tys: Vec<BasicTypeEnum<'ctx>> = vec![ptr_ty.into()];
+        env_field_tys.extend(cap_tys.iter().copied());
+        let env_struct_ty = self.ctx.struct_type(&env_field_tys, false);
+        let env_param = fv
+            .get_nth_param(0)
+            .expect("ICE: env_drop missing param")
+            .into_pointer_value();
+
+        for (i, ty) in cap_mir_tys.iter().enumerate() {
+            if ty.is_trivially_droppable() {
+                continue;
+            }
+            let gep =
+                b!(self
+                    .bld
+                    .build_struct_gep(env_struct_ty, env_param, (i + 1) as u32, "envd.gep"));
+            let val = b!(self.bld.build_load(cap_tys[i], gep, "envd.val"));
+            self.drop_value(val, ty)?;
+        }
+
+        let free = self.ensure_free();
+        b!(self.bld.build_call(free, &[env_param.into()], ""));
+        self.bld.build_return(None).unwrap();
+
+        self.cur_fn = saved_fn;
+        if let Some(bb) = saved_bb {
+            self.bld.position_at_end(bb);
+        }
+        Ok(fv)
     }
 
     pub(in crate::codegen) fn emit_chan_create(

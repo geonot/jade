@@ -294,6 +294,23 @@ impl Typer {
     fn lower_fn_inner(&mut self, f: &ast::Fn) -> Result<hir::Fn, String> {
         let mut hfn = self.lower_fn_deferred(f)?;
 
+        let ret_res = {
+            let was_strict = self.infer_ctx.is_strict();
+            self.infer_ctx.set_strict(false);
+            let r = self.infer_ctx.resolve(&hfn.ret);
+            self.infer_ctx.set_strict(was_strict);
+            r
+        };
+        if crate::typer::expr::views::type_contains_view(&ret_res) {
+            return Err(format!(
+                "{}: function `{}` returns a view — a view is a second-class borrow \
+                 and cannot outlive the frame that created it; return the owning \
+                 container, or a copied slice (`slice` copies)",
+                f.span.loc(),
+                f.name,
+            ));
+        }
+
         let einfo = crate::escape::analyze_fn(&hfn);
         for (id, t) in einfo.iter() {
             self.escape_tiers.insert(*id, *t);
@@ -315,6 +332,7 @@ impl Typer {
         for (i, p) in f.params.iter().enumerate() {
             let pid = self.fresh_id();
             let ty = ptys[i].clone();
+            self.reject_view_annotation(&ty, "a parameter type except at top level (`View of T` is fine, a view inside a container is not)", p.span, true)?;
 
             let eff_mod = self
                 .fn_param_access
@@ -426,13 +444,6 @@ impl Typer {
             .collect();
         if !borrowed_param_ids.is_empty() {
             Self::strip_drops_for(&mut body, &borrowed_param_ids);
-        }
-
-        {
-            let mut locals: std::collections::HashMap<crate::hir::DefId, (Symbol, Type)> =
-                std::collections::HashMap::new();
-            Self::collect_local_binds(&body, &mut locals);
-            self.check_escaping_lambda_captures(&body, &locals)?;
         }
 
         let inferred_err: Vec<Symbol> = self.current_fn_error_types.iter().cloned().collect();

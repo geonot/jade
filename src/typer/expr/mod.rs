@@ -2,6 +2,7 @@ mod access;
 mod concur;
 mod construct;
 mod control;
+mod freeze;
 mod ident;
 mod lambda;
 mod misc;
@@ -9,6 +10,7 @@ mod op;
 mod quaternary;
 mod store;
 mod typeargs;
+pub(crate) mod views;
 
 use std::path::PathBuf;
 
@@ -298,6 +300,8 @@ impl Typer {
                     span: *span,
                 })
             }
+
+            ast::Expr::Freeze(inner, span) => self.lower_expr_freeze(inner, *span),
 
             ast::Expr::Deref(inner, span) => {
                 let hi = self.lower_expr(inner)?;

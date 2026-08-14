@@ -262,6 +262,16 @@ impl Typer {
                 (f.name, ty)
             })
             .collect();
+        for (fname, fty) in &fields {
+            if crate::typer::expr::views::type_contains_view(fty) {
+                self.type_errors.push(format!(
+                    "field `{}.{}`: a view cannot be stored in a struct field — views \
+                     are second-class borrows that never escape; store the owning \
+                     container or a copied slice instead",
+                    td.name, fname
+                ));
+            }
+        }
         if td.fields.iter().any(|f| f.ty.is_none()) {
             self.inferred_field_structs.insert(td.name);
         }
@@ -315,6 +325,15 @@ impl Typer {
         let mut variants = Vec::new();
         for (tag, v) in ed.variants.iter().enumerate() {
             let ftys: Vec<Type> = v.fields.iter().map(|f| f.ty.clone()).collect();
+            for fty in &ftys {
+                if crate::typer::expr::views::type_contains_view(fty) {
+                    self.type_errors.push(format!(
+                        "variant `{}:{}`: a view cannot be stored in an enum payload — \
+                         views are second-class borrows that never escape",
+                        ed.name, v.name
+                    ));
+                }
+            }
             let tag = v.discriminant.map(|d| d as u32).unwrap_or(tag as u32);
             self.variant_tags.insert(v.name, (ed.name, tag));
             variants.push((v.name, ftys));

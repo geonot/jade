@@ -271,6 +271,10 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Deref(Box::new(self.parse_unary()?), sp))
             }
+            Token::Freeze => {
+                self.advance();
+                Ok(Expr::Freeze(Box::new(self.parse_unary()?), sp))
+            }
             _ => self.parse_postfix(),
         }
     }

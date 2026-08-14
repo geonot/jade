@@ -33,6 +33,9 @@ pub enum VecMethod {
     Find,
     Any,
     All,
+    View,
+    AtView,
+    ViewFull,
 }
 
 impl VecMethod {
@@ -69,6 +72,9 @@ impl VecMethod {
             "find" => Self::Find,
             "any" => Self::Any,
             "all" => Self::All,
+            "view" => Self::View,
+            "at_view" => Self::AtView,
+            "view_full" => Self::ViewFull,
             _ => return None,
         })
     }
@@ -100,6 +106,7 @@ impl VecMethod {
                 _ => Type::Vec(Box::new(elem_ty.clone())),
             },
             Self::Join => Type::String,
+            Self::View | Self::AtView | Self::ViewFull => Type::View(Box::new(elem_ty.clone())),
             Self::Enumerate => Type::Vec(Box::new(Type::Tuple(vec![Type::I64, elem_ty.clone()]))),
             Self::Zip | Self::Map | Self::Fold => Type::Void,
         }
@@ -170,6 +177,7 @@ pub enum StrMethod {
     Split,
     Lines,
     IsEmpty,
+    View,
 }
 
 impl StrMethod {
@@ -194,6 +202,7 @@ impl StrMethod {
             "split" => Self::Split,
             "lines" => Self::Lines,
             "is_empty" => Self::IsEmpty,
+            "view" => Self::View,
             _ => return None,
         })
     }
@@ -211,6 +220,7 @@ impl StrMethod {
             | Self::ToLower
             | Self::Repeat => Type::String,
             Self::Split | Self::Lines => Type::Vec(Box::new(Type::String)),
+            Self::View => Type::View(Box::new(Type::U8)),
         }
     }
 

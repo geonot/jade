@@ -118,6 +118,8 @@ const_expr    = expr . (* constant-folded by the typer *)
 type_expr     = primitive_type
               | "vec" "of" type_expr
               | "channel" "of" type_expr
+              | "View" "of" type_expr          (* second-class borrow *)
+              | "Frozen" "of" type_expr        (* deep immutability *)
               | "%" type_expr                  (* pointer / borrow *)
               | "(" type_expr { "," type_expr } ")"   (* tuple type *)
               | identifier [ generic_args ] .
@@ -197,7 +199,8 @@ cmp_op        = "==" | "!=" | "<" | "<=" | ">" | ">="
               | "equals" | "neq" | "eq" | "lt" | "gt" | "lte" | "gte" .
 add_expr      = mul_expr { ( "+" | "-" ) mul_expr } .
 mul_expr      = unary_expr { ( "*" | "/" | "%" | "mod" ) unary_expr } .
-unary_expr    = [ "-" | "%" ] primary .   (* unary "%" is reference/borrow *)
+unary_expr    = [ "-" | "%" | "not" | "~" | "@" | "freeze" ] primary .
+                (* unary "%" is reference/borrow, "@" is dereference *)
 primary       = literal
               | identifier
               | "self"
@@ -219,7 +222,7 @@ arg_list      = arg { "," arg } .
 arg           = [ identifier "is" ] expr .
 
 block_expr    = "block" NEWLINE block .
-lambda_expr   = "(" [ param_list ] ")" "=>" expr .
+lambda_expr   = "|" [ param_list ] "|" [ "returns" type_expr ] expr .
 string_interp = string .  (* "${expr}" segments handled by the lexer *)
 
 (* ===== literals ===== *)

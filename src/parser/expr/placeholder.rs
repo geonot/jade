@@ -70,6 +70,7 @@ pub(in crate::parser) fn contains_placeholder(expr: &Expr) -> bool {
         Expr::As(e, _, _) => contains_placeholder(e),
         Expr::Ref(e, _) => contains_placeholder(e),
         Expr::Deref(e, _) => contains_placeholder(e),
+        Expr::Freeze(e, _) => contains_placeholder(e),
         Expr::Array(elems, _) => elems.iter().any(contains_placeholder),
         Expr::Tuple(elems, _) => elems.iter().any(contains_placeholder),
         Expr::Pipe(l, r, _, _) => contains_placeholder(l) || contains_placeholder(r),
@@ -99,6 +100,7 @@ pub(in crate::parser) fn contains_lambda_placeholder(expr: &Expr) -> bool {
         Expr::As(e, _, _) => contains_lambda_placeholder(e),
         Expr::Ref(e, _) => contains_lambda_placeholder(e),
         Expr::Deref(e, _) => contains_lambda_placeholder(e),
+        Expr::Freeze(e, _) => contains_lambda_placeholder(e),
         Expr::Array(elems, _) => elems.iter().any(contains_lambda_placeholder),
         Expr::Tuple(elems, _) => elems.iter().any(contains_lambda_placeholder),
         Expr::Pipe(l, r, _, _) => contains_lambda_placeholder(l) || contains_lambda_placeholder(r),
@@ -143,6 +145,7 @@ pub(in crate::parser) fn replace_placeholder(expr: &Expr, name: &str) -> Expr {
         Expr::As(e, t, sp) => Expr::As(Box::new(replace_placeholder(e, name)), t.clone(), *sp),
         Expr::Ref(e, sp) => Expr::Ref(Box::new(replace_placeholder(e, name)), *sp),
         Expr::Deref(e, sp) => Expr::Deref(Box::new(replace_placeholder(e, name)), *sp),
+        Expr::Freeze(e, sp) => Expr::Freeze(Box::new(replace_placeholder(e, name)), *sp),
         Expr::Array(elems, sp) => Expr::Array(
             elems.iter().map(|e| replace_placeholder(e, name)).collect(),
             *sp,
@@ -307,6 +310,7 @@ pub(in crate::parser) fn contains_index_placeholder(expr: &Expr) -> bool {
         Expr::As(e, _, _) => contains_index_placeholder(e),
         Expr::Ref(e, _) => contains_index_placeholder(e),
         Expr::Deref(e, _) => contains_index_placeholder(e),
+        Expr::Freeze(e, _) => contains_index_placeholder(e),
         Expr::Array(elems, _) => elems.iter().any(contains_index_placeholder),
         Expr::Tuple(elems, _) => elems.iter().any(contains_index_placeholder),
         Expr::Pipe(l, r, _, _) => contains_index_placeholder(l) || contains_index_placeholder(r),
@@ -358,6 +362,7 @@ pub(in crate::parser) fn replace_index_placeholder(expr: &Expr, name: &str) -> E
         }
         Expr::Ref(e, sp) => Expr::Ref(Box::new(replace_index_placeholder(e, name)), *sp),
         Expr::Deref(e, sp) => Expr::Deref(Box::new(replace_index_placeholder(e, name)), *sp),
+        Expr::Freeze(e, sp) => Expr::Freeze(Box::new(replace_index_placeholder(e, name)), *sp),
         Expr::Array(elems, sp) => Expr::Array(
             elems
                 .iter()

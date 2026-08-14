@@ -462,7 +462,9 @@ impl<'ctx> Compiler<'ctx> {
         let cap_vals: Vec<BasicValueEnum<'ctx>> =
             cap_args.iter().map(|vid| self.val(*vid)).collect();
 
-        let total_size = Compiler::GEN_SIZE + (cap_vals.len() as u64) * 8;
+        let cap_slot_tys: Vec<inkwell::types::BasicTypeEnum<'ctx>> =
+            cap_vals.iter().map(|v| v.get_type()).collect();
+        let (cap_offs, total_size) = self.gen_capture_offsets(&cap_slot_tys);
         let malloc_fn = self.ensure_malloc();
         let gen_mem = b!(self.bld.build_call(
             malloc_fn,
@@ -486,8 +488,7 @@ impl<'ctx> Compiler<'ctx> {
         ));
 
         for (i, val) in cap_vals.iter().enumerate() {
-            let off = Compiler::GEN_SIZE + (i as u64) * 8;
-            let slot_ptr = self.gen_field_ptr(gen_mem, off, "task.cap")?;
+            let slot_ptr = self.gen_field_ptr(gen_mem, cap_offs[i], "task.cap")?;
             b!(self.bld.build_store(slot_ptr, *val));
         }
 
@@ -540,7 +541,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let arg_vals: Vec<BasicValueEnum<'ctx>> = args.iter().map(|vid| self.val(*vid)).collect();
 
-        let total_size = Compiler::GEN_SIZE + (arg_vals.len() as u64) * 8;
+        let arg_slot_tys: Vec<inkwell::types::BasicTypeEnum<'ctx>> =
+            arg_vals.iter().map(|v| v.get_type()).collect();
+        let (arg_offs, total_size) = self.gen_capture_offsets(&arg_slot_tys);
         let malloc_fn = self.ensure_malloc();
         let gen_mem = b!(self.bld.build_call(
             malloc_fn,
@@ -568,8 +571,7 @@ impl<'ctx> Compiler<'ctx> {
         ));
 
         for (i, val) in arg_vals.iter().enumerate() {
-            let off = Compiler::GEN_SIZE + (i as u64) * 8;
-            let slot_ptr = self.gen_field_ptr(gen_mem, off, "cap.slot")?;
+            let slot_ptr = self.gen_field_ptr(gen_mem, arg_offs[i], "cap.slot")?;
             b!(self.bld.build_store(slot_ptr, *val));
         }
 

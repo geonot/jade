@@ -184,7 +184,56 @@ impl<'ctx> Compiler<'ctx> {
                                 ));
                                 return Ok(Some(cmp.into()));
                             }
+                            StrMethod::View => {
+                                if args.len() >= 2 {
+                                    let start = self.val(args[0]);
+                                    let end = self.val(args[1]);
+                                    return Ok(Some(self.view_from_string(recv_val, start, end)?));
+                                }
+                            }
                         }
+                    }
+
+                    if let Some(Type::View(elem_ty)) = &recv_ty {
+                        let elem_ty = (**elem_ty).clone();
+                        let recv_val = self.val(*recv);
+                        match &*method.as_str() {
+                            "len" | "length" | "count" => {
+                                return Ok(Some(self.view_len_val(recv_val)?.into()));
+                            }
+                            "get" | "at" => {
+                                if !args.is_empty() {
+                                    let idx = self.val(args[0]);
+                                    return Ok(Some(self.view_get(recv_val, &elem_ty, idx, true)?));
+                                }
+                                return Err("view get() requires an index argument".into());
+                            }
+                            other => {
+                                return Err(format!("unknown view method '{other}'"));
+                            }
+                        }
+                    }
+
+                    if let Some(Type::Array(elem_ty, n)) = &recv_ty
+                        && &*method.as_str() == "view_full"
+                    {
+                        let elem_ty = (**elem_ty).clone();
+                        let n = *n;
+                        let recv_val = self.val(*recv);
+                        let arr_ty = recv_val.get_type().into_array_type();
+                        let alloca = self.entry_alloca(arr_ty.into(), "vw.arr");
+                        b!(self.bld.build_store(alloca, recv_val));
+                        let i64t = self.ctx.i64_type();
+                        let zero = i64t.const_int(0, false);
+                        let lty = self.llvm_ty(&elem_ty);
+                        let _ = lty;
+                        let base = unsafe {
+                            b!(self
+                                .bld
+                                .build_gep(arr_ty, alloca, &[zero, zero], "vw.abase"))
+                        };
+                        let len = i64t.const_int(n as u64, false);
+                        return Ok(Some(self.view_pack(base, len)?));
                     }
 
                     let is_vec_or_array =
@@ -222,6 +271,28 @@ impl<'ctx> Compiler<'ctx> {
                             match vm {
                                 VecMethod::Len | VecMethod::Count => {
                                     return Ok(Some((self.vec_len(header_ptr))?));
+                                }
+                                VecMethod::View => {
+                                    if args.len() >= 2 {
+                                        let lo = self.val(args[0]);
+                                        let hi = self.val(args[1]);
+                                        return Ok(Some(
+                                            self.view_from_vec_range(header_ptr, &elem_ty, lo, hi)?,
+                                        ));
+                                    }
+                                    return Err("view() requires two index arguments".into());
+                                }
+                                VecMethod::AtView => {
+                                    if !args.is_empty() {
+                                        let idx = self.val(args[0]);
+                                        return Ok(Some(
+                                            self.view_elem_from_vec(header_ptr, &elem_ty, idx)?,
+                                        ));
+                                    }
+                                    return Err("at_view() requires an index argument".into());
+                                }
+                                VecMethod::ViewFull => {
+                                    return Ok(Some(self.view_from_vec_full(header_ptr)?));
                                 }
                                 VecMethod::IsEmpty => {
                                     let len = self.vec_len(header_ptr)?.into_int_value();

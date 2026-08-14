@@ -196,6 +196,12 @@ impl Parser {
                         if name == "Map" {
                             return Ok(Type::Map(Box::new(Type::String), Box::new(arg)));
                         }
+                        if name == "View" {
+                            return Ok(Type::View(Box::new(arg)));
+                        }
+                        if name == "Frozen" {
+                            return Ok(Type::Frozen(Box::new(arg)));
+                        }
                         let mut targs = vec![arg];
                         if self.allow_multi_type_args {
                             while self.check(Token::Comma) {

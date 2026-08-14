@@ -13,7 +13,9 @@ pub(super) fn type_references_name(ty: &Type, name: Symbol) -> bool {
         | Type::Ptr(inner)
         | Type::Channel(inner)
         | Type::Coroutine(inner)
-        | Type::Generator(inner) => type_references_name(inner, name),
+        | Type::Generator(inner)
+        | Type::View(inner)
+        | Type::Frozen(inner) => type_references_name(inner, name),
         Type::Map(k, v) => type_references_name(k, name) || type_references_name(v, name),
         Type::Array(inner, _) => type_references_name(inner, name),
         Type::Tuple(elems) => elems.iter().any(|e| type_references_name(e, name)),
@@ -57,6 +59,10 @@ impl Typer {
             }
             Type::Generator(inner) => {
                 Type::Generator(Box::new(Self::normalize_actor_refs(*inner, actors)))
+            }
+            Type::View(inner) => Type::View(Box::new(Self::normalize_actor_refs(*inner, actors))),
+            Type::Frozen(inner) => {
+                Type::Frozen(Box::new(Self::normalize_actor_refs(*inner, actors)))
             }
             Type::Tuple(elems) => Type::Tuple(
                 elems
@@ -807,6 +813,8 @@ impl Typer {
                     .collect(),
                 Box::new(self.canonicalize_generic_enums(r)),
             ),
+            Type::View(i) => Type::View(Box::new(self.canonicalize_generic_enums(i))),
+            Type::Frozen(i) => self.canonicalize_generic_enums(i),
             _ => ty.clone(),
         }
     }

@@ -1,12 +1,16 @@
 # Closure and generator capture rules — specification
 
-> **Status: design, deliberately ahead of implementation.** Closures that
-> capture (`f is *() use(x)`) do not parse today, so no capture rule has ever
-> been exercised — that is `M-16` in
-> [`../roadmap.md`](../roadmap.md#memory-and-ownership), and its instruction
-> is explicit: specify before implementing. This document is that
-> specification. Lambdas that capture nothing (`double is *(x) x * 2`) exist
-> and are out of scope here.
+> **Status: step 1 implemented ([148]).** When this was specified ([147]) it
+> assumed capturing closures did not parse; probing showed they parsed *and
+> ran* — capturing the enclosing frame by alias, with a use-after-free on any
+> capture the frame invalidated. [148] made the rules below real: captures
+> classify by category (scalars copy, `String`s clone, aggregates move through
+> the place lattice), the closure value is an aggregate owning its
+> environment, and environments carry their own drop function. Pinned by
+> `tests/closure_captures.rs`. Caps integration (step 2), generator-frame
+> drops (step 3), and by-view capture (step 4) remain — tracked as `M-16r` in
+> [`../roadmap.md`](../roadmap.md#memory-and-ownership). Lambda syntax is
+> `|x| x * 2`; a capturing closure is any lambda with free variables.
 
 ## The rule, in one sentence
 
@@ -21,7 +25,7 @@ closures to ship.
 
 ## Capture semantics
 
-At closure creation (`f is *() body`), every free variable of `body` is
+At closure creation (`f is |…| body`), every free variable of `body` is
 classified by the same category rules as assignment:
 
 - **scalars and `String`** — copied into the environment. The original stays

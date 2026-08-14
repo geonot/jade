@@ -59,6 +59,10 @@ pub(crate) enum MoveReason {
     ContainerInsert(Symbol, crate::ast::Span),
 
     CtorCapture(crate::ast::Span),
+
+    ClosureCapture(crate::ast::Span),
+
+    Freeze(crate::ast::Span),
 }
 
 #[allow(clippy::type_complexity)]
@@ -618,6 +622,21 @@ impl Typer {
                 defer_span.loc(),
             ));
         }
+        if !pl.is_root()
+            && self.suppress_move_marking == 0
+            && let Some(root_ty) = self.find_var_by_id(pl.root).map(|v| v.ty.clone())
+            && matches!(self.infer_ctx.resolve(&root_ty), Type::Frozen(_))
+        {
+            return Err(format!(
+                "{}: cannot move `{}` out of `{}`: it is frozen, and a frozen value can \
+                 never be written — not even by moving a part out; copy the part instead \
+                 (`copy {}`)",
+                at.loc(),
+                pl.render(),
+                pl.root_name,
+                pl.render(),
+            ));
+        }
         if self.suppress_move_marking == 0 {
             self.moves.record(pl, reason);
         }
@@ -706,13 +725,14 @@ impl Typer {
             | Type::Vec(_)
             | Type::Map(_, _)
             | Type::Coroutine(_)
-            | Type::Generator(_) => true,
+            | Type::Generator(_)
+            | Type::Fn(_, _) => true,
 
             Type::Struct(_, _) | Type::Enum(_) | Type::Tuple(_) | Type::Array(_, _) => {
                 self.needs_drop(ty)
             }
 
-            Type::Alias(_, inner) | Type::Newtype(_, inner) => {
+            Type::Alias(_, inner) | Type::Newtype(_, inner) | Type::Frozen(inner) => {
                 self.type_param_default_borrows(inner)
             }
 
@@ -731,7 +751,7 @@ impl Typer {
             Type::Coroutine(_) | Type::Generator(_) => true,
 
             Type::Row(_) => true,
-            Type::Newtype(_, inner) | Type::Alias(_, inner) => {
+            Type::Newtype(_, inner) | Type::Alias(_, inner) | Type::Frozen(inner) => {
                 self.type_has_resource_annotation(inner)
             }
             _ => false,
@@ -749,6 +769,14 @@ impl Typer {
                 "{}: resource type `{}` cannot cross thread boundaries ({})",
                 span.loc(),
                 ty,
+                context
+            ));
+        }
+        if crate::typer::expr::views::type_contains_view(ty) {
+            return Err(format!(
+                "{}: a view cannot cross a task boundary ({}): it borrows memory owned \
+                 by the sending frame; send the owning container or a copied slice",
+                span.loc(),
                 context
             ));
         }

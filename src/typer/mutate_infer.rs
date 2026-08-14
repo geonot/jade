@@ -370,6 +370,7 @@ impl crate::typer::Typer {
             | Expr::StrictCast(x, _, _)
             | Expr::Ref(x, _)
             | Expr::Deref(x, _)
+            | Expr::Freeze(x, _)
             | Expr::Spread(x, _)
             | Expr::Grad(x, _)
             | Expr::AsFormat(x, _, _)

@@ -363,6 +363,7 @@ impl<'a> Renamer<'a> {
             Expr::As(e, _, _)
             | Expr::Ref(e, _)
             | Expr::Deref(e, _)
+            | Expr::Freeze(e, _)
             | Expr::Yield(e, _)
             | Expr::Grad(e, _)
             | Expr::StrictCast(e, _, _)

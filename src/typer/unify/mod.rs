@@ -609,6 +609,8 @@ impl InferCtx {
             (Type::Channel(a), Type::Channel(b)) => self.unify(a, b),
             (Type::Coroutine(a), Type::Coroutine(b)) => self.unify(a, b),
             (Type::Generator(a), Type::Generator(b)) => self.unify(a, b),
+            (Type::View(a), Type::View(b)) => self.unify(a, b),
+            (Type::Frozen(a), Type::Frozen(b)) => self.unify(a, b),
             (Type::Struct(na, aa), Type::Struct(nb, ab)) if na == nb && aa.len() == ab.len() => {
                 for (x, y) in aa.iter().zip(ab.iter()) {
                     self.unify(x, y)?;

@@ -21,7 +21,13 @@ impl Typer {
         }
 
         let hobj = self.lower_expr(obj)?;
-        let obj_ty = self.infer_ctx.shallow_resolve(&hobj.ty);
+        let (obj_ty, frozen_recv) = match self.infer_ctx.shallow_resolve(&hobj.ty) {
+            Type::Frozen(inner) => (self.infer_ctx.shallow_resolve(&inner), true),
+            other => (other, false),
+        };
+        if frozen_recv {
+            self.reject_frozen_receiver_write(&obj_ty, method, &hobj, span)?;
+        }
 
         if let Type::Row(store) = &obj_ty
             && method == "snapshot"
@@ -282,7 +288,8 @@ impl Typer {
             let expected_arg_tys: Vec<Option<&Type>> = match method {
                 "push" => vec![Some(elem_ty.as_ref())],
                 "set" => vec![Some(&Type::I64), Some(elem_ty.as_ref())],
-                "get" | "remove" | "take" | "skip" => vec![Some(&Type::I64)],
+                "get" | "remove" | "take" | "skip" | "at_view" => vec![Some(&Type::I64)],
+                "view" => vec![Some(&Type::I64), Some(&Type::I64)],
                 "contains" => vec![Some(elem_ty.as_ref())],
                 "join" => vec![Some(&Type::String)],
                 _ => vec![],
@@ -340,6 +347,45 @@ impl Typer {
                 .ok_or_else(|| format!("no method '{method}' on Map"))?;
             return Ok(hir::Expr {
                 kind: hir::ExprKind::MapMethod(Box::new(hobj), method.into(), hargs),
+                ty: ret_ty,
+                span,
+            });
+        }
+
+        if let Type::View(ref elem_ty) = obj_ty {
+            let (arg_tys, ret_ty): (Vec<&Type>, Type) = match method {
+                "get" | "at" => (vec![&Type::I64], (**elem_ty).clone()),
+                "len" | "length" | "count" => (vec![], Type::I64),
+                _ => {
+                    return Err(format!(
+                        "{}: no method '{}' on View — a view is a borrowed window and \
+                         supports reads only: `.get(i)`, `.length`, and iteration",
+                        span.loc(),
+                        method
+                    ));
+                }
+            };
+            if args.len() != arg_tys.len() {
+                return Err(format!(
+                    "{}: view `.{}()` takes {} argument(s), got {}",
+                    span.loc(),
+                    method,
+                    arg_tys.len(),
+                    args.len()
+                ));
+            }
+            let hargs: Vec<hir::Expr> = args
+                .iter()
+                .enumerate()
+                .map(|(i, e)| self.lower_expr_expected(e, arg_tys.get(i).copied()))
+                .collect::<Result<_, _>>()?;
+            for (i, ha) in hargs.iter().enumerate() {
+                let _ = self
+                    .infer_ctx
+                    .unify_at(arg_tys[i], &ha.ty, span, "view method argument");
+            }
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::VecMethod(Box::new(hobj), method.into(), hargs),
                 ty: ret_ty,
                 span,
             });
@@ -450,7 +496,7 @@ impl Typer {
         if let Some(ref type_name) = struct_type_name {
             let method_name = format!("{type_name}_{method}");
             if let Some((_, param_tys, ret)) = self.fns.get(&method_name).cloned() {
-                let hargs: Vec<hir::Expr> = args
+                let mut hargs: Vec<hir::Expr> = args
                     .iter()
                     .enumerate()
                     .map(|(i, e)| {
@@ -458,6 +504,11 @@ impl Typer {
                         self.lower_expr_expected(e, expected)
                     })
                     .collect::<Result<_, _>>()?;
+                let mangled = Symbol::intern(&method_name);
+                for (i, ha) in hargs.iter_mut().enumerate() {
+                    self.peel_frozen_arg(mangled, i + 1, param_tys.get(i + 1), ha, span)?;
+                    self.coerce_arg_to_view(param_tys.get(i + 1), ha, span);
+                }
                 return Ok(hir::Expr {
                     kind: hir::ExprKind::Method(
                         Box::new(hobj),

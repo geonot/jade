@@ -216,7 +216,9 @@ fn ty_compatible(a: &Type, b: &Type) -> bool {
 
 fn unwrap_transparent(t: &Type) -> &Type {
     match t {
-        Type::Alias(_, inner) | Type::Newtype(_, inner) => unwrap_transparent(inner),
+        Type::Alias(_, inner) | Type::Newtype(_, inner) | Type::Frozen(inner) => {
+            unwrap_transparent(inner)
+        }
         other => other,
     }
 }

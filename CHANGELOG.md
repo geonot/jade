@@ -1,4 +1,108 @@
 # Changelog
+- **[148]** (2026-08-13) the three designed ownership surfaces become real: `freeze` makes deep immutability a type, `View of T` makes zero-copy windows second-class, closures stop aliasing the frame and own their environments — and probing found ctor captures double-freeing, closure captures use-after-freeing, and task capture slots truncating anything wider than a word
+
+Step 1 of all three [147] designs, implemented in one pass with the
+probe-first method. Every feature landed with its own suite; the full suite is
+2195 tests across 52 binaries, and the post-pass `ci/sanitize-corpus.sh`
+sweep (926 clean runs at `--opt 0` and `--opt 3`) reports **zero memory
+corruption**, with the leak tail unchanged in size from [147]'s baseline
+(M-9r2's known residue).
+
+- **`freeze` / `Frozen of T` (M-14 step 1, `tests/freeze.rs`, 20 tests).**
+  `freeze x` is a new hard keyword and unary expression: it consumes an
+  aggregate operand through the same place lattice as every other move
+  (`MoveReason::Freeze`, first-wins so the freeze site survives the bind's
+  own assign-move record) and produces `Frozen of T` — a real `Type` variant
+  that unifies congruently, delegates every ownership predicate to its
+  payload, and is erased to `T` in the end-of-function HIR canonicalization,
+  so MIR and codegen never see it and the runtime representation is
+  unchanged. Freezability is structural and recursive with the offending
+  field path named (`@resource` types, channels, actors, coroutines,
+  generators, functions, and views refuse). Reads auto-deref everywhere —
+  field and element reads, iteration, read-only methods and parameters — and
+  every write rejects at its natural chokepoint: builtin mutating methods and
+  user methods with inferred mutating/consuming receivers at method dispatch,
+  assignment through any frozen component at the assign statement, partial
+  moves at the `mark_place_moved_checked` funnel, and mutating or consuming
+  parameters at call-argument peeling (consuming rejects because moving into
+  a mutable owner would thaw; read-only parameters accept a frozen argument
+  by silently peeling the wrapper). `freeze v` of an unannotated parameter
+  makes the parameter consuming through the existing inference; freezing a
+  borrow (loop binder, borrowed param) is rejected with the clone-first fix.
+  Step 2 — every `dispatch` in a `together` sharing one frozen value — is
+  tracked at M-14r; until then frozen values move into one task like any
+  aggregate.
+- **`View of T` (M-13 step 1, `tests/views.rs`, 13 tests).** A view is
+  `{ptr, len}` by value: trivially droppable, bounds-checked, created by
+  `xs.view(a, b)`, `xs.at_view(i)`, and `s.view(a, b)` over string bytes
+  (heap or SSO — inline strings spill to an entry alloca first), or by
+  passing a whole `Vec` or array to a `View of T` parameter (automatic
+  `view_full` coercion at call boundaries). Views support `.length`,
+  `.get(i)` (value-category elements clone out), and `for` iteration — the
+  MIR loop lowering needed no change because `VecLen`/`IndexUnchecked` gained
+  view arms in codegen. Second-classness is enforced as a compile error in
+  every escaping position: binds ("a view lives only within its statement"),
+  returns (declared or inferred), struct/enum/store fields, nested
+  annotations (`Vec of View` anywhere), task captures, closure captures,
+  channel/actor sends, and yields. Out-of-range windows trap with their own
+  message. Because step 1 has no bind-position views, the existing
+  statement-scoped borrow rules are the entire soundness argument — no
+  lattice work was needed, exactly as the design sequenced it.
+- **Closure captures (M-16 step 1, `tests/closure_captures.rs`, 17 tests).**
+  The design's premise was stale: capturing lambdas already parsed and ran by
+  aliasing the enclosing frame — `total is || xs.sum()` then `xs.push(100)`
+  read the push through the "capture", and consuming `xs` then calling
+  `total()` SIGSEGVed. Captures now classify by category at lambda lowering:
+  scalars copy, `String`s and value structs clone into the environment,
+  aggregates move (`MoveReason::ClosureCapture`, the use-after diagnostic
+  names the capture site and the clone-first fix), and views, `@resource`
+  values, and borrowed parameters reject. The closure value is an aggregate:
+  `Type::Fn` moved from the scalar to the aggregate category (assignment
+  moves it, one task at most, function-typed parameters borrow), and the
+  environment is a heap block whose slot 0 is a synthesized
+  `lambda.N.env_drop` — dropping a closure drops every capture and frees the
+  env through that pointer, uniformly and type-erased, with plain function
+  references keeping a null env. Returning a closure over a local aggregate
+  is now *sound* (the env owns it), so the [143] "captures the local" ban is
+  deleted and its regression test now pins the accepted behavior. Calling a
+  moved closure is rejected on the named-var call path, which had no
+  use-after-move check at all. Caps edges for indirect calls, generator
+  frames, and expression-position closure temps (which leak their env) are
+  tracked at M-16r.
+- **Three live memory bugs found by probing, none pinned by any test.**
+  (1) A constructor or container literal capturing a bound aggregate —
+  `app is App(cfg is xs)`, `nested is vector(xs)` — recorded the move for
+  diagnostics but never told drop emission: both the struct and `xs` dropped
+  at scope end, a silent double-free on pristine [147] (`free(): invalid
+  pointer` at exit). The consumed-set now mirrors `record_ctor_capture`.
+  (2) The HIR var-id collector had no `IndirectCall` arm, so a closure used
+  only as a callee (`g is || f() + 1`) was invisible to capture analysis and
+  to drop exclusion — nested closures double-freed. (3) Scope-task capture
+  slots were hardcoded to 8 bytes on both the writer (`emit_scope_spawn`,
+  `emit_coro_create`) and reader sides; any capture wider than a word — a
+  24-byte `String`, a 16-byte closure — overflowed its malloc and corrupted
+  the heap. Slots are now sized and offset by actual store size on both
+  sides (`gen_capture_offsets`), and a task capturing a spilled-SSO string
+  is pinned.
+- **Smaller fixes riding along.** MIR closure captures are sorted by name
+  (env layout was `HashSet`-ordered, nondeterministic across runs); the MIR
+  free-var walk no longer treats a nested lambda's parameters as captures of
+  the outer closure; `jinn fmt` prints lambda parameter annotations and
+  return types instead of dropping them, and no longer collapses a
+  multi-statement lambda body to the literal `0` (the unrepresentable case
+  now degrades to a reparse refusal, per the [144] posture); the fictional
+  `lambda_expr = "(" params ")" "=>" expr` EBNF production — a token that
+  never existed — is replaced with the real `|params|` grammar, and
+  `unary_expr` gains the `not`/`~`/`@`/`freeze` prefixes it was missing;
+  `.jni` interfaces bump to version 3 for the `View`/`Frozen` type variants.
+  `docs/jinn.md` documents all three features with compiled examples
+  (closure captures under Lambdas; new Frozen values and Views subsections),
+  `docs/memory-model.md` gains rule M12 (closures capture exactly like
+  tasks) and §12 (frozen values and views), the category table moves
+  function values to the aggregate row, and the three design docs' status
+  headers record what shipped and what remains (M-13r, M-14r, M-16r in the
+  roadmap).
+
 - **[147]** (2026-08-13) the memory model gets its verification teeth: MIR repairs and proves its own drop placement, the whole corpus runs under ASan with zero corruption, idiomatic field writes stop being invisible to inference, and every slice of a vector was wrong
 
 The remaining memory-model items, worked as one batch (closed M-9r, M-10,

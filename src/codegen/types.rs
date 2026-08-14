@@ -56,6 +56,8 @@ impl<'ctx> Compiler<'ctx> {
                     .map(|s| s.into())
                     .unwrap_or_else(|| self.ctx.i64_type().into())
             }
+            Type::View(_) => self.view_type().into(),
+            Type::Frozen(inner) => self.llvm_ty(inner),
         }
     }
 
@@ -77,6 +79,12 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) fn closure_type(&self) -> inkwell::types::StructType<'ctx> {
         let ptr = self.ctx.ptr_type(AddressSpace::default());
         self.ctx.struct_type(&[ptr.into(), ptr.into()], false)
+    }
+
+    pub(crate) fn view_type(&self) -> inkwell::types::StructType<'ctx> {
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        self.ctx
+            .struct_type(&[ptr.into(), self.ctx.i64_type().into()], false)
     }
 
     pub(crate) fn type_store_size(&self, ty: BasicTypeEnum<'ctx>) -> u64 {
@@ -135,7 +143,10 @@ impl<'ctx> Compiler<'ctx> {
                 .map(|t| self.type_size_of(t).next_multiple_of(8))
                 .sum::<u64>()
                 .max(1),
-            Type::Alias(_, inner) | Type::Newtype(_, inner) => self.type_size_of(inner),
+            Type::View(_) => 16,
+            Type::Alias(_, inner) | Type::Newtype(_, inner) | Type::Frozen(inner) => {
+                self.type_size_of(inner)
+            }
             Type::Struct(name, _) => {
                 if let Some(fields) = self.structs.get(name) {
                     fields
@@ -226,6 +237,8 @@ impl<'ctx> Compiler<'ctx> {
             Type::Bool => self.ctx.bool_type().const_int(0, false).into(),
             Type::String => self.string_type().const_zero().into(),
             Type::Fn(_, _) => self.closure_type().const_zero().into(),
+            Type::View(_) => self.view_type().const_zero().into(),
+            Type::Frozen(inner) => self.default_val(inner),
             _ => self.ctx.i64_type().const_int(0, false).into(),
         }
     }

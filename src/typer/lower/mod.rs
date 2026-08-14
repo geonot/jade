@@ -142,6 +142,15 @@ impl Typer {
                             fields.push((f.name, f.ty.clone().unwrap_or(Type::I64)));
                         }
                     }
+                    for (fname, fty) in &fields {
+                        if crate::typer::expr::views::type_contains_view(fty) {
+                            self.type_errors.push(format!(
+                                "store field `{}.{}`: a view cannot be persisted — views \
+                                 are second-class borrows that never escape",
+                                sd.name, fname
+                            ));
+                        }
+                    }
                     self.structs.insert(
                         Symbol::intern(&format!("__store_{}", sd.name)),
                         fields.clone(),
