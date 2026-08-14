@@ -1,4 +1,40 @@
 # Changelog
+- **[159]** (2026-08-14) capabilities pass — C-1r's actor/store hole closes: store operations classify as path-scoped fs effects, actor handlers join the fixpoint, and `needs pure` finally sees through a send
+
+The capability pass's two blind spots from C-1r — store operations and
+actor handlers — close. Full suite is 2263 tests; fmt/clippy clean.
+
+- **Store operations classify.** Every store operation — the statement
+  forms (`insert`/`set`/`delete`/`destroy`/`restore`/`save`/`compact`),
+  the expression forms (`count`, `first`, `exists`, `get`, `all`,
+  `distinct`, filters), and query blocks over a store subject — derives
+  `fs.read './<name>.store'` *and* `fs.write './<name>.store'`,
+  deliberately both: any store operation can trigger WAL recovery writes at
+  first open, so a read-only classification would understate what the
+  program may do to the filesystem. `needs pure` on a function that
+  touches a store is now a compile error naming the store path, and a
+  store-using function can declare the honest scoped bound
+  (`needs fs.read './users.store', fs.write './users.store'`). Store
+  methods join the fixpoint as scan roots under the method-name bucket.
+- **Actor handlers join the fixpoint.** Each handler becomes a scan item
+  (a synthesized `ast::Fn` over the handler's params and body, named
+  `Actor__handler_name`), so its body's effects are inferred like any
+  function's. A send (`lg.log_line(s)`) joins the handler's row through
+  the same method-name bucket method calls use — over-approximate across
+  same-named handlers, false-rejection-only, matching the pass's
+  documented bias — and a `spawn` joins *every* handler of the spawned
+  actor, because loop handlers run unprompted the moment the actor exists.
+  `needs pure` now rejects a send to a file-writing handler and a spawn of
+  a file-writing looper, with the introduction path rendering the handler
+  as `Logger.log_line` rather than the mangled item name.
+- Pinned in `tests/caps.rs` (store write and store read against `needs
+  pure`, the scoped-declaration acceptance, send-to-writing-handler and
+  spawn-of-writing-looper rejections naming the path, and a pure-handler
+  send accepted). `docs/internals.md`'s "currently inert" note — stale
+  since [145] — now describes the classification that exists; the
+  remaining C-1r residue (name-bucket edges, `.jni` bodies, ceilings) is
+  restated in the roadmap.
+
 - **[158]** (2026-08-14) payload pass — M-17 closes: consuming one payload bind stops leaking its siblings, and probing it surfaced an opt-0 codegen crash, unrecursed enum payload drops, and a ctor-in-push double ownership
 
 M-17's two edges close, and the probe-first sweep around them found three

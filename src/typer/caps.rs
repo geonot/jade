@@ -19,6 +19,12 @@ pub(in crate::typer) struct CapAnalysis {
     pub rows: HashMap<Symbol, CapSet>,
 }
 
+#[derive(Default)]
+pub(in crate::typer) struct CapContext {
+    pub store_names: HashSet<Symbol>,
+    pub actor_items: HashMap<Symbol, Vec<Symbol>>,
+}
+
 fn parse_annot(a: &CapAnnot) -> Result<Capability, String> {
     let cap = match a.class.as_str() {
         "fs.read" => Capability::FsRead(a.scope.clone()),
@@ -69,9 +75,16 @@ struct Scanner<'a> {
     out: Collected,
     trusted_apertures: &'a HashSet<Symbol>,
     param_names: HashSet<Symbol>,
+    ctx: &'a CapContext,
 }
 
 impl Scanner<'_> {
+    fn store_op(&mut self, store: Symbol) {
+        let path = Some(format!("./{store}.store"));
+        self.out.caps.insert(Capability::FsRead(path.clone()));
+        self.out.caps.insert(Capability::FsWrite(path));
+    }
+
     fn classed_caps(&mut self, caps: &[(cap_sites::CapClass, Option<usize>)], args: &[ast::Expr]) {
         for (class, path_arg) in caps {
             let path = path_arg.and_then(|i| literal_str(args.get(i)));
@@ -193,26 +206,32 @@ impl Scanner<'_> {
                     self.scan_expr(e);
                 }
             }
-            ast::Stmt::StoreInsert(_, inits, _) => {
+            ast::Stmt::StoreInsert(store, inits, _) => {
+                self.store_op(*store);
                 for fi in inits {
                     self.scan_expr(&fi.value);
                 }
             }
-            ast::Stmt::StoreDelete(_, f, _)
-            | ast::Stmt::StoreDestroy(_, f, _)
-            | ast::Stmt::StoreRestore(_, f, _) => self.scan_filter(f),
-            ast::Stmt::StoreSet(_, updates, f, _) => {
+            ast::Stmt::StoreDelete(store, f, _)
+            | ast::Stmt::StoreDestroy(store, f, _)
+            | ast::Stmt::StoreRestore(store, f, _) => {
+                self.store_op(*store);
+                self.scan_filter(f);
+            }
+            ast::Stmt::StoreSet(store, updates, f, _) => {
+                self.store_op(*store);
                 for (_, e) in updates {
                     self.scan_expr(e);
                 }
                 self.scan_filter(f);
             }
+            ast::Stmt::StoreSave(store, _) | ast::Stmt::StoreCompact(store, _) => {
+                self.store_op(*store);
+            }
             ast::Stmt::Ret(None, _)
             | ast::Stmt::Break(None, _)
             | ast::Stmt::Continue(_)
             | ast::Stmt::Nop(_)
-            | ast::Stmt::StoreSave(_, _)
-            | ast::Stmt::StoreCompact(_, _)
             | ast::Stmt::UseLocal(_) => {}
         }
     }
@@ -286,8 +305,11 @@ impl Scanner<'_> {
             | ast::Expr::NamedArg(_, e, _)
             | ast::Expr::Spread(e, _)
             | ast::Expr::Grad(e, _)
-            | ast::Expr::ChannelCreate(_, e, _)
-            | ast::Expr::StoreGet(_, e, _) => self.scan_expr(e),
+            | ast::Expr::ChannelCreate(_, e, _) => self.scan_expr(e),
+            ast::Expr::StoreGet(store, e, _) => {
+                self.store_op(*store);
+                self.scan_expr(e);
+            }
             ast::Expr::Ternary(c, t, f, _) => {
                 self.scan_expr(c);
                 self.scan_expr(t);
@@ -350,6 +372,11 @@ impl Scanner<'_> {
                 }
             }
             ast::Expr::Query(subject, clauses, _) => {
+                if let ast::Expr::Ident(n, _) = subject.as_ref()
+                    && self.ctx.store_names.contains(n)
+                {
+                    self.store_op(*n);
+                }
                 self.scan_expr(subject);
                 for cl in clauses {
                     match cl {
@@ -362,31 +389,43 @@ impl Scanner<'_> {
                     }
                 }
             }
-            ast::Expr::StoreQuery(_, f, _)
-            | ast::Expr::StoreFirst(_, f, _)
-            | ast::Expr::StoreExists(_, f, _) => self.scan_filter(f),
-            ast::Expr::StoreCount(_, f, _) => {
+            ast::Expr::StoreQuery(store, f, _)
+            | ast::Expr::StoreFirst(store, f, _)
+            | ast::Expr::StoreExists(store, f, _) => {
+                self.store_op(*store);
+                self.scan_filter(f);
+            }
+            ast::Expr::StoreCount(store, f, _) => {
+                self.store_op(*store);
                 if let Some(f) = f {
                     self.scan_filter(f);
                 }
             }
-            ast::Expr::StoreInsert(_, inits, _) => {
+            ast::Expr::StoreInsert(store, inits, _) => {
+                self.store_op(*store);
                 for fi in inits {
                     self.scan_expr(&fi.value);
                 }
             }
-            ast::Expr::StoreUpdate(_, updates, f, _) => {
+            ast::Expr::StoreUpdate(store, updates, f, _) => {
+                self.store_op(*store);
                 for (_, e) in updates {
                     self.scan_expr(e);
                 }
                 self.scan_filter(f);
             }
-            ast::Expr::Spawn(_, inits, _) => {
+            ast::Expr::Spawn(actor, inits, _) => {
+                if let Some(handler_items) = self.ctx.actor_items.get(actor) {
+                    for h in handler_items {
+                        self.out.callees.insert(*h);
+                    }
+                }
                 for (_, e) in inits {
                     self.scan_expr(e);
                 }
             }
-            ast::Expr::Send(recv, _, args, _) => {
+            ast::Expr::Send(recv, handler, args, _) => {
+                self.out.method_calls.insert(*handler);
                 self.scan_expr(recv);
                 for a in args {
                     self.scan_expr(a);
@@ -409,6 +448,9 @@ impl Scanner<'_> {
                     self.scan_block(b);
                 }
             }
+            ast::Expr::StoreAll(store, _) | ast::Expr::StoreDistinct(store, _, _) => {
+                self.store_op(*store);
+            }
             ast::Expr::None(_)
             | ast::Expr::Void(_)
             | ast::Expr::Int(_, _)
@@ -420,8 +462,6 @@ impl Scanner<'_> {
             | ast::Expr::IndexPlaceholder(_)
             | ast::Expr::Embed(_, _)
             | ast::Expr::Unreachable(_)
-            | ast::Expr::StoreAll(_, _)
-            | ast::Expr::StoreDistinct(_, _, _)
             | ast::Expr::QualifiedIdent(_, _, _) => {}
         }
     }
@@ -430,6 +470,7 @@ impl Scanner<'_> {
 pub(in crate::typer) fn analyze(
     items: &[CapItem],
     std_files: &HashSet<Symbol>,
+    ctx: &CapContext,
 ) -> Result<CapAnalysis, String> {
     let item_lookup: HashMap<Symbol, &CapItem> = items.iter().map(|it| (it.name, it)).collect();
 
@@ -457,6 +498,7 @@ pub(in crate::typer) fn analyze(
             out: Collected::default(),
             trusted_apertures: &trusted_apertures,
             param_names: it.fun.params.iter().map(|p| p.name).collect(),
+            ctx,
         };
         scanner.scan_block(&it.fun.body);
         let mut collected = scanner.out;
@@ -546,7 +588,7 @@ fn shortest_intro_path(
         if introduces(&last) {
             let chain = path
                 .iter()
-                .map(|s| s.as_str())
+                .map(|s| s.as_str().replace("__handler_", "."))
                 .collect::<Vec<_>>()
                 .join(" -> ");
             return format!(" (introduced via {chain})");
@@ -613,7 +655,7 @@ mod tests {
     fn run(src: &str) -> Result<CapAnalysis, String> {
         let decls = parse(src);
         let items = items_of(&decls);
-        analyze(&items, &HashSet::new())
+        analyze(&items, &HashSet::new(), &CapContext::default())
     }
 
     #[test]
@@ -749,7 +791,7 @@ mod tests {
         std_files.insert(file);
         let items = items_of(&decls);
         assert!(
-            analyze(&items, &std_files).is_err(),
+            analyze(&items, &std_files, &CapContext::default()).is_err(),
             "without provenance the body's caps must join through the edge"
         );
         let mut owned: Vec<ast::Decl> = decls.clone();
@@ -759,6 +801,6 @@ mod tests {
             }
         }
         let items3 = items_of(&owned);
-        assert!(analyze(&items3, &std_files).is_ok());
+        assert!(analyze(&items3, &std_files, &CapContext::default()).is_ok());
     }
 }

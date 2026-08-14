@@ -61,8 +61,12 @@ Load-bearing design facts:
   error effects (`src/typer/errset.rs`) and capabilities (`src/typer/caps.rs`,
   with the enum in `src/caps.rs` and the stdlib table in `src/cap_sites.rs`).
   Annotations like `needs net.client` are compiler-checked upper bounds, never
-  the source of truth. The capability half of this is currently inert — see
-  `C-1` in [`roadmap.md`](roadmap.md#effects-and-capabilities).
+  the source of truth. Capabilities classify at extern leaves and std
+  apertures; store operations derive path-scoped `fs` capabilities
+  (`fs.read`/`fs.write './<name>.store'`), and actor handlers participate as
+  scan roots — a send joins the handler's row through the method-name bucket,
+  and a spawn joins every handler of the spawned actor. The remaining gaps
+  are `C-1r` in [`roadmap.md`](roadmap.md#effects-and-capabilities).
 - **`src/comptime/` is constant folding of inferred-pure functions** (HIR→HIR),
   not user-facing metaprogramming.
 - **MIR verify runs in release**, not just debug. It checks phi and edge types,

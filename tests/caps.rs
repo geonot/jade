@@ -107,3 +107,49 @@ fn unannotated_functions_are_never_checked() {
         "use io\n\n*free_writer\n    io.write_file('anything.txt', 'x')\n\n*main\n    free_writer()\n",
     );
 }
+
+#[test]
+fn store_write_rejects_needs_pure() {
+    rejects(
+        "store users @simple\n    name as String\n\n*pure_math(x as i64) returns i64 needs pure\n    insert users 'sneaky'\n    x + 1\n\n*main\n    pure_math(1)\n",
+        "fs.read './users.store'",
+    );
+}
+
+#[test]
+fn store_read_rejects_needs_pure() {
+    rejects(
+        "store users @simple\n    name as String\n\n*peek returns i64 needs pure\n    count users\n\n*main\n    peek()\n",
+        "./users.store",
+    );
+}
+
+#[test]
+fn store_ops_satisfy_scoped_fs_declaration() {
+    accepts(
+        "store users @simple\n    name as String\n\n*persist(n as String) needs fs.read './users.store', fs.write './users.store'\n    insert users n\n\n*main\n    persist('alice')\n",
+    );
+}
+
+#[test]
+fn send_to_writing_handler_rejects_needs_pure_and_names_the_handler() {
+    rejects(
+        "use io\n\nactor Logger\n    count as i64\n\n    @log_line s as String\n        io.write_file('log.txt', s)\n\n*quiet(lg as Logger) needs pure\n    lg.log_line('hello')\n\n*main\n    lg is spawn Logger\n    quiet(lg)\n    stop lg\n    join lg\n",
+        "Logger.log_line",
+    );
+}
+
+#[test]
+fn send_to_pure_handler_is_accepted() {
+    accepts(
+        "actor Counter\n    count as i64\n\n    @bump n as i64\n        count is count + n\n\n*quiet(c as Counter) needs pure\n    c.bump(1)\n\n*main\n    c is spawn Counter\n    quiet(c)\n    stop c\n    join c\n",
+    );
+}
+
+#[test]
+fn spawn_joins_loop_handler_caps() {
+    rejects(
+        "use io\n\nactor Ticker\n    n as i64\n\n    *loop\n        io.write_file('tick.txt', 'x')\n\n*boot needs pure\n    t is spawn Ticker\n    stop t\n    join t\n\n*main\n    boot()\n",
+        "fs.write 'tick.txt'",
+    );
+}

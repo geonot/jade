@@ -94,6 +94,11 @@ leaking every enum-in-enum, enum-in-struct-field, and Vec-of-enum payload;
 and a constructor wrapped inside a container insert (`xs.push(Leaf(a))`)
 left the source local's drop in place while the element aliased the same
 allocation — a use-after-free once element drops worked.
+The 2026-08-14 capabilities pass ([159]) closed C-1r's actor/store hole:
+store operations derive path-scoped `fs` capabilities, actor handlers are
+scan roots whose rows join at send and spawn sites, and `needs pure` now
+rejects a store write or a send to a writing handler with the introduction
+path named — see the Effects section for the residue that remains.
 Items below are what remains.
 
 ---
@@ -390,13 +395,20 @@ row replacement is trusted only for modules loaded from a std directory, and
 the fixpoint in `src/typer/caps.rs` scans free functions, generic functions,
 and type/impl methods — so `needs` is a checked upper bound (the old sneaky
 canary is a compile error naming the introduction path; `tests/caps.rs` pins
-it). What remains:
+it). [159] closed the actor/store hole: every store operation (statement and
+expression forms, query blocks included) derives `fs.read`/`fs.write` scoped
+to `./<store>.store` — deliberately both, since any operation can trigger
+WAL recovery writes on open — store methods and actor handlers are scan
+roots in the fixpoint, a send joins the handler's row through the
+method-name bucket, and a spawn joins every handler of the spawned actor
+(loop handlers run unprompted, so spawning one is using its effects); the
+diagnostic renders handler items as `Actor.handler` in the introduction
+path. What remains:
 
-- Actor handlers and store operations (a store is a filesystem write) carry no
-  classification and are invisible to the pass.
 - Method-call edges are name-buckets: `x.m()` joins every user method named
   `m`, an over-approximation that can only produce false rejections for
-  `needs`-annotated functions, never false acceptance.
+  `needs`-annotated functions, never false acceptance. Sends join handler
+  rows through the same bucket, so they share the same over-approximation.
 - Modules imported through `.jni` interface files have no bodies to scan
   (interface reuse is off by default — X-5).
 - Module and project capability ceilings, and the manifest surface, remain
