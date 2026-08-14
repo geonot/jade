@@ -66,7 +66,23 @@ syntax, field errors on monomorphized structs render the origin spelling
 (`Pair<i64, string>`), and `tests/diagnostic_hygiene.rs` sweeps a battery of
 failing programs asserting no `__G_`/`?N`/debug-format symbol ever reaches
 stderr (ICE-class messages keep raw symbols deliberately — they report
-compiler bugs, not user errors).
+compiler bugs, not user errors). [157] closed T-1r2 and with it the Types
+section: bind annotations and declared returns flow into generic
+instantiation before defaulting, `name of type(args)` supplies type
+arguments to generic *functions* (return-position-only parameters have a
+call-side spelling), a phantom type parameter warns when it defaults and is
+bindable by annotation or the `of` ctor form, undefined type names and
+arity mismatches in declared signatures and field positions are compile
+errors, and a non-string `Map` key annotation states the runtime's
+string-key rule instead of surfacing a bare unification mismatch. The same
+pass fixed two silent-wrong-code classes it uncovered: method calls through
+a not-yet-monomorphized generic receiver read fields at the fallback layout
+(garbage values), and a generic enum's unit variant bound against any
+annotation whose arguments were not `i64` failed to unify (`Maybe of string
+is Nothing` was a type error; only the `i64` instantiation ever worked).
+The "unsolved type variable defaulted to i64" warning also stopped firing
+for binds that a later statement resolves — each warning is now tagged with
+its variable and dropped at reporting time if the variable resolved.
 Items below are what remains.
 
 ---
@@ -336,31 +352,11 @@ display (old T-12), and int→float coercion works in bind annotations and for
 literals in binary operands, with mismatch diagnostics naming expected/found in
 the caller's order (old T-14).
 
-### T-1r2 (m) Generic types: the residue after the [154] spelling unification
-
-[153] fixed the harshest name collision (a user type actually *named* `E`
-never unified with its own annotation) and [154] closed the spelling core:
-constructors no longer mint mono names from unresolved inference variables
-(`Box_?0`) — instantiation defers until the arguments resolve and every
-spelling canonicalizes to one mono name in finalization; unification and
-generic-call type maps see through mono names via an origin table; multi-
-parameter generics gained their grammar-documented `Pair<A, B>` annotation
-form (nested closers split `>>`; the formatter prints it back); and mono
-methods that fail to type for an instantiation that never calls them no
-longer abort the compile. What remains, all reproduced on 2026-08-14:
-
-- A phantom type parameter (no field mentions it) silently defaults to i64
-  at the constructor; there is no way to bind it, and no warning.
-- Return-position-only type parameters on *functions* (`*empty of T()
-  returns Vec of T`) have no call-side spelling — the `Name of Type(args)`
-  ctor form covers structs/variants only, and `<...>` does not parse in
-  expression position.
-- An undefined generic base in an uncalled function's signature (`x as Zorp
-  of A`) passes the frontend silently, and unknown struct names in field
-  positions still fall back to typing the access as `(i64, index 0)` when
-  neither the structs table nor a generic template knows them.
-- `Map<K, V>` parses, but `map()` literals and the runtime are String-keyed;
-  a non-String key annotation only produces a unification error at the bind.
+Nothing open remains in this section after [157]. Two deliberate limits are
+documented in the tour rather than carried as items: angle-bracket type
+arguments are annotation-only (`empty<string>()` does not parse in
+expression position — the `of` call form is the expression spelling), and
+map keys are strings until the runtime grows typed keys.
 
 ---
 

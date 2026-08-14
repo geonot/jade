@@ -12,6 +12,7 @@ impl Typer {
         name: &str,
         generic_fn: &ast::Fn,
         arg_tys: &[Type],
+        ret_ty: Option<&Type>,
     ) -> HashMap<Symbol, Type> {
         if !self.generic_fns.contains_key(name) {
             self.generic_fns.insert(name.into(), generic_fn.clone());
@@ -22,6 +23,15 @@ impl Typer {
                 && i < arg_tys.len()
             {
                 self.collect_type_mapping(pt, &arg_tys[i], &mut type_map);
+            }
+        }
+        if let (Some(declared_ret), Some(rt)) = (&generic_fn.ret, ret_ty) {
+            let mut ret_map = HashMap::new();
+            self.collect_type_mapping(declared_ret, rt, &mut ret_map);
+            for (k, v) in ret_map {
+                if Self::is_concrete_type(&v) {
+                    type_map.entry(k).or_insert(v);
+                }
             }
         }
         for tp in &generic_fn.type_params {

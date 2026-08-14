@@ -12,6 +12,36 @@ impl Typer {
         let _ = expected;
         match expr {
             ast::Expr::Ident(name, span) => {
+                if self.find_var(&name.as_str()).is_none()
+                    && let Some(exp) = expected
+                {
+                    let exp_c = self.infer_ctx.canonicalize_type(exp);
+                    if let Type::Struct(base, targs) = &exp_c
+                        && !targs.is_empty()
+                        && targs.iter().all(Self::is_concrete_type)
+                        && let Some(ge) = self.generic_enums.get(base).cloned()
+                        && ge.type_params.len() == targs.len()
+                        && ge.variants.iter().any(|v| v.name == *name)
+                    {
+                        let mut m = std::collections::HashMap::new();
+                        for (tp, ta) in ge.type_params.iter().zip(targs.iter()) {
+                            m.insert(*tp, ta.clone());
+                        }
+                        if let Ok(mangled) = self.monomorphize_enum(&base.as_str(), &m)
+                            && let Some(variants) = self.enums.get(&mangled)
+                            && let Some((tag, _)) = variants
+                                .iter()
+                                .enumerate()
+                                .find(|(_, (vn, fs))| vn == name && fs.is_empty())
+                        {
+                            return Ok(hir::Expr {
+                                kind: hir::ExprKind::VariantRef(mangled, *name, tag as u32),
+                                ty: Type::Enum(mangled),
+                                span: *span,
+                            });
+                        }
+                    }
+                }
                 if let Some((enum_name, tag)) = self.variant_tags.get(name).cloned() {
                     let is_unit = self
                         .enums

@@ -477,12 +477,17 @@ impl Typer {
                 if let hir::ExprKind::FnRef(ref mut id, ref mut name) = expr.kind {
                     let has_poly_scheme =
                         self.fn_schemes.get(&*name).is_some_and(|s| !s.0.is_empty());
-                    if has_poly_scheme && let Type::Fn(ref param_tys, _) = expr.ty {
+                    if has_poly_scheme && let Type::Fn(ref param_tys, ref ret_ty) = expr.ty {
                         if expr.ty.has_type_var() {
                         } else if let Some(inf_fn) = self.inferable_fns.get(&*name).cloned() {
                             let normalized = Self::normalize_inferable_fn(&inf_fn);
-                            let type_map =
-                                self.build_type_map(&name.as_str(), &normalized, param_tys);
+                            let ret_ty = ret_ty.as_ref().clone();
+                            let type_map = self.build_type_map(
+                                &name.as_str(),
+                                &normalized,
+                                param_tys,
+                                Some(&ret_ty),
+                            );
                             if let Ok(mangled) = self.monomorphize_fn(&name.as_str(), &type_map)
                                 && let Some((mid, _, _)) = self.fns.get(&mangled).cloned()
                             {

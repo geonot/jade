@@ -743,6 +743,30 @@ type Pair of A, B
     0
 ```
 
+When a type parameter appears only in return position, the call site cannot
+infer it from the arguments. Either annotate the bind — the annotation flows
+into the call — or supply the type argument explicitly with `of`:
+
+```jinn
+*empty of T() returns Vec of T
+    v is vec()
+    return v
+
+*main
+    xs as Vec of string is empty()
+    ys is empty of i64()
+    xs.push('one')
+    ys.push(2)
+    log(xs.get(0))
+    log(ys.get(0))
+    0
+```
+
+The same two spellings bind a constructor's type parameter when no field
+mentions it: `Box of string(tag is 5)`, or `b as Box<string> is Box(tag is 5)`.
+A parameter left unbound defaults to `i64`, and the compiler warns when that
+happens.
+
 ---
 
 ## Aliases and newtypes
@@ -794,6 +818,10 @@ m.set('key', 42)
 log(m.get('key'))    # 42
 log(m.has('key'))    # true
 ```
+
+Map keys are strings: `Map of V` in an annotation is shorthand for
+`Map<string, V>`, and a non-string key type — `Map<i64, string>` — is a
+compile error naming this rule.
 
 ### Array literals
 

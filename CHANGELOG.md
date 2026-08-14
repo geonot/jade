@@ -1,4 +1,75 @@
 # Changelog
+- **[157]** (2026-08-14) types pass, part 5 — T-1r2 closes and the Types section empties: expected types flow into generic instantiation, generic functions get the `of` call form, and undefined type names in declarations stop passing silently
+
+T-1r2's four reproduced bullets close, and probing them surfaced two
+silent-wrong-code bugs and one chronic false warning, all fixed. Full suite
+is 2253 tests across 54 binaries; fmt/clippy clean; doc examples compile.
+
+- **Bind annotations and declared returns now flow into generic
+  instantiation.** `xs as Vec of string is empty()` (a return-position-only
+  type parameter) and `b as Box<string> is Box(tag is 5)` (a phantom
+  parameter no field mentions) both worked only by luck when the default
+  happened to be right: instantiation defaulted unresolved parameters to
+  i64 *first*, then the annotation either mismatched confusingly or
+  accidentally matched. The expected type now reaches the call
+  (`lower_call_expected`), unifies with the instantiated return before the
+  type map is built, and `build_type_map` learns mappings from the declared
+  return type (concrete entries only — arguments still win). Constructors
+  defer unmapped parameters as origin-tagged inference variables instead of
+  hard-defaulting, so the annotation binds them through [154]'s origin
+  table and an unbound phantom warns at its constructor
+  (`--strict-types` makes it an error, matching T-7's contract).
+- **Generic functions gained the `of` call form.** `empty of string()`
+  supplies type arguments to a generic *function* the same way
+  `Box of string(tag is 5)` always did for constructors — return-position-
+  only parameters now have a call-side spelling. Angle brackets stay
+  annotation-only; the tour documents both spellings with a compiled
+  example.
+- **Undefined type names in declarations are compile errors.** A new
+  decl-level pass (`src/typer/annot_check.rs`) validates every annotation
+  in function signatures, type/enum/actor/store fields, handler parameters,
+  and methods against the declared type universe (structs, enums, generic
+  templates, actors, traits, stores, aliases/newtypes, in-scope type
+  parameters). `x as Zorp of A` in an *uncalled* function and `f as Zorp`
+  in a field — both previously silent, the latter reading garbage through
+  the `(i64, index 0)` access fallback if ever touched — now reject with
+  the span and context named. Arity is checked too: `Pair of i64` (2
+  declared, 1 supplied) and `Point of i64` on a non-generic type are
+  errors. The sweep's first run caught the store gates' own test corpus
+  spelling `as I64` (capital I) — never a type; it compiled through the
+  fallback — fixed to `i64`.
+- **Non-string `Map` keys state the rule.** `m as Map<i64, string>` failed
+  with a bare `expected i64, found string` unification message; it now
+  reports that map keys are strings in the current runtime, at decl sites
+  and bind annotations both (`Map of V` remains the `Map<string, V>`
+  shorthand, stated in the tour's Maps section).
+- **Fixed on the way, both silent-wrong-code:** a method call through a
+  generic receiver whose mono was not yet minted (`t.describe()` after
+  `t as Tag<string> is Tag(...)`, or through a defaulted phantom) fell into
+  the deferred-method path with an untracked return variable — the call
+  compiled and read the field at the fallback layout, printing pointer
+  words as integers; receivers now canonicalize before method dispatch
+  (concrete arguments mint eagerly; unresolved ones join the deferred set,
+  which resolves through the mono origin). And a generic enum's *unit
+  variant* ignored the expected type: `a as Maybe of string is Nothing` was
+  a type error because the variant reference always instantiated at the
+  default — [154]'s pin only passed because it used `i64`. Expected-driven
+  instantiation fixes it for every argument type.
+- **The defaulting warning stopped lying.** `v is vector()` followed by
+  `v.push('hi')` warned "unsolved type variable defaulted to i64" even
+  though the next line resolved the element type — every bind whose type
+  resolved later warned falsely, and after this pass's deferral changes the
+  message would also have named types that ended up fully resolved. Each
+  default warning is now tagged with its inference variable and dropped at
+  drain time if the variable resolved; genuinely-unresolved cases still
+  warn (pinned both ways).
+- Pinned in `tests/generic_args.rs` (16 new tests: annotation/`of`-form/
+  declared-return flow, phantom warning and binding, unknown-type and
+  arity rejections, the map-key wording, method calls through deferred
+  receivers, and the stale-warning fix). The tour's Generics section
+  documents the call-side spellings; roadmap's Types section now carries
+  no open items.
+
 - **[156]** (2026-08-14) types pass, part 4 — the section clears: trait impls inherit the trait's declaration, impossible instantiations are rejected, and diagnostics stop leaking compiler internals
 
 T-5r2 and T-2 close, finishing the Types/inference/diagnostics roadmap

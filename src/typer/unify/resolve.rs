@@ -167,16 +167,16 @@ impl InferCtx {
                     if let Some(origin) = &self.origins[root as usize] {
                         match constraint {
                             TypeConstraint::None => {
-                                self.default_warnings.push(format!(
+                                self.default_warnings.push((root, format!(
                                     "{}: unsolved type variable defaulted to i64 ({}). Consider annotating with `as i64` or the appropriate type.",
                                     origin.span.loc(), origin.reason
-                                ));
+                                )));
                             }
                             TypeConstraint::Numeric => {
-                                self.default_warnings.push(format!(
+                                self.default_warnings.push((root, format!(
                                     "{}: numeric type defaults to i64 ({}). Annotate `as i64` for integer or `as f64` for float.",
                                     origin.span.loc(), origin.reason
-                                ));
+                                )));
                             }
                             _ => {}
                         }
@@ -232,7 +232,7 @@ impl InferCtx {
                                     "numeric type defaults to i64 for ?{root}\n  help: annotate `as i64` for integer or `as f64` for float"
                                 )
                             };
-                            self.default_warnings.push(msg);
+                            self.default_warnings.push((root, msg));
                         }
                         TypeConstraint::Trait(traits) => {
                             let traits_str = traits.join(", ");

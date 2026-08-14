@@ -25,6 +25,17 @@ impl Typer {
             Type::Frozen(inner) => (self.infer_ctx.shallow_resolve(&inner), true),
             other => (other, false),
         };
+        let obj_ty = match &obj_ty {
+            Type::Struct(n, targs)
+                if !targs.is_empty()
+                    && targs.iter().all(Self::is_concrete_type)
+                    && (self.generic_types.contains_key(n)
+                        || self.generic_enums.contains_key(n)) =>
+            {
+                self.resolve_canon(&obj_ty)
+            }
+            _ => obj_ty,
+        };
         if frozen_recv {
             self.reject_frozen_receiver_write(&obj_ty, method, &hobj, span)?;
         }
@@ -732,6 +743,18 @@ impl Typer {
                 );
             }
 
+            self.deferred_methods.push(super::super::DeferredMethod {
+                receiver_ty: obj_ty.clone(),
+                method: method.into(),
+                arg_tys,
+                ret_ty: ret_ty.clone(),
+                span,
+            });
+        } else if let Type::Struct(n, targs) = &obj_ty
+            && !targs.is_empty()
+            && (self.generic_types.contains_key(n) || self.generic_enums.contains_key(n))
+        {
+            let arg_tys: Vec<Type> = hargs.iter().map(|a| a.ty.clone()).collect();
             self.deferred_methods.push(super::super::DeferredMethod {
                 receiver_ty: obj_ty.clone(),
                 method: method.into(),

@@ -244,6 +244,8 @@ impl Typer {
             }
         }
 
+        self.check_declared_annotations(prog);
+
         self.infer_ctx.set_trait_impls(self.trait_impls.clone());
 
         let actor_names: std::collections::HashSet<Symbol> = self.actors.keys().cloned().collect();

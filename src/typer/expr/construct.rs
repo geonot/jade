@@ -26,7 +26,7 @@ impl Typer {
                 {
                     let args: Vec<ast::Expr> = inits.iter().map(|fi| fi.value.clone()).collect();
                     let callee = ast::Expr::Ident(*name, *span);
-                    return self.lower_call(&callee, &args, *span);
+                    return self.lower_call_expected(&callee, &args, *span, expected);
                 }
                 if self.variant_tags.contains_key(name)
                     && let Some(r) = self.try_lower_variant_with_expected(
@@ -370,7 +370,15 @@ impl Typer {
                 *v = self.infer_ctx.resolve(v);
             }
             for tp in &gtd.type_params {
-                type_map.entry(*tp).or_insert(Type::I64);
+                if !type_map.contains_key(tp) {
+                    let v = self.infer_ctx.fresh_var_at(
+                        span,
+                        "type parameter of this generic type is not fixed by any constructor \
+                         argument; bind it with an annotation like `as Name<...>` or the \
+                         explicit `Name of type(...)` constructor form",
+                    );
+                    type_map.insert(*tp, v);
+                }
             }
 
             let concrete_fields: Vec<(Symbol, Type)> = gtd

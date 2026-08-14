@@ -5,11 +5,12 @@ use crate::intern::Symbol;
 use crate::types::Type;
 
 impl Typer {
-    pub(crate) fn lower_call(
+    pub(crate) fn lower_call_expected(
         &mut self,
         callee: &ast::Expr,
         args: &[ast::Expr],
         span: Span,
+        expected: Option<&Type>,
     ) -> Result<hir::Expr, String> {
         let spread_expanded;
         let args = if let Some(expanded) = self.expand_spread_args(callee, args, span) {
@@ -49,10 +50,13 @@ impl Typer {
                     ty: Type::Fn(scheme_params.clone(), Box::new(scheme_ret.clone())),
                 };
                 let instantiated = self.infer_ctx.instantiate(&scheme);
-                let (inst_params, _inst_ret) = match instantiated {
+                let (inst_params, inst_ret) = match instantiated {
                     Type::Fn(ps, r) => (ps, *r),
                     _ => unreachable!("scheme instantiation should produce Fn type"),
                 };
+                if let Some(exp) = expected {
+                    let _ = self.infer_ctx.unify(exp, &inst_ret);
+                }
 
                 let mut hargs: Vec<hir::Expr> = Vec::new();
                 for (i, arg) in args.iter().enumerate() {
@@ -104,7 +108,9 @@ impl Typer {
                     .cloned()
                     .expect("fn_schemes should have corresponding inferable_fn");
                 let normalized = Self::normalize_inferable_fn(&inf_fn);
-                let type_map = self.build_type_map(&name.as_str(), &normalized, &arg_tys);
+                let ret_resolved = self.infer_ctx.canonicalize_type(&inst_ret);
+                let type_map =
+                    self.build_type_map(&name.as_str(), &normalized, &arg_tys, Some(&ret_resolved));
                 return self.monomorphize_call(&name.as_str(), &type_map, hargs, span, true);
             }
 
@@ -122,7 +128,9 @@ impl Typer {
                         .iter()
                         .map(|e| self.infer_ctx.resolve(&e.ty))
                         .collect();
-                    let type_map = self.build_type_map(&name.as_str(), &gf, &arg_tys);
+                    let exp_resolved = expected.map(|e| self.infer_ctx.canonicalize_type(e));
+                    let type_map =
+                        self.build_type_map(&name.as_str(), &gf, &arg_tys, exp_resolved.as_ref());
                     return self.monomorphize_call(&name.as_str(), &type_map, hargs, span, false);
                 }
             }
@@ -151,7 +159,13 @@ impl Typer {
                 });
                 if needs_mono {
                     let normalized = Self::normalize_inferable_fn(&inf_fn);
-                    let type_map = self.build_type_map(&name.as_str(), &normalized, &arg_tys);
+                    let exp_resolved = expected.map(|e| self.infer_ctx.canonicalize_type(e));
+                    let type_map = self.build_type_map(
+                        &name.as_str(),
+                        &normalized,
+                        &arg_tys,
+                        exp_resolved.as_ref(),
+                    );
                     return self.monomorphize_call(&name.as_str(), &type_map, hargs, span, false);
                 }
             }

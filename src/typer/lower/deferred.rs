@@ -9,6 +9,16 @@ impl Typer {
         let deferred = std::mem::take(&mut self.deferred_methods);
         for dm in &deferred {
             let recv_ty = self.infer_ctx.shallow_resolve(&dm.receiver_ty);
+            let recv_ty = match &recv_ty {
+                Type::Struct(n, args)
+                    if !args.is_empty()
+                        && (self.generic_types.contains_key(n)
+                            || self.generic_enums.contains_key(n)) =>
+                {
+                    self.resolve_canon(&recv_ty)
+                }
+                _ => recv_ty,
+            };
             match &recv_ty {
                 Type::Vec(elem_ty) => {
                     let elem = elem_ty.as_ref().clone();
@@ -275,6 +285,16 @@ impl Typer {
 
         for df in resolved_concrete {
             let recv_ty = self.infer_ctx.shallow_resolve(&df.receiver_ty);
+            let recv_ty = match &recv_ty {
+                Type::Struct(n, args)
+                    if !args.is_empty()
+                        && (self.generic_types.contains_key(n)
+                            || self.generic_enums.contains_key(n)) =>
+                {
+                    self.resolve_canon(&recv_ty)
+                }
+                _ => recv_ty,
+            };
             if let Type::Struct(ref name, _) = recv_ty {
                 if let Some(fields) = self.structs.get(name)
                     && let Some((_, fty)) = fields.iter().find(|(n, _)| n == &df.field_name)

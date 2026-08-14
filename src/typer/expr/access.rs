@@ -57,6 +57,52 @@ impl Typer {
                         }
                         return Ok(result);
                     }
+                    if !is_struct_ctor
+                        && !is_variant_ctor
+                        && let Some(gf) = self.generic_fns.get(ctor_name).cloned()
+                        && let Some(tys) = self.expr_to_type_args(type_arg_expr)
+                    {
+                        let tparams = if gf.type_params.is_empty() {
+                            self.effective_type_params(&gf)
+                        } else {
+                            gf.type_params.clone()
+                        };
+                        if tys.len() != tparams.len() {
+                            return Err(format!(
+                                "{}: `{}` declares {} type parameter(s) but this call \
+                                 supplies {}",
+                                span.loc(),
+                                ctor_name,
+                                tparams.len(),
+                                tys.len()
+                            ));
+                        }
+                        let mut type_map = std::collections::HashMap::new();
+                        for (tp, ta) in tparams.iter().zip(tys.iter()) {
+                            type_map.insert(*tp, self.resolve_ty(ta.clone()));
+                        }
+                        let mut hargs: Vec<hir::Expr> = Vec::new();
+                        for (i, arg) in args.iter().enumerate() {
+                            let exp_t = gf
+                                .params
+                                .get(i)
+                                .and_then(|p| p.ty.as_ref())
+                                .map(|t| Self::substitute_type_params(t, &type_map));
+                            hargs.push(self.lower_expr_expected(arg, exp_t.as_ref())?);
+                        }
+                        self.instantiated_generics.insert(*ctor_name);
+                        let result = self.monomorphize_call(
+                            &ctor_name.as_str(),
+                            &type_map,
+                            hargs,
+                            *span,
+                            true,
+                        )?;
+                        if let Some(exp) = expected {
+                            self.unify_call_result(exp, &result.ty, *span, "call result");
+                        }
+                        return Ok(result);
+                    }
                 }
 
                 if let ast::Expr::Ident(ctor_name, _) = callee.as_ref() {
@@ -123,7 +169,7 @@ impl Typer {
                         ast::Expr::Lambda(vec![param], None, vec![ast::Stmt::Expr(call)], *span);
                     return self.lower_expr_expected(&lambda, expected);
                 }
-                let result = self.lower_call(callee, args, *span)?;
+                let result = self.lower_call_expected(callee, args, *span, expected)?;
                 if let Some(exp) = expected {
                     self.unify_call_result(exp, &result.ty, *span, "call result");
                 }
@@ -184,7 +230,7 @@ impl Typer {
                             });
                         }
                         let callee = ast::Expr::Ident(qualified_name, *span);
-                        let result = self.lower_call(&callee, args, *span)?;
+                        let result = self.lower_call_expected(&callee, args, *span, expected)?;
                         if let Some(exp) = expected {
                             self.unify_call_result(exp, &result.ty, *span, "call result");
                         }
@@ -212,7 +258,7 @@ impl Typer {
                         }
 
                         let callee = ast::Expr::Ident(*method, *span);
-                        let result = self.lower_call(&callee, args, *span)?;
+                        let result = self.lower_call_expected(&callee, args, *span, expected)?;
                         if let Some(exp) = expected {
                             self.unify_call_result(exp, &result.ty, *span, "call result");
                         }

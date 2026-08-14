@@ -33,7 +33,7 @@ pub(crate) struct InferCtx {
     collect_default_warnings: bool,
 
     pub(crate) suppress_unsolved_reports: bool,
-    default_warnings: Vec<String>,
+    default_warnings: Vec<(u32, String)>,
     strict_types: bool,
     strict_errors: Vec<String>,
 
@@ -87,7 +87,18 @@ impl InferCtx {
     }
 
     pub(crate) fn drain_default_warnings(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.default_warnings)
+        let tagged = std::mem::take(&mut self.default_warnings);
+        tagged
+            .into_iter()
+            .filter_map(|(root, msg)| {
+                let r = self.find(root);
+                if self.types[r as usize].is_none() {
+                    Some(msg)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     pub(crate) fn enable_strict_types(&mut self) {

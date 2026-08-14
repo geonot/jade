@@ -33,6 +33,7 @@ pub(crate) struct DeferredField {
     pub(crate) span: Span,
 }
 
+mod annot_check;
 mod caps;
 mod consume_infer;
 mod errset;

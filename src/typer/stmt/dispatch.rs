@@ -293,6 +293,9 @@ impl Typer {
                 }
                 let value = if let Some(ref ann) = b.ty {
                     let ann_ty = self.resolve_ty(ann.clone());
+                    if let Some(msg) = self.map_key_error_in(&ann_ty, b.span, "bind annotation") {
+                        return Err(msg);
+                    }
                     self.lower_expr_expected(&b.value, Some(&ann_ty))?
                 } else if let Some(existing) = self.find_var(&b.name.as_str()) {
                     self.lower_expr_expected(&b.value, Some(&existing.ty.clone()))?

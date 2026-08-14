@@ -33,7 +33,7 @@ fn run(dir: &Path, bin: &Path) -> std::process::Output {
 #[test]
 fn matching_schema_reopens_cleanly() {
     let dir = tempfile::tempdir().unwrap();
-    let src = "store items @simple\n    name as String\n    price as I64\n\n*main\n    insert items 'apple', 5\n    c is count items\n    log c\n";
+    let src = "store items @simple\n    name as String\n    price as i64\n\n*main\n    insert items 'apple', 5\n    c is count items\n    log c\n";
     let bin = compile_in(dir.path(), "app", src);
 
     let first = run(dir.path(), &bin);
@@ -52,12 +52,12 @@ fn matching_schema_reopens_cleanly() {
 #[test]
 fn changed_schema_without_migration_aborts() {
     let dir = tempfile::tempdir().unwrap();
-    let v1 = "store items @simple\n    name as String\n    price as I64\n\n*main\n    insert items 'apple', 5\n    log count items\n";
+    let v1 = "store items @simple\n    name as String\n    price as i64\n\n*main\n    insert items 'apple', 5\n    log count items\n";
     let bin1 = compile_in(dir.path(), "v1", v1);
     let r1 = run(dir.path(), &bin1);
     assert!(r1.status.success());
 
-    let v2 = "store items @simple\n    label as String\n    cost as I64\n\n*main\n    insert items 'banana', 9\n    log count items\n";
+    let v2 = "store items @simple\n    label as String\n    cost as i64\n\n*main\n    insert items 'banana', 9\n    log count items\n";
     let bin2 = compile_in(dir.path(), "v2", v2);
     let r2 = run(dir.path(), &bin2);
 
@@ -76,12 +76,12 @@ fn changed_schema_without_migration_aborts() {
 #[test]
 fn migration_bridges_schema_change() {
     let dir = tempfile::tempdir().unwrap();
-    let v1 = "store items @simple\n    name as String\n    price as I64\n\n*main\n    insert items 'apple', 5\n    log count items\n";
+    let v1 = "store items @simple\n    name as String\n    price as i64\n\n*main\n    insert items 'apple', 5\n    log count items\n";
     let bin1 = compile_in(dir.path(), "v1", v1);
     let r1 = run(dir.path(), &bin1);
     assert!(r1.status.success());
 
-    let v2 = "store items @simple\n    name as String\n    price as I64\n    stock as I64\n\nmigration 'add_stock' version 1\n    up\n        alter items\n            add stock as I64\n\n*main\n    insert items 'banana', 9, 3\n    log count items\n";
+    let v2 = "store items @simple\n    name as String\n    price as i64\n    stock as i64\n\nmigration 'add_stock' version 1\n    up\n        alter items\n            add stock as i64\n\n*main\n    insert items 'banana', 9, 3\n    log count items\n";
     let bin2 = compile_in(dir.path(), "v2", v2);
     let r2 = run(dir.path(), &bin2);
     assert!(
