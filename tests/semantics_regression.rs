@@ -617,3 +617,52 @@ fn ctor_wrapped_push_argument_suppresses_source_drop() {
     );
     assert_eq!(String::from_utf8_lossy(&run.stdout), "1\n");
 }
+
+#[test]
+fn store_row_strings_are_owned_and_dropped() {
+    let c = compile(
+        "store users @simple\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice-with-a-long-heap-name', 30\n    r is users query\n        where age > 10\n    s is r.name\n    log(s)\n    log(r.name)\n    log(r.age)\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "Alice-with-a-long-heap-name\nAlice-with-a-long-heap-name\n30\n",
+        "store row strings must be readable through a bind and through the row after \
+         the ownership change (cap now marks them owned)"
+    );
+}
+
+#[test]
+fn match_on_temp_store_result_returns_cloned_field_at_opt0() {
+    for opt in ["0", "3"] {
+        let c = compile_opt(
+            "store users @simple\n    name as String\n    age as i64\n\n*grab returns String\n    insert users 'Bob-long-heap-string-name-x', 25\n    match users where age > 10\n        Ok(row) ? return row.name\n        Err(e) ? return 'none'\n    return 'unreachable'\n\n*main\n    s is grab()\n    log(s)\n",
+            opt,
+        );
+        assert!(
+            c.ok(),
+            "opt {opt}: a dead match-merge block after all-returning arms must not \
+             reference an elided bind: {}",
+            c.stderr()
+        );
+        let run = c.run();
+        assert!(run.status.success(), "opt {opt}: {}", exit_desc(&run));
+        assert_eq!(
+            String::from_utf8_lossy(&run.stdout),
+            "Bob-long-heap-string-name-x\n"
+        );
+    }
+}
+
+#[test]
+fn filter_ternary_scalar_result_runs_clean() {
+    let c = compile(
+        "store users @simple\n    name as String\n    age as i64\n\n*main\n    insert users 'Bob', 25\n    b is users where name equals 'Bob' ? $.age ! 0 - 1\n    log(b)\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "25\n");
+}

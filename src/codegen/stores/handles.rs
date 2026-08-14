@@ -735,7 +735,7 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_call(memcpy_fn, &[heap.into(), buf.into(), alloc.into()], ""));
 
-        self.build_string(heap, len, i64t.const_int(0, false), "uuid.str")
+        self.build_string(heap, len, alloc, "uuid.str")
     }
 
     pub(crate) fn field_has_index(field: &hir::StoreField) -> bool {

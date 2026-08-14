@@ -99,6 +99,12 @@ store operations derive path-scoped `fs` capabilities, actor handlers are
 scan roots whose rows join at send and spawn sites, and `needs pure` now
 rejects a store write or a send to a writing handler with the introduction
 path named — see the Effects section for the residue that remains.
+The 2026-08-14 drops pass ([160]) roughly halved M-9r2's measured leak
+surface (45 → 24 corpus programs): temporary match subjects materialize and
+drop through the ordinary machinery, `Type::Row` gained its missing drop
+story, store rows own their strings (every row read leaked every string
+field by construction before), and dead match-merge blocks stopped crashing
+`--opt 0` codegen by referencing SSA-elided binds.
 Items below are what remains.
 
 ---
@@ -214,11 +220,23 @@ container-insert builtin methods, stores, sends, captures, returns) *inserts*
 the drops the typer omits — early returns leaked every live container before
 this — and `src/drops/verify.rs` then fails the compile if any must-held
 allocation still reaches a `return`. Inserted drops land after inlined `defer`
-bodies, so defer-reads-then-drop ordering holds on early returns too. Residue:
-method-call results (`p.split('/')` on an early-return path), `String` temps,
-loop-iteration reallocation, and the conditional-path leaks of `M-7r` are
-outside the obligation set; `ci/sanitize-corpus.sh` measures that surface
-(45 of 510 corpus programs leak, 74 B–1.2 MB per run, zero corruption).
+bodies, so defer-reads-then-drop ordering holds on early returns too.
+
+[160] closed the store cluster and the temp-subject class, roughly halving the
+measured surface (24 of 510 corpus programs leak, down from 45): a droppable
+temporary `match` subject now materializes as a hidden local before the match
+— giving [151]'s payload links a place, and the ordinary scope/move machinery
+its drop — `Type::Row` gained a drop story in both the typer and codegen (it
+is the record struct; it was invisible to both), store rows own their string
+fields (the read path built heap copies marked non-owning, so every row read
+leaked every string field by construction; the per-insert uuid temp leaked the
+same way), and a `?`/`!!` subject temp drops at the desugar block's end when
+the result type is trivially droppable (the conservative gate: a heap-bearing
+result may alias the payload). Residue: `String` temps in expressions,
+method-call results and subjects on early-return paths (an arm that `return`s
+skips the after-match drop — `M-7r`'s class), loop-iteration reallocation,
+recursive-enum tree temps, and quaternary subjects with heap-bearing results;
+`ci/sanitize-corpus.sh` measures the surface, zero corruption throughout.
 
 ### M-10r (m) Sanitizer sweep residue: fiber annotations and the leak tail
 

@@ -191,6 +191,7 @@ pub struct Typer {
 
     pub(crate) defer_read_vars: std::collections::HashMap<DefId, crate::ast::Span>,
     pub(crate) payload_bind_subjects: std::collections::HashMap<DefId, place::Place>,
+    pub(crate) pending_prelude_stmts: Vec<hir::Stmt>,
 
     pub(crate) suppress_moved_field_check: u32,
     pub(crate) current_method_type: Option<String>,
@@ -317,6 +318,7 @@ impl Typer {
             const_vars: std::collections::HashSet::new(),
             defer_read_vars: std::collections::HashMap::new(),
             payload_bind_subjects: std::collections::HashMap::new(),
+            pending_prelude_stmts: Vec::new(),
             suppress_moved_field_check: 0,
             current_method_type: None,
             modules: std::collections::HashSet::new(),

@@ -517,6 +517,7 @@ impl Typer {
             | Type::String
             | Type::Struct(_, _)
             | Type::Enum(_)
+            | Type::Row(_)
             | Type::Fn(_, _) => true,
             Type::Frozen(inner) => Self::expr_type_needs_drop(inner),
             _ => false,
@@ -1838,7 +1839,10 @@ impl Typer {
             }
             Type::Tuple(elts) => elts.iter().any(|t| self.needs_drop_inner(t, visiting)),
             Type::Array(elem, _) => self.needs_drop_inner(elem, visiting),
-
+            Type::Row(name) => {
+                let rec = crate::intern::Symbol::intern(&format!("__store_{name}"));
+                self.needs_drop_inner(&Type::Struct(rec, vec![]), visiting)
+            }
             Type::Alias(_, inner) | Type::Newtype(_, inner) | Type::Frozen(inner) => {
                 self.needs_drop_inner(inner, visiting)
             }

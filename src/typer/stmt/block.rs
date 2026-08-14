@@ -139,11 +139,19 @@ impl Typer {
                 let hm = self.lower_match_with_tail(m, ret_ty, Some(expected))?;
                 let stmt = hir::Stmt::Match(hm);
                 self.record_take_moves_in_stmt(&stmt)?;
+                for p in std::mem::take(&mut self.pending_prelude_stmts) {
+                    self.record_take_moves_in_stmt(&p)?;
+                    stmts.push(p);
+                }
                 stmts.push(stmt);
                 continue;
             }
             let stmt = self.lower_stmt(s, ret_ty)?;
             self.record_take_moves_in_stmt(&stmt)?;
+            for p in std::mem::take(&mut self.pending_prelude_stmts) {
+                self.record_take_moves_in_stmt(&p)?;
+                stmts.push(p);
+            }
             stmts.push(stmt);
         }
         if self.deferred_quantified_vars.len() > deferred_snapshot {
@@ -325,6 +333,51 @@ impl Typer {
         tail_expected: Option<&Type>,
     ) -> Result<hir::Match, String> {
         let subject = self.lower_expr(&m.subject)?;
+        let mut subject_prelude: Option<hir::Stmt> = None;
+        let subject = if crate::typer::place::place_of_expr(&subject).is_none() {
+            let resolved = {
+                let was_strict = self.infer_ctx.is_strict();
+                self.infer_ctx.set_strict(false);
+                let r = self.infer_ctx.resolve(&subject.ty);
+                self.infer_ctx.set_strict(was_strict);
+                r
+            };
+            if self.needs_drop(&resolved) {
+                let id = self.fresh_id();
+                let nm: Symbol = format!("__match_subj_{}", id.0).into();
+                let ty = subject.ty.clone();
+                let span = subject.span;
+                let ownership = Self::ownership_for_type(&ty);
+                self.define_var(
+                    &nm.as_str(),
+                    VarInfo {
+                        def_id: id,
+                        ty: ty.clone(),
+                        ownership,
+                        scheme: None,
+                    },
+                );
+                subject_prelude = Some(hir::Stmt::Bind(hir::Bind {
+                    def_id: id,
+                    name: nm,
+                    value: subject,
+                    ty: ty.clone(),
+                    ownership,
+                    atomic: false,
+                    access_mod: None,
+                    span,
+                }));
+                hir::Expr {
+                    kind: hir::ExprKind::Var(id, nm),
+                    ty,
+                    span,
+                }
+            } else {
+                subject
+            }
+        } else {
+            subject
+        };
         let subj_ty = subject.ty.clone();
 
         let m = self.adapt_propagate_match(m, &subj_ty);
@@ -438,6 +491,9 @@ impl Typer {
 
         self.check_exhaustiveness(&resolved_subj_ty, &result.arms, m.span)?;
 
+        if let Some(p) = subject_prelude {
+            self.pending_prelude_stmts.push(p);
+        }
         Ok(result)
     }
 

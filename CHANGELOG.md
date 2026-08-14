@@ -1,4 +1,56 @@
 # Changelog
+- **[160]** (2026-08-14) drops pass — M-9r2's leak surface halves: temp match subjects get a place and a drop, `Row` gets its missing drop story, store rows own their strings, and dead merge blocks stop crashing `--opt 0`
+
+The store cluster — 18 of the 45 leaking corpus programs — and the
+temporary-subject class close together; the measured surface drops from 45
+programs to 24 (88 sanitize-report lines to 48), zero corruption, zero
+compile failures across all 1020 runs. Full suite is 2266 tests; fmt/clippy
+clean.
+
+- **Temporary `match` subjects materialize.** `match f() ...` had no place
+  to link ([151]) and no drop; a droppable temporary subject now binds to a
+  hidden local (`__match_subj_N`) emitted just before the match — the
+  lowering queues the bind as a prelude statement and the enclosing block
+  loop splices it in — so the [151] payload-consumption links, the [158]
+  arm-end sibling drops, and the ordinary scope-end drop all just work.
+  The subject drop sits after the match; an arm that `return`s early skips
+  it (that path-shaped leak is M-7r's, noted in the roadmap).
+- **`Type::Row` was invisible to every drop layer.** A row is the record
+  struct (`__store_<name>`) under a nominal type, and `llvm_ty` knew it —
+  but the typer's `needs_drop` and codegen's `drop_value` both fell through
+  to "nothing to do", so a bound query result (`r is users query ...`) and
+  a `Result of Row<...>` subject never dropped their rows. Both layers now
+  route `Row` through the record struct.
+- **Store rows leaked every string field by construction.** The row-read
+  path (`read_string_from_fixed_buf`) mallocs a copy of each string field
+  and built the handle with `cap = 0` — the non-owning marker — so no drop
+  anywhere could ever free it; the per-insert uuid temp was built the same
+  way (37 bytes per `insert`, forever). Both now build owned handles, the
+  insert path drops its uuid temp after serializing it, and the aliasing
+  question this raises is pinned: reading a field out of a row (`s is
+  r.name`, `return row.name`) clones, so row ownership introduces no
+  double-free (`tests/semantics_regression.rs` pins reads-through-bind and
+  reads-after-bind both printing correctly under the corpus sanitizer).
+- **`?`/`!!` subject temps drop when nothing can alias out.** The
+  quaternary desugar binds its subject (`__q_subj`) and leaked it; it now
+  appends a drop when the expression's result type is trivially droppable
+  and no payload move was recorded — the conservative gate, because a
+  heap-bearing arm value (`? $` or `? $.name`) may alias the payload.
+  `b is users where ... ? $.age ! 0 - 1` no longer leaks the row.
+- **Dead match-merge blocks crashed `--opt 0` codegen.** When every arm
+  returns, the merge block after the match is unreachable but still holds
+  the after-match drop; MIR's bind lowering had SSA-elided the subject
+  bind, so the dead block's `load __match_subj_N` named a variable no
+  block defines, and codegen panicked ("Load of undefined variable") at
+  `--opt 0` — MIR opts pruned the block at `--opt 1+`. Codegen now emits
+  unreachable blocks (those the [158] reverse-postorder walk never
+  reaches) as a bare `unreachable`, skipping their instructions: dead code
+  can no longer demand values live code never produced.
+- Pinned in `tests/semantics_regression.rs` (row-string ownership round
+  trip, the all-arms-return match at both opt levels, the filter-ternary
+  scalar shape); the store corpus programs themselves — 18 of them — went
+  from LEAK to clean in `ci/sanitize-corpus.sh` and stay pinned there.
+
 - **[159]** (2026-08-14) capabilities pass — C-1r's actor/store hole closes: store operations classify as path-scoped fs effects, actor handlers join the fixpoint, and `needs pure` finally sees through a send
 
 The capability pass's two blind spots from C-1r — store operations and

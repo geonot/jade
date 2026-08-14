@@ -59,7 +59,7 @@ impl<'ctx> Compiler<'ctx> {
         floors
     }
 
-    fn dominance_compatible_order(func: &mir::Function) -> Vec<usize> {
+    fn dominance_compatible_order(func: &mir::Function) -> (Vec<usize>, Vec<bool>) {
         let index: HashMap<mir::BlockId, usize> = func
             .blocks
             .iter()
@@ -91,7 +91,7 @@ impl<'ctx> Compiler<'ctx> {
                 order.push(i);
             }
         }
-        order
+        (order, visited)
     }
 
     pub fn compile_program(
@@ -653,11 +653,17 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
 
-        let emit_order = Self::dominance_compatible_order(func);
+        let (emit_order, reachable) = Self::dominance_compatible_order(func);
         for &bi in &emit_order {
             let bb = &func.blocks[bi];
             let llvm_bb = self.block_map[&bb.id];
             self.bld.position_at_end(llvm_bb);
+
+            if !reachable[bi] {
+                self.block_exit_map.insert(bb.id, llvm_bb);
+                b!(self.bld.build_unreachable());
+                continue;
+            }
 
             for phi in &bb.phis {
                 let llvm_ty = self.llvm_ty(&phi.ty);

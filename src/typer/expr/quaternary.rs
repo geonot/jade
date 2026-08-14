@@ -432,8 +432,34 @@ impl Typer {
             span,
         };
 
+        let mut stmts = vec![subj_bind, hir::Stmt::Expr(ternary)];
+        let subj_resolved = {
+            let was_strict = self.infer_ctx.is_strict();
+            self.infer_ctx.set_strict(false);
+            let r = self.infer_ctx.resolve(&subj_ty);
+            self.infer_ctx.set_strict(was_strict);
+            r
+        };
+        let result_resolved = {
+            let was_strict = self.infer_ctx.is_strict();
+            self.infer_ctx.set_strict(false);
+            let r = self.infer_ctx.resolve(&result_ty);
+            self.infer_ctx.set_strict(was_strict);
+            r
+        };
+        if result_resolved.is_trivially_droppable()
+            && self.moves.entries_for(dollar_id).is_empty()
+            && self.needs_drop(&subj_resolved)
+        {
+            stmts.push(hir::Stmt::Drop(
+                subj_id,
+                "__q_subj".into(),
+                subj_resolved,
+                span,
+            ));
+        }
         Ok(hir::Expr {
-            kind: hir::ExprKind::Block(vec![subj_bind, hir::Stmt::Expr(ternary)]),
+            kind: hir::ExprKind::Block(stmts),
             ty: result_ty,
             span,
         })

@@ -117,6 +117,7 @@ impl<'ctx> Compiler<'ctx> {
                     "uuid" => {
                         let uuid_str = self.gen_store_uuid(new_sid, now)?;
                         self.copy_string_to_fixed_buf(uuid_str, gep)?;
+                        self.drop_string(uuid_str)?;
                     }
                     "hash" => {
                         let empty = self.compile_str_literal("")?;

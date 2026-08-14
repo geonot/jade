@@ -141,7 +141,7 @@ impl<'ctx> Compiler<'ctx> {
         let end = unsafe { b!(self.bld.build_gep(i8t, heap, &[len], "str.end")) };
         b!(self.bld.build_store(end, i8t.const_int(0, false)));
 
-        self.build_string(heap, len, i64t.const_int(0, false), "str.from_store")
+        self.build_string(heap, len, alloc_size, "str.from_store")
     }
 
     pub(crate) fn load_store_record_as_jinn(

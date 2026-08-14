@@ -42,6 +42,9 @@ impl<'ctx> Compiler<'ctx> {
                     self.drop_struct_fields(val, &name.as_str())?;
                 }
             }
+            Type::Row(name) => {
+                self.drop_struct_fields(val, &format!("__store_{}", name.as_str()))?;
+            }
             Type::Array(elem, n) => {
                 if !elem.is_trivially_droppable() {
                     self.drop_array_elements(val, elem, *n)?;
