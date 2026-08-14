@@ -253,3 +253,18 @@ fn moving_a_field_out_of_a_view_is_rejected() {
         &["cannot move `v.items` out of `v`", "borrowed window"],
     );
 }
+
+#[test]
+fn readonly_method_calls_through_element_views() {
+    accepts_and_prints(
+        "type Point\n    x as i64\n    y as i64\n\n    *norm2 returns i64\n        self.x * self.x + self.y * self.y\n\n*main\n    pts is vector(Point(x is 3, y is 4), Point(x is 1, y is 2))\n    log(pts.at_view(0).norm2())\n    total is 0\n    for p in pts.views()\n        total is total + p.norm2()\n    log(total)\n",
+        "25\n30",
+    );
+    rejects(
+        "type Point\n    x as i64\n\n    *bump\n        self.x is self.x + 1\n\n*main\n    pts is vector(Point(x is 3))\n    pts.at_view(0).bump()\n",
+        &[
+            "cannot call `bump` through a view",
+            "read-only borrowed window",
+        ],
+    );
+}

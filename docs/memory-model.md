@@ -493,8 +493,10 @@ call-borrow covers them). `for x in xs.views()` is lending iteration —
 the binder is a per-element view — and a field read through an element view
 reads through the pointer, no element copy (the `M-4r` fix). Moving a field
 out of a view is rejected; `.get` on value-category elements copies out
-(clone for `String`). Read-only *method calls* through element views and the
-std adoption sweep remain
+(clone for `String`). Read-only *method calls* through an element view pass
+the element pointer as the receiver — the call operates on the original, and
+mutating or consuming methods through a view are compile errors ([150]).
+The std adoption sweep remains
 ([`design/second-class-refs.md`](design/second-class-refs.md), roadmap
 `M-13r`).
 

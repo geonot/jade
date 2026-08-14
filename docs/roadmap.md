@@ -102,14 +102,16 @@ the same call in both `? !` arms counts once), pipes move-mark through
 variable state at scope exit, so mutation during a pending defer is sound and
 needs no new rejection (moves were already blocked root-based).
 
-### M-4r (m) Element reads still deep-copy
+### M-4r — closed by [149]/[150]
 
-The silent lost update is now a compile error — including through call
-arguments and nested method receivers since [146] — but every nested-container
-read in expression position still pays a hidden O(n) deep copy, and a
-*read-only* method call on an element read still operates on a copy without a
-diagnostic. The honest fix is `M-13r`'s remaining steps (field and method
-reads through element views).
+The silent lost update became a compile error in [146]; the honest fix the
+item demanded — a zero-copy read path for nested containers — shipped as the
+view surface: `xs.at_view(i)` and `for p in pts.views()` bind element views,
+field reads and read-only method calls go through the element pointer with no
+copy, and mutating/consuming methods through a view are compile errors.
+Expression-position `get` keeps its copy semantics by contract; `at_view` is
+the zero-copy spelling. What remains of the *adoption* (std still uses the
+copying idioms) is `M-13r`'s std sweep.
 
 ### M-7r (m) Conditional consumption: over-tombstones on one side, leaks on the other
 
@@ -207,10 +209,15 @@ and reassignment of the root reject with the view named until the view's
 block ends; views of temporaries cannot be bound; alias binds inherit the
 root. `for p in pts.views()` is lending iteration (per-element view binder),
 and *field* reads through an element view read through the pointer with no
-element copy — closing `M-4r`'s field half. `tests/views.rs` pins all of it.
-Remaining: read-only *method calls* through an element view still resolve
-against a copied receiver, and the std adoption sweep (`strings`, `csv`,
-`json`, `sort`) with benchmarks has not started (step 4).
+element copy — closing `M-4r`'s field half. `tests/views.rs` pins all of it. [150]
+added read-only *method calls* through element views — the receiver passes
+the element pointer, so the call operates on the original, and
+mutating/consuming methods reject with the view named — closing `M-4r`.
+Remaining: the std adoption sweep (`strings`, `csv`, `json`, `sort`) with
+benchmarks (step 4). Adoption is its own careful pass: `s.slice` is
+*scalar*-indexed while `s.view` is *byte*-indexed, so converting std's ~160
+slice sites walks straight through `T-13r`'s byte/scalar seam and must be
+benchmark- and behavior-gated.
 
 ### M-14r (m) `freeze`: actor-handler classification, function-exit dispatch, std adoption
 

@@ -5,9 +5,11 @@
 > codegen with bounds checks, and the full escape rejection shipped in [148];
 > [149] added bind-position views with root-locking through the borrow
 > lattice, `views()` lending iteration, and zero-copy *field* reads through
-> element views — the `M-4r` fix. Pinned by `tests/views.rs`. Remaining:
-> read-only *method calls* through element views, and the std adoption sweep
-> with benchmarks (step 4) — tracked as `M-13r` in
+> element views — the `M-4r` fix; [150] completed it with read-only *method
+> calls* through element views (the receiver passes the element pointer, so
+> the call operates on the original, per the design). Pinned by
+> `tests/views.rs`. Remaining: the std adoption sweep with benchmarks
+> (step 4) — tracked as `M-13r` in
 > [`../roadmap.md`](../roadmap.md#memory-and-ownership).
 
 The premise stays fixed: **no lifetime syntax, ever.** Jinn's borrows today

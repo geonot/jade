@@ -1,4 +1,24 @@
 # Changelog
+- **[150]** (2026-08-13) M-4r closes: read-only method calls through element views operate on the original
+
+The last read shape the view surface did not cover. A user method called
+through an element view (`pts.at_view(0).norm2()`, `p.norm2()` inside
+`for p in pts.views()`) now dispatches against the element type in the typer —
+rejecting methods whose inferred receiver bits say mutating or consuming
+("a view is a read-only borrowed window", with the owning-element and copy
+alternatives named) — and in codegen the receiver passes the view's element
+pointer directly (methods already take `self` by pointer), after a non-empty
+check. The call therefore operates on the *original* element, exactly as
+`design/second-class-refs.md` specified, with no element copy. With field
+reads ([149]) and method calls ([150]) both reading through the pointer,
+`M-4r` is closed: expression-position `get` keeps copy semantics by contract,
+and `at_view`/`views()` are the zero-copy spellings. Frozen-argument peeling
+and view coercion apply to the method's arguments like every other call path.
+Pinned in `tests/views.rs`; full suite 2211 tests, whole-corpus ASan sweep
+still zero corruption. The std adoption sweep stays open at `M-13r` — it
+walks the `T-13r` byte/scalar seam (`slice` is scalar-indexed, `view` is
+byte-indexed across ~160 std sites) and needs its own benchmark-gated pass.
+
 - **[149]** (2026-08-13) the ownership surfaces finish their designs: views bind and lend with root-locking, one frozen value feeds every task in a `together`, closure calls reach the capability row, and generators stop aliasing their arguments
 
 The remaining sequenced steps of [148]'s three features, plus the residues its

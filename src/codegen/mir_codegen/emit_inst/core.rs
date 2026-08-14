@@ -209,7 +209,9 @@ impl<'ctx> Compiler<'ctx> {
                                 return Err("view get() requires an index argument".into());
                             }
                             other => {
-                                return Err(format!("unknown view method '{other}'"));
+                                if !self.fns.contains_key(method) {
+                                    return Err(format!("unknown view method '{other}'"));
+                                }
                             }
                         }
                     }
@@ -646,45 +648,51 @@ impl<'ctx> Compiler<'ctx> {
                             .first()
                             .map(|t| t.is_pointer_type())
                             .unwrap_or(false);
-                        let self_arg: BasicValueEnum<'ctx> =
-                            if first_param_is_ptr && !recv_val.is_pointer_value() {
-                                if let Some(cached) = self.self_allocs.get(recv) {
-                                    (*cached).into()
-                                } else {
-                                    let tmp = self.entry_alloca(recv_val.get_type(), "self.tmp");
-
-                                    let cur_fn = self.cur_fn.expect("ICE: cur_fn not set");
-                                    let entry_bb = cur_fn
-                                        .get_first_basic_block()
-                                        .expect("ICE: function has no entry block");
-                                    let _cur_bb = self
-                                        .bld
-                                        .get_insert_block()
-                                        .expect("ICE: builder has no insert block");
-                                    let recv_in_entry =
-                                        if let Some(inst) = recv_val.as_instruction_value() {
-                                            inst.get_parent() == Some(entry_bb)
-                                        } else {
-                                            true
-                                        };
-                                    if recv_in_entry {
-                                        let entry_bld = self.ctx.create_builder();
-                                        if let Some(term) = entry_bb.get_terminator() {
-                                            entry_bld.position_before(&term);
-                                        } else {
-                                            entry_bld.position_at_end(entry_bb);
-                                        }
-                                        entry_bld.build_store(tmp, recv_val).unwrap();
-                                    } else {
-                                        b!(self.bld.build_store(tmp, recv_val));
-                                    }
-                                    self.self_allocs.insert(*recv, tmp);
-                                    self.self_alloc_types.insert(*recv, recv_val.get_type());
-                                    tmp.into()
-                                }
+                        let recv_is_view =
+                            matches!(self.value_types.get(recv), Some(Type::View(_)));
+                        let self_arg: BasicValueEnum<'ctx> = if recv_is_view {
+                            let len = self.view_len_val(recv_val)?;
+                            let zero = self.ctx.i64_type().const_int(0, false);
+                            self.emit_vec_bounds_check(zero, len)?;
+                            self.view_ptr(recv_val)?.into()
+                        } else if first_param_is_ptr && !recv_val.is_pointer_value() {
+                            if let Some(cached) = self.self_allocs.get(recv) {
+                                (*cached).into()
                             } else {
-                                recv_val
-                            };
+                                let tmp = self.entry_alloca(recv_val.get_type(), "self.tmp");
+
+                                let cur_fn = self.cur_fn.expect("ICE: cur_fn not set");
+                                let entry_bb = cur_fn
+                                    .get_first_basic_block()
+                                    .expect("ICE: function has no entry block");
+                                let _cur_bb = self
+                                    .bld
+                                    .get_insert_block()
+                                    .expect("ICE: builder has no insert block");
+                                let recv_in_entry =
+                                    if let Some(inst) = recv_val.as_instruction_value() {
+                                        inst.get_parent() == Some(entry_bb)
+                                    } else {
+                                        true
+                                    };
+                                if recv_in_entry {
+                                    let entry_bld = self.ctx.create_builder();
+                                    if let Some(term) = entry_bb.get_terminator() {
+                                        entry_bld.position_before(&term);
+                                    } else {
+                                        entry_bld.position_at_end(entry_bb);
+                                    }
+                                    entry_bld.build_store(tmp, recv_val).unwrap();
+                                } else {
+                                    b!(self.bld.build_store(tmp, recv_val));
+                                }
+                                self.self_allocs.insert(*recv, tmp);
+                                self.self_alloc_types.insert(*recv, recv_val.get_type());
+                                tmp.into()
+                            }
+                        } else {
+                            recv_val
+                        };
 
                         let arg_vals: Vec<BasicValueEnum<'ctx>> =
                             args.iter().map(|a| self.val(*a)).collect();

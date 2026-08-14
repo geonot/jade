@@ -368,13 +368,67 @@ impl Typer {
         }
 
         if let Type::View(ref elem_ty) = obj_ty {
+            if let Type::Struct(sname, _) = self.infer_ctx.shallow_resolve(elem_ty) {
+                let method_name = format!("{sname}_{method}");
+                let mangled = Symbol::intern(&method_name);
+                if let Some((_, param_tys, ret)) = self.fns.get(&mangled).cloned() {
+                    let mutates_recv = self
+                        .fn_param_mutates
+                        .get(&mangled)
+                        .and_then(|v| v.first())
+                        .copied()
+                        .unwrap_or(false);
+                    let consumes_recv = matches!(
+                        self.fn_param_access
+                            .get(&mangled)
+                            .and_then(|v| v.first())
+                            .copied()
+                            .flatten(),
+                        Some(ast::AccessMod::Take)
+                    );
+                    if mutates_recv || consumes_recv {
+                        let what = if mutates_recv { "mutates" } else { "consumes" };
+                        return Err(format!(
+                            "{}: cannot call `{}` through a view: it {} its receiver, \
+                             and a view is a read-only borrowed window; call it on the \
+                             owning container's element, or on a copy",
+                            span.loc(),
+                            method,
+                            what,
+                        ));
+                    }
+                    let mut hargs: Vec<hir::Expr> = args
+                        .iter()
+                        .enumerate()
+                        .map(|(i, e)| {
+                            let expected = param_tys.get(i + 1);
+                            self.lower_expr_expected(e, expected)
+                        })
+                        .collect::<Result<_, _>>()?;
+                    for (i, ha) in hargs.iter_mut().enumerate() {
+                        self.peel_frozen_arg(mangled, i + 1, param_tys.get(i + 1), ha, span)?;
+                        self.coerce_arg_to_view(param_tys.get(i + 1), ha, span);
+                    }
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::Method(
+                            Box::new(hobj),
+                            mangled,
+                            Symbol::intern(method),
+                            hargs,
+                        ),
+                        ty: ret,
+                        span,
+                    });
+                }
+            }
             let (arg_tys, ret_ty): (Vec<&Type>, Type) = match method {
                 "get" | "at" => (vec![&Type::I64], (**elem_ty).clone()),
                 "len" | "length" | "count" => (vec![], Type::I64),
                 _ => {
                     return Err(format!(
                         "{}: no method '{}' on View — a view is a borrowed window and \
-                         supports reads only: `.get(i)`, `.length`, and iteration",
+                         supports reads only: `.get(i)`, `.length`, field reads, \
+                         read-only methods of the element type, and iteration",
                         span.loc(),
                         method
                     ));

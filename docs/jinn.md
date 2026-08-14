@@ -1414,10 +1414,12 @@ its root: mutating, moving, or reassigning `xs` while `v` is live is a
 compile error naming the view, and the lock releases when `v`'s block ends.
 A view of a temporary cannot be bound (the data would die with the
 statement). For iteration without per-element copies, `for p in pts.views()`
-binds each element as a view, and reading a field through an element view
-(`pts.at_view(i).x`, `p.x` in the loop) reads through the pointer — no
-element copy, which is the honest fix for the old hidden deep-copy on
-nested-container reads:
+binds each element as a view; reading a field through an element view
+(`pts.at_view(i).x`, `p.x` in the loop) reads through the pointer, and a
+*read-only* method call through one (`p.norm2()`) operates on the original
+element — no copy either way, which is the honest fix for the old hidden
+deep-copy on nested-container reads. A method that mutates or consumes its
+receiver is a compile error through a view:
 
 ```jinn
 type Point
