@@ -1,4 +1,3 @@
-# rule: match_stmt
 enum Color
     Red
     Green
@@ -7,9 +6,6 @@ enum Color
 *main()
     c is Color.Red
     match c
-        Color.Red
-            log("red")
-        Color.Green
-            log("green")
-        _
-            log("other")
+        Red ? log("red")
+        Green ? log("green")
+        _ ? log("other")

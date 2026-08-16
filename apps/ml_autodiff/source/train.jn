@@ -43,9 +43,8 @@ use mlp
         s is s + mlp.loss_value(b)
     s
 
-*apply_grad(net as Mlp, b as Built, lr as i64)
-    px is b.px
-    g  is b.t.grads
+*apply_grad(net as Mlp, t as Tape, px as ParamIx, lr as i64)
+    g is copy t.grads
     net.w1_00 is net.w1_00 - fix.mul(lr, g.get(px.w1_00))
     net.w1_01 is net.w1_01 - fix.mul(lr, g.get(px.w1_01))
     net.w1_10 is net.w1_10 - fix.mul(lr, g.get(px.w1_10))
@@ -60,5 +59,6 @@ use mlp
     lr is fix.from_milli(50)
     loop(0, $ < 4, $ + 1)
         b is mlp.build_loss(net, x0($), x1($), target($))
-        tape.backward(b.t, b.loss_ix)
-        apply_grad(net, b, lr)
+        t is take b.t
+        tape.backward(t, b.loss_ix)
+        apply_grad(net, t, b.px, lr)

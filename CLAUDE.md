@@ -54,7 +54,7 @@ Subcommands: `run`, `test`, `check`, `fmt`, `init`, `bind` (C-header → Jinn ex
 
 ## Architecture
 
-All compilation funnels through `src/driver/pipeline.rs::compile_and_link`:
+Compilation runs two structurally parallel drivers — `src/driver/mod.rs::run()` for direct file compiles, `src/driver/pipeline.rs::compile_and_link` for `build`/`run`/`test` — over the same stages:
 
 lex (`src/lexer/`) → parse to AST (`src/parser/`, `src/ast.rs`) → module/package resolution (`src/driver/sources/`, `src/resolve.rs`) → **typecheck + HIR lowering in one pass** (`src/typer/`, ~20k LOC) → HIR validation (`src/hir_validate.rs`, hard-fails) → comptime const folding (`src/comptime/`) → MIR lowering (`src/mir/lower/`) → MIR verify (runs in release too; `JINN_MIR_VERIFY=0` opts out; failure = compiler bug) → MIR optimize (`src/mir/opt/`) → drop insertion/reuse analysis (`src/drops/mir_drops.rs`) → LLVM codegen (`src/codegen/`, ~21k LOC) → object emit + link via `cc` against `libjinn_rt.a`.
 
@@ -67,10 +67,10 @@ lex (`src/lexer/`) → parse to AST (`src/parser/`, `src/ast.rs`) → module/pac
 
 Layered source trees — don't confuse them:
 
-- `runtime/` — C runtime (~5K LOC) statically linked into every compiled program: coroutines/work-stealing scheduler, actors/channels/select, the persistent store engine (WAL, indexes, recovery), OS surface. Conventions (symbol naming, error-return shapes, shared helpers in util.c) are in runtime/README.md; codegen call sites for each `.c` file live in the matching `src/codegen/` file.
+- `runtime/` — C runtime (~6K LOC) statically linked into every compiled program: coroutines/work-stealing scheduler, actors/channels/select, the persistent store engine (WAL, indexes, recovery), OS surface. Conventions (symbol naming, error-return shapes, shared helpers in util.c) are in runtime/README.md; codegen call sites for each `.c` file live in the matching `src/codegen/` file.
 - `std/` — the Jinn standard library (`use math`; function calls are module-qualified, types are global). The alpha-stable subset and its policy: docs/stdlib.md.
 - `libjn/` — aspirational C-stdlib-in-Jinn; stub bodies, not part of std or the runtime (docs/design/libjn.md).
-- `apps/` (21 realistic multi-module programs), `benchmarks/` (+ `comparison/` C/Rust/Python equivalents), `snippets/` (400 numbered single-feature programs), `tests/programs/` — the executable language-surface corpora.
+- `apps/` (21 realistic multi-module programs), `benchmarks/` (+ `comparison/` C/Rust/Python equivalents), `snippets/` (402 single-feature programs), `tests/programs/` — the executable language-surface corpora.
 
 ## Conventions
 

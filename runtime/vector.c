@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <unistd.h>
 #include "jinn_rt.h"
 
 #define VEC_MAGIC "JINNVEC\0"
@@ -42,8 +43,47 @@ void jinn_vec_close(JinnVec *v) {
     free(v);
 }
 
+typedef struct {
+    JinnVec *v;
+    int64_t  count;
+    long     len;
+} VecTxnSnap;
+static void vec_txn_rollback(void *arg) {
+    VecTxnSnap *s = (VecTxnSnap *)arg;
+    JinnVec *v = s->v;
+    if (!v->fp) return;
+    fflush(v->fp);
+    int fd = fileno(v->fp);
+    if (fd >= 0 && ftruncate(fd, (off_t)s->len) != 0) {
+        fprintf(stderr, "jinn: vector: rollback truncate failed\n");
+    }
+    v->count = s->count;
+    fseek(v->fp, 8, SEEK_SET);
+    fwrite(&v->count, 8, 1, v->fp);
+    fflush(v->fp);
+    fseek(v->fp, 0, SEEK_END);
+}
+static void vec_txn_release(void *arg) { free(arg); }
+static void vec_txn_guard(JinnVec *v) {
+    if (!jinn_txn_active() || jinn_txn_is_tracked(v)) return;
+    VecTxnSnap *s = (VecTxnSnap *)malloc(sizeof *s);
+    if (!s) {
+        fprintf(stderr, "jinn: vector: out of memory snapshotting for a "
+                        "transaction — aborting (cannot guarantee rollback)\n");
+        abort();
+    }
+    fflush(v->fp);
+    long cur = ftell(v->fp);
+    fseek(v->fp, 0, SEEK_END);
+    s->v = v;
+    s->count = v->count;
+    s->len = ftell(v->fp);
+    fseek(v->fp, cur, SEEK_SET);
+    jinn_txn_track_mem(v, vec_txn_rollback, vec_txn_release, s);
+}
 void jinn_vec_insert(JinnVec *v, const double *vec) {
     if (!v || !v->fp) return;
+    vec_txn_guard(v);
     fseek(v->fp, 0, SEEK_END);
     fwrite(vec, sizeof(double), v->dims, v->fp);
     v->count++;

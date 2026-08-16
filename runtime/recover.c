@@ -16,6 +16,7 @@ typedef struct {
     int64_t  del_off;
     int64_t  changed;
     int64_t  skipped;
+    int64_t  oom;
 } Recover;
 static int64_t rec_sid(const Recover *r, const uint8_t *rec) {
     int64_t sid;
@@ -34,7 +35,7 @@ static void recover_cb(uint8_t op, const void *payload, uint32_t payload_len,
     uint8_t *img = rec;
     if (r->rec_size > (int64_t)sizeof(rec)) {
         heap_rec = (uint8_t *)malloc((size_t)r->rec_size);
-        if (!heap_rec) { r->skipped++; return; }
+        if (!heap_rec) { r->oom++; return; }
         img = heap_rec;
     }
     memcpy(img, payload, (size_t)r->rec_size);
@@ -59,9 +60,9 @@ static void recover_cb(uint8_t op, const void *payload, uint32_t payload_len,
     if (r->count == r->cap) {
         int64_t ncap = r->cap ? r->cap * 2 : 64;
         size_t nbytes = jinn_safe_mul(ncap, r->rec_size);
-        if (nbytes == 0) { r->skipped++; free(heap_rec); return; }
+        if (nbytes == 0) { r->oom++; free(heap_rec); return; }
         uint8_t *n = (uint8_t *)realloc(r->rows, nbytes);
-        if (!n) { r->skipped++; free(heap_rec); return; }
+        if (!n) { r->oom++; free(heap_rec); return; }
         r->rows = n;
         r->cap = ncap;
     }
@@ -91,37 +92,6 @@ static int recover_fill(FILE *tmp, void *arg) {
         return -1;
     }
     return 0;
-}
-static void unlink_indexes(const char *store_path) {
-    char dirbuf[4096];
-    const char *slash = strrchr(store_path, '/');
-    const char *dir = ".";
-    const char *base = store_path;
-    if (slash) {
-        size_t n = (size_t)(slash - store_path);
-        if (n == 0 || n >= sizeof(dirbuf)) return;
-        memcpy(dirbuf, store_path, n);
-        dirbuf[n] = '\0';
-        dir = dirbuf;
-        base = slash + 1;
-    }
-    size_t blen = strlen(base);
-    if (blen > 6 && strcmp(base + blen - 6, ".store") == 0) blen -= 6;
-    DIR *d = opendir(dir);
-    if (!d) return;
-    struct dirent *e;
-    while ((e = readdir(d)) != NULL) {
-        size_t nlen = strlen(e->d_name);
-        if (nlen > blen + 5 &&
-            strncmp(e->d_name, base, blen) == 0 &&
-            e->d_name[blen] == '.' &&
-            strcmp(e->d_name + nlen - 4, ".idx") == 0) {
-            char full[4600];
-            snprintf(full, sizeof full, "%s/%s", dir, e->d_name);
-            unlink(full);
-        }
-    }
-    closedir(d);
 }
 int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
                            const char *wal_path, int64_t rec_size,
@@ -196,11 +166,22 @@ int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
         }
     }
     int64_t replayed = jinn_wal_replay(wal, recover_cb, &r);
+    int complete = jinn_wal_replay_was_complete() && r.oom == 0;
     if (r.skipped > 0) {
         fprintf(stderr,
                 "jinn: recover: %s: %lld WAL entr%s did not match the record "
                 "size and were skipped\n",
                 store_path, (long long)r.skipped, r.skipped == 1 ? "y" : "ies");
+    }
+    if (!complete) {
+        fprintf(stderr,
+                "jinn: recover: %s: out of memory during WAL replay — the data "
+                "file is left as it was and the WAL is preserved for the next "
+                "run\n",
+                store_path);
+        jinn_wal_close(wal);
+        free(r.rows);
+        return -1;
     }
 
     if (replayed >= 0 && r.changed > 0) {
@@ -213,7 +194,7 @@ int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
             jinn_wal_close(wal);
             return -1;
         }
-        unlink_indexes(store_path);
+        jinn_store_drop_indexes(store_path);
     }
     if (replayed >= 0) jinn_wal_checkpoint(wal);
     jinn_wal_close(wal);

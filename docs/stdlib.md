@@ -122,7 +122,7 @@ exist yet. Tracked in the `EXPERIMENTAL` list in
 | `test` | Uses `try`/`rescue` exception handling, which has no lexer, parser, or HIR support. |
 
 The gate is self-policing: `std_experimental_list_is_accurate` asserts that
-every excluded module *still fails* the frontend check. When the blocking
+every excluded module *still fails* at least one of the two gates. When the blocking
 feature lands and the module compiles, that test fails until the entry is
 removed — at which point the module joins the stable subset and is gated like
 the rest.
@@ -144,7 +144,7 @@ the rest.
 | Language corpus | `tests/corpus_differential.rs` — compiles **and runs** `snippets/` and `tests/programs/` at `--opt 0` and `--opt 3`, diffing stdout and exit code |
 | `String` semantics | `tests/string_unicode.rs` |
 | Documented examples | `tests/doc_examples.rs` — every fenced example in `jinn.md` |
-| Grammar | `tests/ebnf_roundtrip.rs` — against `jinn.ebnf` |
+| Grammar | `tests/ebnf_roundtrip.rs` — against `docs/jinn.ebnf` |
 | Formatting of the compiler itself | `cargo fmt --check`, `cargo clippy --release -- -D warnings` |
 
 ## Policy

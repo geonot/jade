@@ -9,13 +9,15 @@ ok
 a.out
 **/a.out
 
-# Store/WAL runtime artifacts produced by running programs and benchmarks.
-# A store's path is its declared name relative to the process cwd, so any
-# program with a `store` decl writes these wherever it is run from. Tests
+# Store/WAL/index runtime artifacts produced by running programs and
+# benchmarks. A store's path is its declared name relative to the process
+# cwd, so any program with a `store` decl writes these wherever it is run
+# from ( `<store>.store`, `<store>.wal`, `<store>.<field>.idx` ). Tests
 # and benchmarks run their binaries inside a scratch cwd; use .data/ for
 # ad-hoc runs so the repo root stays clean.
 *.store
 *.wal
+*.idx
 .data/*
 !.data/README.md
 

@@ -1,3 +1,2 @@
-# rule: fn_decl
 *greet(name as string) returns string
     return name

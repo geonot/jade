@@ -1,4 +1,239 @@
 # Changelog
+- **[163]** (2026-08-16) alpha-hardening pass — all seven blockers and all twelve majors from the [162] review close with pinning tests; the roadmap headline reaches 0 blockers / 0 majors; corpus re-measured under ASan+LSan at zero corruption, 34 leaking (down one)
+
+Worked in four batches — typer soundness, store durability, type-system
+majors, concurrency — each verified against the [162] repros before and
+after, then swept the highest-value minors. Full suite is 2323 tests, green;
+fmt/clippy clean; `ci/sanitize-corpus.sh` re-run across all 514 corpus
+programs at `--opt 0` and `--opt 3`: zero corruption, 34 leaking (was 35).
+
+- **Typer soundness (B-1–B-5).** Consuming calls in `if`/`elif`/`while`
+  condition, `match` scrutinee, and `for` iterator position now record moves
+  (`record_take_moves_in_expr` runs at each lowering site; a consuming
+  `while` condition rejects via the loop-move check since it would re-run).
+  Multi-level projection binds (`v is o.inner.items`, any depth, through
+  elements) promote to `take` and hit the existing nested-take rejection
+  instead of silently aliasing. Read-only enforcement follows the place
+  root: `frozen.hosts.push(x)` and mutating builtins through a view
+  element's field reject (`reject_readonly_root_write`), and mutation
+  inference walks nested receivers (`p.inner.xs.push(y)` marks `p`), so a
+  function mutating a nested field of its parameter no longer accepts a
+  `Frozen of T` argument — with a builtin-container carve-out so a user
+  type's mutating `get` cannot poison every `vec.get` through the
+  name-bucket. Unannotated-parameter rebinds stop minting second owners:
+  the generic-instantiation path (`lower_generic_fn_body`) now assigns
+  parameter ownership through `param_ownership_with_mod` like the direct
+  path, repairs borrow-alias binds, and strips their drops — the [162]
+  double-free repro now runs clean with borrow semantics. `$` and `$$`
+  outside a handler arm are compile errors instead of silent `void`
+  (the `f($)`-partial-application rewrite is unaffected). Fallout fixed in
+  the corpus itself: `std/raft.jn` mutated `s.persistent` through a nested
+  receiver (the exact lost-mutation shape the diagnostic describes),
+  `apps/ml_autodiff` passed a nested field to a mutating parameter, and
+  `tests/ebnf_corpus/valid/match_stmt.jn` predated the `pat ? body` arm
+  grammar. Pinned in `tests/place_ownership.rs`, `tests/freeze.rs`,
+  `tests/views.rs`.
+- **Store durability (B-6, B-7, S-5–S-9).** A transaction now holds the
+  store's writer lock from its first mutation to commit/rollback (the lock
+  became owner-reentrant, keyed by the coroutine), and the per-op lock
+  acquires *before* loading the `FILE*`, so rollback can no longer erase
+  another task's committed writes or hand a writer a freed handle — pinned
+  by a shared-store concurrent commit/rollback test run five times.
+  `save` became `jinn_store_save`: data-file fdatasync *before* the WAL
+  checkpoint, and no checkpoint if the sync fails. `@relaxed` (GROUP) now
+  defers per-record syncs to commit/checkpoint instead of silently equaling
+  `fdatasync`. All sidecars roll back with the transaction: `@kv` and
+  `@bloom` snapshot in memory, `@versioned` and `@vector` record truncate
+  points (`jinn_txn_track_mem`/`_trunc`), and recovery unlinks stale `.fts`
+  alongside `.idx`. Recovery distinguishes OOM from size mismatch, and an
+  incomplete replay preserves both the data file and the WAL instead of
+  checkpointing frames away. Store open moved into `jinn_store_open_data`:
+  only `ENOENT` creates; `EMFILE`/`EACCES` exit with a message instead of
+  truncating the store; new stores fsync and directory-fsync. Plus the S-9
+  mechanical tail: kv key-truncation warnings, kv persist-failure reports,
+  checked kv/index/migration reads, a WAL-policy-table-full warning, an
+  unrecognised `JINN_WAL_SYNC` warning, and rollback reopen-failure
+  messages that say which state the store is actually in. New residue filed
+  as `S-10` (reads race handle swaps), `S-11` (cancellation mid-transaction
+  leaks the lock), `S-12` (multi-store deadlock).
+- **Type-system majors (T-1, T-2, T-3, E-4, O-10).** Alias-typed arguments
+  reject at the call site — the tolerant-unify escape no longer excuses an
+  unresolved argument against an alias nominal (`Typer::alias_names`);
+  method arguments remain and are filed as `T-4`. Annotated method bodies
+  are tail-checked like functions (the missing `m.ret.is_some()` branch in
+  `lower_method_impl`), so an unsatisfiable annotation on an uncalled
+  method of a generic instantiation is a typer diagnostic instead of a MIR
+  verify failure. Bare `! E` functions Ok-wrap their implicit Unit exit.
+  Numeric method returns infer: a Float-constrained receiver pins to `f64`
+  at the call, the deferred-method resolver gained a float arm, and the
+  tour's numeric block re-entered the doc-compile gate — which immediately
+  exposed that `min`/`max`/`is_nan`/`is_finite`/`is_infinite`/`to_int`/
+  `recip`/`signum` had no working lowering at all (`Call("min")` to a
+  nonexistent symbol); all eight now lower to real libm calls or inline
+  compare/cast/div sequences. Capturing lambdas stay monomorphic instead of
+  monomorphizing into a global function that reads outer locals ("Load of
+  undefined variable"); non-capturing lambdas still generalize (filed as
+  the new `O-10`).
+- **Concurrency majors (N-5–N-8) and residue.** Unscoped anonymous
+  `dispatch` in statement position is a compile error naming the three
+  alternatives (scope it, bind it as a generator, `spawn`). `stop <scope>`
+  works from inside child tasks — enclosing scope pointers ride the task's
+  capture block and seed the child lowerer's scope tables, which also makes
+  nested dispatches register into the enclosing scope. `jinn_scope_cancel`
+  recurses through a new child-scope tree, so cancelling an outer scope
+  releases grandchildren parked in inner joins. Every scheduler task gets a
+  cancel-cleanup block (not just those with a `defer`), so loop back-edges
+  are cancellation points universally; the cleanup-injection pass now
+  rewrites phi predecessors when it splits an edge, fixing the
+  `defer`+`while` "PHI node entries do not match predecessors" ICE.
+  `return`/`err` inside a `together` body is rejected (it would skip the
+  join); the `!`-arm-on-`together` misparse is a targeted diagnostic at the
+  ternary lowering. `jinn_coro_trampoline`/`_exit`/`_yield`/
+  `jinn_current_coro` read the worker through the `noinline` accessor
+  (the stale-TLS class), and the dead `jinn_actor_park`/`_wake` pair is
+  deleted (N-10). A `send` to a closed channel drops the undelivered
+  payload instead of leaking it; `select` send arms are rejected until MIR
+  carries the direction — they silently lowered as *receive* arms (N-11).
+  Actor honesty (N-9): `*` non-loop handlers are documented and enforced as
+  async sends — binding or printing a handler call's (non)value is a
+  compile error with guidance, `returns` on a handler is a parse-time
+  rejection, and the spawn-init path resolves its expressions (an
+  aggregate-typed field initialised at `spawn` ICE'd with an unresolved
+  TypeVar reaching codegen).
+- **Capabilities (E-2 sound default).** A call through a field or element
+  callee, or through a local bound from a field, element, or call result,
+  taints the row as an indirect call — `needs`-annotated functions now
+  reject the `h is cfg.callback; h()` false-accept shape. Local aliases of
+  named functions follow to the source. Zero corpus fallout. Remaining
+  under-approximations (relation traversal, method-form buckets, `.jni`)
+  stay filed under `E-2`.
+- **Hygiene (P-4, P-5).** The string constructor is `build_owned_string`
+  (ownership explicit at every call site), and `runtime/vec.c`'s
+  `__jinn_str_slice` trio no longer implements an *inverted* SSO tag
+  convention (it marked heap strings as SSO — wired to string `Slice` and
+  one refactor away from corruption). `runtime/README.md` updated for the
+  new exit paths and the deleted actor park pair.
+- **Docs corrected against the implementation** — `memory-model.md` (B-1–B-4
+  gaps replaced with the enforced rules), `concurrency.md` (N-5/N-6/N-7/N-8
+  gaps replaced; L1–L3 and C1 now state what holds; the worked example's
+  `stop pool` caveat removed), `error-effects.md` (E-4 and B-5 gaps
+  removed), `jinn.md` (alias argument enforcement, view mutation, the
+  transaction lock contract with its S-11/S-12 caveats, actor `*` handler
+  honesty, numeric methods re-gated). `docs/roadmap.md` rewritten: 0
+  blockers, 0 majors, 39 minors, 5 coverage gaps, with residue ids
+  (`T-4`, `N-6r`, `N-10r`, `P-4r`, `S-10`–`S-12`, new `O-10`).
+
+- **[162]** (2026-08-15) alpha-readiness review — release MIR verify lands on every compile path and catches four latent lowering bugs; `const` params stop double-freeing; adversarial probing and a runtime audit reopen the roadmap at 7 blockers / 12 majors; docs corrected against the implementation wholesale
+
+The review the roadmap's own coverage clause asked for: targeted soundness
+probes, a code-level store/runtime audit, and claim-by-claim doc
+verification. Full suite is 2296 tests, green; fmt/clippy clean;
+`ci/sanitize-corpus.sh` re-measured at 514 programs — zero corruption, 35
+leaking (unchanged classes).
+
+- **MIR verify now runs in release on the direct compile path.** It was
+  `#[cfg(debug_assertions)]` in `src/driver/mod.rs` — plain `jinnc file.jn`
+  (the path nearly every test and user takes) shipped unverified MIR while
+  docs and CLAUDE.md claimed otherwise. Turning it on immediately caught
+  four latent bugs, all fixed:
+  - a statement-position ternary/quaternary built a `Void`-typed merge phi
+    whose arms carried values (`insert … ? log($) !! log(-1)` was
+    verify-broken on every store test); the `Ternary` lowering now mirrors
+    the `If` arm's Void guard (`src/mir/lower/expr_control.rs`);
+  - a bare `return` never constrained the function's return type, so
+    void-intent functions whose tail was a value-returning call inferred
+    `i64`/`i32` and returned garbage on early exits (`std/sort`,
+    `std/glob`); bare `return` now unifies the return type with `Void` when
+    it is still unresolved — `std/glob`'s genuine mixed-return got a real
+    diagnostic and a one-line fix;
+  - `main`'s early bare `return` lowered as `return-void` against `I32`;
+    it now returns 0, matching the fall-off-the-end path;
+  - `tests/programs/generic_containers.jn` carried a method annotation
+    unsatisfiable for half its instantiations, silently mono'd as garbage —
+    annotation removed, underlying issue filed as `T-3`.
+- **`const` parameters stop double-freeing.** `param_ownership_with_mod`
+  promoted `Some(Const)` to Owned, so a `const` aggregate param dropped in
+  the callee and again in the caller (accept-then-corrupt, verified). Const
+  now keeps the borrow default, and a new escape check
+  (`check_const_param_escapes`) rejects returning/storing/sending a `const`
+  param with the diagnostic memory-model §M7 always promised.
+- **One-armed ternaries are rejected in value position.** `s is cond !
+  "fallback"` and `s is cond ? then` bound a synthesized `void` on one path
+  — silent garbage whenever the missing arm ran. Both are now parse errors
+  naming the full `cond ? then ! else` form (statement-position
+  if-shorthands are unchanged); the two integration tests pinning the old
+  acceptance now pin the rejection.
+- **The roadmap headline is honest again: 7 blockers, 12 majors.**
+  Adversarial probing (≈50 compiled programs) found four accept-then-corrupt
+  holes — consuming calls in condition/scrutinee position (`B-1`),
+  multi-level projection binds aliasing (`B-2`), freeze/view write rejection
+  stopping one projection deep (`B-3`), unannotated-param rebinds minting a
+  second owner (`B-4`) — plus silent-garbage `$` (`B-5`); the runtime audit
+  found transaction rollback erasing other tasks' committed writes (`B-6`)
+  and `save` checkpointing the WAL before the data file is synced (`B-7`).
+  Majors cover alias-argument ICE (`T-2`), mono of unsatisfiable methods
+  (`T-3`), lambda-interpolation captures (`O-10`), bare `! E` (`E-4`),
+  unscoped `dispatch` never running (`N-5`), cancellation holes and ICEs
+  (`N-6`–`N-8`), `@relaxed` as a no-op (`S-5`), sidecar/transaction and
+  recovery/open failure paths (`S-6`–`S-8`). All carry minimal repros or
+  file:line evidence.
+- **Docs corrected wholesale against the implementation.** Roughly forty
+  false or drifted claims fixed across `memory-model.md` (defer/drop order,
+  M6 scope, M7 wording, phantom `set_ptr_param_attrs`), `concurrency.md`
+  (dispatch table, actor drain epilogue with `jinn_actor_stop_all`,
+  L1–L3/C1 scoped to reality, E5 rewritten), `error-effects.md` (R4, C4,
+  the §10 example now uses real syntax), `jinn.md` (annotation parens,
+  lambda annotations, alias args, store field types, view mutation,
+  reserved-word alias count), `tooling.md` (inert `--threads` removed from
+  code, env-var table completed: `JINN_ALLOW_SHELL`,
+  `JINN_TXN_SNAPSHOT_MAX`, `JINN_USE_INTERFACE_FILES`,
+  `JINN_MIR_VERIFY_SOFT`), `internals.md` (two-driver pipeline stated,
+  filed as `P-3`; gates list completed), `stdlib.md`, `strings.md` (byte
+  iteration), `runtime/README.md` (error-contract reality, epoll-only,
+  bounded channels), and every `design/` status header (capabilities pass
+  shipped; fmt trivia step shipped). `E-2` now admits the function-value
+  false-accept class. Roadmap S/X items renumbered contiguous; corpus
+  count corrected to 514; `T-1` filed for numeric-method inference (the
+  tour's dead "task 8-16" reference). `hits.ip.idx` untracked (second
+  offense) and `*.idx` gitignored.
+
+- **[161]** (2026-08-14) store, LSP, and sanitizer pass — the last three majors close: query blocks group and aggregate, `has-many` relations traverse with transitive `@cascade` deletes, and the LSP gains type-aware analysis; plus per-store durability decorators and coroutine fiber annotations
+
+Landed as commit `7688f68` ("last 3 majors and a few minors") without its
+`[N]` prefix; this entry restores the numbering. With it the roadmap reaches
+0 blockers / 0 majors and was rewritten and renumbered (entries [160] and
+earlier use the previous ids).
+
+- **Query blocks group and aggregate.** `group <field>` with `select`
+  projections — `count`, `sum(f)`, `avg(f)`, `min(f)`, `max(f)` — lowering
+  through `src/codegen/mir_codegen/store_ext/analytics.rs`; `where` filters
+  apply before grouping, and a bare `group` gets a default projection.
+  Pinned by `tests/programs/query_group_select.jn` and the diagnostic
+  surface in `tests/integration.rs`. Closes old S-2.
+- **Relations traverse both directions; `@cascade` deletes transitively.**
+  `&pets as [pets] @cascade` reads back as `o.pets`, and `delete`/`destroy`
+  walk cascade chains across stores (owners→pets→toys)
+  (`src/codegen/mir_codegen/store/delete.rs`, `store/read.rs`;
+  `tests/store_relations.rs`, `tests/programs/store_relations_cascade.jn`).
+  Closes old S-3.
+- **The LSP runs the typed frontend per edit.** `src/lsp/typed.rs`: type
+  diagnostics with positions, inferred-type hover, `DefId`-resolved
+  definition, scope-aware rename — inside a panic-contained 256 MiB worker
+  thread. `tests/lsp_smoke.rs` pins shadow-correct rename and positioned
+  type errors. Closes old X-3; residue is the new X-4.
+- **Durability is a per-store decorator.** `@durable` (fsync after every
+  WAL record), `@relaxed` (syncs batched at transaction commits),
+  `@volatile` (never synced), mutually exclusive, overriding the process
+  default; `JINN_WAL_SYNC` is demoted to a testing override
+  (`src/store_decorators.rs`, `runtime/wal.c`). Closes old S-5.
+- **Every context switch carries sanitizer fiber annotations.**
+  `__sanitizer_start/finish_switch_fiber` and the TSan fiber API sit behind
+  the `jinn_coro_swap_*` helpers (`runtime/jinn_rt.h`, `coro.c`, `sched.c`),
+  so ASan stops losing stack bounds across swaps. The sweep's `segv?` class
+  drops out and the leak count rose honestly from 24 to 35 programs —
+  actor-heavy programs that previously died in spurious SEGVs now run to
+  completion and report. Closes old N-5.
+
 - **[160]** (2026-08-14) drops pass — M-9r2's leak surface halves: temp match subjects get a place and a drop, `Row` gets its missing drop story, store rows own their strings, and dead merge blocks stop crashing `--opt 0`
 
 The store cluster — 18 of the 45 leaking corpus programs — and the

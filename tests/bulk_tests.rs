@@ -6834,3 +6834,57 @@ fn const_binding_rejects_rebind() {
 fn const_binding_reads_normally() {
     expect("*main()\n    x is const 42\n    log(x)\n", "42");
 }
+
+#[test]
+fn alias_typed_argument_rejects_the_underlying_type() {
+    let err = expect_compile_fail(
+        "alias Seconds is f64\n\n*wait(s as Seconds)\n    log('hi')\n\n*main()\n    wait(1.5)\n",
+    );
+    assert!(
+        err.contains("argument 1 of `wait`") && err.contains("Seconds"),
+        "{err}"
+    );
+}
+
+#[test]
+fn unsatisfiable_generic_method_annotation_is_a_typer_error_even_uncalled() {
+    let err = expect_compile_fail(
+        "type Pair of A, B\n    first as A\n    second as B\n\n    *describe(self) returns i64 is self.first\n\n    *both(self) returns B is self.second\n\n*main()\n    p as Pair<string, i64> is Pair(first is 'a', second is 2)\n    log(p.both())\n",
+    );
+    assert!(
+        err.contains("type mismatch") && !err.contains("MIR"),
+        "must be a typer diagnostic, not a MIR verify failure: {err}"
+    );
+}
+
+#[test]
+fn annotated_method_with_mismatched_tail_is_rejected() {
+    let err = expect_compile_fail(
+        "type Boxy\n    first as string\n\n    *describe(self) returns i64 is self.first\n\n*main()\n    b is Boxy(first is 'x')\n    log(b.describe())\n",
+    );
+    assert!(err.contains("type mismatch"), "{err}");
+}
+
+#[test]
+fn bare_bang_signature_with_implicit_unit_exit_compiles() {
+    expect(
+        "err E\n    Bad\n\n*sync(x as i64) ! E\n    if x > 5\n        err Bad\n\n*main()\n    sync(1) !! log('failed')\n    log('ok')\n",
+        "ok",
+    );
+}
+
+#[test]
+fn numeric_method_return_types_infer_on_inferred_float_locals() {
+    expect(
+        "*main()\n    x is 2.0\n    r is x.sqrt()\n    log(r)\n    log(x.min(3.0))\n    log(x.is_finite())\n    log(x.to_int())\n",
+        "1.414214\n2.000000\n1\n2",
+    );
+}
+
+#[test]
+fn interpolating_a_captured_variable_in_a_lambda_compiles_and_runs() {
+    expect(
+        "*main()\n    n is 5\n    f is |s| 'hi {n} {s}'\n    log(f('x'))\n",
+        "hi 5 x",
+    );
+}

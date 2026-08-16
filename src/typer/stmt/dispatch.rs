@@ -241,6 +241,42 @@ impl Typer {
         }
     }
 
+    fn find_return_in_together_body(stmts: &[hir::Stmt]) -> Option<ast::Span> {
+        fn walk_expr(e: &hir::Expr) -> Option<ast::Span> {
+            match &e.kind {
+                hir::ExprKind::Block(stmts) => walk(stmts),
+                hir::ExprKind::Ternary(c, t, els) => walk_expr(c)
+                    .or_else(|| walk_expr(t))
+                    .or_else(|| walk_expr(els)),
+                _ => None,
+            }
+        }
+        fn walk(stmts: &[hir::Stmt]) -> Option<ast::Span> {
+            for s in stmts {
+                let hit = match s {
+                    hir::Stmt::Ret(_, _, span) | hir::Stmt::ErrReturn(_, _, span) => Some(*span),
+                    hir::Stmt::If(i) => walk(&i.then)
+                        .or_else(|| i.elifs.iter().find_map(|(_, b)| walk(b)))
+                        .or_else(|| i.els.as_ref().and_then(|b| walk(b))),
+                    hir::Stmt::Match(m) => m.arms.iter().find_map(|a| walk(&a.body)),
+                    hir::Stmt::While(w) => walk(&w.body),
+                    hir::Stmt::For(f) | hir::Stmt::SimFor(f, _) => walk(&f.body),
+                    hir::Stmt::Loop(l) => walk(&l.body),
+                    hir::Stmt::Transaction(b, _) | hir::Stmt::SimBlock(b, _) => walk(b),
+                    hir::Stmt::Expr(e) | hir::Stmt::Break(Some(e), _) => walk_expr(e),
+                    hir::Stmt::Bind(b) => walk_expr(&b.value),
+                    hir::Stmt::Assign(t, v, _) => walk_expr(t).or_else(|| walk_expr(v)),
+                    _ => None,
+                };
+                if hit.is_some() {
+                    return hit;
+                }
+            }
+            None
+        }
+        walk(stmts)
+    }
+
     pub(crate) fn lower_stmt(
         &mut self,
         stmt: &ast::Stmt,
@@ -407,6 +443,14 @@ impl Typer {
                     view_bind_root = Some(root);
                 }
 
+                if matches!(value.kind, hir::ExprKind::Send(..)) {
+                    return Err(format!(
+                        "{}: an actor handler call produces no value to bind — \
+                         messages are asynchronous sends; have the handler send a \
+                         reply on a channel and `receive` it instead",
+                        b.span.loc(),
+                    ));
+                }
                 let is_element_read = match &value.kind {
                     hir::ExprKind::VecMethod(_, mname, _)
                     | hir::ExprKind::MapMethod(_, mname, _) => matches!(
@@ -432,13 +476,10 @@ impl Typer {
                 }
 
                 let access_mod = {
-                    let field_of_var = matches!(
-                        &value.kind,
-                        hir::ExprKind::Field(parent, _, _)
-                            if matches!(parent.kind, hir::ExprKind::Var(..))
-                    );
+                    let field_read_of_place = matches!(&value.kind, hir::ExprKind::Field(..))
+                        && crate::typer::place::place_of_expr(&value).is_some();
                     if b.access_mod.is_none()
-                        && field_of_var
+                        && field_read_of_place
                         && self.type_is_aggregate(&resolved_bind_ty)
                     {
                         Some(ast::AccessMod::Take)
@@ -573,7 +614,22 @@ impl Typer {
                         span: b.span,
                     }))
                 } else {
-                    let scheme = if Self::is_syntactic_value(&b.value) {
+                    let lambda_captures_outer = match &value.kind {
+                        hir::ExprKind::Lambda(lparams, lbody) => {
+                            let mut used: std::collections::HashSet<crate::hir::DefId> =
+                                std::collections::HashSet::new();
+                            for st in lbody {
+                                Self::collect_hir_var_ids_stmt(st, &mut used);
+                            }
+                            for p in lparams {
+                                used.remove(&p.def_id);
+                            }
+                            let outer = self.in_scope_def_ids();
+                            used.iter().any(|u| outer.contains(u))
+                        }
+                        _ => false,
+                    };
+                    let scheme = if !lambda_captures_outer && Self::is_syntactic_value(&b.value) {
                         self.generalize(&ty)
                     } else {
                         Scheme::mono(ty.clone())
@@ -763,6 +819,20 @@ impl Typer {
             }
 
             ast::Stmt::Expr(e) => {
+                if let ast::Expr::DispatchBlock(dname, _, dspan) = e
+                    && dname.as_str() == "__anon"
+                    && self.together_outer_ids.is_empty()
+                {
+                    return Err(format!(
+                        "{}: a `dispatch` outside a `together` scope creates a task \
+                         that is never scheduled — it would silently do nothing; wrap \
+                         it in a `together` block (task scopes are lexical, so a \
+                         helper function needs its own `together`), bind it to drive \
+                         it as a generator (`g is dispatch ...`), or use an actor via \
+                         `spawn`",
+                        dspan.loc(),
+                    ));
+                }
                 if let ast::Expr::Query(source, clauses, span) = e {
                     let store_name = match source.as_ref() {
                         ast::Expr::Ident(name, _) => *name,
@@ -855,10 +925,10 @@ impl Typer {
             }
 
             ast::Stmt::While(w) => {
-                let cond = self.lower_expr_expected(&w.cond, Some(&Type::Bool))?;
-
                 let outer_ids = self.in_scope_def_ids();
                 let pre = self.snapshot_moved_fields();
+                let cond = self.lower_expr_expected(&w.cond, Some(&Type::Bool))?;
+                self.record_take_moves_in_expr(&cond)?;
                 let body = self.lower_block(&w.body, ret_ty)?;
                 self.check_loop_body_moves(&pre, &outer_ids, w.span)?;
                 self.restore_moved_fields(pre);
@@ -885,6 +955,13 @@ impl Typer {
                 };
                 let end = f.end.as_ref().map(|e| self.lower_expr(e)).transpose()?;
                 let step = f.step.as_ref().map(|e| self.lower_expr(e)).transpose()?;
+                self.record_take_moves_in_expr(&iter)?;
+                if let Some(ref e) = end {
+                    self.record_take_moves_in_expr(e)?;
+                }
+                if let Some(ref e) = step {
+                    self.record_take_moves_in_expr(e)?;
+                }
                 let resolved_iter_ty = self.infer_ctx.shallow_resolve(&iter.ty);
 
                 if let (Some(val_bind), Type::Map(key_ty, val_ty)) = (&f.bind2, &resolved_iter_ty) {
@@ -1065,6 +1142,10 @@ impl Typer {
                     let _ = self
                         .infer_ctx
                         .unify_at(&v.ty, ret_ty, *span, "return value");
+                } else if matches!(self.infer_ctx.shallow_resolve(ret_ty), Type::TypeVar(_)) {
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(&Type::Void, ret_ty, *span, "bare `return`");
                 }
                 let hval = hval.map(|v| self.maybe_coerce_to(v, ret_ty));
                 Ok(hir::Stmt::Ret(hval, ret_ty.clone(), *span))
@@ -1317,6 +1398,14 @@ impl Typer {
                     self.scope_names.pop();
                 }
                 let hbody = hbody?;
+                if let Some(ret_span) = Self::find_return_in_together_body(&hbody) {
+                    return Err(format!(
+                        "{}: `return` inside a `together` body would skip the scope's \
+                         join and leak its running tasks; bind the value and return \
+                         after the `together` block ends",
+                        ret_span.loc(),
+                    ));
+                }
                 let errs: Vec<Symbol> = self
                     .current_fn_error_types
                     .difference(&before)

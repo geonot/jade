@@ -2,18 +2,6 @@
 #include "jinn_rt.h"
 #include <stdlib.h>
 #include <stdio.h>
-void jinn_actor_park(void *mailbox_ptr) {
-    (void)mailbox_ptr;
-    jinn_worker_t *w = tl_worker;
-    if (!w || !w->current) return;
-    jinn_coro_t *self = w->current;
-    self->state = JINN_CORO_SUSPENDED;
-    self->wait_chan = mailbox_ptr;
-    jinn_coro_swap_out(self, &w->sched_ctx);
-}
-void jinn_actor_wake(void *mailbox_ptr) {
-    (void)mailbox_ptr;
-}
 void jinn_actor_stop(void *mailbox_ptr) {
     jinn_chan_t *ch = *(jinn_chan_t **)mailbox_ptr;
     if (ch) {

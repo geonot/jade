@@ -7,9 +7,10 @@
 > outside it, locked against moves until the join — plus frozen-aware pipes.
 > Pinned by `tests/freeze.rs`; [152] shipped step 3's std adoption —
 > `toml.parse_frozen` returns a `Frozen of TomlTable` read through the
-> ordinary accessors. Remaining: function-exit `dispatch` sharing and actor
+> ordinary accessors. Remaining: function-exit `dispatch` sharing, actor
 > handlers accepting frozen payloads without a `Frozen of ...` annotation
-> (handler write-inference) — tracked as `O-8` in
+> (handler write-inference), and a frozen value created *inside* the
+> `together` body (it falls back to single-task moves) — tracked as `O-8` in
 > [`../roadmap.md`](../roadmap.md#memory-and-ownership).
 
 Large read-only data — configuration, lookup tables, model weights — must

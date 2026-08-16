@@ -102,7 +102,12 @@ impl crate::typer::Typer {
                     .collect()
             })
             .unwrap_or_default();
-        let ctx = ScanCtx { facts, fields };
+        let builtins = self.builtin_container_names(f, self_ty);
+        let ctx = ScanCtx {
+            facts,
+            fields,
+            builtins,
+        };
         let mut mutated: HashSet<usize> = HashSet::new();
         self.mutate_scan_block(&f.body, &mut alias, &ctx, &mut mutated);
         let mut changed = false;
@@ -258,6 +263,24 @@ impl crate::typer::Typer {
         }
     }
 
+    fn mutate_place_root_alias(e: &Expr, alias: &AliasMap) -> HashSet<usize> {
+        match e {
+            Expr::Field(x, _, _) | Expr::Index(x, _, _) | Expr::Deref(x, _) => {
+                Self::mutate_place_root_alias(x, alias)
+            }
+            _ => Self::mutate_expr_alias(e, alias),
+        }
+    }
+
+    fn mark_mutated_place(e: &Expr, alias: &AliasMap, ctx: &ScanCtx, mutated: &mut HashSet<usize>) {
+        mutated.extend(Self::mutate_place_root_alias(e, alias));
+        if let Some(root) = Self::lvalue_root(e)
+            && ctx.fields.contains(&root)
+        {
+            mutated.insert(0);
+        }
+    }
+
     pub(in crate::typer) fn any_user_method_mutates(&self, method: Symbol, slot: usize) -> bool {
         self.methods.iter().any(|(ty, ms)| {
             ms.iter().any(|m| m.name == method) && {
@@ -290,7 +313,7 @@ impl crate::typer::Typer {
                     {
                         for (j, a) in args.iter().enumerate() {
                             if slots.get(j).copied().unwrap_or(false) {
-                                mutated.extend(Self::mutate_expr_alias(a, alias));
+                                Self::mark_mutated_place(a, alias, ctx, mutated);
                             }
                         }
                     }
@@ -306,23 +329,25 @@ impl crate::typer::Typer {
                             format!("{}_{}", tyname.as_str(), name.as_str()).into();
                         let slots = self.fn_param_mutates.get(&mangled);
                         if slots.and_then(|s| s.first().copied()).unwrap_or(false) {
-                            mutated.extend(Self::mutate_expr_alias(recv, alias));
+                            Self::mark_mutated_place(recv, alias, ctx, mutated);
                         }
                         for (j, a) in args.iter().enumerate() {
                             if slots.and_then(|s| s.get(j + 1).copied()).unwrap_or(false) {
-                                mutated.extend(Self::mutate_expr_alias(a, alias));
+                                Self::mark_mutated_place(a, alias, ctx, mutated);
                             }
                         }
                     }
                     None => {
+                        let builtin_recv =
+                            matches!(&**recv, Expr::Ident(n, _) if ctx.builtins.contains(n));
                         if is_builtin_mutating_method(&name.as_str())
-                            || self.any_user_method_mutates(*name, 0)
+                            || (!builtin_recv && self.any_user_method_mutates(*name, 0))
                         {
-                            mutated.extend(Self::mutate_expr_alias(recv, alias));
+                            Self::mark_mutated_place(recv, alias, ctx, mutated);
                         }
                         for (j, a) in args.iter().enumerate() {
-                            if self.any_user_method_mutates(*name, j + 1) {
-                                mutated.extend(Self::mutate_expr_alias(a, alias));
+                            if !builtin_recv && self.any_user_method_mutates(*name, j + 1) {
+                                Self::mark_mutated_place(a, alias, ctx, mutated);
                             }
                         }
                     }
@@ -337,7 +362,7 @@ impl crate::typer::Typer {
                     && let Some(slots) = self.fn_param_mutates.get(fname)
                     && slots.first().copied().unwrap_or(false)
                 {
-                    mutated.extend(Self::mutate_expr_alias(lhs, alias));
+                    Self::mark_mutated_place(lhs, alias, ctx, mutated);
                 }
                 self.mutate_scan_expr(lhs, alias, ctx, mutated);
                 for a in rest {

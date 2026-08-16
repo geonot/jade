@@ -1,6 +1,7 @@
 # Closure and generator capture rules — specification
 
-> **Status: step 1 implemented ([148]).** When this was specified ([147]) it
+> **Status: steps 1–2 and the creation half of step 3 implemented ([148],
+> [149]).** When this was specified ([147]) it
 > assumed capturing closures did not parse; probing showed they parsed *and
 > ran* — capturing the enclosing frame by alias, with a use-after-free on any
 > capture the frame invalidated. [148] made the rules below real: captures
@@ -13,9 +14,10 @@
 > named) and the creation half of step 3 (a generator's aggregate arguments
 > are inferred consuming, so the frame owns them — the aliasing SIGSEGV is a
 > use-after-move error now). Remaining: suspended-frame drops for generators
-> dropped mid-iteration, by-view capture (step 4), and per-iteration closure
-> temporaries in loops, which still leak their environments — tracked as
-> `O-7` in [`../roadmap.md`](../roadmap.md#memory-and-ownership). Lambda
+> dropped mid-iteration, by-view capture (step 4), per-iteration closure
+> temporaries in loops (they still leak their environments), and a local that
+> aliases a function-typed parameter being invisible to the caps taint —
+> tracked as `O-7` in [`../roadmap.md`](../roadmap.md#memory-and-ownership). Lambda
 > syntax is `|x| x * 2`; a capturing closure is any lambda with free
 > variables.
 

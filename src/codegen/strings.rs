@@ -32,7 +32,7 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             let gstr = b!(self.bld.build_global_string_ptr(s, "str"));
             let i64t = self.ctx.i64_type();
-            self.build_string(
+            self.build_owned_string(
                 gstr.as_pointer_value(),
                 i64t.const_int(s.len() as u64, false),
                 i64t.const_int(0, false),
@@ -146,7 +146,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(phi.as_basic_value())
     }
 
-    pub(crate) fn build_string(
+    pub(crate) fn build_owned_string(
         &mut self,
         data: impl Into<BasicValueEnum<'ctx>>,
         len: impl Into<BasicValueEnum<'ctx>>,
@@ -288,7 +288,7 @@ impl<'ctx> Compiler<'ctx> {
                 .build_call(memcpy, &[buf.into(), src.into(), len.into()], ""));
             buf
         };
-        let heap_val = self.build_string(heap_buf, len, len, &format!("{prefix}.hv"))?;
+        let heap_val = self.build_owned_string(heap_buf, len, len, &format!("{prefix}.hv"))?;
         let heap_exit = self.current_bb();
         b!(self.bld.build_unconditional_branch(merge_bb));
 
@@ -346,6 +346,6 @@ impl<'ctx> Compiler<'ctx> {
         call_args2.extend_from_slice(args);
         b!(self.bld.build_call(snprintf, &call_args2, ""));
 
-        self.build_string(buf, len, size, &format!("{prefix}.s"))
+        self.build_owned_string(buf, len, size, &format!("{prefix}.s"))
     }
 }

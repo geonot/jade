@@ -277,10 +277,6 @@ fn url_to_dir(url: &str) -> String {
 }
 
 fn ensure_safe_dep_url(url: &str) -> Result<(), String> {
-    // The cache directory is derived from the URL, so a `..` segment would
-    // place the clone outside the cache root. An absolute remainder is normal
-    // for file:// URLs and is harmless: url_to_dir rewrites every segment and
-    // ensure_inside_root re-checks the result.
     if strip_scheme(url).split('/').any(|seg| seg == "..") {
         return Err(format!(
             "dependency URL '{url}' contains a `..` path segment; package cache \

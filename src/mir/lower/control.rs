@@ -556,7 +556,12 @@ impl Lowerer {
                 } else {
                     self.emit_txn_unwind("__txn_commit", *span);
                     self.lower_deferred_in_reverse();
-                    self.set_terminator(Terminator::Return(None));
+                    if matches!(self.func.ret_ty, Type::I32) {
+                        let zero = self.emit(InstKind::IntConst(0), Type::I32, *span);
+                        self.set_terminator(Terminator::Return(Some(zero)));
+                    } else {
+                        self.set_terminator(Terminator::Return(None));
+                    }
                 }
                 let dead = self.new_block("after.ret");
                 self.switch_to(dead);

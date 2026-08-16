@@ -143,7 +143,7 @@ static void jinn_coro_trampoline(void) {
         for (;;) {}
     }
 
-    jinn_worker_t *w = tl_worker;
+    jinn_worker_t *w = jinn_worker_self();
     self = w ? w->current : NULL;
     if (!self) return;
 #ifdef JINN_SAN_ASAN_FIBERS
@@ -154,7 +154,7 @@ static void jinn_coro_trampoline(void) {
     jinn_coro_exit();
 }
 static void jinn_coro_exit(void) {
-    jinn_worker_t *w = tl_worker;
+    jinn_worker_t *w = jinn_worker_self();
     if (!w || !w->current) return;
     jinn_coro_t *self = w->current;
     if (self->on_exit_cb) {
@@ -170,7 +170,7 @@ static void jinn_coro_exit(void) {
     __builtin_unreachable();
 }
 void jinn_coro_yield(void) {
-    jinn_worker_t *w = tl_worker;
+    jinn_worker_t *w = jinn_worker_self();
     if (!w || !w->current) return;
     jinn_coro_t *c = w->current;
     c->state = JINN_CORO_READY;
@@ -179,11 +179,11 @@ void jinn_coro_yield(void) {
     jinn_coro_swap_out(c, &w->sched_ctx);
 }
 jinn_coro_t *jinn_current_coro(void) {
-    jinn_worker_t *w = tl_worker;
+    jinn_worker_t *w = jinn_worker_self();
     return w ? w->current : NULL;
 }
 jinn_worker_t *jinn_current_worker(void) {
-    return tl_worker;
+    return jinn_worker_self();
 }
 void jinn_coro_set_daemon(jinn_coro_t *c) {
     if (c) c->daemon = 1;

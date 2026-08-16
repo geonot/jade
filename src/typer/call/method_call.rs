@@ -39,6 +39,7 @@ impl Typer {
         if frozen_recv {
             self.reject_frozen_receiver_write(&obj_ty, method, &hobj, span)?;
         }
+        self.reject_readonly_root_write(&obj_ty, method, &hobj, span)?;
 
         if let Type::Row(store) = &obj_ty
             && method == "snapshot"
@@ -503,6 +504,20 @@ impl Typer {
             }
         }
 
+        let obj_ty = if let Type::TypeVar(v) = &obj_ty
+            && matches!(
+                self.infer_ctx.constraint(*v),
+                crate::typer::unify::TypeConstraint::Float
+            )
+            && Self::float_method_ret_ty(&Type::F64, method).is_some()
+        {
+            let _ = self
+                .infer_ctx
+                .unify_at(&hobj.ty, &Type::F64, span, "float method receiver");
+            self.infer_ctx.shallow_resolve(&hobj.ty)
+        } else {
+            obj_ty
+        };
         if matches!(obj_ty, Type::F64 | Type::F32) {
             let float_ret = match method {
                 "sqrt" | "abs" | "floor" | "ceil" | "round" | "trunc" | "sin" | "cos" | "tan"

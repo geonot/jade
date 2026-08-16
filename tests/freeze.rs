@@ -268,3 +268,19 @@ fn frozen_pipes_peel_for_reads_and_reject_mutation() {
         &["is frozen", "mutates it"],
     );
 }
+
+#[test]
+fn mutating_builtin_through_a_frozen_field_is_rejected() {
+    rejects(
+        "type Config\n    hosts as Vec of string\n\n*main\n    c is Config(hosts is vec('a', 'b'))\n    f is freeze c\n    f.hosts.push('c')\n    log(f.hosts.length)\n",
+        &["frozen", "push"],
+    );
+}
+
+#[test]
+fn nested_field_mutation_infers_the_param_mutating_and_rejects_frozen_args() {
+    rejects(
+        "type Inner\n    xs as Vec of i64\n\ntype Wrap\n    inner as Inner\n\n*poke(w as Wrap)\n    w.inner.xs.push(7)\n\n*main\n    w is Wrap(inner is Inner(xs is vec(1)))\n    f is freeze w\n    poke(f)\n    log(f.inner.xs.length)\n",
+        &["frozen", "mutates"],
+    );
+}

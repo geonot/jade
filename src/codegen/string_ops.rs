@@ -120,7 +120,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self
             .bld
             .build_call(memcpy2, &[dst.into(), rdata.into(), rlen.into()], ""));
-        let heap_val = self.build_string(buf, total, total, "cat")?;
+        let heap_val = self.build_owned_string(buf, total, total, "cat")?;
         let heap_exit = self.current_bb();
         b!(self.bld.build_unconditional_branch(merge_bb));
 

@@ -16,10 +16,10 @@ jinnc file.jn --opt 0        # 0..3, default 3
 | Flag group | Flags |
 | --- | --- |
 | Output | `-o`, `--emit-llvm`, `--emit-hir`, `--emit-mir`, `--emit-obj`, `--emit-interface` |
-| Codegen | `--opt N`, `--lto`, `--lib`, `--link`, `--standalone`, `--threads N` |
+| Codegen | `--opt N`, `--lto`, `--lib`, `--link`, `--standalone` |
 | Target | `--target`, `--cpu`, `--features` |
 | Floating point | `--fast-math`, `--deterministic-fp` |
-| Type checking | `--strict-types`, `--lenient`, `--pedantic`, `--warn-inferred-defaults` |
+| Type checking | `--strict-types`, `--lenient`, `--pedantic`, `--no-warn-inferred-defaults` (the warning is on by default) |
 | Debugging | `--debug`, `--debug-types`, `--debug-drops`, `--dump-tokens`, `--dump-ast`, `-v` |
 
 `--target`/`--cpu`/`--features`, `--lto`, `--fast-math`, `--deterministic-fp`
@@ -31,7 +31,8 @@ spot-checked.
 | Command | Purpose |
 | --- | --- |
 | `run` | Compile and run, with a hash-keyed binary cache. Dependency edits invalidate the cache. |
-| `test` | Run a program's tests. |
+| `compile` | The explicit spelling of the default mode (`jinnc file.jn`). |
+| `test` | Run a program's tests. The top-level `--test` flag compiles a single file in test mode instead. |
 | `check` | Type-check without emitting an object. Runs the same ownership analysis as `build`. |
 | `fmt` | Format source (prints to stdout; `--write` rewrites in place). |
 | `init` | Scaffold a project (`project.jn` + `source/`). |
@@ -114,7 +115,7 @@ Positions convert between UTF-16 code units and byte offsets in both
 directions, so hover and go-to-definition keep working to the right of an emoji
 or an accented character.
 
-**Known limitations** (`X-5`): package imports are not resolved in the editor
+**Known limitations** (`X-4`): package imports are not resolved in the editor
 (module resolution runs with an empty package set; a file whose imports cannot
 resolve degrades to parse-level analysis with a warning saying so);
 cross-file rename and references are still lexical; generic functions lose
@@ -137,8 +138,12 @@ plumbing. To add a capability: implement the handler, wire it in
 | Variable | Effect |
 | --- | --- |
 | `JINN_RT_DEBUG=1` | Build the C runtime `-O0 -g`. |
-| `JINN_MIR_VERIFY=0` | Opt out of MIR verification (on by default, including in release). |
+| `JINN_MIR_VERIFY=0` | Opt out of MIR verification (on by default on every compile path, including in release; failure is a compiler bug). |
+| `JINN_MIR_VERIFY_SOFT` | Make a post-lower MIR verify failure non-fatal (testing aid). |
+| `JINN_USE_INTERFACE_FILES=1` | Turn `.jni` interface reuse on (off by default — `X-3`). |
+| `JINN_ALLOW_SHELL=1` | Allow `process` shell execution at runtime; without it shell exec returns `EPERM`. |
+| `JINN_TXN_SNAPSHOT_MAX` | Cap in bytes on the per-transaction store snapshot (default 256 MB; exceeding it aborts with a message naming this knob). |
 | `JINN_PROPTEST_CASES=N` | Property-test case count. |
-| `JINN_WAL_SYNC` | Testing override for the WAL sync policy; when set it overrides every store's `@durable`/`@relaxed`/`@volatile` decorator. `group` batches syncs at transaction commits and falls back to per-record `fdatasync` outside them. |
-| `JINN_LOG` | `tracing` filter, e.g. `jinnc::lsp=debug`. |
+| `JINN_WAL_SYNC` | Testing override for the WAL sync policy; when set it overrides every store's `@durable`/`@relaxed`/`@volatile` decorator. Values: `none` (never sync), `fsync` (per record), `group` (batched at transaction commits, per-record `fdatasync` outside them); any other value means per-record `fdatasync`. |
+| `JINN_LOG` | `tracing` filter for `jinnc`, e.g. `jinnc=debug`. (`jinnc-lsp` does not install a subscriber.) |
 | `LLVM_SYS_211_PREFIX` | Required for a *fresh* compiler build on Arch: `/usr/lib/llvm21`. |

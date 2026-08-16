@@ -47,6 +47,7 @@ type AliasMap = HashMap<Symbol, HashSet<usize>>;
 pub(in crate::typer) struct ScanCtx {
     pub(in crate::typer) facts: HashMap<Symbol, Symbol>,
     pub(in crate::typer) fields: HashSet<Symbol>,
+    pub(in crate::typer) builtins: HashSet<Symbol>,
 }
 
 #[derive(Default)]
@@ -134,6 +135,37 @@ impl crate::typer::Typer {
             Type::Struct(n, _) | Type::Enum(n) if self.is_user_type_name(*n) => Some(*n),
             _ => None,
         }
+    }
+
+    pub(in crate::typer) fn builtin_container_names(
+        &self,
+        f: &ast::Fn,
+        self_ty: Option<Symbol>,
+    ) -> HashSet<Symbol> {
+        fn is_builtin_container(t: &Type) -> bool {
+            matches!(
+                t,
+                Type::Vec(_) | Type::Map(_, _) | Type::Array(_, _) | Type::String
+            )
+        }
+        let mut names: HashSet<Symbol> = HashSet::new();
+        if let Some(t) = self_ty
+            && let Some(fields) = self.structs.get(&t)
+        {
+            for (fname, fty) in fields {
+                if is_builtin_container(fty) {
+                    names.insert(*fname);
+                }
+            }
+        }
+        for p in &f.params {
+            if p.ty.as_ref().is_some_and(is_builtin_container) {
+                names.insert(p.name);
+            } else {
+                names.remove(&p.name);
+            }
+        }
+        names
     }
 
     fn user_ctor_ty(&self, e: &Expr) -> Option<Symbol> {
@@ -314,7 +346,12 @@ impl crate::typer::Typer {
                     .collect()
             })
             .unwrap_or_default();
-        let ctx = ScanCtx { facts, fields };
+        let builtins = self.builtin_container_names(f, self_ty);
+        let ctx = ScanCtx {
+            facts,
+            fields,
+            builtins,
+        };
         let mut escaping = Escapes::default();
         let returns_value = f.ret.is_some() || ret_is_inferred(f);
         self.scan_block(
@@ -399,6 +436,85 @@ impl crate::typer::Typer {
                     span.loc(),
                     when,
                     p.name,
+                ));
+            }
+        }
+    }
+
+    pub(crate) fn check_const_param_escapes(&mut self, fns: &[&ast::Fn]) {
+        let method_items: Vec<(Symbol, ast::Fn)> = self
+            .methods
+            .iter()
+            .flat_map(|(ty, ms)| {
+                let ty = *ty;
+                ms.iter().map(move |m| (ty, m.clone()))
+            })
+            .collect();
+        for f in fns {
+            self.const_escape_one(f, 0, None);
+        }
+        for (ty, m) in &method_items {
+            self.const_escape_one(m, 1, Some(*ty));
+        }
+    }
+
+    fn const_escape_one(&mut self, f: &ast::Fn, offset: usize, self_ty: Option<Symbol>) {
+        let mut alias: AliasMap = AliasMap::new();
+        let mut names: HashMap<usize, Symbol> = HashMap::new();
+        let mut slot = offset;
+        for p in &f.params {
+            if offset == 1 && p.name.as_str() == "self" {
+                continue;
+            }
+            let this_slot = slot;
+            slot += 1;
+            if !matches!(p.access_mod, Some(ast::AccessMod::Const))
+                || annotated_non_consumable(&p.ty)
+            {
+                continue;
+            }
+            alias.insert(p.name, HashSet::from([this_slot]));
+            names.insert(this_slot, p.name);
+        }
+        if alias.is_empty() {
+            return;
+        }
+        let facts = self.receiver_facts(f, self_ty);
+        let param_names: HashSet<Symbol> = f.params.iter().map(|p| p.name).collect();
+        let fields: HashSet<Symbol> = self_ty
+            .map(|t| {
+                self.self_field_names(t)
+                    .difference(&param_names)
+                    .copied()
+                    .collect()
+            })
+            .unwrap_or_default();
+        let builtins = self.builtin_container_names(f, self_ty);
+        let ctx = ScanCtx {
+            facts,
+            fields,
+            builtins,
+        };
+        let mut escaping = Escapes::default();
+        let returns_value = f.ret.is_some() || ret_is_inferred(f);
+        self.scan_block(
+            &f.body,
+            &mut alias,
+            &ctx,
+            &mut escaping,
+            returns_value,
+            false,
+        );
+        let mut sites: Vec<_> = escaping.sites.into_iter().collect();
+        sites.sort_by_key(|(i, _)| *i);
+        for (i, (span, _)) in sites {
+            if let Some(name) = names.get(&i) {
+                self.type_errors.push(format!(
+                    "{}: cannot consume `const` parameter `{}`: `const` keeps it \
+                     borrowed, but this site returns, stores, or sends it — use `take` \
+                     (or drop the modifier) to let it be consumed",
+                    span.loc(),
+                    name.as_str()
                 ));
             }
         }

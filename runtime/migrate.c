@@ -136,9 +136,10 @@ int64_t jinn_mig_add_field(FILE **store_fp_ptr, const char *store_path,
     FILE *fp = *store_fp_ptr;
     if (!fp) return -1;
     fseek(fp, 8, SEEK_SET);
-    int64_t count, old_rec_size;
-    fread(&count, 8, 1, fp);
-    fread(&old_rec_size, 8, 1, fp);
+    int64_t count = -1, old_rec_size = 0;
+    if (fread(&count, 8, 1, fp) != 1 || fread(&old_rec_size, 8, 1, fp) != 1) {
+        return -1;
+    }
     if (count < 0 || old_rec_size <= 0 || field_offset < 0 || field_size <= 0) return -1;
     if (count > 0 && old_rec_size > (INT64_MAX / count)) return -1;
     int64_t new_rec_size = old_rec_size + field_size;
@@ -152,7 +153,12 @@ int64_t jinn_mig_add_field(FILE **store_fp_ptr, const char *store_path,
     uint8_t *old_data = (uint8_t *)malloc((size_t)(count * old_rec_size));
     if (!old_data) return -1;
     fseek(fp, STORE_HEADER, SEEK_SET);
-    fread(old_data, (size_t)old_rec_size, (size_t)count, fp);
+    if (fread(old_data, (size_t)old_rec_size, (size_t)count, fp) != (size_t)count) {
+        fprintf(stderr, "jinn: migrate: short read of %s — aborting migration\n",
+                store_path);
+        free(old_data);
+        return -1;
+    }
     uint8_t *new_data = (uint8_t *)calloc((size_t)count, (size_t)new_rec_size);
     if (!new_data) { free(old_data); return -1; }
     for (int64_t i = 0; i < count; i++) {
@@ -182,9 +188,10 @@ int64_t jinn_mig_drop_field(FILE **store_fp_ptr, const char *store_path,
     FILE *fp = *store_fp_ptr;
     if (!fp) return -1;
     fseek(fp, 8, SEEK_SET);
-    int64_t count, old_rec_size;
-    fread(&count, 8, 1, fp);
-    fread(&old_rec_size, 8, 1, fp);
+    int64_t count = -1, old_rec_size = 0;
+    if (fread(&count, 8, 1, fp) != 1 || fread(&old_rec_size, 8, 1, fp) != 1) {
+        return -1;
+    }
     if (count < 0 || old_rec_size <= 0 || field_offset < 0 || field_size <= 0) return -1;
     if (count > 0 && old_rec_size > (INT64_MAX / count)) return -1;
     int64_t new_rec_size = old_rec_size - field_size;
@@ -199,7 +206,12 @@ int64_t jinn_mig_drop_field(FILE **store_fp_ptr, const char *store_path,
     uint8_t *old_data = (uint8_t *)malloc((size_t)(count * old_rec_size));
     if (!old_data) return -1;
     fseek(fp, STORE_HEADER, SEEK_SET);
-    fread(old_data, (size_t)old_rec_size, (size_t)count, fp);
+    if (fread(old_data, (size_t)old_rec_size, (size_t)count, fp) != (size_t)count) {
+        fprintf(stderr, "jinn: migrate: short read of %s — aborting migration\n",
+                store_path);
+        free(old_data);
+        return -1;
+    }
     uint8_t *new_data = (uint8_t *)calloc((size_t)count, (size_t)new_rec_size);
     if (!new_data) { free(old_data); return -1; }
     for (int64_t i = 0; i < count; i++) {

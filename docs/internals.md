@@ -28,7 +28,12 @@ Three binaries: `jinnc` (`src/main.rs`), `jinn` (byte-identical — it
 
 ## Pipeline
 
-All compilation funnels through `src/driver/pipeline.rs::compile_and_link`:
+Compilation runs through two structurally parallel drivers — the inline path
+in `src/driver/mod.rs::run()` for direct file compiles (`jinnc file.jn`, the
+`--emit-*` early exits, `--link` extras, `project.jn` overrides) and
+`src/driver/pipeline.rs::compile_and_link` for `build`/`run`/`test`. Both
+walk the same stages (unifying them is `P-3` in
+[`roadmap.md`](roadmap.md#performance-and-build)):
 
 ```
 lex (src/lexer/)
@@ -69,32 +74,34 @@ Load-bearing design facts:
   are `E-2` and `E-3` in [`roadmap.md`](roadmap.md#types-errors-and-effects).
 - **`src/comptime/` is constant folding of inferred-pure functions** (HIR→HIR),
   not user-facing metaprogramming.
-- **MIR verify runs in release**, not just debug. It checks phi and edge types,
-  which is what catches join points whose incoming values disagree.
+- **MIR verify runs in release, on every compile path**, not just debug. It
+  checks phi and edge types, which is what catches join points whose incoming
+  values disagree. `JINN_MIR_VERIFY=0` opts out; a failure is a compiler bug.
 - **`src/store_decorators.rs` is the single source of truth** for every store
   and field decorator: argument arity and type, mutual exclusions, numeric-only
   constraints. The parser validates names, argument shapes, and store-level
   exclusions; the typer validates field-type constraints once field types are
-  known; the reference list in the docs is generated from the same table.
+  known. (`render_docs()` can render the table as a reference list, but the
+  docs' decorator prose is hand-written — nothing pins the two together.)
 
 ## Source trees — do not confuse them
 
 | Tree | What it is |
 | --- | --- |
 | `src/` | The compiler, in Rust. |
-| `runtime/` | The C runtime (~5k LOC) statically linked into every compiled program: coroutines and the work-stealing scheduler, actors, channels, `select`, structured-concurrency scopes, the persistent store engine (WAL, indexes, recovery, migrations), and the OS surface. Conventions — symbol naming, error-return shapes, shared helpers in `util.c` — are in [`../runtime/README.md`](../runtime/README.md); the codegen call sites for each `.c` file live in the matching `src/codegen/` file. |
+| `runtime/` | The C runtime (~6k LOC) statically linked into every compiled program: coroutines and the work-stealing scheduler, actors, channels, `select`, structured-concurrency scopes, the persistent store engine (WAL, indexes, recovery, migrations), and the OS surface. Conventions — symbol naming, error-return shapes, shared helpers in `util.c` — are in [`../runtime/README.md`](../runtime/README.md); the codegen call sites for each `.c` file live in the matching `src/codegen/` file. |
 | `std/` | The Jinn standard library. See [`stdlib.md`](stdlib.md). |
 | `libjn/` | An aspirational C-stdlib-in-Jinn. Stub bodies; not part of `std` or the runtime. See [`design/libjn.md`](design/libjn.md). |
 | `apps/` | 21 realistic multi-module programs. |
 | `benchmarks/` | Benchmarks, plus `comparison/` C, Rust, and Python equivalents. |
-| `snippets/` | 400 numbered single-feature programs. |
+| `snippets/` | 402 single-feature programs (400 numbered, two stragglers). |
 | `tests/programs/` | Language-surface programs driven by the corpus harnesses. |
 
 ## Incremental compilation
 
 **There is none.** `src/incr.rs` was deleted. `src/cache.rs` is the *package*
 cache despite the name; the only compile-time reuse is `.jni` interface files
-(`src/interface.rs`), and reading those is off by default (`X-4`).
+(`src/interface.rs`), and reading those is off by default (`X-3`).
 
 The deleted design is recorded here so the next attempt does not rebuild the
 same broken shape. Its call sites only ever logged a dirty count,
@@ -188,7 +195,13 @@ cargo clippy --release -- -D warnings   # zero-warning policy
 scripts/preflight.sh                    # full release gate: build, tests, fmt,
                                         # clippy, smoke, benchmarks, WAL crash test
 ci/sanitize.sh                          # ASan+UBSan then TSan sweeps (~2 min)
-python3 run_benchmarks.py --bench=fib --runs=3
+ci/sanitize-corpus.sh                   # every corpus program under ASan+LSan,
+                                        # --opt 0 and --opt 3 (corruption gates,
+                                        # leaks report)
+cargo test --release --test std_stable_subset   # the std gate: frontend- and
+                                        # link-checks every stable std module
+python3 run_benchmarks.py --bench=fib --runs=3  # ci/bench_regression.py gates
+                                        # against benchmarks/results.csv
 ```
 
 `ci/sanitize.sh` builds an instrumented runtime into its own target directory

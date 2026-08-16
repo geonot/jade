@@ -71,7 +71,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self
             .bld
             .build_call(memcpy, &[buf.into(), arg_p.into(), size.into()], ""));
-        let s = self.build_string(buf, slen, size, "arg.s")?;
+        let s = self.build_owned_string(buf, slen, size, "arg.s")?;
 
         let len_gep = b!(self
             .bld

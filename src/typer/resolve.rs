@@ -394,6 +394,11 @@ impl Typer {
                 (h.name, ptys, tag)
             })
             .collect();
+        for h in &ad.handlers {
+            if h.is_sync && !h.is_loop {
+                self.sync_handlers.insert((ad.name, h.name));
+            }
+        }
         self.actors.insert(ad.name, (id, fields, handlers));
     }
 

@@ -3413,10 +3413,24 @@ fn ternary_in_bind_still_works() {
     x is 5
     r is x > 3 ? "big" ! "small"
     log(r)
-    s is x > 99 ! "fallback"
-    log(s)
 "#;
-    expect(src, "big\nfallback");
+    expect(src, "big");
+}
+
+#[test]
+fn one_armed_ternary_in_bind_is_rejected() {
+    let err = expect_compile_fail(
+        r#"
+*main()
+    x is 5
+    s is x > 99 ? "big"
+    log(s)
+"#,
+    );
+    assert!(
+        err.contains("needs both arms"),
+        "unexpected diagnostic: {err}"
+    );
 }
 
 #[test]
@@ -3492,14 +3506,19 @@ err Outcome
 }
 
 #[test]
-fn bind_string_fallback_still_ternary() {
-    let src = r#"
+fn bind_string_fallback_is_rejected() {
+    let err = expect_compile_fail(
+        r#"
 *main()
     x is 5
     s is x > 99 ! "fallback"
     log(s)
-"#;
-    expect(src, "fallback");
+"#,
+    );
+    assert!(
+        err.contains("needs a `?` arm"),
+        "unexpected diagnostic: {err}"
+    );
 }
 
 #[test]

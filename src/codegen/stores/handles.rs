@@ -213,42 +213,36 @@ impl<'ctx> Compiler<'ctx> {
         let is_transient = sd
             .decorators
             .contains(&crate::ast::StoreDecorator::Transient);
-        if is_transient {
-            b!(self.bld.build_conditional_branch(is_null, init_bb, done_bb));
-        } else {
-            b!(self.bld.build_conditional_branch(is_null, open_bb, done_bb));
-        }
+        b!(self.bld.build_conditional_branch(is_null, open_bb, done_bb));
 
         self.bld.position_at_end(open_bb);
         let filename = format!("{name}.store\0");
         let file_str = b!(self.bld.build_global_string_ptr(&filename, "store.path"));
-        let mode_rw = b!(self.bld.build_global_string_ptr("r+b\0", "mode.rw"));
-        let fopen_fn = crate::codegen::fn_or_die(&self.module, "fopen");
+        let open_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_open_data");
+        let created_alloca = self.entry_alloca(_i32t.into(), "store.created");
         let fp_val = self.call_result(b!(self.bld.build_call(
-            fopen_fn,
+            open_fn,
             &[
                 file_str.as_pointer_value().into(),
-                mode_rw.as_pointer_value().into()
+                _i32t.const_int(is_transient as u64, false).into(),
+                created_alloca.into(),
             ],
             "fp"
         )));
-        let fp_null = b!(self
-            .bld
-            .build_is_null(fp_val.into_pointer_value(), "fp.null"));
-        b!(self.bld.build_conditional_branch(fp_null, init_bb, done_bb));
-
+        b!(self.bld.build_store(global.as_pointer_value(), fp_val));
+        let created = b!(self.bld.build_load(_i32t, created_alloca, "created"));
+        let created_nz = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::NE,
+            created.into_int_value(),
+            _i32t.const_zero(),
+            "created.nz"
+        ));
         let store_existing_bb = self.ctx.append_basic_block(fv, "store_existing");
-        open_bb
-            .get_terminator()
-            .expect("ICE: block has no terminator")
-            .erase_from_basic_block();
-        self.bld.position_at_end(open_bb);
         b!(self
             .bld
-            .build_conditional_branch(fp_null, init_bb, store_existing_bb));
+            .build_conditional_branch(created_nz, init_bb, store_existing_bb));
 
         self.bld.position_at_end(store_existing_bb);
-        b!(self.bld.build_store(global.as_pointer_value(), fp_val));
         let fingerprint = super::store_schema_fingerprint(sd);
         let schema_version = self.store_schema_version(sd);
         let name_str = b!(self
@@ -269,16 +263,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(done_bb));
 
         self.bld.position_at_end(init_bb);
-        let mode_wb = b!(self.bld.build_global_string_ptr("w+b\0", "mode.wb"));
-        let new_fp = self.call_result(b!(self.bld.build_call(
-            fopen_fn,
-            &[
-                file_str.as_pointer_value().into(),
-                mode_wb.as_pointer_value().into()
-            ],
-            "new_fp"
-        )));
-        b!(self.bld.build_store(global.as_pointer_value(), new_fp));
+        let new_fp: inkwell::values::BasicValueEnum<'ctx> = fp_val;
 
         let fwrite_fn = crate::codegen::fn_or_die(&self.module, "fwrite");
 
@@ -354,10 +339,16 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
-        b!(self.bld.build_call(fflush_fn, &[new_fp.into()], ""));
-
-        if !is_transient {
+        if is_transient {
+            let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
+            b!(self.bld.build_call(fflush_fn, &[new_fp.into()], ""));
+        } else {
+            let finish_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_finish_create");
+            b!(self.bld.build_call(
+                finish_fn,
+                &[new_fp.into(), file_str.as_pointer_value().into()],
+                ""
+            ));
             self.emit_store_recover_call(sd, global.as_pointer_value())?;
         }
 
@@ -643,13 +634,11 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    pub(crate) fn store_lock(
-        &mut self,
-        store_name: &str,
-        fp: PointerValue<'ctx>,
-    ) -> Result<(), String> {
+    pub(crate) fn store_lock(&mut self, store_name: &str) -> Result<PointerValue<'ctx>, String> {
         self.store_wlock_call(store_name, "jinn_store_wlock")?;
-        self.store_flock(fp, Self::LOCK_EX)
+        let fp = self.load_store_fp(store_name)?;
+        self.store_flock(fp, Self::LOCK_EX)?;
+        Ok(fp)
     }
 
     pub(crate) fn store_unlock(
@@ -750,7 +739,7 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_call(memcpy_fn, &[heap.into(), buf.into(), alloc.into()], ""));
 
-        self.build_string(heap, len, alloc, "uuid.str")
+        self.build_owned_string(heap, len, alloc, "uuid.str")
     }
 
     pub(crate) fn field_has_index(field: &hir::StoreField) -> bool {

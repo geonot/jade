@@ -4,6 +4,24 @@
 #include <stdint.h>
 #include "jinn_rt.h"
 
+__attribute__((weak)) int jinn_txn_active(void) { return 0; }
+__attribute__((weak)) int jinn_txn_is_tracked(void *key) {
+    (void)key;
+    return 0;
+}
+__attribute__((weak)) void jinn_txn_track_mem(void *key, void (*rb)(void *),
+                                              void (*rel)(void *), void *arg) {
+    (void)key;
+    (void)rb;
+    (void)arg;
+    if (rel) rel(arg);
+}
+__attribute__((weak)) void jinn_store_truncation_warn(int64_t original_len,
+                                                      int64_t max_len) {
+    (void)original_len;
+    (void)max_len;
+}
+
 #define KV_MAGIC      "JINNKV\0\0"
 #define KV_MAGIC_SIZE 8
 #define KV_KEY_SIZE   256
@@ -92,16 +110,66 @@ static int kv_fill(FILE *tmp, void *arg) {
 }
 static void kv_save(JinnKV *kv) {
     if (!kv->path) return;
-    (void)jinn_atomic_rewrite(kv->path, kv_fill, kv);
+    if (jinn_atomic_rewrite(kv->path, kv_fill, kv) != 0) {
+        fprintf(stderr, "jinn: kv: persisting %s failed — on-disk state is stale\n",
+                kv->path);
+    }
+}
+typedef struct {
+    JinnKV  *kv;
+    KvSlot  *slots;
+    int64_t  capacity;
+    int64_t  count;
+} KvTxnSnap;
+static void kv_txn_rollback(void *arg) {
+    KvTxnSnap *s = (KvTxnSnap *)arg;
+    JinnKV *kv = s->kv;
+    free(kv->slots);
+    kv->slots = s->slots;
+    kv->capacity = s->capacity;
+    kv->count = s->count;
+    s->slots = NULL;
+    kv_save(kv);
+}
+static void kv_txn_release(void *arg) {
+    KvTxnSnap *s = (KvTxnSnap *)arg;
+    free(s->slots);
+    free(s);
+}
+static void kv_txn_guard(JinnKV *kv) {
+    if (!jinn_txn_active() || jinn_txn_is_tracked(kv)) return;
+    KvTxnSnap *s = (KvTxnSnap *)malloc(sizeof *s);
+    KvSlot *copy = (KvSlot *)malloc((size_t)kv->capacity * sizeof(KvSlot));
+    if (!s || !copy) {
+        fprintf(stderr, "jinn: kv: out of memory snapshotting for a transaction — "
+                        "aborting (cannot guarantee rollback)\n");
+        abort();
+    }
+    memcpy(copy, kv->slots, (size_t)kv->capacity * sizeof(KvSlot));
+    s->kv = kv;
+    s->slots = copy;
+    s->capacity = kv->capacity;
+    s->count = kv->count;
+    jinn_txn_track_mem(kv, kv_txn_rollback, kv_txn_release, s);
 }
 JinnKV *jinn_kv_open(const char *path) {
     int lock_fd = jinn_writer_lock(path);
     if (lock_fd < 0) return NULL;
     JinnKV *kv = (JinnKV *)calloc(1, sizeof(JinnKV));
+    if (!kv) {
+        jinn_writer_unlock(lock_fd);
+        return NULL;
+    }
     kv->path = strdup(path);
     kv->lock_fd = lock_fd;
     kv->capacity = KV_INIT_CAP;
     kv->slots = (KvSlot *)calloc((size_t)kv->capacity, sizeof(KvSlot));
+    if (!kv->slots) {
+        jinn_writer_unlock(lock_fd);
+        free(kv->path);
+        free(kv);
+        return NULL;
+    }
     kv->count = 0;
     FILE *fp = fopen(path, "r+b");
     if (fp) {
@@ -109,7 +177,9 @@ JinnKV *jinn_kv_open(const char *path) {
         if (fread(magic, 1, KV_MAGIC_SIZE, fp) == KV_MAGIC_SIZE
             && memcmp(magic, KV_MAGIC, KV_MAGIC_SIZE) == 0) {
             int64_t entry_count = 0;
-            fread(&entry_count, sizeof(int64_t), 1, fp);
+            if (fread(&entry_count, sizeof(int64_t), 1, fp) != 1 || entry_count < 0) {
+                entry_count = 0;
+            }
             while ((double)(entry_count + 1) / (double)kv->capacity > KV_LOAD_MAX) {
                 int64_t new_cap = kv->capacity * 2;
                 free(kv->slots);
@@ -145,7 +215,11 @@ void jinn_kv_close(JinnKV *kv) {
 
 void jinn_kv_set(JinnKV *kv, const char *key, int64_t key_len, int64_t value) {
     if (!kv || !key || key_len <= 0) return;
-    if (key_len >= KV_KEY_SIZE) key_len = KV_KEY_SIZE - 1;
+    kv_txn_guard(kv);
+    if (key_len >= KV_KEY_SIZE) {
+        jinn_store_truncation_warn(key_len, KV_KEY_SIZE - 1);
+        key_len = KV_KEY_SIZE - 1;
+    }
     uint64_t hash = kv_hash(key, key_len);
     int64_t slot = kv_find_slot(kv, hash, key, key_len);
     if (slot >= 0) {
@@ -170,7 +244,10 @@ void jinn_kv_set(JinnKV *kv, const char *key, int64_t key_len, int64_t value) {
 }
 int64_t jinn_kv_get(JinnKV *kv, const char *key, int64_t key_len) {
     if (!kv || !key || key_len <= 0) return 0;
-    if (key_len >= KV_KEY_SIZE) key_len = KV_KEY_SIZE - 1;
+    if (key_len >= KV_KEY_SIZE) {
+        jinn_store_truncation_warn(key_len, KV_KEY_SIZE - 1);
+        key_len = KV_KEY_SIZE - 1;
+    }
     uint64_t hash = kv_hash(key, key_len);
     int64_t slot = kv_find_slot(kv, hash, key, key_len);
     if (slot >= 0) return kv->slots[slot].value;
@@ -178,7 +255,10 @@ int64_t jinn_kv_get(JinnKV *kv, const char *key, int64_t key_len) {
 }
 int jinn_kv_has(JinnKV *kv, const char *key, int64_t key_len) {
     if (!kv || !key || key_len <= 0) return 0;
-    if (key_len >= KV_KEY_SIZE) key_len = KV_KEY_SIZE - 1;
+    if (key_len >= KV_KEY_SIZE) {
+        jinn_store_truncation_warn(key_len, KV_KEY_SIZE - 1);
+        key_len = KV_KEY_SIZE - 1;
+    }
     uint64_t hash = kv_hash(key, key_len);
     int64_t slot = kv_find_slot(kv, hash, key, key_len);
     return slot >= 0 ? 1 : 0;
@@ -186,7 +266,11 @@ int jinn_kv_has(JinnKV *kv, const char *key, int64_t key_len) {
 
 void jinn_kv_del(JinnKV *kv, const char *key, int64_t key_len) {
     if (!kv || !key || key_len <= 0) return;
-    if (key_len >= KV_KEY_SIZE) key_len = KV_KEY_SIZE - 1;
+    kv_txn_guard(kv);
+    if (key_len >= KV_KEY_SIZE) {
+        jinn_store_truncation_warn(key_len, KV_KEY_SIZE - 1);
+        key_len = KV_KEY_SIZE - 1;
+    }
 
     uint64_t hash = kv_hash(key, key_len);
     int64_t slot = kv_find_slot(kv, hash, key, key_len);
@@ -199,7 +283,11 @@ void jinn_kv_del(JinnKV *kv, const char *key, int64_t key_len) {
 
 void jinn_kv_incr(JinnKV *kv, const char *key, int64_t key_len, int64_t delta) {
     if (!kv || !key || key_len <= 0) return;
-    if (key_len >= KV_KEY_SIZE) key_len = KV_KEY_SIZE - 1;
+    kv_txn_guard(kv);
+    if (key_len >= KV_KEY_SIZE) {
+        jinn_store_truncation_warn(key_len, KV_KEY_SIZE - 1);
+        key_len = KV_KEY_SIZE - 1;
+    }
     uint64_t hash = kv_hash(key, key_len);
     int64_t slot = kv_find_slot(kv, hash, key, key_len);
     if (slot >= 0) {

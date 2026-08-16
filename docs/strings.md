@@ -113,7 +113,7 @@ is therefore outside the contract.
 
 ## Iteration
 
-There is no implicit character iterator yet. Iterate explicitly over the byte
+There is no character iterator yet; `for b in s` iterates **bytes** (the binder is an `i64` holding one byte per step). Iterate explicitly over the byte
 view (`for i from 0 to s.byte_count`), or split into substrings with
 `s.split(delim)` / `s.lines()`, which return `Vec<String>` cut on byte-exact
 delimiters.

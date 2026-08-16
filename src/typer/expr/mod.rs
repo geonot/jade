@@ -180,6 +180,15 @@ impl Typer {
                     return Ok(reinterpreted);
                 }
                 let hc = self.lower_expr(cond)?;
+                if matches!(self.infer_ctx.shallow_resolve(&hc.ty), Type::Coroutine(_)) {
+                    return Err(format!(
+                        "{}: this `!` line attaches as the else-arm of a ternary whose \
+                         condition is a task value — a `together`/`dispatch` block has \
+                         no `!` (nothing) arm; use `!!` to handle a scope's error, or \
+                         `?`/`!!` arms on a fallible call",
+                        span.loc(),
+                    ));
+                }
                 let ht = self.lower_expr_expected(then, expected)?;
                 let he = self.lower_expr_expected(els, expected)?;
 
@@ -272,22 +281,20 @@ impl Typer {
                         span: *span,
                     });
                 }
-                Ok(hir::Expr {
-                    kind: hir::ExprKind::Void,
-                    ty: expected
-                        .cloned()
-                        .unwrap_or_else(|| self.infer_ctx.fresh_var()),
-                    span: *span,
-                })
+                Err(format!(
+                    "{}: `$` has no value here: it names the result inside a `?`/`!!` \
+                     handler arm, and this expression is not inside one; bind the value \
+                     to a name and use that instead",
+                    span.loc(),
+                ))
             }
 
-            ast::Expr::IndexPlaceholder(span) => Ok(hir::Expr {
-                kind: hir::ExprKind::Void,
-                ty: expected
-                    .cloned()
-                    .unwrap_or_else(|| self.infer_ctx.fresh_var()),
-                span: *span,
-            }),
+            ast::Expr::IndexPlaceholder(span) => Err(format!(
+                "{}: `$$` has no value here: it is a placeholder that only means \
+                 something inside the expression forms that bind it; bind the value to \
+                 a name and use that instead",
+                span.loc(),
+            )),
 
             ast::Expr::Ref(inner, span) => {
                 let hi = self.lower_expr(inner)?;

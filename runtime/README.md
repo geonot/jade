@@ -24,8 +24,14 @@ each `jinnc`-produced binary as `libjinn_rt.a` (always) plus optional
   [jinn_rt.h](jinn_rt.h) (e.g. `JinnKV`, `JinnIndex`, `jinn_chan_t`).
 - Cross-module helpers (FNV-1a, sorts, bit-cast) live in
   [util.c](util.c) — never re-implement them.
-- The runtime never prints to `stderr` from a hot path; only fatal allocator
-  failures call `abort()` (see `jinn_xmalloc`).
+- The intended contract: no `stderr` from hot paths, and `abort()` only for
+  fatal allocator failures (see `jinn_xmalloc`). The store/WAL layer
+  currently exceeds it — schema mismatch, WAL sync failure, transaction OOM,
+  the transaction snapshot cap, and sidecar transaction-snapshot OOM
+  `abort()`; bad WAL magic and unopenable/uncreatable store data files
+  `exit(2)`; and the kv/index/column/fts mutators are void functions that
+  report IO errors to `stderr` and continue. Roadmap `P-5` tracks aligning
+  code and contract.
 
 ## Build flags
 
@@ -41,15 +47,15 @@ corresponding `src/codegen/` file.
 
 | File | Subsystem | Codegen client(s) |
 |---|---|---|
-| `actor.c` | Actor lifecycle (park / wake / stop / destroy) | `src/codegen/actors.rs`, `src/codegen/mir_codegen/concurrency.rs` |
+| `actor.c` | Actor lifecycle (join / stop / destroy) | `src/codegen/actors.rs`, `src/codegen/mir_codegen/concurrency.rs` |
 | `bloom.c` | Bloom filter store extension | `src/codegen/mir_codegen/store_ext.rs` |
-| `channel.c` | Bounded/unbounded channels | `src/codegen/channels.rs` |
+| `channel.c` | Bounded MPMC channels (capacity 0 becomes the default 64) | `src/codegen/channels.rs` |
 | `column.c` | Columnar store extension (sum/min/max/avg) | `src/codegen/mir_codegen/store_ext.rs` |
 | `coro.c` | Coroutine + generator suspend/resume | `src/codegen/coroutines.rs` |
 | `coro.c` + `context_*.S` | Architecture-specific stack switch | linked in `build.rs` |
 | `crypto.c` | SHA-256/512, HMAC, AES-GCM, RNG (OpenSSL) | `std/crypto.jn` |
 | `deque.c` | Work-stealing deque (used by scheduler) | `runtime/sched.c` |
-| `event.c` | Async I/O event loop (poll/epoll/kqueue) | `src/codegen/builtins.rs` (io waits) |
+| `event.c` | Async I/O event loop (epoll; Linux-only — other targets get stubs returning `-1`) | `src/codegen/builtins.rs` (io waits) |
 | `fs.c` | Filesystem helpers + libc wrappers | `std/fs.jn` |
 | `fts.c` | Full-text search store extension | `src/codegen/mir_codegen/store_ext.rs` |
 | `index.c` | Hash-index store extension | `src/codegen/mir_codegen/store.rs` (where-clauses) |

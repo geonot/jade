@@ -464,18 +464,23 @@ impl Typer {
             }
         }
 
-        let borrowed_param_ids: std::collections::HashSet<crate::hir::DefId> = params
+        let mut borrow_alias_ids: std::collections::HashSet<crate::hir::DefId> = params
             .iter()
-            .filter(|p| {
-                matches!(
-                    p.ownership,
-                    Ownership::Borrowed | Ownership::BorrowMut | Ownership::Raw
-                )
-            })
+            .filter(|p| matches!(p.ownership, Ownership::Borrowed | Ownership::BorrowMut))
             .map(|p| p.def_id)
             .collect();
-        if !borrowed_param_ids.is_empty() {
-            Self::strip_drops_for(&mut body, &borrowed_param_ids);
+        if !borrow_alias_ids.is_empty() {
+            Self::repair_borrow_alias_binds(&mut body, &mut borrow_alias_ids)?;
+        }
+        let mut strip_ids = borrow_alias_ids;
+        strip_ids.extend(
+            params
+                .iter()
+                .filter(|p| matches!(p.ownership, Ownership::Raw))
+                .map(|p| p.def_id),
+        );
+        if !strip_ids.is_empty() {
+            Self::strip_drops_for(&mut body, &strip_ids);
         }
 
         let inferred_err: Vec<Symbol> = self.current_fn_error_types.iter().cloned().collect();
@@ -510,6 +515,18 @@ impl Typer {
                     .infer_ctx
                     .unify_at(&ret, &tail_ty, f.span, "function tail expression");
                 self.collect_unify_error(r);
+            } else if let resolved_ret = self.infer_ctx.shallow_resolve(&ret)
+                && let Some(re) = self.result_enum_of(&resolved_ret)
+                && let ok_inner = self.ok_inner_ty_pub(re)
+                && matches!(self.infer_ctx.shallow_resolve(&ok_inner), Type::Void)
+            {
+                let void_expr = hir::Expr {
+                    kind: hir::ExprKind::Void,
+                    ty: Type::Void,
+                    span: f.span,
+                };
+                let wrapped = self.auto_wrap_ok(void_expr, re);
+                body.push(hir::Stmt::Ret(Some(wrapped), ret.clone(), f.span));
             } else {
                 let _ = self.infer_ctx.unify(&ret, &Type::Void);
             }
@@ -867,6 +884,25 @@ impl Typer {
                 self.collect_unify_error(r);
             } else {
                 let _ = self.infer_ctx.unify(&ret, &Type::Void);
+            }
+        } else if let Some(tail_ty) = self.hir_tail_type(&body) {
+            let rt = self.infer_ctx.shallow_resolve(&ret);
+            let tt = self.infer_ctx.shallow_resolve(&tail_ty);
+            let r = self.infer_ctx.unify_at(&ret, &tail_ty, m.span, reason);
+            let rt_lax = matches!(rt, Type::Ptr(_)) || self.infer_ctx.type_has_unresolved(&rt);
+            let tt_lax = matches!(tt, Type::Ptr(_)) || self.infer_ctx.type_has_unresolved(&tt);
+            if let Err(e) = r
+                && !rt_lax
+                && !tt_lax
+                && !(rt.is_num() && tt.is_num())
+            {
+                return Err(format!(
+                    "{}: method `{}` declares `returns {}` but its body produces a \
+                     different type: {e}",
+                    m.span.loc(),
+                    m.name,
+                    ret,
+                ));
             }
         }
 

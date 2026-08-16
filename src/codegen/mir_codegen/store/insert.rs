@@ -21,8 +21,7 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_call(ensure_fn, &[], ""));
         }
 
-        let fp = self.load_store_fp(store_name)?;
-        self.store_lock(store_name, fp)?;
+        let fp = self.store_lock(store_name)?;
         self.txn_track_store(store_name, fp)?;
 
         for dec in &sd.decorators {

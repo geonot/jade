@@ -43,6 +43,7 @@ impl Parser {
         let mut is_loop = false;
         let mut loop_sleep_ms = None;
 
+        let mut is_sync = false;
         let name = if self.check(Token::At) {
             self.advance();
             self.ident()?
@@ -53,6 +54,7 @@ impl Parser {
                 is_loop = true;
                 Symbol::intern("loop")
             } else {
+                is_sync = true;
                 self.ident()?
             }
         };
@@ -74,11 +76,19 @@ impl Parser {
                 }
             }
         }
+        if self.check(Token::Returns) {
+            return Err(self.error(
+                "an actor handler cannot declare `returns`: handler calls are \
+                 asynchronous message sends and produce no value; have the handler \
+                 send its result on a reply channel instead",
+            ));
+        }
         let body = self.parse_body()?;
         Ok(Handler {
             name,
             params,
             is_loop,
+            is_sync,
             loop_sleep_ms,
             body,
             span: sp,

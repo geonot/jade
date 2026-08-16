@@ -279,6 +279,20 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self
                     .bld
                     .build_int_truncate(res, self.ctx.bool_type(), "send.delivered"));
+            if let Some(pt) = self.value_types.get(&val).cloned()
+                && !pt.is_trivially_droppable()
+            {
+                let cur = self.cur_fn.expect("ICE: cur_fn not set");
+                let drop_bb = self.ctx.append_basic_block(cur, "send.undelivered");
+                let cont_bb = self.ctx.append_basic_block(cur, "send.cont");
+                b!(self
+                    .bld
+                    .build_conditional_branch(delivered, cont_bb, drop_bb));
+                self.bld.position_at_end(drop_bb);
+                self.drop_value(v, &pt)?;
+                b!(self.bld.build_unconditional_branch(cont_bb));
+                self.bld.position_at_end(cont_bb);
+            }
             Ok(delivered.into())
         } else {
             Ok(self.ctx.bool_type().const_int(1, false).into())

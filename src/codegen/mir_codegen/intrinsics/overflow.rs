@@ -242,7 +242,7 @@ impl<'ctx> Compiler<'ctx> {
                     ))
                 };
                 b!(self.bld.build_store(nul, self.ctx.i8_type().const_zero()));
-                return Ok(Some(self.build_string(buf, len, size, "sfr")?));
+                return Ok(Some(self.build_owned_string(buf, len, size, "sfr")?));
             }
             "StringFromPtr" => {
                 if args.is_empty() {
@@ -275,7 +275,7 @@ impl<'ctx> Compiler<'ctx> {
                 b!(self
                     .bld
                     .build_call(memcpy, &[buf.into(), ptr.into(), size.into()], ""));
-                return Ok(Some(self.build_string(buf, len, size, "sfp")?));
+                return Ok(Some(self.build_owned_string(buf, len, size, "sfp")?));
             }
             "Chr" => {
                 if args.is_empty() {
@@ -321,7 +321,7 @@ impl<'ctx> Compiler<'ctx> {
 
                 let nul = unsafe { b!(self.bld.build_gep(i8t, bufp, &[len], "chr.nul")) };
                 b!(self.bld.build_store(nul, i8t.const_zero()));
-                return Ok(Some(self.build_string(buf, len, size, "chr")?));
+                return Ok(Some(self.build_owned_string(buf, len, size, "chr")?));
             }
             "Byte" => {
                 if args.is_empty() {
@@ -351,7 +351,7 @@ impl<'ctx> Compiler<'ctx> {
                         .build_gep(i8t, bufp, &[i64t.const_int(1, false)], "byte.p1"))
                 };
                 b!(self.bld.build_store(p1, i8t.const_zero()));
-                return Ok(Some(self.build_string(
+                return Ok(Some(self.build_owned_string(
                     buf,
                     i64t.const_int(1, false),
                     size,

@@ -638,7 +638,11 @@ impl Typer {
                     self.resolve_expr(a);
                 }
             }
-            hir::ExprKind::Spawn(_, _) => {}
+            hir::ExprKind::Spawn(_, inits) => {
+                for (_, v) in inits {
+                    self.resolve_expr(v);
+                }
+            }
             hir::ExprKind::Send(recv, _, _, _, args) => {
                 self.resolve_expr(recv);
                 for a in args {

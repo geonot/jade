@@ -4,9 +4,12 @@
 > lexes, parses to `ast::Program`, and pretty-prints the AST back to source,
 > covering the corpus grammar: a CI gate formats every corpus file and fails if
 > any stops frontend-checking, and `--write` refuses output that no longer
-> parses (residue at `X-1` in [`../roadmap.md`](../roadmap.md#tooling)).
-> `--check`, `--diff`, `--stdin`, a `jinn lint` subcommand, and the rule engine
-> below do not exist.
+> parses (residue at `X-1` in [`../roadmap.md`](../roadmap.md#tooling)). The
+> sidecar-trivia first step below has shipped: the lexer records comment spans,
+> `src/fmt.rs` threads them through printing, and
+> `tests/fmt_nondestructive.rs` pins comment/shebang preservation and
+> idempotence. `--check`, `--diff`, `--stdin`, a `jinn lint` subcommand, and
+> the rule engine below do not exist.
 
 The target: take any well-formed Jinn source — including un-idiomatic or
 C-transliterated code — and turn it into clean, idiomatic Jinn **without
@@ -61,10 +64,10 @@ view (cleanest long-term, larger parser change), or an AST plus a sidecar trivia
 table (the pragmatic first step). **v1 is the sidecar**: the smallest change
 that makes the tool safe, with a documented migration path to the green tree.
 
-Either way there is one hard requirement: **the lexer must stop dropping
-comments.** Today it does `b'#' => { self.skip_line(); }`; it must instead
-record a comment token with a span, filtered out before the parser sees the
-stream and collected into the trivia table.
+Either way there is one hard requirement, **now met**: the lexer records a
+span for every comment before skipping it (`src/lexer/mod.rs`), filtered out
+before the parser sees the stream and collected for the printer — the trivia
+table this design asks for, in its v1 form.
 
 The formatter never re-implements parsing. If the parser rejects the input,
 `fmt` reports the parse error and **makes no changes** — you cannot format what

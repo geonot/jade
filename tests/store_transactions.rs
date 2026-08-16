@@ -191,3 +191,43 @@ fn rollback_in_one_task_leaves_other_store_committed() {
     assert!(lines.contains(&"30"), "good must commit fully: {stdout}");
     assert!(lines.contains(&"0"), "bad must roll back fully: {stdout}");
 }
+
+#[test]
+fn rollback_in_one_task_preserves_other_tasks_commits_to_the_same_store() {
+    let src = "err OpErr\n    Boom\n    S(StoreError)\n\nimpl From of StoreError for OpErr\n    *from(e as StoreError) returns OpErr is S(e)\n\nstore ledger\n    v as i64\n\n*fill_committed()\n    transaction\n        for i in 0 to 30\n            insert ledger i\n\n*fill_aborted() returns Result of i64, OpErr\n    transaction\n        for i in 100 to 130\n            insert ledger i\n        err Boom\n    Ok(0)\n\n*main\n    together\n        dispatch\n            fill_committed()\n        dispatch\n            match fill_aborted()\n                Ok(v) ? log(v)\n                Err(e) ? log(0 - 1)\n    log(count ledger)\n";
+    let dir = tempfile::tempdir().unwrap();
+    let bin = compile_in(dir.path(), "p", src);
+    for _ in 0..5 {
+        for f in ["ledger.store", "ledger.wal"] {
+            let _ = std::fs::remove_file(dir.path().join(f));
+        }
+        let out = run_in(dir.path(), &bin);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let lines: Vec<&str> = stdout.lines().collect();
+        assert!(
+            lines.contains(&"30"),
+            "the committing task's writes must survive the other task's rollback: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn kv_writes_inside_an_aborted_transaction_roll_back() {
+    expect(
+        "err OpErr\n    Boom\n\nstore cache @kv\n\n*doomed() returns Result of i64, OpErr\n    transaction\n        cache.set('a', 1)\n        cache.incr('a')\n        cache.set('b', 9)\n        err Boom\n    Ok(0)\n\n*main\n    cache.set('a', 5)\n    match doomed()\n        Ok(v) ? log(v)\n        Err(e) ? log(0 - 1)\n    log(cache.get('a').unwrap_or(0 - 99))\n    log(cache.has('b'))\n    log(cache.count())\n",
+        "-1\n5\n0\n1",
+    );
+}
+
+#[test]
+fn versioned_history_inside_an_aborted_transaction_rolls_back() {
+    expect(
+        "err OpErr\n    Boom\n    S(StoreError)\n\nimpl From of StoreError for OpErr\n    *from(e as StoreError) returns OpErr is S(e)\n\nstore notes @versioned\n    text as String\n\n*doomed() returns Result of i64, OpErr\n    transaction\n        set notes where text equals 'v2' text 'v3'\n        err Boom\n    Ok(0)\n\n*main\n    insert notes 'v1'\n    set notes where text equals 'v1' text 'v2'\n    match doomed()\n        Ok(v) ? log(v)\n        Err(e) ? log(0 - 1)\n    h is notes.history(1)\n    log h.length\n",
+        "-1\n1",
+    );
+}

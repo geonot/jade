@@ -41,9 +41,14 @@ Two kinds of work land on the scheduler:
 
 | Construct | Coroutine kind | Counts toward `active_coros`? |
 | --- | --- | --- |
-| `dispatch` / parallel block | **non-daemon** | **yes** |
+| `dispatch` inside a `together` scope | **non-daemon** (scope-owned) | **yes** |
 | `spawn Actor` inside a `together` scope | **non-daemon** (scope-owned) | **yes** |
 | `spawn Actor` outside any scope | **daemon** | **no** |
+
+> A `dispatch` *outside* any `together` scope is a compile error — a task
+> needs a scope to run in, so the compiler rejects the silent-no-op instead
+> of creating a coroutine nothing ever schedules. (A *bound* dispatch is a
+> generator and is legal anywhere.)
 
 This distinction is the single most important fact about Jinn shutdown.
 
@@ -54,10 +59,13 @@ that have been spawned but not yet finished. Non-daemon coroutines increment it
 on spawn and decrement it on completion; `jinn_sched_run()` blocks `*main` until
 the count reaches zero.
 
-Daemon coroutines never touch the count. They are fire-and-forget: the program
-may exit while they are running or parked. `jinn_sched_run()` therefore does
-**not** wait for a top-level actor, and the program will not linger to let one
-drain its mailbox.
+Daemon coroutines never touch the count. They are fire-and-forget in the
+sense that `jinn_sched_run()` does not wait for them — but before the
+scheduler runs, the `*main` epilogue calls `jinn_actor_stop_all`, which
+closes every live daemon mailbox and waits (bounded, a few seconds at most)
+for already-enqueued messages to drain. So queued sends to a top-level actor
+are normally delivered at exit; the drain is best-effort and bounded, not a
+guarantee — `stop`/`join` explicitly when delivery matters.
 
 ## Channels
 
@@ -77,7 +85,7 @@ close ch                    # mark the channel closed
 
 | Operation | Runtime symbol | Blocking behaviour |
 | --- | --- | --- |
-| `send ch, v` | `jinn_chan_send` | Parks while full. Yields `false` and drops `v` if the channel is closed; `true` once delivered. |
+| `send ch, v` | `jinn_chan_send` | Parks while full. Yields `false` and discards `v` if the channel is closed (`N-11`: a heap payload is currently leaked, not dropped); `true` once delivered. |
 | `receive ch` | `jinn_chan_recv` | Parks while empty. Drains buffered values even after close. |
 | `close ch` | `jinn_chan_close` | Idempotent; sets the closed flag and wakes all parked waiters. |
 
@@ -147,8 +155,9 @@ The actor loop is generated in one of two shapes:
   closed, exit. A loop actor does periodic work *and* services messages.
 
 Both shapes converge on the same exit path: signal the completion latch so any
-pending `join` wakes, then close and destroy the mailbox channel, free the
-mailbox, and return.
+pending `join` wakes, then close and *retire* the mailbox channel — the
+actual free is deferred to scheduler shutdown, so a racing waiter never
+touches freed memory — and return.
 
 ## Structured concurrency — the `together` scope
 
@@ -202,16 +211,19 @@ still means "close the mailbox now"; the scope's auto-stop is idempotent.
 
 ### Child lifetime rules
 
-- **L1 — Registration.** A coroutine created by `dispatch`/`spawn` while a scope
-  is current becomes a child of the innermost current scope. The current scope
-  is carried on the coroutine, so helper functions register their dispatches
-  too.
+- **L1 — Registration.** A `dispatch` lexically inside the `together` body
+  becomes a child of that scope (nested dispatches inside a child body
+  register into the same scope); `spawn` registers dynamically (the runtime
+  reads the current scope), so helper functions register their *spawns* but
+  **not** their dispatches — a `dispatch` in a helper called from the body
+  is rejected at compile time; give the helper its own `together`.
 - **L2 — Join on exit.** Control leaves a `together` block only after every
   child has completed — normally, with a propagated error, or by cancellation
-  unwind.
-- **L3 — No escape.** A child cannot be moved out of its scope. Binding a
-  dispatch inside a scope and returning it from the enclosing function is a
-  compile error.
+  unwind. An explicit `return` inside the body is a compile error (it would
+  skip the join).
+- **L3 — No escape.** A child cannot be moved out of its scope. Ordinary
+  lexical scoping plus the `return` rejection enforce this; returning a
+  *bound* dispatch (a generator value) is not specifically rejected.
 - **L4 — Actor teardown.** At normal body exit the scope first `stop`s every
   scope-owned actor, then joins all children, so actors drain in parallel with
   other children finishing.
@@ -224,17 +236,20 @@ still means "close the mailbox now"; the scope's auto-stop is idempotent.
 ### Cancellation
 
 A scope becomes **cancelled** when a child completes with an error, or when
-`stop <scope-name>` executes from the body or from any child. Cancellation
-propagates **down** the scope tree, marking every live child and, transitively,
-the children of their nested scopes.
+`stop <scope-name>` executes from the body *or from inside a child task*
+(the scope pointer rides the child's capture block). Cancellation recurses
+into nested scopes: cancelling a scope marks its direct children and cancels
+every child scope, so a grandchild parked in an inner join is released when
+its own children unwind.
 
 - **C1 — Cancellation points.** A cancelled coroutine unwinds at its next
-  suspension point: a channel park (`send` on full, `receive` on empty), a
-  `yield`, a scheduler yield in an actor `*loop` tick, a sleep, or a loop
-  back-edge in a scheduler task. Already-parked coroutines are woken
-  immediately. Channel `send`/`receive` check the cancelled flag at the top of
-  their park loop *and* just before committing to park, which closes the
-  lost-wakeup race under the channel lock.
+  channel or select suspension point (`send` on full, `receive` on empty).
+  Already-parked coroutines are woken immediately. Channel `send`/`receive`
+  check the cancelled flag at the top of their park loop *and* just before
+  committing to park, which closes the lost-wakeup race under the channel
+  lock. Loop back-edges are cancellation points in every scheduler task.
+  **Gap (`N-6r`):** sleeps (currently a raw `nanosleep` on the worker
+  thread), IO parks, and joins are *not* cancellation points.
 - **C2 — Unwind semantics.** Unwinding reuses the error model's early-return
   path: `defer`s run, drops are emitted, the coroutine returns. It behaves as if
   a built-in `Cancelled` error were raised at the suspension point. `Cancelled`
@@ -290,14 +305,14 @@ none of its rules change.
   ```
 
   The `!!` arm runs after the join with `err` bound to the first error. A `?`
-  arm is permitted (`$` is Unit) but rarely useful; the `!` arm is meaningless
-  for scopes and is rejected.
-- **E5 — Actor handlers propagate to their scope.** A fallible handler in a
-  *scope-owned* actor that propagates an error completes the actor child with
-  that error, triggering E1 — this is the supervision boundary. A *daemon* actor
-  with a fallible handler keeps today's behaviour: the error terminates that
-  coroutine silently, since it has no parent to inform, and the compiler emits a
-  warning suggesting a scope.
+  arm is permitted (`$` is Unit) but rarely useful; the `!` arm is
+  meaningless for scopes and is rejected with a diagnostic.
+- **E5 — Actor handlers must handle their errors locally.** Handler bodies
+  are synthesized as non-fallible functions: an unhandled fallible call in a
+  handler is a hard compile error, in both daemon and scope-owned actors.
+  The intended design — a scope-owned actor's propagating handler completes
+  the child with the error (triggering E1), a daemon's terminates silently
+  with a warning — is not implemented (`N-9`).
 
 ### How `stop` and `close` compose
 
@@ -311,8 +326,9 @@ One family, one mental model: a one-way "no more input" valve. `stop` on a
 scope-owned actor inside its scope is graceful early shutdown with drain
 semantics. Scope cancellation overrides drain. Closing a channel that scope
 children are parked on is the normal way to let children finish. `stop` of an
-outer scope from inside an inner one cancels the outer, which transitively
-cancels the inner.
+outer scope from inside an inner one cancels the outer and, transitively,
+the inner — both halves work: `stop` resolves from child tasks, and
+cancellation recurses into nested scopes.
 
 `supervisor` is parsed but dormant — it is the *restart* layer, and will be
 specified as sugar over scopes (`N-4`).
@@ -353,31 +369,33 @@ propagation.
 1. `jinn_sched_init` — start the scheduler lazily; workers spin up on the first
    spawn.
 2. Run the user `*main` body.
-3. `jinn_sched_run()` — block until `active_coros == 0`, i.e. until every
-   non-daemon coroutine has finished. Daemon actors are not awaited.
-4. `jinn_sched_shutdown()` — set the shutdown flag, wake all workers,
-   `pthread_join` them.
-5. Return `*main`'s exit code.
+3. `jinn_actor_stop_all` — close every live daemon mailbox and wait (bounded,
+   a few seconds at most) for pending message counts to reach zero: a
+   best-effort drain, not a guarantee.
+4. `jinn_sched_run()` — block until `active_coros == 0`, i.e. until every
+   non-daemon coroutine has finished.
+5. `jinn_sched_shutdown()` — set the shutdown flag, wake all workers,
+   `pthread_join` them, then free retired mailboxes.
+6. Return `*main`'s exit code.
 
-Each worker loop checks the shutdown flag at the top of every iteration. When a
-daemon actor is parked on its mailbox at shutdown, control has already swapped
-back to the worker; the worker observes the flag and exits, abandoning the
-parked actor, and process teardown reclaims it. A parked daemon actor does not
-prevent the program from exiting.
+A parked daemon actor is woken by its mailbox close, exits its loop cleanly,
+and is reclaimed at shutdown. It does not prevent the program from exiting.
 
 ## Sharp edges
 
 These follow from the rules above. They are sharp, not bugs — but they bite.
 
-1. **Top-level actors are not awaited.** A daemon actor's work is not
-   guaranteed to be observable when `*main` returns. Synchronize deliberately:
-   put the actor in a `together` scope, or `stop` then `join` it, or have it
-   send results back on a channel that `*main` receives. Sprinkling `usleep` to
-   "let the actor catch up" is a smell, not a contract.
+1. **Top-level actors get a bounded, best-effort drain, not a guarantee.**
+   The epilogue's `jinn_actor_stop_all` normally delivers already-enqueued
+   messages, but the wait is bounded and delivery is not a contract.
+   Synchronize deliberately when it matters: put the actor in a `together`
+   scope, or `stop` then `join` it, or have it send results back on a channel
+   that `*main` receives. Sprinkling `usleep` to "let the actor catch up" is
+   a smell, not a contract.
 2. **Long loops yield automatically.** A coroutine swaps back to its worker only
    at a yield or park point, so the compiler inserts a scheduler yield at every
-   loop **back-edge** inside coroutine and actor contexts (the `inject_yields`
-   MIR pass). This is a *correctness* pass — it runs at every optimization
+   loop **back-edge** inside scope tasks and actor loops (the `inject_yields`
+   MIR pass; generators are not covered). This is a *correctness* pass — it runs at every optimization
    level, including none — and is justified at MIR level because LLVM has no
    notion of the scheduler. Injection only covers back-edges; it cannot rescue a
    genuinely infinite loop, which is a logic bug. Opt a hot kernel out with
@@ -393,9 +411,12 @@ These follow from the rules above. They are sharp, not bugs — but they bite.
    that will never receive, `*main` hangs. Close channels you are done with, and
    make sure some non-daemon coroutine can always make progress. Inside a scope
    the same hang becomes lexically attributable to one block.
-4. **Send after close drops the value — but tells you.** Treat `close`/`stop` as
-   a one-way valve: once shut, producers have no effect. Bind the result
-   (`delivered is send ch, v`) if you need to know whether your value landed.
+4. **Send after close discards the value — but tells you.** Treat
+   `close`/`stop` as a one-way valve: once shut, producers have no effect.
+   Bind the result (`delivered is send ch, v`) if you need to know whether
+   your value landed. (`N-11`: the discarded heap payload is currently
+   leaked, not dropped, and select's send-arm on a closed channel reports
+   success.)
 
 ## Conformance
 

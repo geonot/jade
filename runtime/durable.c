@@ -97,7 +97,7 @@ int jinn_atomic_rewrite_reopen(const char *path, jinn_fill_fn fill, void *arg,
         if (!nf) {
             fprintf(stderr, "jinn: reopen after rewrite of %s failed: %s\n",
                     path, strerror(errno));
-            return -1;
+            return -2;
         }
         fseek(nf, 0, SEEK_END);
         if (*fpp) fclose(*fpp);
@@ -193,6 +193,42 @@ FILE *jinn_rewrite_commit(JinnRewrite *rw, FILE *old_fp) {
     rewrite_free(rw);
     return nf;
 }
+FILE *jinn_store_open_data(const char *path, int transient, int *created) {
+    if (created) *created = 0;
+    if (!path) {
+        fprintf(stderr, "jinn: store: internal error — no path to open\n");
+        exit(2);
+    }
+    if (!transient) {
+        errno = 0;
+        FILE *f = fopen(path, "r+b");
+        if (f) return f;
+        if (errno != ENOENT) {
+            fprintf(stderr,
+                    "jinn: store: cannot open %s for writing: %s — refusing to "
+                    "recreate an existing store\n",
+                    path, strerror(errno));
+            exit(2);
+        }
+    }
+    FILE *f = fopen(path, "w+b");
+    if (!f) {
+        fprintf(stderr, "jinn: store: cannot create %s: %s\n", path, strerror(errno));
+        exit(2);
+    }
+    if (created) *created = 1;
+    return f;
+}
+void jinn_store_finish_create(FILE *fp, const char *path) {
+    if (!fp) return;
+    if (fflush(fp) != 0) {
+        fprintf(stderr, "jinn: store: writing the header of new store %s failed: %s\n",
+                path ? path : "(store)", strerror(errno));
+        exit(2);
+    }
+    (void)jinn_fsync_checked(fileno(fp), path);
+    (void)jinn_dir_fsync(path);
+}
 void jinn_store_drop_indexes(const char *store_path) {
     if (!store_path) return;
     char dirbuf[4096];
@@ -225,29 +261,32 @@ void jinn_store_drop_indexes(const char *store_path) {
     closedir(d);
 }
 #define JINN_STORE_LOCK_MAX 64
-static struct {
-    char             path[256];
-    _Atomic(int32_t) held;
-    int              used;
-} g_store_locks[JINN_STORE_LOCK_MAX];
+typedef struct {
+    char            path[256];
+    _Atomic(void *) owner;
+    int32_t         depth;
+    int             used;
+} JinnStoreLock;
+static JinnStoreLock g_store_locks[JINN_STORE_LOCK_MAX];
 static pthread_mutex_t g_store_lock_table = PTHREAD_MUTEX_INITIALIZER;
 
-static _Atomic(int32_t) *store_lock_slot(const char *path) {
+static JinnStoreLock *store_lock_slot(const char *path) {
     if (!path) return NULL;
     pthread_mutex_lock(&g_store_lock_table);
     for (int i = 0; i < JINN_STORE_LOCK_MAX; i++) {
         if (g_store_locks[i].used && strcmp(g_store_locks[i].path, path) == 0) {
             pthread_mutex_unlock(&g_store_lock_table);
-            return &g_store_locks[i].held;
+            return &g_store_locks[i];
         }
     }
     for (int i = 0; i < JINN_STORE_LOCK_MAX; i++) {
         if (!g_store_locks[i].used) {
             snprintf(g_store_locks[i].path, sizeof g_store_locks[i].path, "%s", path);
             g_store_locks[i].used = 1;
-            atomic_store(&g_store_locks[i].held, 0);
+            g_store_locks[i].depth = 0;
+            atomic_store(&g_store_locks[i].owner, NULL);
             pthread_mutex_unlock(&g_store_lock_table);
-            return &g_store_locks[i].held;
+            return &g_store_locks[i];
         }
     }
     pthread_mutex_unlock(&g_store_lock_table);
@@ -258,6 +297,7 @@ static _Atomic(int32_t) *store_lock_slot(const char *path) {
     return NULL;
 }
 __attribute__((weak)) void jinn_sched_yield(void);
+__attribute__((weak)) jinn_coro_t *jinn_current_coro(void);
 
 static void store_lock_backoff(void) {
     if (jinn_sched_yield) {
@@ -267,22 +307,43 @@ static void store_lock_backoff(void) {
     struct timespec ns = {0, 10000};
     nanosleep(&ns, NULL);
 }
+static void *store_lock_self(void) {
+    static _Thread_local char tl_lock_id;
+    if (jinn_current_coro) {
+        jinn_coro_t *c = jinn_current_coro();
+        if (c) return c;
+    }
+    return &tl_lock_id;
+}
 void jinn_store_wlock(const char *path) {
-    _Atomic(int32_t) *slot = store_lock_slot(path);
+    JinnStoreLock *slot = store_lock_slot(path);
     if (!slot) return;
+    void *self = store_lock_self();
+    if (atomic_load_explicit(&slot->owner, memory_order_relaxed) == self) {
+        slot->depth++;
+        return;
+    }
     for (;;) {
-        int32_t expected = 0;
-        if (atomic_compare_exchange_weak_explicit(slot, &expected, 1, memory_order_acquire,
+        void *expected = NULL;
+        if (atomic_compare_exchange_weak_explicit(&slot->owner, &expected, self,
+                                                  memory_order_acquire,
                                                   memory_order_relaxed)) {
+            slot->depth = 1;
             return;
         }
         store_lock_backoff();
     }
 }
 void jinn_store_wunlock(const char *path) {
-    _Atomic(int32_t) *slot = store_lock_slot(path);
+    JinnStoreLock *slot = store_lock_slot(path);
     if (!slot) return;
-    atomic_store_explicit(slot, 0, memory_order_release);
+    if (atomic_load_explicit(&slot->owner, memory_order_relaxed) != store_lock_self()) {
+        return;
+    }
+    if (--slot->depth <= 0) {
+        slot->depth = 0;
+        atomic_store_explicit(&slot->owner, NULL, memory_order_release);
+    }
 }
 int jinn_writer_lock(const char *path) {
     if (!path) return -1;

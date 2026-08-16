@@ -535,11 +535,23 @@ impl Typer {
         let saved_scopes = std::mem::take(&mut self.scopes);
         self.push_scope();
 
+        let accs = self
+            .fn_param_access
+            .get(&Symbol::intern(mangled))
+            .cloned()
+            .or_else(|| self.fn_param_access.get(&Symbol::from(origin)).cloned());
         let mut params = Vec::new();
         for (i, p) in gf.params.iter().enumerate() {
             let pid = self.fresh_id();
             let ty = ptys[i].clone();
-            let ownership = Self::ownership_for_type(&ty);
+            let eff_mod = accs
+                .as_ref()
+                .and_then(|a| a.get(i).copied())
+                .flatten()
+                .or(p.access_mod);
+            let ownership = self
+                .param_ownership_with_mod(&ty, eff_mod)
+                .map_err(|e| format!("{}: {e}", p.span.loc()))?;
             self.define_var(
                 &p.name.as_str(),
                 VarInfo {
@@ -555,12 +567,42 @@ impl Typer {
                 ty,
                 ownership,
                 default: None,
-                access_mod: None,
+                access_mod: eff_mod,
                 span: p.span,
             });
         }
+        let prev_param_ids = std::mem::replace(
+            &mut self.current_fn_param_ids,
+            params.iter().map(|p| p.def_id).collect(),
+        );
 
-        let body = self.lower_block(&gf.body, ret)?;
+        let body_res = self.lower_block(&gf.body, ret);
+        self.current_fn_param_ids = prev_param_ids;
+        let mut body = body_res?;
+
+        let mut borrow_alias_ids: std::collections::HashSet<DefId> = params
+            .iter()
+            .filter(|p| {
+                matches!(
+                    p.ownership,
+                    crate::hir::Ownership::Borrowed | crate::hir::Ownership::BorrowMut
+                )
+            })
+            .map(|p| p.def_id)
+            .collect();
+        if !borrow_alias_ids.is_empty() {
+            Self::repair_borrow_alias_binds(&mut body, &mut borrow_alias_ids)?;
+        }
+        let mut strip_ids = borrow_alias_ids;
+        strip_ids.extend(
+            params
+                .iter()
+                .filter(|p| matches!(p.ownership, crate::hir::Ownership::Raw))
+                .map(|p| p.def_id),
+        );
+        if !strip_ids.is_empty() {
+            Self::strip_drops_for(&mut body, &strip_ids);
+        }
 
         if gf.ret.is_none() {
             if let Some(tail_ty) = self.hir_tail_type(&body) {

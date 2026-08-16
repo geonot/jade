@@ -38,18 +38,20 @@ and each is pinned by a conformance suite.
 | [`roadmap.md`](roadmap.md) | Every known open item, and where the language stands relative to alpha. |
 | [`SECURITY.md`](SECURITY.md) | Reporting a vulnerability; what is and is not in scope. |
 
-## Design — specified, not built
+## Design — specified ahead of implementation
 
-Design documents are specified ahead of implementation. Each states what
-exists today before specifying the target; where early steps have shipped, the
-document's status header says which.
+Design documents are written before the code. Several have since shipped in
+large part — `freeze`, views, closure captures, the formatter's trivia step,
+and the capabilities pass are all built and conformance-gated — and each
+document's status header states exactly which steps are real and which
+remain.
 
 | Document | Covers |
 | --- | --- |
 | [`design/lamp.md`](design/lamp.md) | The package manager, registry protocol, `.jnb` binary library format, supply-chain trust layer, and deployments. |
-| [`design/compiler-prereqs.md`](design/compiler-prereqs.md) | The compiler machinery lamp assumes: capabilities as an effect pass, path-scoped package identity, interface v2 with the three-hash ladder, and config blocks. |
+| [`design/compiler-prereqs.md`](design/compiler-prereqs.md) | The compiler machinery lamp assumes: capabilities as an effect pass (shipped), path-scoped package identity, interface v2 with the three-hash ladder, and config blocks (the rest unbuilt). |
 | [`design/fmt-and-lint.md`](design/fmt-and-lint.md) | The formatter and linter: lossless syntax tree, tiered rule engine, and the verifier that makes behaviour preservation checkable rather than hoped for. |
 | [`design/libjn.md`](design/libjn.md) | A C standard library in Jinn, and the language gaps it is a forcing function for. |
 | [`design/second-class-refs.md`](design/second-class-refs.md) | Borrowed views in parameter, expression, and yield positions — never storable, so no lifetime syntax; the honest fix for element-read deep copies. |
 | [`design/freeze.md`](design/freeze.md) | One-way deep immutability for sharing read-only data across tasks without copies or refcounts. |
-| [`design/closure-captures.md`](design/closure-captures.md) | Capture rules for closures and generators, specified before implementation. |
+| [`design/closure-captures.md`](design/closure-captures.md) | Capture rules for closures and generators — implemented through step 2; the status header carries the residue. |

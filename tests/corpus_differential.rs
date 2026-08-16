@@ -89,10 +89,6 @@ fn jn_files(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
-// Programs that do not compile for a recorded compiler limitation, with the
-// diagnostic they must fail with. tests/programs_harness.rs keeps the same
-// list and asserts the wording; here we only need to keep them out of the
-// differential, which requires a running binary.
 const UNSUPPORTED: &[&str] = &[];
 
 fn is_unsupported(path: &Path) -> bool {

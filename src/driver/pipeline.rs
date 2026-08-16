@@ -20,7 +20,7 @@ use super::sources::{
     flatten_workspace, load_packages_with_ids, resolve_modules, resolve_scoped_pkg_ids,
 };
 
-fn mir_verify_enabled() -> bool {
+pub(super) fn mir_verify_enabled() -> bool {
     match std::env::var("JINN_MIR_VERIFY").as_deref() {
         Ok("0") => false,
         Ok(_) => true,

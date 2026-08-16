@@ -284,3 +284,11 @@ fn string_view_coercion_rejects_non_u8_element() {
         &["type mismatch"],
     );
 }
+
+#[test]
+fn mutating_builtin_through_a_view_element_field_is_rejected() {
+    rejects(
+        "type Item\n    tags as Vec of i64\n\n*main\n    xs is vec(Item(tags is vec(1)), Item(tags is vec(2)))\n    for v in xs.views()\n        v.tags.push(9)\n    log(xs.get(0).tags.length)\n",
+        &["view", "push"],
+    );
+}

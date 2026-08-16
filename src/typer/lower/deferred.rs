@@ -5,6 +5,18 @@ use crate::intern::Symbol;
 use crate::types::Type;
 
 impl Typer {
+    pub(in crate::typer) fn float_method_ret_ty(recv: &Type, method: &str) -> Option<Type> {
+        match method {
+            "sqrt" | "abs" | "floor" | "ceil" | "round" | "trunc" | "sin" | "cos" | "tan"
+            | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "exp" | "exp2" | "ln"
+            | "log2" | "log10" | "cbrt" | "recip" | "signum" | "pow" | "atan2" | "copysign"
+            | "min" | "max" => Some(recv.clone()),
+            "is_nan" | "is_infinite" | "is_finite" => Some(Type::Bool),
+            "to_int" => Some(Type::I64),
+            _ => None,
+        }
+    }
+
     pub(in crate::typer) fn resolve_deferred_methods(&mut self) {
         let deferred = std::mem::take(&mut self.deferred_methods);
         for dm in &deferred {
@@ -137,7 +149,41 @@ impl Typer {
                         );
                     }
                 }
+                Type::F64 | Type::F32 => {
+                    if let Some(actual_ret) =
+                        Self::float_method_ret_ty(&recv_ty, &dm.method.as_str())
+                    {
+                        let _ = self.infer_ctx.unify_at(
+                            &dm.ret_ty,
+                            &actual_ret,
+                            dm.span,
+                            "deferred float method return",
+                        );
+                    }
+                }
                 _ => {
+                    if let Type::TypeVar(v) = recv_ty
+                        && matches!(
+                            self.infer_ctx.constraint(v),
+                            crate::typer::unify::TypeConstraint::Float
+                        )
+                        && let Some(actual_ret) =
+                            Self::float_method_ret_ty(&Type::F64, &dm.method.as_str())
+                    {
+                        let _ = self.infer_ctx.unify_at(
+                            &recv_ty,
+                            &Type::F64,
+                            dm.span,
+                            "deferred float method implies f64",
+                        );
+                        let _ = self.infer_ctx.unify_at(
+                            &dm.ret_ty,
+                            &actual_ret,
+                            dm.span,
+                            "deferred float method return",
+                        );
+                        continue;
+                    }
                     if matches!(recv_ty, Type::TypeVar(_)) {
                         if Self::is_string_exclusive_method(&dm.method.as_str()) {
                             let _ = self.infer_ctx.unify_at(

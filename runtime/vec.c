@@ -30,7 +30,7 @@ void *__jinn_vec_slice(void *hdr, int64_t start, int64_t end, int64_t elem_size)
     return dst;
 }
 static inline int sso_is_heap(const jinn_sso_t *s) {
-    return (s->bytes[23] & 0x80) != 0;
+    return (s->bytes[23] & 0x80) == 0;
 }
 static inline const char *sso_data(const jinn_sso_t *s, int64_t *out_len) {
     if (sso_is_heap(s)) {
@@ -41,7 +41,8 @@ static inline const char *sso_data(const jinn_sso_t *s, int64_t *out_len) {
         *out_len = len;
         return ptr;
     } else {
-        int64_t len = 23 - (int64_t)(unsigned char)s->bytes[23];
+        int64_t len = (int64_t)((unsigned char)s->bytes[23] & 0x7F);
+        if (len > 23) len = 23;
         *out_len = len;
         return s->bytes;
     }
@@ -49,18 +50,16 @@ static inline const char *sso_data(const jinn_sso_t *s, int64_t *out_len) {
 static inline jinn_sso_t sso_from_parts(const char *data, int64_t len) {
     jinn_sso_t result;
     memset(&result, 0, 24);
-    if (len <= 23) {
+    if (len < 23) {
         memcpy(result.bytes, data, (size_t)len);
-        result.bytes[23] = (char)(23 - len);
+        result.bytes[23] = (char)(0x80 | (unsigned char)len);
     } else {
         char *buf = (char *)malloc((size_t)(len + 1));
         memcpy(buf, data, (size_t)len);
         buf[len] = '\0';
         memcpy(result.bytes, &buf, 8);
         memcpy(result.bytes + 8, &len, 8);
-        int64_t cap = len;
-
-        cap |= ((int64_t)1 << 63);
+        int64_t cap = len + 1;
         memcpy(result.bytes + 16, &cap, 8);
     }
     return result;

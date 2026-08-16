@@ -100,10 +100,17 @@ void jinn_idx_close(JinnIndex *idx) {
 }
 static void read_slot(JinnIndex *idx, int64_t slot,
                       uint64_t *hash, int64_t *offset, int64_t *status) {
-    fseek(idx->fp, IDX_HEADER + slot * SLOT_SIZE, SEEK_SET);
-    fread(hash, 8, 1, idx->fp);
-    fread(offset, 8, 1, idx->fp);
-    fread(status, 8, 1, idx->fp);
+    *hash = 0;
+    *offset = 0;
+    *status = 0;
+    if (fseek(idx->fp, IDX_HEADER + slot * SLOT_SIZE, SEEK_SET) != 0) return;
+    if (fread(hash, 8, 1, idx->fp) != 1 ||
+        fread(offset, 8, 1, idx->fp) != 1 ||
+        fread(status, 8, 1, idx->fp) != 1) {
+        *hash = 0;
+        *offset = 0;
+        *status = 0;
+    }
 }
 static int write_slot(JinnIndex *idx, int64_t slot,
                       uint64_t hash, int64_t offset, int64_t status) {

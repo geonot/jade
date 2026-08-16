@@ -203,6 +203,7 @@ impl Typer {
                         ));
                     }
                     alias_map.insert(*name, ty.clone());
+                    self.alias_names.insert(*name);
                 }
                 ast::Decl::Newtype(_, _, _) => {}
                 ast::Decl::TopStmt(_) => {}
@@ -323,6 +324,7 @@ impl Typer {
                 })
                 .collect();
             self.infer_consuming_params(&all_fns);
+            self.check_const_param_escapes(&all_fns);
         }
 
         for d in &prog.decls {

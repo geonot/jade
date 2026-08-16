@@ -7,7 +7,7 @@ owned value has exactly one drop site, decided by the compiler.
 
 This document is the contract the typer, the escape analysis, the drop
 discipline, and codegen implement against. The implementation is wrong wherever
-it disagrees with this file. Rules are numbered `M1`–`M11` and each is pinned by
+it disagrees with this file. Rules are numbered `M1`–`M12` and each is pinned by
 a conformance test in `tests/memory_model.rs`, `tests/access_semantics.rs`, or
 `tests/semantics_regression.rs`.
 
@@ -17,7 +17,12 @@ are tracked per **place** (`root.field.elem…`) with overlap and disjointness
 queries: overlapping call arguments, iteration borrows of field places and
 maps, and moves through projections are checked, and disjoint sibling places
 stay independent. Element reads in expression position (`get`) copy by
-contract; the zero-copy spelling is a view (§12).
+contract; the zero-copy spelling is a view (§12). Since [163], consuming
+calls in condition, scrutinee, and iterator position are move-tracked like
+every other position; a bind of a place two or more projections deep is
+rejected (take the outer field first, or clone); and write rejection through
+frozen values and views follows the place *root*, so `frozen.a.b.push(x)`
+and mutation through a view element's field are compile errors.
 
 ## 1. Design pillars
 
@@ -130,8 +135,10 @@ help: clone it (`row is copy grid.get(0)`) or remove it (`row is take grid.get(0
 
 `take` on a container slot keeps its meaning: remove-and-own. Scalar and
 `String` elements bind freely (`x is nums.get(0)` copies). Element reads in
-**expression position** (`grid.get(0).length`) are borrows and stay legal — see
-M5.
+**expression position** (`grid.get(0).length`) pass a copy of the element by
+contract and stay legal — see M5. A *bind* of a deeper projection
+(`v is o.inner.items`) is rejected the same way: take the outer field first,
+or clone the place (`v is copy o.inner.items`).
 
 ## 4. Reads and borrows
 
@@ -185,9 +192,10 @@ ownership:
 
 Binding a borrowed parameter to a local (`s is v`) does not mint an owner: the
 new binding borrows too, so the callee can rename or restructure without
-double-freeing the caller's value ([146] — this used to create a second owner
-and free twice). `s is take v` on a borrowed parameter is a compile error that
-suggests declaring the parameter `take`.
+double-freeing the caller's value ([146] — this used to create a second
+owner and free twice; [163] extended it to unannotated parameters, whose
+functions instantiate through the generic path). `s is take v` on a borrowed
+parameter is a compile error that suggests declaring the parameter `take`.
 
 If the callee's body **consumes** the parameter — returns it, binds it, stores
 it in something that outlives the call, sends it on a channel, moves it into
@@ -218,12 +226,13 @@ override inference and remain the vocabulary for exported APIs.
 
 Returning a local, a consumed parameter, or a fresh expression transfers
 ownership to the caller. The callee emits **no** drop for the returned value.
-Returning a parameter that an explicit annotation forced to stay borrowed is an
-error:
+Returning (or storing, or sending) a parameter that an explicit `const`
+annotation forced to stay borrowed is an error ([162]):
 
 ```
-error: cannot return borrowed parameter `v`
-help: take ownership: declare the parameter `v as take Vec of i64`, or return `copy v`
+cannot consume `const` parameter `v`: `const` keeps it borrowed, but this
+site returns, stores, or sends it — use `take` (or drop the modifier) to
+let it be consumed
 ```
 
 ## 5. Concurrency
@@ -261,8 +270,11 @@ shared, it is *relocated*.
 ### M10 — one drop per owner, after `defer`
 
 At scope exit, live owned aggregates drop exactly once, in reverse binding
-order, **after** the scope's `defer` blocks run — so a `defer` may read anything
-it could read at registration. Tombstoned bindings drop nothing. Moving a value
+order. On early exits, repair-inserted drops land after the inlined `defer`
+bodies; on the normal exit path, scope-end drops currently run **before** the
+`defer` bodies — a `defer` that reads a dropped aggregate's contents is a
+latent use-after-free (benign today only for header reads like `.length`);
+reordering normal-exit drops after defers is open work. Tombstoned bindings drop nothing. Moving a value
 that a registered `defer` reads is a compile error:
 
 ```
@@ -431,10 +443,10 @@ A plain scalar is POD, copies freely, and crosses without issue. See
 | `b is a; b.push(4); log(a.length)` | compile error | ``use of moved value `a` `` |
 | two `dispatch` blocks over one `Vec` | compile error | ``  `shared` used after being moved into a concurrent task `` |
 | use in the parent after a single task capture | compile error | same as above |
-| bind of an aggregate element (`row is grid.get(0)`) | compile error | `cannot bind aggregate element` |
-| whole-struct read while a field is moved out | compile error | ``use of partially moved value `b` `` |
+| bind of an aggregate element (`row is grid.get(0)`) | compile error | ``cannot bind aggregate element to `row` `` |
+| whole-struct read while a field is moved out | compile error | `` `b` cannot be read as a whole: its field `items` was moved out earlier `` |
 | move of a value read by an earlier `defer` | compile error | ``cannot move `buf` `` |
-| return of an explicitly-borrowed parameter | compile error | ``cannot return borrowed parameter `v` `` |
+| return of an explicitly-borrowed (`const`) parameter | compile error | ``cannot consume `const` parameter `v` `` |
 | `*ident(v) returns Vec of i64; return v` | **compiles**, runs clean, one drop | — |
 
 ## 11. Consequences, stated so they are not lost
@@ -448,6 +460,9 @@ A plain scalar is POD, copies freely, and crosses without issue. See
   refcounts are the runtime-internal `Channel` and `ActorRef` handles.
 - **`jinn check` and `jinn build` agree.** The ownership analysis runs in both
   pipelines, so a program `check` passes must not corrupt memory when built.
+  The [162] review found four accept-then-corrupt violations of this clause;
+  all four were closed and repro-pinned in [163]
+  (`tests/place_ownership.rs`, `tests/freeze.rs`, `tests/views.rs`).
 
 ## 12. Frozen values and second-class views ([148])
 
@@ -504,8 +519,9 @@ The rest of std's byte loops remain
 - MIR lowering of moves, drop hoisting, and field-tombstone tracking — see
   `src/mir/`.
 - Perceus reuse-pairing heuristics — see `src/drops/mir_drops.rs`.
-- LLVM parameter attributes (`nocapture`, `readonly`, `dereferenceable`) — see
-  `set_ptr_param_attrs` in `src/codegen/support/runtime.rs`.
+- LLVM function-level attributes (`nounwind`, `nofree`, inlining hints) —
+  per-parameter pointer attributes (`nocapture`, `readonly`) are not yet
+  emitted.
 
 ## 14. Implementation map
 

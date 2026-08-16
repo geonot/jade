@@ -443,8 +443,8 @@ exit.
     fib(n - 1) + fib(n - 2)
 ```
 
-Annotate types with `as` and `returns` when you want them. Parentheses are
-required around parameters once you annotate them.
+Annotate types with `as` and `returns` when you want them. Parentheses
+around annotated parameters are conventional, not required.
 
 ```jinn
 *greet(name as String) returns String
@@ -497,9 +497,9 @@ Functions are values. A function parameter is typed `(ParamTypes) returns Ret`.
 ## Lambdas and pipelines
 
 A lambda is written `|params| body`, where the body is a single expression.
-Lambda parameters are always inferred — `as` annotations are not supported
-inside `|…|` — and multi-line lambda bodies are not supported; use a named
-function for anything larger.
+Parameters may be annotated (`|x as i64| x * 2`) or left to inference;
+multi-line lambda bodies are not supported — use a named function for
+anything larger.
 
 ```jinn
 square is |x| x * x
@@ -771,10 +771,11 @@ happens.
 
 ## Aliases and newtypes
 
-An `alias` is a second name for an existing type. It is a *distinct* type
-to the checker: passing an `f64` where a `Seconds` is expected is a type
-error, exactly as for a newtype below. Use one when you want the name to
-carry meaning at call sites.
+An `alias` is a distinct type to the checker, not a transparent synonym:
+mixing a `Seconds` with a plain `f64` is a type error, exactly as for a
+newtype below — in both argument and return position. Use one when you want
+the name to carry meaning at call sites. (Method arguments are the one
+position not yet enforced — roadmap `T-4`.)
 
 ```jinn
 alias Seconds is f64
@@ -1048,11 +1049,12 @@ message is still delivered) followed by `join` (wait for the actor to drain
 and exit). Without the `join` above, `*main` can return before `@report`
 runs and the program prints nothing.
 
-A handler introduced with `*` is called synchronously and returns a value.
-Two current limitations, both tracked for fixes: a `returns` annotation on a
-`*` handler does not parse (write the handler unannotated), and a synchronous
-call does **not** wait for earlier `@` messages to be processed — it reads
-the actor's state as it is at the moment of the call. See
+A handler may also be introduced with `*`; today it behaves exactly like an
+`@` handler — the call is an asynchronous send and produces no value.
+(A synchronous call protocol that waits for a reply is tracked as `N-9` and
+does not exist yet; using a handler call where a value is expected is a
+compile error, and `returns` on a handler is rejected. To read a value out
+of an actor, have a handler send it on a reply channel.) See
 [`docs/concurrency.md`](concurrency.md) for the full shutdown contract.
 
 ### Channels
@@ -1094,9 +1096,10 @@ checked at compile time.
 
 > **Current limitation, stated so you can design around it:**
 >
-> - A store is durable for a **single writer process**. Two processes
->   writing the same store is unsupported and currently undetected
->   (file locking is planned).
+> - A store is durable for a **single writer process**. Individual
+>   operations take an advisory `flock`, but there is no cross-process
+>   coordination beyond that: two processes writing the same store is
+>   unsupported (`V-4` measures none of this surface).
 
 ```jinn
 store users
@@ -1308,10 +1311,18 @@ makes the batch durable, and any rollback aborts the whole nest.
 > first, then the data file restored atomically), but a crash exactly
 > between the two steps leaves the last transaction's writes in the data
 > file — structurally intact, not torn. Transaction state is per-task:
-> concurrent tasks each get their own, and one task's open transaction
-> does not weaken the durability of others' writes.
+> concurrent tasks each get their own, and one task's rollback never
+> touches another task's committed writes — a transaction holds the
+> store's writer lock from its first mutation to commit or rollback, so
+> other tasks' writes to that store wait for it. Two caveats follow from
+> the lock: transactions that touch the same two stores in opposite orders
+> can deadlock (roadmap `S-12`), and a task cancelled mid-transaction
+> currently leaves the lock held (`S-11`) — do not `stop` a scope whose
+> children are inside `transaction` blocks.
 
-Field types are `i64`, `f64`, `bool`, and `String`. Query operators are
+The supported field types are `i64`, `f64`, `bool`, and `String`.
+(Aggregate-typed fields currently compile and round-trip in simple cases,
+but they are unspecified and untested surface — `V-1`.) Query operators are
 `equals`, `neq`, `<`, `>`, `<=`, and `>=`, combined with `and` / `or`. Data is
 stored in a `<name>.store` file in the working directory.
 
@@ -1364,12 +1375,10 @@ A few commonly used pieces.
 
 ### Numeric methods
 
-> **Known gap:** the return type of numeric method calls currently fails to
-> infer in many positions (`r is x.sqrt()` mis-defaults to `i64`), which is
-> the same inference gap as task 8-16. The block below is excluded from the
-> doc-compile gate until that lands; re-enable it there.
-
-<!-- doctest:skip blocked on 8-16: numeric method return-type inference -->
+<!-- doctest:prelude
+x is 2.0
+y is 3.0
+-->
 ```jinn
 x.sqrt()
 x.sin()
@@ -1489,8 +1498,11 @@ type Config
     log(attempts(frozen))      # read-only parameters accept frozen values
 ```
 
-`Frozen of T` is a real type: a parameter or field declared `Frozen of T`
-*demands* immutability from its callers. Freezing requires the type to be
+`Frozen of T` is a real type: a parameter declared `Frozen of T` promises
+the callee treats the value as deeply immutable (writes through it are
+rejected in the callee). A caller may pass an unfrozen value to such a
+parameter — the guarantee is about what the callee may do, not a demand
+that the caller freeze first. Freezing requires the type to be
 built of data — scalars, `String`, `Vec`, `Map`, and structs or enums of the
 same, recursively; `@resource` types, channels, actors, coroutines, and
 functions are live handles, not data, and are rejected with the offending
@@ -1556,8 +1568,9 @@ binds each element as a view; reading a field through an element view
 (`pts.at_view(i).x`, `p.x` in the loop) reads through the pointer, and a
 *read-only* method call through one (`p.norm2()`) operates on the original
 element — no copy either way, which is the honest fix for the old hidden
-deep-copy on nested-container reads. A method that mutates or consumes its
-receiver is a compile error through a view:
+deep-copy on nested-container reads. A method that consumes or
+mutates its receiver is a compile error through a view, and so is a mutating
+builtin call through an element view's field (`v.tags.push(x)`):
 
 ```jinn
 type Point
@@ -1666,9 +1679,10 @@ itself is [`jinn.ebnf`](jinn.ebnf), which `tests/ebnf_roundtrip.rs` keeps honest
 | Diagnostics and meta | `test`, `assert`, `log`, `unreachable`, `build`, `syscall`, `grad`, `einsum` |
 | Literals | `true`, `false`, `none` |
 
-The five comparison aliases (`ngte`, `nlte`, `ngt`, `nlt`) are double negatives
-— `ngte` is "not greater-than-or-equal", i.e. `lt`. They parse, and the
-formatter rewrites them to the positive spelling.
+Four of the aliases (`ngte`, `nlte`, `ngt`, `nlt`) are double negatives —
+`ngte` is "not greater-than-or-equal", i.e. `lt`; the fifth alias spelling
+is `eq` for `equals`. They parse, and the formatter rewrites the
+double-negative forms to the positive spelling.
 
 The access modifiers `copy`, `take`, and `const` are **not** reserved words:
 they are recognized in modifier position and are ordinary identifiers

@@ -623,6 +623,7 @@ pub struct Handler {
     pub name: Symbol,
     pub params: Vec<Param>,
     pub is_loop: bool,
+    pub is_sync: bool,
     pub loop_sleep_ms: Option<Expr>,
     pub body: Block,
     pub span: Span,

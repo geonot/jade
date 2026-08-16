@@ -82,7 +82,16 @@ impl Typer {
                                 matches!(t, Type::Ptr(_) | Type::Param(_))
                                     || this.infer_ctx.type_has_unresolved(t)
                             };
-                            if !(lax(self, &pl) || lax(self, &al) || (pl.is_num() && al.is_num())) {
+                            let param_is_alias = matches!(
+                                &pl,
+                                Type::Struct(n, a) if a.is_empty() && self.alias_names.contains(n)
+                            );
+                            let arg_ok = if param_is_alias {
+                                matches!(al, Type::Ptr(_) | Type::Param(_))
+                            } else {
+                                lax(self, &al)
+                            };
+                            if !(lax(self, &pl) || arg_ok || (pl.is_num() && al.is_num())) {
                                 return Err(format!(
                                     "argument {} of `{}` has the wrong type: {e}",
                                     i + 1,
@@ -204,7 +213,16 @@ impl Typer {
                                 matches!(t, Type::Ptr(_) | Type::Param(_))
                                     || this.infer_ctx.type_has_unresolved(t)
                             };
-                            if !(lax(self, &pl) || lax(self, &al) || (pl.is_num() && al.is_num())) {
+                            let param_is_alias = matches!(
+                                &pl,
+                                Type::Struct(n, a) if a.is_empty() && self.alias_names.contains(n)
+                            );
+                            let arg_ok = if param_is_alias {
+                                matches!(al, Type::Ptr(_) | Type::Param(_))
+                            } else {
+                                lax(self, &al)
+                            };
+                            if !(lax(self, &pl) || arg_ok || (pl.is_num() && al.is_num())) {
                                 return Err(format!(
                                     "argument {} of `{}` has the wrong type: {e}",
                                     i + 1,

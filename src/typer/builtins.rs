@@ -565,6 +565,18 @@ impl Typer {
         span: Span,
     ) -> Result<hir::Expr, String> {
         let hargs = self.lower_exprs(args)?;
+        if matches!(builtin, hir::BuiltinFn::Log | hir::BuiltinFn::Eprint)
+            && let Some(a) = hargs.first()
+            && matches!(a.kind, hir::ExprKind::Send(..))
+        {
+            return Err(format!(
+                "{}: an actor handler call produces no value — messages are \
+                 asynchronous sends, so there is nothing to print here; have the \
+                 handler log its own state, or pass a reply channel to read a \
+                 value back",
+                span.loc(),
+            ));
+        }
         Ok(hir::Expr {
             kind: hir::ExprKind::Builtin(builtin, hargs),
             ty,

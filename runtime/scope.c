@@ -12,9 +12,13 @@ struct jinn_scope {
     _Atomic(int64_t)  error_val;
     jinn_coro_t      *parent;
     jinn_scope_t     *prev;
+    jinn_scope_t     *parent_scope;
     jinn_coro_t     **children;
     int               child_count;
     int               child_cap;
+    jinn_scope_t    **child_scopes;
+    int               cscope_count;
+    int               cscope_cap;
     void            **actors;
     int               actor_count;
     int               actor_cap;
@@ -55,12 +59,30 @@ jinn_scope_t *jinn_scope_create(void) {
     atomic_store(&s->error_val, 0);
     s->parent = NULL;
     s->prev = tl_scope;
+    s->parent_scope = tl_scope;
     s->children = NULL;
     s->child_count = 0;
     s->child_cap = 0;
+    s->child_scopes = NULL;
+    s->cscope_count = 0;
+    s->cscope_cap = 0;
     s->actors = NULL;
     s->actor_count = 0;
     s->actor_cap = 0;
+    if (s->parent_scope) {
+        jinn_scope_t *p = s->parent_scope;
+        scope_lock(p);
+        if (p->cscope_count == p->cscope_cap) {
+            p->cscope_cap = p->cscope_cap ? p->cscope_cap * 2 : 4;
+            p->child_scopes = (jinn_scope_t **)scope_xrealloc(
+                p->child_scopes, (size_t)p->cscope_cap * sizeof(*p->child_scopes));
+        }
+        p->child_scopes[p->cscope_count++] = s;
+        int parent_cancelled =
+            atomic_load_explicit(&p->cancelled, memory_order_acquire);
+        scope_unlock(p);
+        if (parent_cancelled) atomic_store(&s->cancelled, 1);
+    }
     tl_scope = s;
     jinn_coro_t *cur = jinn_current_coro();
     if (cur) cur->scope = s;
@@ -163,6 +185,9 @@ void jinn_scope_cancel(jinn_scope_t *s) {
     for (int i = 0; i < s->actor_count; i++) {
         jinn_actor_stop(s->actors[i]);
     }
+    for (int i = 0; i < s->cscope_count; i++) {
+        jinn_scope_cancel(s->child_scopes[i]);
+    }
     scope_unlock(s);
 }
 
@@ -244,13 +269,27 @@ static int jinn_scope_join_no_free(jinn_scope_t *s) {
     }
     return atomic_load_explicit(&s->has_error, memory_order_acquire) ? 1 : 0;
 }
+static void scope_unregister_from_parent(jinn_scope_t *s) {
+    jinn_scope_t *p = s->parent_scope;
+    if (!p) return;
+    scope_lock(p);
+    for (int i = 0; i < p->cscope_count; i++) {
+        if (p->child_scopes[i] == s) {
+            p->child_scopes[i] = p->child_scopes[--p->cscope_count];
+            break;
+        }
+    }
+    scope_unlock(p);
+}
 void jinn_scope_join(jinn_scope_t *s) {
     if (!s) return;
     jinn_scope_join_no_free(s);
+    scope_unregister_from_parent(s);
     jinn_scope_set_current(s->prev);
     jinn_coro_t *cur = jinn_current_coro();
     if (cur && cur->scope == s) cur->scope = s->prev;
     free(s->children);
+    free(s->child_scopes);
     free(s->actors);
     free(s);
 }
@@ -259,10 +298,12 @@ int64_t jinn_scope_join_take_error(jinn_scope_t *s) {
     int had = jinn_scope_join_no_free(s);
     int64_t word = had ? atomic_load_explicit(&s->error_val, memory_order_acquire)
                        : INT64_MIN;
+    scope_unregister_from_parent(s);
     jinn_scope_set_current(s->prev);
     jinn_coro_t *cur = jinn_current_coro();
     if (cur && cur->scope == s) cur->scope = s->prev;
     free(s->children);
+    free(s->child_scopes);
     free(s->actors);
     free(s);
     return word;

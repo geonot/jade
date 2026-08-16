@@ -30,6 +30,7 @@ void jinn_ver_close(FILE *f) {
 void jinn_ver_append(FILE *f, int64_t sid, int64_t version,
                      const void *record_data, int64_t rec_size) {
     if (!f) return;
+    jinn_txn_track_trunc(f);
     fseek(f, 0, SEEK_END);
     int64_t ts = (int64_t)time(NULL);
     fwrite(&sid, 8, 1, f);

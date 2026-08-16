@@ -83,8 +83,41 @@ void jinn_bloom_close(JinnBloom *b) {
     free(b->bits);
     free(b);
 }
+typedef struct {
+    JinnBloom *b;
+    uint8_t   *bits;
+    int64_t    num_bits;
+} BloomTxnSnap;
+static void bloom_txn_rollback(void *arg) {
+    BloomTxnSnap *s = (BloomTxnSnap *)arg;
+    if (s->b->num_bits == s->num_bits) {
+        memcpy(s->b->bits, s->bits, (size_t)((s->num_bits + 7) / 8));
+    }
+}
+static void bloom_txn_release(void *arg) {
+    BloomTxnSnap *s = (BloomTxnSnap *)arg;
+    free(s->bits);
+    free(s);
+}
+static void bloom_txn_guard(JinnBloom *b) {
+    if (!jinn_txn_active() || jinn_txn_is_tracked(b)) return;
+    int64_t bytes = (b->num_bits + 7) / 8;
+    BloomTxnSnap *s = (BloomTxnSnap *)malloc(sizeof *s);
+    uint8_t *copy = (uint8_t *)malloc((size_t)bytes);
+    if (!s || !copy) {
+        fprintf(stderr, "jinn: bloom: out of memory snapshotting for a "
+                        "transaction — aborting (cannot guarantee rollback)\n");
+        abort();
+    }
+    memcpy(copy, b->bits, (size_t)bytes);
+    s->b = b;
+    s->bits = copy;
+    s->num_bits = b->num_bits;
+    jinn_txn_track_mem(b, bloom_txn_rollback, bloom_txn_release, s);
+}
 void jinn_bloom_add(JinnBloom *b, const void *data, int64_t len) {
     if (!b || !b->bits) return;
+    bloom_txn_guard(b);
     for (int64_t k = 0; k < b->num_hashes; k++) {
         uint64_t h = bloom_hash(data, len, k) % (uint64_t)b->num_bits;
         b->bits[h / 8] |= (1 << (h % 8));

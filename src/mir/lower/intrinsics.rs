@@ -69,27 +69,94 @@ impl Lowerer {
                     }
                     BuiltinFn::FloatMethod(method) => {
                         let m = method.as_str();
-                        let libm_name: &str = match &*m {
-                            "abs" => "fabs",
-                            "sqrt" => "sqrt",
-                            "floor" => "floor",
-                            "ceil" => "ceil",
-                            "round" => "round",
-                            "trunc" => "trunc",
-                            "sin" => "sin",
-                            "cos" => "cos",
-                            "tan" => "tan",
-                            "asin" => "asin",
-                            "acos" => "acos",
-                            "atan" => "atan",
-                            "log" | "ln" => "log",
-                            "log10" => "log10",
-                            "log2" => "log2",
-                            "exp" => "exp",
-                            "exp2" => "exp2",
-                            other => other,
-                        };
-                        self.emit(InstKind::Call(Symbol::intern(libm_name), vals), ty, span)
+                        let recv_ty = args.first().map(|a| a.ty.clone()).unwrap_or(Type::F64);
+                        match &*m {
+                            "is_nan" => {
+                                let x = vals[0];
+                                self.emit(InstKind::Cmp(CmpOp::Ne, x, x, recv_ty), Type::Bool, span)
+                            }
+                            "is_infinite" => {
+                                let x = vals[0];
+                                let mag = self.emit(
+                                    InstKind::Call(Symbol::intern("fabs"), vec![x]),
+                                    recv_ty.clone(),
+                                    span,
+                                );
+                                let inf = self.emit(
+                                    InstKind::FloatConst(f64::INFINITY),
+                                    recv_ty.clone(),
+                                    span,
+                                );
+                                self.emit(
+                                    InstKind::Cmp(CmpOp::Eq, mag, inf, recv_ty),
+                                    Type::Bool,
+                                    span,
+                                )
+                            }
+                            "is_finite" => {
+                                let x = vals[0];
+                                let mag = self.emit(
+                                    InstKind::Call(Symbol::intern("fabs"), vec![x]),
+                                    recv_ty.clone(),
+                                    span,
+                                );
+                                let inf = self.emit(
+                                    InstKind::FloatConst(f64::INFINITY),
+                                    recv_ty.clone(),
+                                    span,
+                                );
+                                self.emit(
+                                    InstKind::Cmp(CmpOp::Lt, mag, inf, recv_ty),
+                                    Type::Bool,
+                                    span,
+                                )
+                            }
+                            "to_int" => {
+                                let x = vals[0];
+                                self.emit(InstKind::Cast(x, Type::I64), Type::I64, span)
+                            }
+                            "recip" => {
+                                let x = vals[0];
+                                let one =
+                                    self.emit(InstKind::FloatConst(1.0), recv_ty.clone(), span);
+                                self.emit(InstKind::BinOp(BinOp::Div, one, x), ty, span)
+                            }
+                            "signum" => {
+                                let x = vals[0];
+                                let one =
+                                    self.emit(InstKind::FloatConst(1.0), recv_ty.clone(), span);
+                                self.emit(
+                                    InstKind::Call(Symbol::intern("copysign"), vec![one, x]),
+                                    ty,
+                                    span,
+                                )
+                            }
+                            _ => {
+                                let libm_name: &str = match &*m {
+                                    "abs" => "fabs",
+                                    "min" => "fmin",
+                                    "max" => "fmax",
+                                    "sqrt" => "sqrt",
+                                    "floor" => "floor",
+                                    "ceil" => "ceil",
+                                    "round" => "round",
+                                    "trunc" => "trunc",
+                                    "sin" => "sin",
+                                    "cos" => "cos",
+                                    "tan" => "tan",
+                                    "asin" => "asin",
+                                    "acos" => "acos",
+                                    "atan" => "atan",
+                                    "log" | "ln" => "log",
+                                    "log10" => "log10",
+                                    "log2" => "log2",
+                                    "exp" => "exp",
+                                    "exp2" => "exp2",
+                                    other => other,
+                                };
+                                self.emit(InstKind::Call(Symbol::intern(libm_name), vals), ty, span)
+                            }
+                        }
                     }
                     _ => {
                         let name = Symbol::intern(&format!("__builtin_{builtin:?}"));

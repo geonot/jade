@@ -146,6 +146,27 @@ impl<'ctx> Compiler<'ctx> {
             self.module
                 .add_function("jinn_wal_checkpoint", ft, Some(Linkage::External));
         }
+        if self.module.get_function("jinn_store_save").is_none() {
+            let void_ty = self.ctx.void_type();
+            let ft = void_ty.fn_type(&[ptr.into(), ptr.into()], false);
+            self.module
+                .add_function("jinn_store_save", ft, Some(Linkage::External));
+        }
+        if self.module.get_function("jinn_store_open_data").is_none() {
+            let ft = ptr.fn_type(&[ptr.into(), i32t.into(), ptr.into()], false);
+            self.module
+                .add_function("jinn_store_open_data", ft, Some(Linkage::External));
+        }
+        if self
+            .module
+            .get_function("jinn_store_finish_create")
+            .is_none()
+        {
+            let void_ty = self.ctx.void_type();
+            let ft = void_ty.fn_type(&[ptr.into(), ptr.into()], false);
+            self.module
+                .add_function("jinn_store_finish_create", ft, Some(Linkage::External));
+        }
         if self.module.get_function("jinn_wal_close").is_none() {
             let void_ty = self.ctx.void_type();
             let ft = void_ty.fn_type(&[ptr.into()], false);

@@ -189,13 +189,23 @@ impl Lowerer {
 
                 self.switch_to(merge_bb);
                 self.seal_block(merge_bb);
-                let result = self.new_value();
-                self.func.block_mut(merge_bb).phis.push(Phi {
-                    dest: result,
-                    ty: ty.clone(),
-                    incoming: vec![(then_end, then_val), (else_end, else_val)],
-                });
-                result
+                if matches!(ty, Type::Void) {
+                    self.emit(InstKind::Void, Type::Void, span)
+                } else {
+                    let mut incoming = vec![(then_end, then_val), (else_end, else_val)];
+                    incoming.retain(|(bb, _)| !self.unreachable_blocks.contains(bb));
+                    if incoming.is_empty() {
+                        self.emit(InstKind::Void, Type::Void, span)
+                    } else {
+                        let result = self.new_value();
+                        self.func.block_mut(merge_bb).phis.push(Phi {
+                            dest: result,
+                            ty: ty.clone(),
+                            incoming,
+                        });
+                        result
+                    }
+                }
             }
             _ => unreachable!("expression dispatched to wrong MIR lowering module"),
         }

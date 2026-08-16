@@ -19,8 +19,8 @@ impl<'ctx> Compiler<'ctx> {
         if args.is_empty() {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
         }
-        let (sd, st, rec_size, fp) = self.setup_store_access(store_name)?;
-        self.store_lock(store_name, fp)?;
+        let (sd, st, rec_size, _fp) = self.setup_store_access(store_name)?;
+        let fp = self.store_lock(store_name)?;
         self.txn_track_store(store_name, fp)?;
         let i64t = self.ctx.i64_type();
         let i32t = self.ctx.i32_type();
@@ -248,10 +248,9 @@ impl<'ctx> Compiler<'ctx> {
         store_name: &str,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let (_sd, _st, _rec_size, fp) = self.setup_store_access(store_name)?;
-        let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
-        b!(self.bld.build_call(fflush_fn, &[fp.into()], ""));
-
-        self.wal_checkpoint(store_name)?;
+        let wal = self.load_store_wal(store_name)?;
+        let save_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_save");
+        b!(self.bld.build_call(save_fn, &[fp.into(), wal.into()], ""));
         Ok(self.ctx.i8_type().const_int(0, false).into())
     }
 }

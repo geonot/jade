@@ -577,3 +577,69 @@ err Boom
         "1\n7\n0",
     );
 }
+
+fn expect_reject(src: &str, needles: &[&str]) {
+    let dir = tempfile::tempdir().unwrap();
+    let jinn = dir.path().join("test.jn");
+    let out = dir.path().join("test_bin");
+    std::fs::write(&jinn, src).unwrap();
+    let output = Command::new(jinnc())
+        .arg(&jinn)
+        .arg("-o")
+        .arg(&out)
+        .output()
+        .expect("jinnc failed to start");
+    assert!(!output.status.success(), "must not compile:\n{src}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for n in needles {
+        assert!(stderr.contains(n), "missing `{n}` in:\n{stderr}");
+    }
+}
+
+#[test]
+fn unscoped_dispatch_is_rejected_instead_of_silently_never_running() {
+    expect_reject(
+        "*main\n    dispatch\n        log('never runs')\n    log('done')\n",
+        &["`dispatch` outside a `together`", "never scheduled"],
+    );
+}
+
+#[test]
+fn stop_scope_from_inside_a_child_cancels_the_scope() {
+    expect(
+        "*main\n    together work\n        dispatch\n            i is 0\n            while true\n                i is i + 1\n                if i > 100\n                    stop work\n        dispatch\n            j is 0\n            while true\n                j is j + 1\n    log('joined')\n",
+        "joined",
+    );
+}
+
+#[test]
+fn defer_plus_while_in_a_cancelled_task_runs_cleanup_without_ice() {
+    expect(
+        "*main\n    together work\n        dispatch\n            defer\n                log('cleanup')\n            k is 0\n            while true\n                k is k + 1\n        dispatch\n            stop work\n    log('done')\n",
+        "cleanup\ndone",
+    );
+}
+
+#[test]
+fn cancellation_reaches_a_looping_task_with_no_defer() {
+    expect(
+        "*main\n    together work\n        dispatch\n            k is 0\n            while true\n                k is k + 1\n        dispatch\n            stop work\n    log('done')\n",
+        "done",
+    );
+}
+
+#[test]
+fn return_inside_a_together_body_is_rejected() {
+    expect_reject(
+        "*f() returns i64\n    together\n        dispatch\n            log('t')\n        return 5\n    7\n\n*main\n    log(f())\n",
+        &["`return` inside a `together` body", "join"],
+    );
+}
+
+#[test]
+fn bang_arm_on_a_together_scope_is_a_diagnostic_not_an_ice() {
+    expect_reject(
+        "*main\n    together\n        dispatch\n            log('work')\n        ! log('oops')\n",
+        &["no `!` (nothing) arm"],
+    );
+}

@@ -127,10 +127,17 @@ impl Lowerer {
                         .collect();
                     captures.sort_by_key(|(n, _)| *n);
 
-                    let cap_vals: Vec<ValueId> = captures
+                    let mut cap_vals: Vec<ValueId> = captures
                         .iter()
                         .map(|(n, t)| self.read_var(*n, self.current_block, t.clone(), span))
                         .collect();
+                    for (sn, sv) in self.scope_named.clone() {
+                        captures.push((
+                            Symbol::intern(&format!("__scope_{sn}")),
+                            Type::Ptr(Box::new(Type::Void)),
+                        ));
+                        cap_vals.push(sv);
+                    }
 
                     self.lower_scope_task(*name, body, &captures, span);
 
@@ -355,11 +362,16 @@ impl Lowerer {
                 .entry(entry)
                 .or_default()
                 .insert(*cap_name, val);
+            let cap_str = cap_name.as_str();
+            if let Some(scope_name) = cap_str.strip_prefix("__scope_") {
+                sub.scope_named.push((Symbol::intern(scope_name), val));
+                sub.scope_stack.push(val);
+            }
         }
 
         super::finish_body(&mut sub, body, &Type::Void, span, false);
 
-        if scheduler_task && !sub.function_defers.is_empty() {
+        if scheduler_task {
             let cleanup = sub.new_block("cancel.cleanup");
             sub.seal_block(cleanup);
             let saved = sub.current_block;

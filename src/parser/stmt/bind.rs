@@ -86,7 +86,7 @@ impl Parser {
 
         let bang_ok = !matches!(self.peek(), Token::Bang) || !self.suppress_bang_else;
         if bang_ok && matches!(self.peek(), Token::Question | Token::Bang | Token::BangBang) {
-            let handled = self.parse_stmt_handler_arms(value)?;
+            let handled = self.parse_bind_handler_arms(value)?;
             return Ok(Stmt::Bind(Bind {
                 name,
                 value: handled,

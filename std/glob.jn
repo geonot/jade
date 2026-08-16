@@ -1,7 +1,6 @@
 
 extern *c_opendir(path as %i8) returns %i8
 extern *c_readdir_name(d as %i8) returns %i8
-extern *c_closedir(d as %i8)
 extern *jinn_is_dir(path as %i8) returns i32
 extern *malloc(size as i64) returns %i8
 extern *free(ptr as %i8)
@@ -115,3 +114,4 @@ extern *jinn_dirent_name(ent as %i8) returns %i8
             else
                 result.push(full)
     extern.closedir(d)
+    return

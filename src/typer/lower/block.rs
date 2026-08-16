@@ -1067,7 +1067,10 @@ impl Typer {
         Ok(())
     }
 
-    fn record_take_moves_in_expr(&mut self, expr: &hir::Expr) -> Result<(), String> {
+    pub(in crate::typer) fn record_take_moves_in_expr(
+        &mut self,
+        expr: &hir::Expr,
+    ) -> Result<(), String> {
         match &expr.kind {
             hir::ExprKind::Call(_, name, args) => {
                 if let Some(access) = self.fn_param_access.get(name).cloned() {
@@ -1470,6 +1473,68 @@ impl Typer {
                 _ => {}
             }
         }
+    }
+
+    pub(in crate::typer) fn repair_borrow_alias_binds(
+        body: &mut [hir::Stmt],
+        borrow_ids: &mut std::collections::HashSet<crate::hir::DefId>,
+    ) -> Result<(), String> {
+        for s in body.iter_mut() {
+            match s {
+                hir::Stmt::Bind(b) => {
+                    let src = Self::peel_move_wrappers(&b.value);
+                    if let hir::ExprKind::Var(id, name) = &src.kind
+                        && borrow_ids.contains(id)
+                    {
+                        if matches!(b.access_mod, Some(crate::ast::AccessMod::Take)) {
+                            return Err(format!(
+                                "{}: cannot `take` from `{}`: it is a borrow, not an \
+                                 owner (a parameter borrows unless the function \
+                                 consumes it); declare the parameter `take` to consume \
+                                 it at call sites, or bind a clone (`{} is copy {}`)",
+                                b.span.loc(),
+                                name,
+                                b.name,
+                                name,
+                            ));
+                        }
+                        if b.access_mod.is_none()
+                            && matches!(b.ownership, crate::hir::Ownership::Owned)
+                        {
+                            b.ownership = crate::hir::Ownership::Borrowed;
+                            borrow_ids.insert(b.def_id);
+                        }
+                    }
+                }
+                hir::Stmt::If(i) => {
+                    Self::repair_borrow_alias_binds(&mut i.then, borrow_ids)?;
+                    for (_, blk) in i.elifs.iter_mut() {
+                        Self::repair_borrow_alias_binds(blk, borrow_ids)?;
+                    }
+                    if let Some(blk) = i.els.as_mut() {
+                        Self::repair_borrow_alias_binds(blk, borrow_ids)?;
+                    }
+                }
+                hir::Stmt::Match(m) => {
+                    for a in m.arms.iter_mut() {
+                        Self::repair_borrow_alias_binds(&mut a.body, borrow_ids)?;
+                    }
+                }
+                hir::Stmt::While(w) => Self::repair_borrow_alias_binds(&mut w.body, borrow_ids)?,
+                hir::Stmt::For(f) | hir::Stmt::SimFor(f, _) => {
+                    Self::repair_borrow_alias_binds(&mut f.body, borrow_ids)?
+                }
+                hir::Stmt::Loop(l) => Self::repair_borrow_alias_binds(&mut l.body, borrow_ids)?,
+                hir::Stmt::Defer(blk, _)
+                | hir::Stmt::Transaction(blk, _)
+                | hir::Stmt::SimBlock(blk, _)
+                | hir::Stmt::Together(_, blk, _, _, _) => {
+                    Self::repair_borrow_alias_binds(blk, borrow_ids)?
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     fn expand_payload_bind_links(&self, ids: &mut std::collections::HashSet<crate::hir::DefId>) {

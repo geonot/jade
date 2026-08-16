@@ -80,10 +80,22 @@ fn inject_cancel_checks(func: &mut Function, yield_srcs: &HashSet<BlockId>) {
     for src in srcs {
         let idx = func.blocks.iter().position(|b| b.id == src).unwrap();
         let orig_term = func.blocks[idx].terminator.clone();
+        let succs: Vec<BlockId> = orig_term.successors();
 
         let cont = func.new_block("cancel.cont");
         let chk = func.new_value();
         let flag = func.new_value();
+
+        for succ in succs {
+            let succ_bb = func.blocks.iter_mut().find(|b| b.id == succ).unwrap();
+            for phi in succ_bb.phis.iter_mut() {
+                for (pred, _) in phi.incoming.iter_mut() {
+                    if *pred == src {
+                        *pred = cont;
+                    }
+                }
+            }
+        }
 
         let cont_bb = func.blocks.iter_mut().find(|b| b.id == cont).unwrap();
         cont_bb.terminator = orig_term;

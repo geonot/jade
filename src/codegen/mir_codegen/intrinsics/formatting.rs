@@ -262,7 +262,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(done_bb);
         let end = unsafe { b!(self.bld.build_gep(i8t, buf_ptr, &[nbits], "fb.end")) };
         b!(self.bld.build_store(end, i8t.const_int(0, false)));
-        self.build_string(
+        self.build_owned_string(
             buf,
             nbits,
             b!(self

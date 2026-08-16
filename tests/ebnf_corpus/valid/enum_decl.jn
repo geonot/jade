@@ -1,4 +1,3 @@
-# rule: enum_decl
 enum Direction
     North
     South

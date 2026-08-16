@@ -290,6 +290,14 @@ impl Typer {
                             ));
                         }
                     };
+                    if arm.is_send {
+                        return Err(format!(
+                            "{}: `select` send arms are not implemented yet — the arm \
+                             would silently behave as a receive; use a plain `send` \
+                             before or after the `select`, or select on receives only",
+                            arm.span.loc(),
+                        ));
+                    }
                     let hval = if let Some(ref v) = arm.value {
                         let hv = self.lower_expr(v)?;
                         if arm.is_send {

@@ -139,8 +139,8 @@ impl<'ctx> Compiler<'ctx> {
         if vals.is_empty() {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
         }
-        let (sd, st, rec_size, fp) = self.setup_store_access(store_name)?;
-        self.store_lock(store_name, fp)?;
+        let (sd, st, rec_size, _fp) = self.setup_store_access(store_name)?;
+        let fp = self.store_lock(store_name)?;
         self.txn_track_store(store_name, fp)?;
 
         for dec in &sd.decorators {
@@ -391,8 +391,8 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
         }
 
-        let (sd, st, rec_size, fp) = self.setup_store_access(store_name)?;
-        self.store_lock(store_name, fp)?;
+        let (sd, st, rec_size, _fp) = self.setup_store_access(store_name)?;
+        let fp = self.store_lock(store_name)?;
         self.txn_track_store(store_name, fp)?;
 
         for dec in &sd.decorators {

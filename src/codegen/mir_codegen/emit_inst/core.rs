@@ -56,9 +56,11 @@ impl<'ctx> Compiler<'ctx> {
                     } else {
                         const LIBM_UNARY_F64: &[&str] = &[
                             "fabs", "sqrt", "floor", "ceil", "round", "trunc", "sin", "cos", "tan",
-                            "asin", "acos", "atan", "log", "log10", "log2", "exp", "exp2",
+                            "asin", "acos", "atan", "log", "log10", "log2", "exp", "exp2", "cbrt",
+                            "sinh", "cosh", "tanh",
                         ];
-                        const LIBM_BINARY_F64: &[&str] = &["pow", "atan2", "fmod", "copysign"];
+                        const LIBM_BINARY_F64: &[&str] =
+                            &["pow", "atan2", "fmod", "copysign", "fmin", "fmax"];
                         let name_str = name.as_str();
                         let f64t = self.ctx.f64_type();
                         if LIBM_UNARY_F64.contains(&&*name_str) && arg_vals.len() == 1 {

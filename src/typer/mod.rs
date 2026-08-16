@@ -216,6 +216,8 @@ pub struct Typer {
     pub(crate) dep_pkg_ids: std::collections::HashMap<crate::intern::Symbol, crate::pkgid::PkgId>,
     pub(crate) scoped_use_map: crate::pkgid::ScopedUseMap,
     pub(crate) declared_type_names: std::collections::HashSet<Symbol>,
+    pub(crate) alias_names: std::collections::HashSet<Symbol>,
+    pub(crate) sync_handlers: std::collections::HashSet<(Symbol, Symbol)>,
 
     pub(crate) const_expansion_stack: Vec<Symbol>,
 
@@ -313,6 +315,8 @@ impl Typer {
             current_fn_param_ids: std::collections::HashSet::new(),
             suppress_whole_struct_check: 0,
             declared_type_names: std::collections::HashSet::new(),
+            alias_names: std::collections::HashSet::new(),
+            sync_handlers: std::collections::HashSet::new(),
             const_expansion_stack: Vec::new(),
             instantiated_generics: std::collections::HashSet::new(),
             const_vars: std::collections::HashSet::new(),
@@ -821,7 +825,9 @@ impl Typer {
         ty: &Type,
         access_mod: Option<crate::ast::AccessMod>,
     ) -> Result<Ownership, String> {
-        if access_mod.is_none() && self.type_param_default_borrows(ty) {
+        if matches!(access_mod, None | Some(crate::ast::AccessMod::Const))
+            && self.type_param_default_borrows(ty)
+        {
             return Ok(Ownership::Borrowed);
         }
         self.ownership_with_mod(ty, access_mod)

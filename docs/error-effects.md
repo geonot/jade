@@ -107,7 +107,8 @@ signature (optional; otherwise inferred):
 
 Semantics of `! E`:
 - The function's *result type* is sugar for `Result of R, E`, where `R` is the
-  declared `returns` type (or `Unit`). A bare `! E` is `Result of Unit, E`.
+  declared `returns` type (or `Unit`). A bare `! E` is `Result of Unit, E`,
+  and its implicit Unit success exit auto-wraps to `Ok`.
 - A function with no raised/propagated error has error set `{}` (its result
   type is plain `R`, not a `Result`).
 - `! E` is checked (§5): the inferred error set must convert into `E`.
@@ -153,8 +154,8 @@ foo()
 `$` is the unwrapped success value, bound only inside a `?` arm (innermost when
 nested). `err` is the current error value, usable in a `!!` arm; `!! err`
 yields the error itself, which a fallible enclosing function returns — i.e.
-explicit propagation. Using `$` outside a `?` arm or `err` outside a `!!` arm is
-a compile error.
+explicit propagation. Using `$` outside a `?` arm or `err` outside a `!!` arm
+is a compile error, exactly as this spec requires.
 
 ---
 
@@ -189,9 +190,12 @@ R3. **Propagation well-formedness.** A propagated `e` must be `Result`/`Option`,
     and a conversion `X -> E` into the enclosing error type must exist (else
     R1-style error at the propagation site).
 
-R4. **`main`.** `main` is not fallible by default; an error propagated out of
-    `main` causes a nonzero process exit and the runtime prints the error. No
-    ceremony is required for scripts.
+R4. **`main`.** `main` is not fallible by default. An unhandled fallible call
+    in *statement position* stops `main` with exit 1 and a location-only
+    message ("`main` stopped with an unhandled error here"). A fallible call
+    whose value is *bound* binds the raw `Result` — handle it where it
+    appears. A direct `err` raise in `main` is a compile error demanding
+    `! E` on `main`.
 
 R5. **Exhaustive handling.** `match` on a `Result`/`Option` must cover all
     variants (existing exhaustiveness checker applies).
@@ -216,7 +220,11 @@ C2. **One step.** Conversion is a single `From` application, not transitive.
 C3. **Ambiguity.** If multiple target enums in a union can receive `X`,
     disambiguation is required. Single-target unions are unambiguous.
 C4. **Coherence.** `impl From of X for E` is allowed only in the module defining
-    `X` or the module defining `E` (orphan rule).
+    `X` or the module defining `E` (orphan rule). **Gap (`E-1`):** not
+    enforced today — conversion resolution is a global name-pattern lookup
+    with no provenance check. Also unstated by C3 but true: when the source
+    enum is itself in the declared union, identity silently wins over any
+    available conversion.
 
 ---
 
@@ -277,18 +285,18 @@ err AppError
 
 impl From of FileError for AppError
     *from(e as FileError) returns AppError
-        AppError.Io(e)
+        Io(e)
 
 impl From of NetError for AppError
     *from(e as NetError) returns AppError
-        AppError.Net(e)
+        Net(e)
 
 *fetch(url as String) returns Bytes ! NetError
-*save(path as String, b as Bytes) ! FileError
+*persist(path as String, b as Bytes) returns i64 ! FileError
 
 *backup(url as String, path as String) returns Bytes ! AppError
     data is fetch(url)              # NetError -> AppError via From, propagated
-    save(path, data)               # FileError -> AppError via From, propagated
+    persist(path, data)            # FileError -> AppError via From, propagated
     data                           # bare value auto-wraps to Ok
 
 *main()

@@ -447,7 +447,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let zero = i64t.const_int(0, false);
         self.bld.position_at_end(true_bb);
-        let tv = self.build_string(
+        let tv = self.build_owned_string(
             true_str.as_pointer_value(),
             i64t.const_int(4, false),
             zero,
@@ -455,7 +455,7 @@ impl<'ctx> Compiler<'ctx> {
         )?;
         b!(self.bld.build_unconditional_branch(merge_bb));
         self.bld.position_at_end(false_bb);
-        let fv_val = self.build_string(
+        let fv_val = self.build_owned_string(
             false_str.as_pointer_value(),
             i64t.const_int(5, false),
             zero,
@@ -508,7 +508,7 @@ impl<'ctx> Compiler<'ctx> {
             cases.push((i32t.const_int(tag_val as u64, false), case_bb));
             self.bld.position_at_end(case_bb);
             let gs = b!(self.bld.build_global_string_ptr(vname, "ts.e.s"));
-            let sv = self.build_string(
+            let sv = self.build_owned_string(
                 gs.as_pointer_value(),
                 i64t.const_int(vname.len() as u64, false),
                 zero,
@@ -523,7 +523,7 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(default_bb);
         let unk = b!(self.bld.build_global_string_ptr("?", "ts.e.unk"));
-        let unk_sv = self.build_string(
+        let unk_sv = self.build_owned_string(
             unk.as_pointer_value(),
             i64t.const_int(1, false),
             zero,

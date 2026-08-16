@@ -75,6 +75,8 @@ struct Scanner<'a> {
     out: Collected,
     trusted_apertures: &'a HashSet<Symbol>,
     param_names: HashSet<Symbol>,
+    opaque_locals: HashSet<Symbol>,
+    local_alias: HashMap<Symbol, Symbol>,
     ctx: &'a CapContext,
 }
 
@@ -143,7 +145,27 @@ impl Scanner<'_> {
 
     fn scan_stmt(&mut self, s: &ast::Stmt) {
         match s {
-            ast::Stmt::Bind(b) => self.scan_expr(&b.value),
+            ast::Stmt::Bind(b) => {
+                match &b.value {
+                    ast::Expr::Lambda(..) => {
+                        self.opaque_locals.remove(&b.name);
+                        self.local_alias.remove(&b.name);
+                    }
+                    ast::Expr::Ident(src, _) => {
+                        self.opaque_locals.remove(&b.name);
+                        self.local_alias.insert(b.name, *src);
+                    }
+                    ast::Expr::Field(..)
+                    | ast::Expr::Index(..)
+                    | ast::Expr::Call(..)
+                    | ast::Expr::Method(..) => {
+                        self.local_alias.remove(&b.name);
+                        self.opaque_locals.insert(b.name);
+                    }
+                    _ => {}
+                }
+                self.scan_expr(&b.value)
+            }
             ast::Stmt::TupleBind(_, e, _)
             | ast::Stmt::Expr(e)
             | ast::Stmt::Ret(Some(e), _)
@@ -239,14 +261,24 @@ impl Scanner<'_> {
     fn scan_expr(&mut self, e: &ast::Expr) {
         match e {
             ast::Expr::Call(callee, args, _) => {
-                if let ast::Expr::Ident(name, _) = callee.as_ref() {
-                    if self.param_names.contains(name) {
-                        self.out.caps.insert(Capability::IndirectCall);
-                    } else {
-                        self.out.callees.insert(*name);
+                match callee.as_ref() {
+                    ast::Expr::Ident(name, _) => {
+                        if self.param_names.contains(name) || self.opaque_locals.contains(name) {
+                            self.out.caps.insert(Capability::IndirectCall);
+                        } else if let Some(src) = self.local_alias.get(name) {
+                            let src = *src;
+                            self.out.callees.insert(src);
+                        } else {
+                            self.out.callees.insert(*name);
+                        }
                     }
-                } else {
-                    self.scan_expr(callee);
+                    ast::Expr::Field(..) | ast::Expr::Index(..) => {
+                        self.out.caps.insert(Capability::IndirectCall);
+                        self.scan_expr(callee);
+                    }
+                    _ => {
+                        self.scan_expr(callee);
+                    }
                 }
                 for a in args {
                     self.scan_expr(a);
@@ -501,6 +533,8 @@ pub(in crate::typer) fn analyze(
             out: Collected::default(),
             trusted_apertures: &trusted_apertures,
             param_names: it.fun.params.iter().map(|p| p.name).collect(),
+            opaque_locals: HashSet::new(),
+            local_alias: HashMap::new(),
             ctx,
         };
         scanner.scan_block(&it.fun.body);

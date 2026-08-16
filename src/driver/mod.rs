@@ -500,8 +500,9 @@ pub fn run() {
         _ => crate::mir::opt::OptLevel::Full,
     };
     let mut mir_prog = crate::mir::lower::lower_program(&hir_prog);
-    #[cfg(debug_assertions)]
-    if let Err(errs) = crate::mir::verify::verify_program(&mir_prog) {
+    if pipeline::mir_verify_enabled()
+        && let Err(errs) = crate::mir::verify::verify_program(&mir_prog)
+    {
         for e in &errs {
             eprintln!("MIR verify (post-lower): {e}");
         }
@@ -512,8 +513,9 @@ pub fn run() {
     for func in &mut mir_prog.functions {
         crate::mir::opt::optimize(func, mir_opt_level);
     }
-    #[cfg(debug_assertions)]
-    if let Err(errs) = crate::mir::verify::verify_program(&mir_prog) {
+    if pipeline::mir_verify_enabled()
+        && let Err(errs) = crate::mir::verify::verify_program(&mir_prog)
+    {
         for e in &errs {
             eprintln!("MIR verify (post-opt): {e}");
         }

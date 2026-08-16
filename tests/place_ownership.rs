@@ -378,3 +378,75 @@ fn subject_use_after_payload_consumed_is_rejected() {
         &["use of moved value `v`", "moved into a constructor"],
     );
 }
+
+#[test]
+fn consuming_call_in_if_condition_is_move_tracked() {
+    rejects(
+        "*eat(v as take Vec of i64) returns bool\n    v.length > 0\n\n*main\n    a is vec(1, 2, 3)\n    if eat(a)\n        log('ate')\n    log(a.length)\n",
+        &["use of moved value `a`", "`eat`"],
+    );
+}
+
+#[test]
+fn consuming_call_in_elif_condition_is_move_tracked() {
+    rejects(
+        "*eat(v as take Vec of i64) returns bool\n    v.length > 9\n\n*main\n    a is vec(1, 2, 3)\n    if false\n        log('no')\n    elif eat(a)\n        log('yes')\n    log(a.length)\n",
+        &["use of moved value `a`", "`eat`"],
+    );
+}
+
+#[test]
+fn consuming_call_in_while_condition_is_rejected() {
+    rejects(
+        "*eat(v as take Vec of i64) returns bool\n    v.length > 3\n\n*main\n    a is vec(1, 2, 3)\n    while eat(a)\n        log('spin')\n    log(a.length)\n",
+        &["moved inside a loop"],
+    );
+}
+
+#[test]
+fn consuming_call_in_match_scrutinee_is_move_tracked() {
+    rejects(
+        "enum Size\n    Small\n    Big\n\n*eat(v as take Vec of i64) returns Size\n    v.length > 2 ? Size.Big ! Size.Small\n\n*main\n    a is vec(1, 2, 3)\n    match eat(a)\n        Big ? log('big')\n        _ ? log('small')\n    log(a.length)\n",
+        &["use of moved value `a`", "`eat`"],
+    );
+}
+
+#[test]
+fn consuming_call_in_for_iter_is_move_tracked() {
+    rejects(
+        "*wrap(v as take Vec of i64) returns Vec of i64\n    v\n\n*main\n    a is vec(1, 2, 3)\n    for x in wrap(a)\n        log(x)\n    log(a.length)\n",
+        &["use of moved value `a`", "`wrap`"],
+    );
+}
+
+#[test]
+fn multi_level_projection_bind_is_rejected_not_aliased() {
+    rejects(
+        "type Inner\n    items as Vec of i64\n\ntype Outer\n    inner as Inner\n\n*main\n    o is Outer(inner is Inner(items is vec(1, 2, 3)))\n    v is o.inner.items\n    v.push(99)\n    log(o.inner.items.length)\n",
+        &["`take` of the nested place `o.inner.items`", "copy"],
+    );
+}
+
+#[test]
+fn unannotated_param_rebind_borrows_instead_of_minting_an_owner() {
+    accepts_and_prints(
+        "*f(v)\n    s is v\n    log(s.length)\n\n*main\n    a is vec(1, 2, 3)\n    f(a)\n    log(a.length)\n",
+        "3\n3",
+    );
+}
+
+#[test]
+fn take_from_unannotated_borrowed_param_is_rejected() {
+    rejects(
+        "*f(v)\n    s is take v\n    log(s.length)\n\n*main\n    a is vec(1, 2, 3)\n    f(a)\n",
+        &["cannot `take` from `v`", "borrow"],
+    );
+}
+
+#[test]
+fn dollar_outside_a_handler_arm_is_rejected() {
+    rejects(
+        "*main\n    x is $ + 1\n    log(x)\n",
+        &["`$` has no value here"],
+    );
+}

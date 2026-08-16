@@ -55,6 +55,67 @@ impl Typer {
         })
     }
 
+    pub(in crate::typer) fn reject_readonly_root_write(
+        &mut self,
+        obj_ty: &Type,
+        method: &str,
+        hobj: &hir::Expr,
+        span: ast::Span,
+    ) -> Result<(), String> {
+        let Some(pl) = crate::typer::place::place_of_expr(hobj) else {
+            return Ok(());
+        };
+        if pl.proj.is_empty() {
+            return Ok(());
+        }
+        let Some(root_ty) = self.find_var_by_id(pl.root).map(|v| v.ty.clone()) else {
+            return Ok(());
+        };
+        match self.infer_ctx.shallow_resolve(&root_ty) {
+            Type::Frozen(_) => self.reject_frozen_receiver_write(obj_ty, method, hobj, span),
+            Type::View(_) => {
+                let mutates = crate::typer::mutate_infer::is_builtin_mutating_method(method)
+                    || self.method_writes_receiver(obj_ty, method);
+                if mutates {
+                    return Err(format!(
+                        "{}: cannot call `{}` on `{}`: `{}` is (part of) a view, a \
+                         read-only borrowed window into memory someone else owns; \
+                         mutate the owning container's element, or work on a copy",
+                        span.loc(),
+                        method,
+                        pl.render(),
+                        pl.root_name,
+                    ));
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn method_writes_receiver(&self, obj_ty: &Type, method: &str) -> bool {
+        if let Type::Struct(sname, _) = obj_ty {
+            let mangled = crate::intern::Symbol::intern(&format!("{sname}_{method}"));
+            let mutates = self
+                .fn_param_mutates
+                .get(&mangled)
+                .and_then(|v| v.first())
+                .copied()
+                .unwrap_or(false);
+            let consumes = matches!(
+                self.fn_param_access
+                    .get(&mangled)
+                    .and_then(|v| v.first())
+                    .copied()
+                    .flatten(),
+                Some(ast::AccessMod::Take)
+            );
+            mutates || consumes
+        } else {
+            false
+        }
+    }
+
     pub(in crate::typer) fn reject_frozen_receiver_write(
         &self,
         peeled_ty: &Type,

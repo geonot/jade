@@ -154,10 +154,11 @@ type AppendEntriesReply
         e is req.entries.get(i)
         if e.index <= s.persistent.last_index()
             if s.persistent.term_at(e.index) neq e.term
-                s.persistent.truncate_from(e.index)
-                s.persistent.append(e)
+                while s.persistent.log.length > e.index
+                    s.persistent.log.pop()
+                s.persistent.log.push(e)
         else
-            s.persistent.append(e)
+            s.persistent.log.push(e)
         i is i + 1
     if req.leader_commit > s.volatile.commit_index
         s.volatile.commit_index is __min(req.leader_commit, s.persistent.last_index())
@@ -212,7 +213,7 @@ type AppendEntriesReply
     if s.state neq LEADER
         return 0
     idx is s.persistent.last_index() + 1
-    s.persistent.append(LogEntry(term is s.persistent.current_term, index is idx, command is command))
+    s.persistent.log.push(LogEntry(term is s.persistent.current_term, index is idx, command is command))
     idx
 
 

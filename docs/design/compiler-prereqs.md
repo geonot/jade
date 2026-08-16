@@ -1,11 +1,15 @@
 # Compiler prerequisites for lamp
 
-> **Status: decided spec, not implemented.** Four pieces of compiler machinery
-> that [`lamp.md`](lamp.md) assumes and `jinnc` does not yet have: capabilities
-> as an effect pass, path-scoped package identity, interface v2 with the
-> three-hash ladder, and config blocks. They are specified together because they
-> depend on each other in that order — capabilities feed the interface, identity
-> is rooted in the abi hash, and the manifest is a config block.
+> **Status: decided spec; the capabilities pass has shipped, the rest has
+> not.** Four pieces of compiler machinery that [`lamp.md`](lamp.md) assumes:
+> capabilities as an effect pass (**live** — [145]/[149]/[159]: inferred rows
+> over call-graph SCCs, extern-leaf classification, std apertures, path-scoped
+> store effects, actor handlers in the fixpoint; residue at `E-2`/`E-3`),
+> path-scoped package identity, interface v2 with the three-hash ladder, and
+> config blocks — the latter three unimplemented. They are specified together
+> because they depend on each other in that order — capabilities feed the
+> interface, identity is rooted in the abi hash, and the manifest is a config
+> block.
 
 Read [`lamp.md`](lamp.md) first for what consumes all of this.
 
@@ -15,16 +19,17 @@ Current reality, stated plainly so the gap is visible:
   classified at the extern leaves (`src/cap_sites.rs`; an
   unclassified extern call or `syscall`/`asm` is `ffi.unsafe`), std-vetted
   aperture entries give `io.*`/`fs.*` path-scoped signatures, and the fixpoint
-  in `src/typer/caps.rs` covers free functions, generics, and type/impl
-  methods. What this design still adds beyond that: module/project capability
-  ceilings, actor and store-operation classification, and the manifest story.
-- **Modules are merged by string prefixing.** `prefix_module` in
+  in `src/typer/caps.rs` covers free functions, generics, type/impl methods,
+  actor handlers, and store operations (path-scoped `fs` effects, [159]). What
+  this design still adds beyond that: module/project capability ceilings and
+  the manifest story.
+- **Modules are merged by string prefixing.** `flatten_module` in
   `src/resolve.rs` rewrites `*name` → `module_name` and `Type` → `Module_Type`,
   after which there are no modules — just a flat mangled global namespace.
 - **The interface file is a v1 header.** `src/interface.rs` holds
   `InterfaceFile { version, module, functions }` over a closed `IType` enum,
   with no ownership, no effect rows, no Perceus obligations, and no hashing.
-  Reading it is off by default (`X-4`).
+  Reading it is off by default (`X-3`).
 - **Config blocks do not exist.** The manifest is parsed ad hoc.
 
 ---

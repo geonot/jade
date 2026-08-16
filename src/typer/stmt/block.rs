@@ -184,8 +184,9 @@ impl Typer {
         tail_expected: Option<&Type>,
     ) -> Result<hir::If, String> {
         let cond = self.lower_expr_expected(&i.cond, Some(&Type::Bool))?;
+        self.record_take_moves_in_expr(&cond)?;
 
-        let pre_if = self.snapshot_moved_fields();
+        let mut pre_if = self.snapshot_moved_fields();
         let then = self.lower_branch_with_tail(&i.then, ret_ty, tail_expected)?;
         let then_end = self.snapshot_moved_fields();
         let mut branch_ends: Vec<_> = vec![then_end];
@@ -193,6 +194,8 @@ impl Typer {
         let mut elifs = Vec::new();
         for (ec, eb) in &i.elifs {
             let hc = self.lower_expr_expected(ec, Some(&Type::Bool))?;
+            self.record_take_moves_in_expr(&hc)?;
+            pre_if = self.snapshot_moved_fields();
             let hb = self.lower_branch_with_tail(eb, ret_ty, tail_expected)?;
             branch_ends.push(self.snapshot_moved_fields());
             self.restore_moved_fields(pre_if.clone());
@@ -333,6 +336,7 @@ impl Typer {
         tail_expected: Option<&Type>,
     ) -> Result<hir::Match, String> {
         let subject = self.lower_expr(&m.subject)?;
+        self.record_take_moves_in_expr(&subject)?;
         let mut subject_prelude: Option<hir::Stmt> = None;
         let subject = if crate::typer::place::place_of_expr(&subject).is_none() {
             let resolved = {

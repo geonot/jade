@@ -19,7 +19,14 @@ impl Parser {
         &mut self,
         subject: Expr,
     ) -> Result<Expr, ParseError> {
-        self.collect_handler_arms(subject, false)
+        self.collect_handler_arms(subject, false, false)
+    }
+
+    pub(in crate::parser) fn parse_bind_handler_arms(
+        &mut self,
+        subject: Expr,
+    ) -> Result<Expr, ParseError> {
+        self.collect_handler_arms(subject, false, true)
     }
 
     fn parse_inline_handler_arms(&mut self, subject: Expr) -> Result<Expr, ParseError> {
@@ -28,7 +35,7 @@ impl Parser {
         if !starts_arm {
             return Ok(subject);
         }
-        self.collect_handler_arms(subject, false)
+        self.collect_handler_arms(subject, false, true)
     }
 
     pub(in crate::parser) fn parse_multiline_handler_arms(
@@ -37,10 +44,15 @@ impl Parser {
     ) -> Result<Expr, ParseError> {
         self.advance();
         self.advance();
-        self.collect_handler_arms(subject, true)
+        self.collect_handler_arms(subject, true, false)
     }
 
-    fn collect_handler_arms(&mut self, subject: Expr, multiline: bool) -> Result<Expr, ParseError> {
+    fn collect_handler_arms(
+        &mut self,
+        subject: Expr,
+        multiline: bool,
+        value_position: bool,
+    ) -> Result<Expr, ParseError> {
         let sp = self.span();
         let mut ok_arm: Option<Expr> = None;
         let mut nothing_arm: Option<Expr> = None;
@@ -56,7 +68,8 @@ impl Parser {
                     self.advance();
                     let arm = self.parse_pipeline()?;
                     if !multiline && matches!(self.peek(), Token::Question) {
-                        nothing_arm = Some(self.collect_handler_arms(arm, false)?);
+                        nothing_arm =
+                            Some(self.collect_handler_arms(arm, false, value_position)?);
                     } else {
                         nothing_arm = Some(arm);
                     }
@@ -103,18 +116,34 @@ impl Parser {
                 Box::new(f),
                 sp,
             )),
-            (Some(t), None) => Ok(Expr::Ternary(
-                Box::new(subject),
-                Box::new(t),
-                Box::new(Expr::Void(sp)),
-                sp,
-            )),
-            (None, Some(f)) => Ok(Expr::Ternary(
-                Box::new(subject),
-                Box::new(Expr::Void(sp)),
-                Box::new(f),
-                sp,
-            )),
+            (Some(t), None) => {
+                if value_position {
+                    return Err(self.error(
+                        "a ternary used as a value needs both arms: `cond ? then ! else` \
+                         (the `?`-only form is a statement)",
+                    ));
+                }
+                Ok(Expr::Ternary(
+                    Box::new(subject),
+                    Box::new(t),
+                    Box::new(Expr::Void(sp)),
+                    sp,
+                ))
+            }
+            (None, Some(f)) => {
+                if value_position {
+                    return Err(self.error(
+                        "a `!` fallback used as a value needs a `?` arm: write \
+                         `cond ? then ! else`, or `expr !! fallback` for an error fallback",
+                    ));
+                }
+                Ok(Expr::Ternary(
+                    Box::new(subject),
+                    Box::new(Expr::Void(sp)),
+                    Box::new(f),
+                    sp,
+                ))
+            }
             (None, None) => Ok(subject),
         }
     }
