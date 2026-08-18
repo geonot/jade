@@ -7,7 +7,7 @@ extern *free(ptr as %i8)
 *__digest_hex(alg as String, data as String, out_size as i64) returns String
     out_buf is extern.malloc(out_size)
     hex_buf is extern.malloc(out_size * 2 + 1)
-    n is extern.jinn_evp_digest(%alg, %data, data.length, out_buf)
+    n is extern.jinn_evp_digest(%alg, %data, data.byte_count, out_buf)
     if n < 0
         extern.free(out_buf)
         extern.free(hex_buf)
@@ -20,7 +20,7 @@ extern *free(ptr as %i8)
 
 *__digest_raw(alg as String, data as String, out_size as i64) returns String
     out_buf is extern.malloc(out_size)
-    n is extern.jinn_evp_digest(%alg, %data, data.length, out_buf)
+    n is extern.jinn_evp_digest(%alg, %data, data.byte_count, out_buf)
     if n < 0
         extern.free(out_buf)
         return ""

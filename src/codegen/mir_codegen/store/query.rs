@@ -53,7 +53,7 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_call(ensure_fn, &[], ""));
         }
 
-        let fp = self.load_store_fp(store_name)?;
+        let fp = self.store_lock(store_name)?;
         let i64t = self.ctx.i64_type();
         let i32t = self.ctx.i32_type();
 
@@ -178,12 +178,14 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_unconditional_branch(done_bb));
 
             self.bld.position_at_end(done_bb);
+            self.store_unlock(store_name, fp)?;
             let result = self.load_store_record_as_jinn(st, result_ptr, &sd)?;
             return Ok(result);
         }
 
-        let count = self.store_read_count(fp)?;
+        let count = self.store_read_count(fp, rec_size, store_name)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
+        self.store_unlock(store_name, fp)?;
 
         let result_ptr = self.entry_alloca(st.into(), "q.result");
         let memset_fn = crate::codegen::fn_or_die(&self.module, "memset");
@@ -344,37 +346,16 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_call(ensure_fn, &[], ""));
         }
 
-        let fp = self.load_store_fp(store_name)?;
+        let fp = self.store_lock(store_name)?;
         let i64t = self.ctx.i64_type();
-        let i32t = self.ctx.i32_type();
 
         let deleted_idx = sd.fields.iter().position(|f| f.name == "deleted");
 
         if deleted_idx.is_none() {
-            let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
-            b!(self.bld.build_call(
-                fseek_fn,
-                &[
-                    fp.into(),
-                    i64t.const_int(8, false).into(),
-                    i32t.const_int(0, false).into()
-                ],
-                ""
-            ));
-            let count_buf = self.entry_alloca(i64t.into(), "sc.count");
-            b!(self.bld.build_store(count_buf, i64t.const_int(0, false)));
-            let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
-            b!(self.bld.build_call(
-                fread_fn,
-                &[
-                    count_buf.into(),
-                    i64t.const_int(8, false).into(),
-                    i64t.const_int(1, false).into(),
-                    fp.into()
-                ],
-                ""
-            ));
-            return Ok(b!(self.bld.build_load(i64t, count_buf, "count")));
+            let rec_size = self.store_record_size(&sd);
+            let count = self.store_read_count(fp, rec_size, store_name)?;
+            self.store_unlock(store_name, fp)?;
+            return Ok(count.into());
         }
 
         let rec_name = format!("__store_{store_name}_rec");
@@ -385,8 +366,9 @@ impl<'ctx> Compiler<'ctx> {
         let rec_size = self.store_record_size(&sd);
         let del_idx = deleted_idx.unwrap();
 
-        let total_count = self.store_read_count(fp)?;
+        let total_count = self.store_read_count(fp, rec_size, store_name)?;
         let buf = self.store_load_records(fp, total_count, rec_size)?;
+        self.store_unlock(store_name, fp)?;
 
         let fv = self.cur_fn.expect("ICE: cur_fn not set");
         let live_ptr = self.entry_alloca(i64t.into(), "sc.live");
@@ -503,7 +485,7 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_call(ensure_fn, &[], ""));
         }
 
-        let fp = self.load_store_fp(store_name)?;
+        let fp = self.store_lock(store_name)?;
         let i64t = self.ctx.i64_type();
 
         let rec_name = format!("__store_{store_name}_rec");
@@ -523,8 +505,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let filter_val = self.value_map[&args[0]];
 
-        let count = self.store_read_count(fp)?;
+        let count = self.store_read_count(fp, rec_size, store_name)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
+        self.store_unlock(store_name, fp)?;
 
         let fv = self.cur_fn.expect("ICE: cur_fn not set");
         let match_count_ptr = self.entry_alloca(i64t.into(), "vc.cnt");

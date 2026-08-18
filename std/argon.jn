@@ -15,10 +15,10 @@ DEFAULT_SALT_LEN is 16
 
 
 *derive(password as String, salt as String, t_cost as i64, m_cost as i64, parallelism as i64, dklen as i64) returns String
-    if dklen <= 0 or password.length equals 0 or salt.length < 8
+    if dklen <= 0 or password.byte_count equals 0 or salt.byte_count < 8
         return ""
     out is extern.malloc(dklen)
-    rc is extern.jinn_argon2id(%password, password.length, %salt, salt.length, t_cost, m_cost, parallelism, dklen, out)
+    rc is extern.jinn_argon2id(%password, password.byte_count, %salt, salt.byte_count, t_cost, m_cost, parallelism, dklen, out)
     if rc neq 0
         extern.free(out)
         return ""
@@ -39,7 +39,7 @@ DEFAULT_SALT_LEN is 16
     salt is __string_from_ptr_len(salt_buf, DEFAULT_SALT_LEN)
     extern.free(salt_buf)
     hash is derive(password, salt, DEFAULT_T_COST, DEFAULT_M_COST, DEFAULT_PARALLEL, DEFAULT_DKLEN)
-    if hash.length equals 0
+    if hash.byte_count equals 0
         return ""
     salt_hex is __bytes_to_hex(salt)
     hash_hex is __bytes_to_hex(hash)
@@ -59,9 +59,9 @@ DEFAULT_SALT_LEN is 16
         return false
     salt is __hex_to_bytes(salt_hex)
     expected is __hex_to_bytes(hash_hex)
-    if expected.length equals 0
+    if expected.byte_count equals 0
         return false
-    actual is derive(password, salt, p.get(1), p.get(0), p.get(2), expected.length)
+    actual is derive(password, salt, p.get(1), p.get(0), p.get(2), expected.byte_count)
     if actual.length equals 0
         return false
     __secure_compare(actual, expected)
@@ -77,24 +77,24 @@ DEFAULT_SALT_LEN is 16
         eq is $.find("=")
         if eq < 0
             return vec()
-        out.push(convert.parse_int($.slice(eq + 1, $.length)))
+        out.push(convert.parse_int($.slice(eq + 1, $.byte_count)))
     out
 
 *__bytes_to_hex(data as String) returns String
-    if data.length equals 0
+    if data.byte_count equals 0
         return ""
-    hex_buf is extern.malloc(data.length * 2 + 1)
-    extern.jinn_bytes_to_hex(%data, data.length, hex_buf)
+    hex_buf is extern.malloc(data.byte_count * 2 + 1)
+    extern.jinn_bytes_to_hex(%data, data.byte_count, hex_buf)
     result is __string_from_ptr(hex_buf)
     extern.free(hex_buf)
     result
 
 *__hex_to_bytes(hex as String) returns String
-    if hex.length equals 0 or hex.length mod 2 neq 0
+    if hex.byte_count equals 0 or hex.byte_count mod 2 neq 0
         return ""
-    n is hex.length / 2
+    n is hex.byte_count / 2
     buf is extern.malloc(n)
-    rc is extern.jinn_hex_to_bytes(%hex, hex.length, buf)
+    rc is extern.jinn_hex_to_bytes(%hex, hex.byte_count, buf)
     if rc < 0
         extern.free(buf)
         return ""
@@ -103,11 +103,11 @@ DEFAULT_SALT_LEN is 16
     result
 
 *__secure_compare(a as String, b as String) returns bool
-    if a.length neq b.length
+    if a.byte_count neq b.byte_count
         return false
     diff is 0
     i is 0
-    while i < a.length
+    while i < a.byte_count
         diff is diff | (a.char_at(i) ^ b.char_at(i))
         i is i + 1
     diff equals 0

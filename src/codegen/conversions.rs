@@ -426,7 +426,34 @@ impl<'ctx> Compiler<'ctx> {
         } else {
             fv.into()
         };
-        self.snprintf_to_string("%g", &[wide.into()], "ts")
+        let i64t = self.ctx.i64_type();
+        let i8t = self.ctx.i8_type();
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        if self.module.get_function("jinn_f64_format").is_none() {
+            let ft = i64t.fn_type(&[self.ctx.f64_type().into(), ptr_ty.into()], false);
+            self.module.add_function(
+                "jinn_f64_format",
+                ft,
+                Some(inkwell::module::Linkage::External),
+            );
+        }
+        let fmt_fn = crate::codegen::fn_or_die(&self.module, "jinn_f64_format");
+        let buf_arr_ty = i8t.array_type(32);
+        let buf_arr = self.entry_alloca(buf_arr_ty.into(), "ts.fbuf");
+        let zero = i64t.const_int(0, false);
+        let buf = unsafe {
+            b!(self
+                .bld
+                .build_gep(buf_arr_ty, buf_arr, &[zero, zero], "ts.fbuf.ptr"))
+        };
+        let len = b!(self
+            .bld
+            .build_call(fmt_fn, &[wide.into(), buf.into()], "ts.flen"))
+        .try_as_basic_value()
+        .basic()
+        .expect("ICE: call returned void")
+        .into_int_value();
+        self.finalize_string_sso(buf, len, false, "ts.f")
     }
 
     pub(crate) fn bool_to_string(

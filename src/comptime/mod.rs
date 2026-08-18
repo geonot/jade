@@ -1,76 +1,29 @@
-use crate::ast::Span;
-use crate::hir::{self, Expr, ExprKind};
-use crate::intern::Symbol;
-use crate::types::Type;
-use std::collections::HashMap;
+use crate::hir;
 
-mod eval;
 mod fold;
-mod purity;
 
-use fold::{fold_block_with_fns, fold_expr_with_fns};
-use purity::is_pure_fn;
+use fold::{fold_block, fold_expr};
 
 pub fn fold_program(prog: &mut hir::Program) {
-    let mut pure: std::collections::HashSet<Symbol> = std::collections::HashSet::new();
-    loop {
-        let mut changed = false;
-        for f in &prog.fns {
-            if !pure.contains(&f.name) && is_pure_fn(f, &pure) {
-                pure.insert(f.name);
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-    let pure_fns: HashMap<Symbol, hir::Fn> = prog
-        .fns
-        .iter()
-        .filter(|f| pure.contains(&f.name))
-        .map(|f| (f.name, f.clone()))
-        .collect();
-
     for f in &mut prog.fns {
-        fold_block_with_fns(&mut f.body, &pure_fns);
+        fold_block(&mut f.body);
     }
     for td in &mut prog.types {
         for m in &mut td.methods {
-            fold_block_with_fns(&mut m.body, &pure_fns);
+            fold_block(&mut m.body);
         }
     }
     for actor in &mut prog.actors {
         for m in &mut actor.handlers {
-            fold_block_with_fns(&mut m.body, &pure_fns);
+            fold_block(&mut m.body);
             if let Some(sleep_ms) = &mut m.loop_sleep_ms {
-                fold_expr_with_fns(sleep_ms, &pure_fns);
+                fold_expr(sleep_ms);
             }
         }
     }
     for imp in &mut prog.trait_impls {
         for m in &mut imp.methods {
-            fold_block_with_fns(&mut m.body, &pure_fns);
+            fold_block(&mut m.body);
         }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(super) enum ConstVal {
-    Int(i64),
-    Float(f64),
-    Bool(bool),
-    Void,
-}
-
-impl ConstVal {
-    pub(super) fn to_expr(&self, ty: Type, span: Span) -> Expr {
-        let kind = match self {
-            ConstVal::Int(v) => ExprKind::Int(*v),
-            ConstVal::Float(v) => ExprKind::Float(*v),
-            ConstVal::Bool(v) => ExprKind::Bool(*v),
-            ConstVal::Void => ExprKind::Void,
-        };
-        Expr { kind, ty, span }
     }
 }

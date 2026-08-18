@@ -279,7 +279,12 @@ if x in [1, 2, 3]
     log('found')
 if 'lo' in 'hello'
     log('substring')
+if not x in [7, 8]
+    log('absent')
 ```
+
+`not` binds looser than `in` and the comparisons but tighter than `and` and
+`or`, so `not x in xs` reads as `not (x in xs)`.
 
 ### Arithmetic and bitwise
 
@@ -302,6 +307,10 @@ y is x as f64            # widen — always safe
 z is big as strict i16   # narrow, panics if the value does not fit
 w is big as i16          # narrow, truncates
 ```
+
+An integer literal that does not fit its annotated type is a compile error —
+`y as i8 is 300` rejects rather than wrapping. Cast explicitly (`300 as i8`)
+if truncation is intended.
 
 ---
 

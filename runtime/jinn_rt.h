@@ -504,6 +504,8 @@ void jinn_store_finish_create(FILE *fp, const char *path);
 void jinn_wal_close(FILE *wal);
 int64_t jinn_wal_size(FILE *wal);
 int64_t jinn_wal_replay(FILE *wal, jinn_wal_replay_cb callback, void *user_data);
+int jinn_wal_uncommitted_begin(FILE *wal, unsigned char **snap_out,
+                               int64_t *len_out);
 typedef int (*jinn_fill_fn)(FILE *tmp, void *arg);
 int  jinn_fsync_checked(int fd, const char *what);
 int  jinn_dir_fsync(const char *filepath);
@@ -522,6 +524,11 @@ void         jinn_rewrite_abort(JinnRewrite *rw);
 void         jinn_store_drop_indexes(const char *store_path);
 void         jinn_store_wlock(const char *path);
 void         jinn_store_wunlock(const char *path);
+int64_t      jinn_store_read_count_checked(FILE *fp, int64_t rec_size,
+                                           const char *path);
+int64_t      jinn_f64_format(double v, char *buf);
+#define JINN_WAL_OP_TXN_BEGIN  0xF0
+#define JINN_WAL_OP_TXN_COMMIT 0xF1
 void jinn_writer_unlock(int lock_fd);
 int  jinn_sha256(const unsigned char *data, long len, unsigned char *out);
 int  jinn_sha512(const unsigned char *data, long len, unsigned char *out);

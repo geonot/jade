@@ -1,4 +1,84 @@
 # Changelog
+- **[166]** (2026-08-18) WS-3 store-engine close + comptime cut + std byte-count sweep — the review's store workstream lands whole (transactional WAL framing with undo images, locked and validated reads, real migration defaults/drops, the fingerprint sentinel), `src/comptime/` is cut to literal-only type-gated folding, the std `.length`-as-byte-count class is swept at 118 audited sites, and the cheap parser/typer/MIR/fmt blockers close (`not` precedence, literal range errors, duplicate-fn/arm rejection, `vector` reservation, shortest-round-trip float printing)
+
+Full suite is 2358 + 19 new pins, green; fmt/clippy clean.
+
+- **Store WS-3 (STO-1..6, STO-8 partial, STORE-1, DIST-4, S-10).**
+  Transactions are bracketed in the WAL: `jinn_txn_track_impl` writes a
+  `TXN_BEGIN` frame whose payload is the pre-transaction data-file snapshot
+  (the undo image, group-committed before the first in-transaction write) and
+  commit appends `TXN_COMMIT`; replay two-passes the log and stops before an
+  unmatched begin, and `jinn_store_recover` restores the undo image — so
+  kill -9 mid-`transaction` recovers the pre-transaction state instead of
+  durably persisting a partial transaction (pinned with a real kill -9 in
+  `tests/store_transactions.rs`). Every read path — `count`, `all`, queries,
+  aggregates, group-by, graph/fts traversal, `ts_latest`, the index rebuild
+  scan, and store-open itself (double-checked under the lock; the unlocked
+  first-open race let two tasks both open and both run recovery, which the
+  new framing turned from benign into a live-transaction "recovery" — caught
+  by the [163] cross-task rollback pin flaking under load) — takes the store
+  writer lock and reads the header through a new
+  `jinn_store_read_count_checked`, which refuses (exit 2, named store) a
+  count the file cannot hold; inserts validate the same way, so an inflated
+  header can no longer mint a 256 MB sparse file. Migration
+  `add ... default <literal>` encodes the literal into an on-disk-shaped
+  buffer (LE scalars; 256-byte string slots) and existing rows actually get
+  it; `drop` derives the dropped field's type from the matching `add` in the
+  `down` block and removes the record's final field, any other shape a
+  compile error (the old code searched the post-migration schema, found
+  nothing, and silently no-opped — then logged the migration as applied).
+  Migration rewrites stamp fingerprint `-1` ("in progress"); `check_schema`
+  refuses it with restore guidance instead of the old silent `0`-adoption.
+  Mismatched quaternary arms reject: the arm unify error is collected instead
+  of `let _ =`-dropped and the `!!` arm lowers against the ok-arm's expected
+  type. Extern emission reuses an existing LLVM declaration instead of
+  minting `malloc.1` (store + `extern *malloc`, e.g. via std/aes, now
+  links). String-slot hardening: the read path clamps the on-disk length to
+  `0..=248` (an inflated length read heap garbage), and `kv.c`'s weak no-op
+  `jinn_store_truncation_warn` now warns, so link order can no longer
+  silence truncation. The 248-byte cap itself stays (format change; STO-8r).
+- **Comptime cut (HIR-1, HIR-2, HIR-5).** `src/comptime/eval.rs` and
+  `purity.rs` are deleted: the pure-call evaluator's `None` conflated "no
+  value yet" with "cannot evaluate", so a failed evaluation inside a taken
+  branch fell through and folded calls to the wrong constant — pinned:
+  `f(5)` with a string bind before `return 10` now prints 10, not 20. The
+  remaining literal folds are type-gated to `i64`/`f64` operands, so
+  unsigned compares/divides and narrow widths are never folded with the
+  wrong semantics (`0 - 1` bound as `u64` compares unsigned at runtime,
+  pinned). Cheap and honest for alpha; a successor needs a tri-state
+  evaluator.
+- **std byte-count sweep (DIST-3, STD-1..4, sha/blake/io/regex).** A
+  line-audited sweep (site inventory from a dedicated review pass) converted
+  every string-byte context from `.length` (UTF-8 scalar count) to
+  `.byte_count` across net, http, tls, io, crypto, aes, argon, sha, blake,
+  regex, os, process — 118 sites: FFI length args, `malloc` sizes, send
+  loops (`sent` accumulated bytes but compared scalar counts, so non-ASCII
+  payloads truncated or trapped), `Content-Length` (the http deadlock), the
+  hex helpers (whose truncation was why argon verify was always false and
+  AEAD could not decrypt its own output), every `jinn_evp_digest` call
+  (hashes digested a truncated prefix of non-ASCII input), and PCRE2 offset
+  mixing. One mislabeled site (a Vec `.length` in os.jn) was caught by the
+  std gate and reverted; the sweep is otherwise behaviorally untested —
+  GATE-3 stands.
+- **Float printing (STD-8).** `to_string` of floats (and json stringify
+  through it) calls a new `jinn_f64_format`: `%.15g` → `%.17g` escalation
+  with a `strtod` round-trip check — `123456789.5` prints as itself instead
+  of `1.23457e+08`, `0.1` stays `0.1`. `log(float)` keeps its `%f` path.
+- **Parser/typer/MIR/fmt quick closes.** `not` gets its own precedence level
+  between `and` and the comparisons (per the EBNF), so `not x in xs` means
+  `not (x in xs)`; the fmt printer parenthesizes `not` under tighter
+  operators so old trees round-trip, and it now emits list-comprehension
+  `to`/`if` clauses instead of deleting them (TDX-1/2). Out-of-range integer
+  literals at an annotated type are hard errors (both signs; `-<lit>` folds
+  at lowering with the expected type — T-5/DIAG-2). Duplicate unguarded
+  literal match arms are a typed error and the dense switch dedupes as a
+  backstop; string/float literal matches take the comparison chain (MIR-4).
+  Duplicate top-level function definitions — including collisions with a
+  module's flattened `{module}_{fn}` spelling — error naming both sites
+  (HIR-6). `vec`/`vector` builtins always win and defining either name is an
+  error (PAR-1). Store-block methods reject at typing with guidance; they
+  were never lowered and are not in the grammar (HIR-7).
+
 - **[165]** (2026-08-18) alpha-remediation pass — an 18-area adversarial review falsified the [163]/[164] "0 blockers / 0 majors" headline (~28 blockers, ~53 majors reproduced from clean directories); this pass closes the two soundness workstreams on the critical path (type/ownership interior, memory-safety completeness — 18 of the review's blockers) plus the two one-line quick wins and a batch of cheap surface blockers, each pinned in `tests/alpha_hardening_pins.rs`; the open remainder is filed in docs/roadmap.md under "Alpha review backlog" with the review's stable ids
 
 Full suite is 2338 + 20 new pins, green; fmt/clippy clean. array_ops measured

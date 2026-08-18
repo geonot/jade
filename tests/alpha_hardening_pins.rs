@@ -263,3 +263,112 @@ fn emitted_ir_carries_stack_probes_and_internal_xmalloc() {
         "jinn_xmalloc must be internal and inlinable"
     );
 }
+
+#[test]
+fn not_binds_looser_than_in() {
+    accepts_and_prints(
+        "*main\n    xs is [1, 2, 3]\n    if not 5 in xs\n        log('absent')\n    if not 1 in xs\n        log('bug')\n    else\n        log('present')\n",
+        "absent\npresent",
+    );
+}
+
+#[test]
+fn narrow_literal_bind_rejects_out_of_range() {
+    rejects(
+        "*main\n    y as i8 is 300\n    log(y)\n",
+        &["does not fit in `i8`"],
+    );
+}
+
+#[test]
+fn negative_out_of_range_literal_rejects() {
+    rejects(
+        "*main\n    w as i8 is -200\n    log(w)\n",
+        &["does not fit in `i8`"],
+    );
+}
+
+#[test]
+fn negative_min_literal_is_accepted() {
+    accepts_and_prints("*main\n    z as i8 is -128\n    log(z)\n", "-128");
+}
+
+#[test]
+fn user_fn_named_vector_is_rejected_not_hijacking_literals() {
+    rejects(
+        "*vector(x as i64) returns i64\n    x\n\n*main\n    xs is [1, 2]\n    log(xs.length)\n",
+        &["reserved"],
+    );
+}
+
+#[test]
+fn module_fn_name_collision_is_rejected() {
+    rejects(
+        "use math\n\n*math_ln(x as f64) returns f64\n    x\n\n*main\n    log(math.ln(1.0))\n",
+        &["defined more than once"],
+    );
+}
+
+#[test]
+fn duplicate_int_literal_match_arms_reject_instead_of_ice() {
+    rejects(
+        "*main\n    x is 2\n    match x\n        1 ? log('one')\n        1 ? log('again')\n        _ ? log('other')\n",
+        &["duplicate match arm"],
+    );
+}
+
+#[test]
+fn store_plus_extern_malloc_links() {
+    let c = compile(
+        "extern *malloc(size as i64) returns %i8\nextern *free(ptr as %i8)\n\nstore things @simple\n    name as String\n\n*main\n    p is extern.malloc(16)\n    extern.free(p)\n    insert things 'a'\n    log(count things)\n",
+    );
+    assert!(c.ok(), "store + extern malloc must link: {}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success());
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "1");
+}
+
+#[test]
+fn float_to_string_round_trips_beyond_six_digits() {
+    accepts_and_prints(
+        "*main\n    log(to_string(123456789.5))\n    log(to_string(0.1))\n    log(to_string(2.0))\n",
+        "123456789.5\n0.1\n2",
+    );
+}
+
+#[test]
+fn comptime_does_not_fold_unsigned_arithmetic_with_signed_semantics() {
+    accepts_and_prints("*main\n    x as u64 is 0 - 1\n    log(x > 100)\n", "1");
+}
+
+#[test]
+fn comptime_does_not_fold_pure_calls_through_failed_branches() {
+    accepts_and_prints(
+        "*f(a as i64) returns i64\n    if a > 0\n        s is 'hi'\n        return 10\n    return 20\n\n*main\n    log(f(5))\n",
+        "10",
+    );
+}
+
+#[test]
+fn store_block_methods_reject_with_guidance() {
+    rejects(
+        "store users\n    name as String\n\n    *total() returns i64\n        count users\n\n*main\n    log(1)\n",
+        &["not supported in alpha"],
+    );
+}
+
+#[test]
+fn migration_drop_without_down_type_rejects() {
+    rejects(
+        "store items @simple\n    name as String\n\nmigration 'drop_price' version 1\n    up\n        alter items\n            drop price\n\n*main\n    log(count items)\n",
+        &["cannot determine the field's position"],
+    );
+}
+
+#[test]
+fn quaternary_err_arm_type_mismatch_rejects() {
+    rejects(
+        "err OpErr\n    Boom\n\n*risky() returns Result of i64, OpErr\n    Ok(1)\n\n*main\n    v is risky() ? $ !! 'text'\n    log(v)\n",
+        &["type"],
+    );
+}

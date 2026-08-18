@@ -37,8 +37,8 @@ type ProcessResult
 *capture(cmd as String) returns String
     result is run(cmd)
     out is result.output
-    if out.length > 0 and out.char_at(out.length - 1) equals 10
-        return out.slice(0, out.length - 1)
+    if out.byte_count > 0 and out.char_at(out.byte_count - 1) equals 10
+        return out.slice(0, out.byte_count - 1)
     out
 
 *lines(cmd as String) returns Vec of String
@@ -46,8 +46,8 @@ type ProcessResult
     if result.exit_code neq 0
         return vec()
     out is result.output
-    if out.length > 0 and out.char_at(out.length - 1) equals 10
-        out is out.slice(0, out.length - 1)
+    if out.byte_count > 0 and out.char_at(out.byte_count - 1) equals 10
+        out is out.slice(0, out.byte_count - 1)
     out.split("\n")
 
 *succeeds(cmd as String) returns bool
@@ -112,8 +112,8 @@ type ProcessResult
     if result.exit_code neq 0
         return vec()
     out is result.output
-    if out.length > 0 and out.char_at(out.length - 1) equals 10
-        out is out.slice(0, out.length - 1)
+    if out.byte_count > 0 and out.char_at(out.byte_count - 1) equals 10
+        out is out.slice(0, out.byte_count - 1)
     out.split("\n")
 
 *spawn_succeeds(prog as String, args as Vec of String) returns bool

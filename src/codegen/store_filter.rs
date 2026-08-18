@@ -114,7 +114,24 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
 
-        let len = b!(self.bld.build_load(i64t, buf_ptr, "str.len")).into_int_value();
+        let raw_len = b!(self.bld.build_load(i64t, buf_ptr, "str.len")).into_int_value();
+        let max_data = i64t.const_int(crate::codegen::stores::STRING_BUF_SIZE - 8, false);
+        let zero = i64t.const_int(0, false);
+        let too_big = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::SGT,
+            raw_len,
+            max_data,
+            "str.len.big"
+        ));
+        let capped = b!(self
+            .bld
+            .build_select(too_big, max_data, raw_len, "str.len.cap"))
+        .into_int_value();
+        let negative =
+            b!(self
+                .bld
+                .build_int_compare(inkwell::IntPredicate::SLT, capped, zero, "str.len.neg"));
+        let len = b!(self.bld.build_select(negative, zero, capped, "str.len.ok")).into_int_value();
 
         let data_src = unsafe {
             b!(self

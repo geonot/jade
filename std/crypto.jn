@@ -52,7 +52,7 @@ extern *free(ptr as %i8)
 
 *hmac(alg as String, key as String, data as String) returns String
     out is extern.malloc(64)
-    n is extern.jinn_evp_hmac(%alg, %key, key.length, %data, data.length, out)
+    n is extern.jinn_evp_hmac(%alg, %key, key.byte_count, %data, data.byte_count, out)
     if n < 0
         extern.free(out)
         return ""
@@ -69,7 +69,7 @@ extern *free(ptr as %i8)
 *hmac_sha256(key as String, data as String) returns String
     out_buf is extern.malloc(32)
     hex_buf is extern.malloc(65)
-    rc is extern.jinn_hmac_sha256(%key, key.length, %data, data.length, out_buf)
+    rc is extern.jinn_hmac_sha256(%key, key.byte_count, %data, data.byte_count, out_buf)
     if rc neq 0
         extern.free(out_buf)
         extern.free(hex_buf)
@@ -90,11 +90,11 @@ type AeadResult
     ok as bool
 
 *chacha20_poly1305_encrypt(key as String, nonce as String, plaintext as String, aad as String) returns AeadResult
-    if key.length neq 32 or nonce.length neq 12
+    if key.byte_count neq 32 or nonce.byte_count neq 12
         return AeadResult(ciphertext is "", tag is "", ok is false)
-    ct_buf is extern.malloc(plaintext.length + 16)
+    ct_buf is extern.malloc(plaintext.byte_count + 16)
     tag_buf is extern.malloc(16)
-    n is extern.jinn_chacha20_poly1305_encrypt(%key, %nonce, %plaintext, plaintext.length, %aad, aad.length, ct_buf, tag_buf)
+    n is extern.jinn_chacha20_poly1305_encrypt(%key, %nonce, %plaintext, plaintext.byte_count, %aad, aad.byte_count, ct_buf, tag_buf)
     if n < 0
         extern.free(ct_buf)
         extern.free(tag_buf)
@@ -106,10 +106,10 @@ type AeadResult
     AeadResult(ciphertext is ct, tag is tag, ok is true)
 
 *chacha20_poly1305_decrypt(key as String, nonce as String, ciphertext as String, aad as String, tag as String) returns String
-    if key.length neq 32 or nonce.length neq 12 or tag.length neq 16
+    if key.byte_count neq 32 or nonce.byte_count neq 12 or tag.byte_count neq 16
         return ""
-    pt_buf is extern.malloc(ciphertext.length + 1)
-    n is extern.jinn_chacha20_poly1305_decrypt(%key, %nonce, %ciphertext, ciphertext.length, %aad, aad.length, %tag, pt_buf)
+    pt_buf is extern.malloc(ciphertext.byte_count + 1)
+    n is extern.jinn_chacha20_poly1305_decrypt(%key, %nonce, %ciphertext, ciphertext.byte_count, %aad, aad.byte_count, %tag, pt_buf)
     if n < 0
         extern.free(pt_buf)
         return ""
@@ -122,7 +122,7 @@ type AeadResult
     if dklen <= 0 or iters < 1
         return ""
     out is extern.malloc(dklen)
-    rc is extern.jinn_pbkdf2(%alg, %password, password.length, %salt, salt.length, iters, dklen, out)
+    rc is extern.jinn_pbkdf2(%alg, %password, password.byte_count, %salt, salt.byte_count, iters, dklen, out)
     if rc neq 0
         extern.free(out)
         return ""
@@ -141,7 +141,7 @@ type AeadResult
     if dklen <= 0
         return ""
     out is extern.malloc(dklen)
-    rc is extern.jinn_scrypt(%password, password.length, %salt, salt.length, n, r, p, dklen, out)
+    rc is extern.jinn_scrypt(%password, password.byte_count, %salt, salt.byte_count, n, r, p, dklen, out)
     if rc neq 0
         extern.free(out)
         return ""
@@ -154,11 +154,11 @@ type AeadResult
 
 
 *secure_compare(a as String, b as String) returns bool
-    if a.length neq b.length
+    if a.byte_count neq b.byte_count
         return false
     diff is 0
     i is 0
-    while i < a.length
+    while i < a.byte_count
         diff is diff | (a.char_at(i) ^ b.char_at(i))
         i is i + 1
     diff equals 0
@@ -171,20 +171,20 @@ type AeadResult
     __hex_to_bytes(hex)
 
 *__bytes_to_hex(data as String) returns String
-    if data.length equals 0
+    if data.byte_count equals 0
         return ""
-    hex_buf is extern.malloc(data.length * 2 + 1)
-    extern.jinn_bytes_to_hex(%data, data.length, hex_buf)
+    hex_buf is extern.malloc(data.byte_count * 2 + 1)
+    extern.jinn_bytes_to_hex(%data, data.byte_count, hex_buf)
     result is __string_from_ptr(hex_buf)
     extern.free(hex_buf)
     result
 
 *__hex_to_bytes(hex as String) returns String
-    if hex.length equals 0 or hex.length mod 2 neq 0
+    if hex.byte_count equals 0 or hex.byte_count mod 2 neq 0
         return ""
-    n is hex.length / 2
+    n is hex.byte_count / 2
     buf is extern.malloc(n)
-    rc is extern.jinn_hex_to_bytes(%hex, hex.length, buf)
+    rc is extern.jinn_hex_to_bytes(%hex, hex.byte_count, buf)
     if rc < 0
         extern.free(buf)
         return ""

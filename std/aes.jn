@@ -21,13 +21,13 @@ type GcmHex
 
 
 *gcm_encrypt(key as String, iv as String, plaintext as String, aad as String) returns GcmResult
-    if key.length neq 32
+    if key.byte_count neq 32
         return GcmResult(ciphertext is "", tag is "", ok is false)
-    if iv.length neq 12
+    if iv.byte_count neq 12
         return GcmResult(ciphertext is "", tag is "", ok is false)
-    ct_buf is extern.malloc(plaintext.length + 16)
+    ct_buf is extern.malloc(plaintext.byte_count + 16)
     tag_buf is extern.malloc(16)
-    ct_len is extern.jinn_aes_gcm_encrypt(%key, %iv, %plaintext, plaintext.length, %aad, aad.length, ct_buf, tag_buf)
+    ct_len is extern.jinn_aes_gcm_encrypt(%key, %iv, %plaintext, plaintext.byte_count, %aad, aad.byte_count, ct_buf, tag_buf)
     if ct_len < 0
         extern.free(ct_buf)
         extern.free(tag_buf)
@@ -39,10 +39,10 @@ type GcmHex
     GcmResult(ciphertext is ct_str, tag is tag_str, ok is true)
 
 *gcm_decrypt(key as String, iv as String, ciphertext as String, aad as String, tag as String) returns String
-    if key.length neq 32 or iv.length neq 12 or tag.length neq 16
+    if key.byte_count neq 32 or iv.byte_count neq 12 or tag.byte_count neq 16
         return ""
-    pt_buf is extern.malloc(ciphertext.length + 1)
-    pt_len is extern.jinn_aes_gcm_decrypt(%key, %iv, %ciphertext, ciphertext.length, %aad, aad.length, %tag, pt_buf)
+    pt_buf is extern.malloc(ciphertext.byte_count + 1)
+    pt_len is extern.jinn_aes_gcm_decrypt(%key, %iv, %ciphertext, ciphertext.byte_count, %aad, aad.byte_count, %tag, pt_buf)
     if pt_len < 0
         extern.free(pt_buf)
         return ""
@@ -63,10 +63,10 @@ type GcmHex
 
 
 *cbc_encrypt(key as String, iv as String, plaintext as String) returns String
-    if key.length neq 32 or iv.length neq 16
+    if key.byte_count neq 32 or iv.byte_count neq 16
         return ""
-    out_buf is extern.malloc(plaintext.length + 32)
-    n is extern.jinn_aes_cbc_encrypt(%key, %iv, %plaintext, plaintext.length, out_buf)
+    out_buf is extern.malloc(plaintext.byte_count + 32)
+    n is extern.jinn_aes_cbc_encrypt(%key, %iv, %plaintext, plaintext.byte_count, out_buf)
     if n < 0
         extern.free(out_buf)
         return ""
@@ -75,10 +75,10 @@ type GcmHex
     result
 
 *cbc_decrypt(key as String, iv as String, ciphertext as String) returns String
-    if key.length neq 32 or iv.length neq 16
+    if key.byte_count neq 32 or iv.byte_count neq 16
         return ""
-    out_buf is extern.malloc(ciphertext.length + 1)
-    n is extern.jinn_aes_cbc_decrypt(%key, %iv, %ciphertext, ciphertext.length, out_buf)
+    out_buf is extern.malloc(ciphertext.byte_count + 1)
+    n is extern.jinn_aes_cbc_decrypt(%key, %iv, %ciphertext, ciphertext.byte_count, out_buf)
     if n < 0
         extern.free(out_buf)
         return ""
@@ -88,22 +88,22 @@ type GcmHex
 
 
 *__bytes_to_hex(data as String) returns String
-    if data.length equals 0
+    if data.byte_count equals 0
         return ""
-    hex_buf is extern.malloc(data.length * 2 + 1)
-    extern.jinn_bytes_to_hex(%data, data.length, hex_buf)
+    hex_buf is extern.malloc(data.byte_count * 2 + 1)
+    extern.jinn_bytes_to_hex(%data, data.byte_count, hex_buf)
     result is __string_from_ptr(hex_buf)
     extern.free(hex_buf)
     result
 
 *__hex_to_bytes(hex as String) returns String
-    if hex.length equals 0
+    if hex.byte_count equals 0
         return ""
-    if hex.length mod 2 neq 0
+    if hex.byte_count mod 2 neq 0
         return ""
-    n is hex.length / 2
+    n is hex.byte_count / 2
     buf is extern.malloc(n)
-    rc is extern.jinn_hex_to_bytes(%hex, hex.length, buf)
+    rc is extern.jinn_hex_to_bytes(%hex, hex.byte_count, buf)
     if rc < 0
         extern.free(buf)
         return ""

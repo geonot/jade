@@ -260,6 +260,26 @@ void jinn_store_drop_indexes(const char *store_path) {
     }
     closedir(d);
 }
+int64_t jinn_store_read_count_checked(FILE *fp, int64_t rec_size, const char *path) {
+    if (!fp || rec_size <= 0) return 0;
+    int64_t count = 0;
+    if (fseek(fp, 8, SEEK_SET) != 0 || fread(&count, 8, 1, fp) != 1) {
+        fseek(fp, 0, SEEK_END);
+        return 0;
+    }
+    if (fseek(fp, 0, SEEK_END) != 0) return 0;
+    long file_end = ftell(fp);
+    int64_t max_records = file_end >= 40 ? ((int64_t)file_end - 40) / rec_size : 0;
+    if (count < 0 || count > max_records) {
+        fprintf(stderr,
+                "jinn: store %s: header claims %lld records but the file holds at "
+                "most %lld — the store is corrupt or truncated; refusing to read "
+                "past the end of the file\n",
+                path ? path : "(store)", (long long)count, (long long)max_records);
+        exit(2);
+    }
+    return count;
+}
 #define JINN_STORE_LOCK_MAX 64
 typedef struct {
     char            path[256];

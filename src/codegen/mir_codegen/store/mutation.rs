@@ -57,7 +57,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
 
-        let count = self.store_read_count(fp)?;
+        let count = self.store_read_count(fp, rec_size, store_name)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
 
         let fv = self.cur_fn.expect("ICE: cur_fn not set");
@@ -384,14 +384,16 @@ impl<'ctx> Compiler<'ctx> {
         if args.is_empty() {
             return Ok(self.ctx.i64_type().const_int(0, false).into());
         }
-        let (sd, st, rec_size, fp) = self.setup_store_access(store_name)?;
+        let (sd, st, rec_size, _fp) = self.setup_store_access(store_name)?;
+        let fp = self.store_lock(store_name)?;
         let i64t = self.ctx.i64_type();
         let i32t = self.ctx.i32_type();
 
         let sid_val = self.val(args[0]).into_int_value();
 
-        let count = self.store_read_count(fp)?;
+        let count = self.store_read_count(fp, rec_size, store_name)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
+        self.store_unlock(store_name, fp)?;
 
         let result_ptr = self.entry_alloca(st.into(), "get.result");
         let memset_fn = crate::codegen::fn_or_die(&self.module, "memset");
@@ -511,7 +513,8 @@ impl<'ctx> Compiler<'ctx> {
         if args.is_empty() {
             return Ok(self.ctx.bool_type().const_int(0, false).into());
         }
-        let (sd, st, rec_size, fp) = self.setup_store_access(store_name)?;
+        let (sd, st, rec_size, _fp) = self.setup_store_access(store_name)?;
+        let fp = self.store_lock(store_name)?;
         let i64t = self.ctx.i64_type();
 
         let (field_idx, field_ty) = sd
@@ -524,8 +527,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let filter_val = self.value_map[&args[0]];
 
-        let count = self.store_read_count(fp)?;
+        let count = self.store_read_count(fp, rec_size, store_name)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
+        self.store_unlock(store_name, fp)?;
 
         let fv = self.cur_fn.expect("ICE: cur_fn not set");
         let found_ptr = self.entry_alloca(self.ctx.bool_type().into(), "exists.found");

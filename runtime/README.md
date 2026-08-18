@@ -75,7 +75,7 @@ corresponding `src/codegen/` file.
 | `vec.c` | SSO string ABI + slice helpers + deque ABI | `src/codegen/strings.rs`, `src/codegen/vec.rs` |
 | `vector.c` | Vector / nearest-neighbour store extension | `src/codegen/mir_codegen/store_ext.rs` |
 | `version.c` | Versioned record store extension | `src/codegen/mir_codegen/store_ext.rs` |
-| `wal.c` | Write-ahead log + group commit + replay | `src/codegen/mir_codegen/store.rs` |
+| `wal.c` | Write-ahead log + group commit + replay; transactions bracket their frames with `TXN_BEGIN` (payload: pre-transaction data-file snapshot, the undo image) and `TXN_COMMIT`, and replay drops everything after an unmatched begin | `src/codegen/mir_codegen/store.rs` |
 
 ## Adding a new runtime function
 

@@ -45,7 +45,7 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_call(ensure_fn, &[], ""));
         }
 
-        let fp = self.load_store_fp(store_name)?;
+        let fp = self.store_lock(store_name)?;
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
 
@@ -66,8 +66,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let deleted_idx = sd.fields.iter().position(|f| f.name == "deleted");
 
-        let total_count = self.store_read_count(fp)?;
+        let total_count = self.store_read_count(fp, rec_size, store_name)?;
         let buf = self.store_load_records(fp, total_count, rec_size)?;
+        self.store_unlock(store_name, fp)?;
 
         let header_ty = self.vec_header_type();
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
@@ -278,7 +279,7 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_call(ensure_fn, &[], ""));
         }
 
-        let fp = self.load_store_fp(store_name)?;
+        let fp = self.store_lock(store_name)?;
         let i64t = self.ctx.i64_type();
         let f64t = self.ctx.f64_type();
         let i8t = self.ctx.i8_type();
@@ -321,8 +322,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let deleted_idx = sd.fields.iter().position(|f| f.name == "deleted");
 
-        let total_count = self.store_read_count(fp)?;
+        let total_count = self.store_read_count(fp, rec_size, store_name)?;
         let buf = self.store_load_records(fp, total_count, rec_size)?;
+        self.store_unlock(store_name, fp)?;
 
         let calloc_fn = self.ensure_calloc();
         let cap = b!(self.bld.build_int_add(
@@ -763,7 +765,7 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_call(ensure_fn, &[], ""));
         }
 
-        let fp = self.load_store_fp(store_name)?;
+        let fp = self.store_lock(store_name)?;
         let i64t = self.ctx.i64_type();
         let f64t = self.ctx.f64_type();
 
@@ -790,8 +792,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let deleted_idx = sd.fields.iter().position(|f| f.name == "deleted");
 
-        let total_count = self.store_read_count(fp)?;
+        let total_count = self.store_read_count(fp, rec_size, store_name)?;
         let buf = self.store_load_records(fp, total_count, rec_size)?;
+        self.store_unlock(store_name, fp)?;
 
         let fv = self.cur_fn.expect("ICE: cur_fn not set");
 
@@ -1131,7 +1134,7 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_call(ensure_fn, &[], ""));
         }
 
-        let fp = self.load_store_fp(store_name)?;
+        let fp = self.store_lock(store_name)?;
         let i64t = self.ctx.i64_type();
         let f64t = self.ctx.f64_type();
         let i8t = self.ctx.i8_type();
@@ -1203,8 +1206,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let deleted_idx = sd.fields.iter().position(|f| f.name == "deleted");
 
-        let total_count = self.store_read_count(fp)?;
+        let total_count = self.store_read_count(fp, rec_size, store_name)?;
         let buf = self.store_load_records(fp, total_count, rec_size)?;
+        self.store_unlock(store_name, fp)?;
 
         let calloc_fn = self.ensure_calloc();
         let cap = b!(self.bld.build_int_add(

@@ -55,10 +55,10 @@ type File @resource
         sb
 
     *write(data as String)
-        extern.fwrite(%data, 1, data.length, self.handle)
+        extern.fwrite(%data, 1, data.byte_count, self.handle)
 
     *write_line(data as String)
-        extern.fwrite(%data, 1, data.length, self.handle)
+        extern.fwrite(%data, 1, data.byte_count, self.handle)
         extern.fwrite("\n", 1, 1, self.handle)
 
     *seek(offset as i64, whence as i32)
@@ -129,7 +129,7 @@ type File @resource
     fp is extern.fopen(%path, "w")
     if fp as i64 equals 0
         return false
-    extern.fwrite(%content, 1, content.length, fp)
+    extern.fwrite(%content, 1, content.byte_count, fp)
     extern.fclose(fp)
     true
 
@@ -137,7 +137,7 @@ type File @resource
     fp is extern.fopen(%path, "wb")
     if fp as i64 equals 0
         return false
-    extern.fwrite(%content, 1, content.length, fp)
+    extern.fwrite(%content, 1, content.byte_count, fp)
     extern.fclose(fp)
     true
 
@@ -145,7 +145,7 @@ type File @resource
     fp is extern.fopen(%path, "a")
     if fp as i64 equals 0
         return false
-    extern.fwrite(%content, 1, content.length, fp)
+    extern.fwrite(%content, 1, content.byte_count, fp)
     extern.fclose(fp)
     true
 
@@ -154,7 +154,7 @@ type File @resource
     if fp as i64 equals 0
         return false
     loop lines
-        extern.fwrite(%$, 1, $.length, fp)
+        extern.fwrite(%$, 1, $.byte_count, fp)
         extern.fwrite("\n", 1, 1, fp)
     extern.fclose(fp)
     true
@@ -198,11 +198,11 @@ type File @resource
 
 
 *eprint(s as String)
-    extern.write(2, %s, s.length)
+    extern.write(2, %s, s.byte_count)
 
 *eprintln(s as String)
     msg is s + "\n"
-    extern.write(2, %msg, msg.length)
+    extern.write(2, %msg, msg.byte_count)
 
 *read_stdin(max_bytes as i64) returns String
     buf is extern.malloc(max_bytes)

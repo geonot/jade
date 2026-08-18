@@ -72,8 +72,13 @@ Load-bearing design facts:
   scan roots — a send joins the handler's row through the method-name bucket,
   and a spawn joins every handler of the spawned actor. The remaining gaps
   are `E-2` and `E-3` in [`roadmap.md`](roadmap.md#types-errors-and-effects).
-- **`src/comptime/` is constant folding of inferred-pure functions** (HIR→HIR),
-  not user-facing metaprogramming.
+- **`src/comptime/` is literal-only constant folding** (HIR→HIR), not
+  user-facing metaprogramming. Folds are type-gated to `i64`/`f64` operands so
+  a fold can never change width or signedness semantics. The pure-function-call
+  evaluator was deleted in [166]: its `None` return conflated "no value yet"
+  with "cannot evaluate", so a failed evaluation inside a taken `if` branch
+  fell through to later statements and folded calls to the wrong constant
+  (HIR-1) — any successor needs a tri-state evaluation result.
 - **MIR verify runs in release, on every compile path**, not just debug. It
   checks phi and edge types, which is what catches join points whose incoming
   values disagree. `JINN_MIR_VERIFY=0` opts out; a failure is a compiler bug.

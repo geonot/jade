@@ -26,15 +26,15 @@ type ParsedUrl
     scheme is "http"
     if url.starts_with("https://")
         scheme is "https"
-        rest is url.slice(8, url.length)
+        rest is url.slice(8, url.byte_count)
     elif url.starts_with("http://")
-        rest is url.slice(7, url.length)
+        rest is url.slice(7, url.byte_count)
     slash_pos is rest.find("/")
     host_part is rest
     the_path is "/"
     if slash_pos >= 0
         host_part is rest.slice(0, slash_pos)
-        the_path is rest.slice(slash_pos, rest.length)
+        the_path is rest.slice(slash_pos, rest.byte_count)
     colon_pos is host_part.find(":")
     the_host is host_part
     the_port is 80
@@ -42,7 +42,7 @@ type ParsedUrl
         the_port is 443
     if colon_pos >= 0
         the_host is host_part.slice(0, colon_pos)
-        the_port is convert.parse_int(host_part.slice(colon_pos + 1, host_part.length))
+        the_port is convert.parse_int(host_part.slice(colon_pos + 1, host_part.byte_count))
     ParsedUrl(scheme is scheme, host is the_host, port is the_port, path is the_path)
 
 
@@ -54,12 +54,12 @@ type ParsedUrl
     sb.write("Host: " + parsed.host + "\r\n")
     sb.write("Connection: close\r\n")
     sb.write("User-Agent: jinn/0.5\r\n")
-    if body.length > 0
-        sb.write("Content-Length: " + to_string(body.length) + "\r\n")
+    if body.byte_count > 0
+        sb.write("Content-Length: " + to_string(body.byte_count) + "\r\n")
     loop extra_headers
         sb.write($.name + ": " + $.value + "\r\n")
     sb.write("\r\n")
-    if body.length > 0
+    if body.byte_count > 0
         sb.write(body)
     req_str is sb.to_string()
 
@@ -89,9 +89,9 @@ type ParsedUrl
     extern.free(addr)
 
     sent is 0
-    while sent < req_str.length
-        remaining is req_str.slice(sent, req_str.length)
-        n is extern.jinn_send(fd, %remaining, remaining.length, 0)
+    while sent < req_str.byte_count
+        remaining is req_str.slice(sent, req_str.byte_count)
+        n is extern.jinn_send(fd, %remaining, remaining.byte_count, 0)
         if n <= 0
             break
         sent is sent + n
@@ -116,17 +116,17 @@ type ParsedUrl
         return HttpResponse(status is 0, headers is vec(), body is raw)
 
     header_section is raw.slice(0, sep_pos)
-    resp_body is raw.slice(sep_pos + 4, raw.length)
+    resp_body is raw.slice(sep_pos + 4, raw.byte_count)
 
     lines is header_section.split("\r\n")
     status_line is lines.get(0)
     sp1 is status_line.find(" ")
     if sp1 < 0
         return HttpResponse(status is 0, headers is vec(), body is resp_body)
-    rest is status_line.slice(sp1 + 1, status_line.length)
+    rest is status_line.slice(sp1 + 1, status_line.byte_count)
     sp2 is rest.find(" ")
     if sp2 < 0
-        sp2 is rest.length
+        sp2 is rest.byte_count
     status_str is rest.slice(0, sp2)
     status_code is convert.parse_int(status_str)
 
@@ -136,7 +136,7 @@ type ParsedUrl
             colon is $.find(":")
             if colon > 0
                 hname is $.slice(0, colon).trim()
-                hvalue is $.slice(colon + 1, $.length).trim()
+                hvalue is $.slice(colon + 1, $.byte_count).trim()
                 headers.push(HttpHeader(name is hname, value is hvalue))
 
     HttpResponse(status is status_code, headers is headers, body is resp_body)
@@ -183,12 +183,12 @@ type ConnectionPool
         sb.write("Host: " + parsed.host + "\r\n")
         sb.write("Connection: keep-alive\r\n")
         sb.write("User-Agent: jinn/0.5\r\n")
-        if body.length > 0
-            sb.write("Content-Length: " + to_string(body.length) + "\r\n")
+        if body.byte_count > 0
+            sb.write("Content-Length: " + to_string(body.byte_count) + "\r\n")
         loop extra_headers
             sb.write($.name + ": " + $.value + "\r\n")
         sb.write("\r\n")
-        if body.length > 0
+        if body.byte_count > 0
             sb.write(body)
         req_str is sb.to_string()
 
@@ -237,9 +237,9 @@ type ConnectionPool
         p.entries.push(PoolEntry(host is parsed.host, port is parsed.port, fd is fd, is_tls is false))
 
     sent is 0
-    while sent < req_str.length
-        remaining is req_str.slice(sent, req_str.length)
-        n is extern.jinn_send(fd, %remaining, remaining.length, 0)
+    while sent < req_str.byte_count
+        remaining is req_str.slice(sent, req_str.byte_count)
+        n is extern.jinn_send(fd, %remaining, remaining.byte_count, 0)
         if n <= 0
             break
         sent is sent + n

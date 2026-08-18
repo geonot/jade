@@ -67,13 +67,13 @@ type TcpStream @resource
         __string_from_raw(buf, n, max_bytes + 1)
 
     *write(data as String)
-        extern.jinn_send(self.fd, %data, data.length, 0)
+        extern.jinn_send(self.fd, %data, data.byte_count, 0)
 
     *write_all(data as String)
         sent is 0
-        while sent < data.length
-            remaining is data.slice(sent, data.length)
-            n is extern.jinn_send(self.fd, %remaining, remaining.length, 0)
+        while sent < data.byte_count
+            remaining is data.slice(sent, data.byte_count)
+            n is extern.jinn_send(self.fd, %remaining, remaining.byte_count, 0)
             if n <= 0
                 return false
             sent is sent + n
@@ -94,7 +94,7 @@ type UdpSocket @resource
 
     *send_to(data as String, host as String, port as i64)
         addr is __make_sockaddr(host, port)
-        extern.jinn_sendto(self.fd, %data, data.length, 0, addr, SOCKADDR_IN_SIZE)
+        extern.jinn_sendto(self.fd, %data, data.byte_count, 0, addr, SOCKADDR_IN_SIZE)
         extern.free(addr)
 
     *recv_from(max_bytes)

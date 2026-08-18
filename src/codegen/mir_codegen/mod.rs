@@ -196,9 +196,12 @@ impl<'ctx> Compiler<'ctx> {
                 })
                 .collect();
             let ft = self.mk_fn_type(&ext.ret, &ptys, false);
-            let fv = self
-                .module
-                .add_function(&ext.name.as_str(), ft, Some(Linkage::External));
+            let fv = match self.module.get_function(&ext.name.as_str()) {
+                Some(existing) => existing,
+                None => self
+                    .module
+                    .add_function(&ext.name.as_str(), ft, Some(Linkage::External)),
+            };
             fv.add_attribute(
                 inkwell::attributes::AttributeLoc::Function,
                 self.attr("nounwind"),

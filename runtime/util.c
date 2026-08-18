@@ -2,6 +2,15 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include "jinn_rt.h"
+int64_t jinn_f64_format(double v, char *buf) {
+    for (int prec = 15; prec <= 17; prec++) {
+        int n = snprintf(buf, 32, "%.*g", prec, v);
+        if (n < 0 || n >= 32) break;
+        if (strtod(buf, NULL) == v) return n;
+    }
+    int n = snprintf(buf, 32, "%.17g", v);
+    return n < 0 ? 0 : (n >= 32 ? 31 : n);
+}
 void *jinn_xmalloc(size_t size) {
     void *p = malloc(size);
     if (!p && size > 0) {

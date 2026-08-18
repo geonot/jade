@@ -248,3 +248,31 @@ fn fmt_output_still_frontend_checks_over_corpus() {
         failures.join("\n")
     );
 }
+
+#[test]
+fn fmt_keeps_list_comprehension_to_and_if_clauses() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("comp.jn");
+    let src = "*main\n    xs is [i * 2 for i in 0 to 10 if i > 3]\n    log(xs.length)\n";
+    std::fs::write(&path, src).unwrap();
+
+    let out = Command::new(jinn())
+        .args(["fmt", "--write"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "fmt --write must succeed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let formatted = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        formatted.contains("to 10"),
+        "the `to` clause must survive formatting: {formatted}"
+    );
+    assert!(
+        formatted.contains("if i > 3"),
+        "the `if` clause must survive formatting: {formatted}"
+    );
+}

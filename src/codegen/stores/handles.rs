@@ -213,7 +213,30 @@ impl<'ctx> Compiler<'ctx> {
         let is_transient = sd
             .decorators
             .contains(&crate::ast::StoreDecorator::Transient);
-        b!(self.bld.build_conditional_branch(is_null, open_bb, done_bb));
+        let lock_bb = self.ctx.append_basic_block(fv, "open_lock");
+        let unlock_done_bb = self.ctx.append_basic_block(fv, "open_lost_race");
+        let release_bb = self.ctx.append_basic_block(fv, "open_release");
+        b!(self.bld.build_conditional_branch(is_null, lock_bb, done_bb));
+
+        self.bld.position_at_end(lock_bb);
+        self.store_wlock_call(&name.as_str(), "jinn_store_wlock")?;
+        let fp2 = b!(self
+            .bld
+            .build_load(ptr_ty, global.as_pointer_value(), "fp2"));
+        let still_null = b!(self
+            .bld
+            .build_is_null(fp2.into_pointer_value(), "still_null"));
+        b!(self
+            .bld
+            .build_conditional_branch(still_null, open_bb, unlock_done_bb));
+
+        self.bld.position_at_end(unlock_done_bb);
+        self.store_wlock_call(&name.as_str(), "jinn_store_wunlock")?;
+        b!(self.bld.build_unconditional_branch(done_bb));
+
+        self.bld.position_at_end(release_bb);
+        self.store_wlock_call(&name.as_str(), "jinn_store_wunlock")?;
+        b!(self.bld.build_unconditional_branch(done_bb));
 
         self.bld.position_at_end(open_bb);
         let filename = format!("{name}.store\0");
@@ -260,7 +283,7 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
         self.emit_store_recover_call(sd, global.as_pointer_value())?;
-        b!(self.bld.build_unconditional_branch(done_bb));
+        b!(self.bld.build_unconditional_branch(release_bb));
 
         self.bld.position_at_end(init_bb);
         let new_fp: inkwell::values::BasicValueEnum<'ctx> = fp_val;
@@ -352,7 +375,7 @@ impl<'ctx> Compiler<'ctx> {
             self.emit_store_recover_call(sd, global.as_pointer_value())?;
         }
 
-        b!(self.bld.build_unconditional_branch(done_bb));
+        b!(self.bld.build_unconditional_branch(release_bb));
 
         self.bld.position_at_end(done_bb);
         b!(self.bld.build_return(None));
@@ -858,32 +881,11 @@ impl<'ctx> Compiler<'ctx> {
             .ok_or_else(|| format!("unknown field '{field_name}' in '{store_name}'"))?;
         let deleted_idx = sd.fields.iter().position(|f| f.name == "deleted");
 
-        let fp = self.load_store_fp(store_name)?;
+        let fp = self.store_lock(store_name)?;
 
-        let count_buf = self.entry_alloca(i64t.into(), "rb.count");
-        b!(self.bld.build_store(count_buf, i64t.const_int(0, false)));
+        let total = self.store_read_count(fp, rec_size, store_name)?;
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
-        b!(self.bld.build_call(
-            fseek_fn,
-            &[
-                fp.into(),
-                i64t.const_int(8, false).into(),
-                i32t.const_int(0, false).into()
-            ],
-            ""
-        ));
         let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
-        b!(self.bld.build_call(
-            fread_fn,
-            &[
-                count_buf.into(),
-                i64t.const_int(8, false).into(),
-                i64t.const_int(1, false).into(),
-                fp.into(),
-            ],
-            ""
-        ));
-        let total = b!(self.bld.build_load(i64t, count_buf, "rb.n")).into_int_value();
 
         let i_ptr = self.entry_alloca(i64t.into(), "rb.i");
         b!(self.bld.build_store(i_ptr, i64t.const_int(0, false)));
@@ -965,6 +967,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_unconditional_branch(cond_bb));
 
         self.bld.position_at_end(end_bb);
+        self.store_unlock(store_name, fp)?;
         Ok(())
     }
 }

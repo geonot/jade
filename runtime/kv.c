@@ -18,8 +18,9 @@ __attribute__((weak)) void jinn_txn_track_mem(void *key, void (*rb)(void *),
 }
 __attribute__((weak)) void jinn_store_truncation_warn(int64_t original_len,
                                                       int64_t max_len) {
-    (void)original_len;
-    (void)max_len;
+    fprintf(stderr,
+            "jinn: warning: store string truncated from %lld to %lld bytes\n",
+            (long long)original_len, (long long)max_len);
 }
 
 #define KV_MAGIC      "JINNKV\0\0"

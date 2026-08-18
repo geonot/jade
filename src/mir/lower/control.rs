@@ -127,21 +127,27 @@ impl Lowerer {
 
                 let is_enum = matches!(m.subject.ty, Type::Enum(_));
                 let has_ctor = m.arms.iter().any(|a| matches!(a.pat, Pat::Ctor(..)));
-                let all_lit = m
-                    .arms
-                    .iter()
-                    .all(|a| matches!(a.pat, Pat::Lit(_) | Pat::Wild(_)));
+                let all_lit = m.arms.iter().all(|a| match &a.pat {
+                    Pat::Lit(e) => {
+                        matches!(e.kind, hir::ExprKind::Int(_) | hir::ExprKind::Bool(_))
+                    }
+                    Pat::Wild(_) => true,
+                    _ => false,
+                });
                 let result_ty = m.ty.clone();
                 let has_result = !matches!(result_ty, Type::Void);
 
                 let has_dup_tags = {
                     let mut seen = HashSet::new();
-                    m.arms.iter().any(|a| {
-                        if let Pat::Ctor(_, tag, _, _) = &a.pat {
-                            !seen.insert(*tag)
-                        } else {
-                            false
-                        }
+                    let mut seen_lits = HashSet::new();
+                    m.arms.iter().any(|a| match &a.pat {
+                        Pat::Ctor(_, tag, _, _) => !seen.insert(*tag),
+                        Pat::Lit(e) => match &e.kind {
+                            hir::ExprKind::Int(n) => !seen_lits.insert(*n),
+                            hir::ExprKind::Bool(b) => !seen_lits.insert(*b as i64),
+                            _ => false,
+                        },
+                        _ => false,
                     })
                 };
 

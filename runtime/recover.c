@@ -118,6 +118,40 @@ int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
         jinn_wal_close(wal);
         return 0;
     }
+
+    unsigned char *undo = NULL;
+    int64_t undo_len = 0;
+    int force_rewrite = 0;
+    int have_undo = jinn_wal_uncommitted_begin(wal, &undo, &undo_len);
+    if (have_undo) {
+        static const char MAGIC[8] = {'J','A','D','E','S','T','R','\0'};
+        int64_t u_count = -1, u_rec_size = -1;
+        if (undo_len >= REC_HEADER && undo && memcmp(undo, MAGIC, 8) == 0) {
+            memcpy(&u_count, undo + 8, 8);
+            memcpy(&u_rec_size, undo + 16, 8);
+        }
+        if (u_count >= 0 && (u_rec_size == rec_size || u_count == 0) &&
+            REC_HEADER + u_count * rec_size <= undo_len) {
+            fprintf(stderr,
+                    "jinn: recover: %s: an interrupted transaction left "
+                    "uncommitted writes — restoring the pre-transaction "
+                    "state\n",
+                    store_path);
+            count = u_count;
+            memcpy(&fingerprint, undo + 24, 8);
+            memcpy(&version, undo + 32, 8);
+            force_rewrite = 1;
+        } else {
+            fprintf(stderr,
+                    "jinn: recover: %s: an interrupted transaction was found "
+                    "but its undo image is unusable — the data file may keep "
+                    "that transaction's partial writes\n",
+                    store_path);
+            free(undo);
+            undo = NULL;
+            have_undo = 0;
+        }
+    }
     if (fseek(fp, 0, SEEK_END) != 0) {
         jinn_wal_close(wal);
         return -1;
@@ -129,7 +163,7 @@ int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
         return -1;
     }
     int64_t max_records = ((int64_t)file_bytes - REC_HEADER) / rec_size;
-    if (count > max_records) {
+    if (!have_undo && count > max_records) {
         fprintf(stderr,
                 "jinn: recover: %s: header claims %lld records but the file holds at "
                 "most %lld; refusing to read past the end of the file\n",
@@ -149,22 +183,30 @@ int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
         if (bytes == 0) {
             fprintf(stderr, "jinn: recover: %s: record count %lld overflows\n", store_path,
                     (long long)count);
+            free(undo);
             jinn_wal_close(wal);
             return -1;
         }
         r.rows = (uint8_t *)malloc(bytes);
         if (!r.rows) {
+            free(undo);
             jinn_wal_close(wal);
             return -1;
         }
-        fseek(fp, REC_HEADER, SEEK_SET);
-        if (fread(r.rows, (size_t)rec_size, (size_t)count, fp) != (size_t)count) {
-            fprintf(stderr, "jinn: recover: short read of %s\n", store_path);
-            free(r.rows);
-            jinn_wal_close(wal);
-            return -1;
+        if (have_undo) {
+            memcpy(r.rows, undo + REC_HEADER, bytes);
+        } else {
+            fseek(fp, REC_HEADER, SEEK_SET);
+            if (fread(r.rows, (size_t)rec_size, (size_t)count, fp) != (size_t)count) {
+                fprintf(stderr, "jinn: recover: short read of %s\n", store_path);
+                free(r.rows);
+                jinn_wal_close(wal);
+                return -1;
+            }
         }
     }
+    free(undo);
+    undo = NULL;
     int64_t replayed = jinn_wal_replay(wal, recover_cb, &r);
     int complete = jinn_wal_replay_was_complete() && r.oom == 0;
     if (r.skipped > 0) {
@@ -184,7 +226,7 @@ int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
         return -1;
     }
 
-    if (replayed >= 0 && r.changed > 0) {
+    if (replayed >= 0 && (r.changed > 0 || force_rewrite)) {
         fprintf(stderr,
                 "jinn: recover: %s: restoring %lld record%s from the WAL\n",
                 store_path, (long long)r.changed, r.changed == 1 ? "" : "s");

@@ -24,19 +24,28 @@ acting on its details.
 
 ## Where the language stands
 
-**Open: 28 blockers, ~40 majors, 41+ minors, 5+ coverage gaps** — all from
-the 2026-08-18 18-area adversarial review (ids `TYP-*`, `STO-*`, `STD-*`,
-`DIST-*`, `HIR-*`, `SYN-*`, `PAR-*`, `TDX-*`, `MIR-*`, `CG-*`, `PERF-*`,
-`DIAG-*`, `GATE-*`), which falsified the previous "0 blockers / 0 majors"
-headline by reproducing ~28 blockers and ~53 majors from clean directories on
-first-week-plausible code, all invisible to the green gate battery. The [165]
-pass closed the two soundness workstreams on the critical path (type/ownership
-interior and memory-safety completeness — 18 of the review's blockers) plus a
-batch of cheap high-signal blockers, each pinned in
-`tests/alpha_hardening_pins.rs`; what remains is filed in the review backlog
-section below with the review's stable ids. The pre-review sections further
-down ([162]/[164] residue, ids `O-*`, `T-*`, `E-*`, `S-*`, `X-*`, `N-*`,
-`P-*`) still stand.
+**Open: ~8 blockers, ~30 majors, 40+ minors, 5+ coverage gaps** — the
+remainder of the 2026-08-18 18-area adversarial review (ids `TYP-*`, `STO-*`,
+`STD-*`, `DIST-*`, `HIR-*`, `SYN-*`, `PAR-*`, `TDX-*`, `MIR-*`, `CG-*`,
+`PERF-*`, `DIAG-*`, `GATE-*`), which falsified the previous "0 blockers /
+0 majors" headline by reproducing ~28 blockers and ~53 majors from clean
+directories on first-week-plausible code, all invisible to the green gate
+battery. The [165] pass closed the two soundness workstreams on the critical
+path (type/ownership interior and memory-safety completeness — 18 of the
+review's blockers) plus a batch of cheap high-signal blockers. The [166]
+pass closed the store-engine workstream (WS-3: transactional WAL framing
+with undo images, read locking, validated headers, real migration
+defaults/drops, the fingerprint sentinel), cut comptime to literal-only
+folding, swept the std `.length`-as-byte-count class (118 sites), and took
+the cheap parser/typer/MIR/fmt blockers (`not` precedence, literal range
+errors, duplicate-fn and duplicate-arm rejection, `vector` reservation,
+shortest-round-trip float printing) — pinned across
+`tests/alpha_hardening_pins.rs`, `tests/store_schema.rs`,
+`tests/store_transactions.rs`, and `tests/fmt_nondestructive.rs`.
+Remaining blockers: `DIST-1` (dead spill temp), `DIST-5r` (cross-process
+store access), `STD-5` (dataframe sort), `SYN-4`, `SYN-6`, `MIR-1`,
+`TYP-5`, `TDX-3`. The pre-review sections further down ([162]/[164]
+residue, ids `O-*`, `T-*`, `E-*`, `S-*`, `X-*`, `N-*`, `P-*`) still stand.
 
 - **Memory and ownership** — the [162] accept-then-corrupt holes are closed:
   consuming calls in condition/scrutinee/iterator position are move-tracked,
@@ -76,8 +85,12 @@ down ([162]/[164] residue, ids `O-*`, `T-*`, `E-*`, `S-*`, `X-*`, `N-*`,
   actually batches syncs, all sidecars (`@kv`, `@versioned`, `@vector`,
   `@bloom`, `.idx`, `.fts`, `.col`) roll back with the transaction,
   recovery preserves the WAL when replay is incomplete, and store open
-  never truncates an existing store on a transient error. Failure-path
-  minors remain (`S-1`–`S-4`, `S-9`–`S-12`).
+  never truncates an existing store on a transient error. Since [166],
+  a killed process no longer persists a partial transaction (WAL
+  begin/commit framing with undo images), reads take the store lock and
+  validate the header, migrations apply literal defaults and drop for real,
+  and a crashed migration refuses to auto-adopt. Failure-path minors remain
+  (`S-1`–`S-4`, `S-9`, `S-11`, `S-12`).
 - **Concurrency** — unscoped `dispatch` is rejected instead of silently
   never running, `stop <scope>` works from child tasks, cancellation
   propagates into nested scopes, loop back-edges are cancellation points in
@@ -103,70 +116,98 @@ The open remainder of the 18-area adversarial review, grouped by workstream.
 Ids are the review's; severity per the taxonomy above. Items marked
 *unverified* carry finder-confirmed evidence but no adversarial re-check.
 
-### Store engine (B unless noted; the review's WS-3, all week+-class)
+### Store engine (the review's WS-3 — closed in [166], residue below)
 
-- **STO-1** kill -9 mid-`transaction` durably persists a partial transaction —
-  the WAL has no begin/commit frames, recovery replays whatever landed.
-- **STO-2 / DIST-5** concurrent store access from two actors or tasks is
-  memory- and disk-unsafe: reads take no lock and race the writer on the
-  shared `FILE*` cursor. Alpha scope-gate proposed: compile-error on store
-  access from actor handlers until locking lands.
-- **STO-3** `migration ... drop <field>` computes offsets against the
-  post-migration layout — silently does nothing, then logs the migration as
-  applied.
-- **STO-5** the read path trusts the data-file header unconditionally —
-  an inflated count or truncated `.store` yields silently-accepted garbage
-  rows.
-- **STO-6** a crashed migration durably leaves `fingerprint=0`, which
-  auto-adopts on next open.
-- **STO-4** (M) migration `add ... default <expr>` parses the default and
-  discards it; **STO-8** (M) store string fields silently truncate at 248
-  bytes; **STORE-1** (M) mismatched quaternary-bind arms accepted then
-  malformed-lower; **DIST-4** (M) `store` + `extern *malloc` fails to link
-  (extern declarations are not deduplicated by symbol).
+[166] closed the store-engine blockers: the WAL brackets every transaction
+with `TXN_BEGIN`/`TXN_COMMIT` frames — the begin frame carries the
+pre-transaction data-file snapshot as an undo image, and recovery restores it
+and drops the frames of an unmatched begin, so kill -9 mid-`transaction` no
+longer persists a partial transaction (STO-1; pinned in
+`tests/store_transactions.rs`). Every read path (`count`, `all`, queries,
+aggregates, graph/fts traversal, index rebuild, and store open itself) now
+takes the store writer lock and validates the header count against the file
+size through `jinn_store_read_count_checked` — corrupt or truncated stores
+refuse loudly instead of yielding garbage rows, and in-process reader/writer
+and double-open races are gone (STO-2 in-process, STO-5, S-10; pinned in
+`tests/store_schema.rs`). Migration `add ... default <literal>` applies the
+default to existing rows, `drop` removes the field for real (see residue),
+migration rewrites stamp a `-1` in-progress fingerprint that the next open
+refuses with guidance instead of silently adopting (STO-6), mismatched
+quaternary arms reject at the type level (STORE-1), and extern declarations
+reuse the compiler's own (`store` + `extern *malloc` links — DIST-4).
+
+Residue:
+
+- **STO-3r** (m) migration `drop` removes the record's *final* field only and
+  requires the matching `add <field> as <type>` in the `down` block (that is
+  where the type comes from); any other shape is a compile error. Mid-record
+  drops need a persisted schema history.
+- **STO-8r** (M) store string fields still cap at 248 bytes (fixed 256-byte
+  slots). [166] made the failure honest: the truncation warning can no longer
+  be silenced by link order (the weak no-op in `kv.c` now warns), and the read
+  path clamps corrupt on-disk lengths instead of reading out of bounds.
+  Raising the cap is an on-disk format change.
+- **DIST-5r** (B) *cross-process* store access remains unsafe: per-op `flock`
+  serializes operations, but a rewrite (compact, rollback, migration) in one
+  process leaves other processes' `FILE*` handles stale. The single-writer
+  policy is only enforced per-op, not per-open.
+- Read serialization is coarse: readers now exclude each other and writers per
+  store. Fine for alpha; a shared-read lock is the obvious refinement.
 
 ### Distributed / std surface (B unless noted)
 
 - **DIST-1** mutating a call-returned struct through a free-function
   parameter writes to a dead spill temp — the caller sees stale values.
   Root of **STD-7** (raft inertness).
-- **DIST-3** std/net `write`/`write_all`/`send_to` send `.length` (scalar
-  count) bytes instead of `.byte_count` — silently truncates non-ASCII.
-  Same class as **STD-1** (~50 sites across 11 FFI-facing modules),
-  **STD-2** (AEAD cannot decrypt its own ciphertext), **STD-3**
-  (argon verify always false), **STD-4** (http non-ASCII body deadlock).
-- **STD-5** dataframe sort loses and duplicates rows; **STD-8** json
-  stringify corrupts >6-significant-digit numbers (`%g`).
+- ~~DIST-3 / STD-1 / STD-2 / STD-3 / STD-4~~ closed in [166]: a line-audited
+  sweep converted every inventoried string-byte context — FFI length
+  arguments, `malloc` sizes, send loops, `Content-Length`, byte-indexed
+  `slice`/`char_at` bounds — from `.length` (scalar count) to `.byte_count`
+  across net, http, tls, io, crypto, aes, argon, sha, blake, regex, os, and
+  process (118 sites). This closes the named breakages (net/http truncation
+  and deadlock, AEAD decrypt, argon verify, every digest hashing a truncated
+  prefix, PCRE2 offset mixing). *Caveat:* the sweep is site-exact but mostly
+  behaviorally untested — GATE-3 still applies. Remaining `.length`-bounded
+  scalar byte *loops* (toml, glob, args, bangle, path, date, hex tails) are
+  `O-9`'s class: correct on ASCII, wrong-or-quadratic beyond it.
+- **STD-5** dataframe sort loses and duplicates rows. ~~STD-8~~ closed in
+  [166]: float `to_string` (and therefore json stringify) uses a
+  shortest-round-trip formatter (`jinn_f64_format`: `%.15g` → `%.17g` with a
+  `strtod` round-trip check) instead of 6-significant-digit `%g`.
 - **DIST-8** (M) blocking socket syscalls pin scheduler workers — 8 idle
   connections starve a server; needs an IO reactor. **DIST-9** (M)
   `supervisor` does not parse (see N-4). **DIST-2/STD-13** (M) std/raft is
   aspirational — demote from stable, with dataframe, bangle, and the crypto
   stack, until behaviorally tested (**Tier demotion**, hours).
 
-### Comptime and name resolution (B unless noted)
+### Comptime and name resolution (closed in [166])
 
-- **HIR-1** comptime eval treats failure inside a taken if-branch as
-  fall-through — folds pure calls to the wrong constant. *unverified*
-- **HIR-2 / HIR-5** comptime folds all integer arithmetic at i64 and floats
-  at f64 regardless of declared width, and compares/divides unsigned
-  operands with signed semantics. *unverified* Recommended vehicle for both:
-  cut `src/comptime/eval.rs` to literal-only folding for alpha.
-- **HIR-6** module-name mangling is textual (`{module}_{fn}`) — a user
-  function with a colliding name silently replaces the module function.
-  *unverified*
-- **HIR-7** (M) methods declared inside a `store` block are typed but never
-  lowered — every call fails at codegen.
+- ~~HIR-1 / HIR-2 / HIR-5~~ `src/comptime/` was cut to literal-only folding:
+  the pure-function-call evaluator is deleted (its taken-branch fall-through
+  was HIR-1), and the remaining expression folds are type-gated to
+  `i64`/`f64` operands so a fold can never change width or signedness
+  semantics. Both pinned in `tests/alpha_hardening_pins.rs`.
+- ~~HIR-6~~ a top-level function whose name collides with another (including
+  a module function's flattened `{module}_{fn}` spelling) is a compile error
+  naming both sites, instead of last-writer-wins.
+- ~~HIR-7~~ methods declared inside a `store` block are rejected at type
+  checking with guidance (move to a top-level function) instead of failing
+  at codegen; they were never lowered and are not in the grammar. Real
+  store-method support would need a `self` story and its own lowering queue.
 
 ### Parser and surface (B unless noted)
 
-- **PAR-1** a user function named `vector` silently hijacks every
-  bracket-list literal. *unverified*
+- ~~PAR-1~~ closed in [166]: the `vec`/`vector` builtin now always wins (the
+  same class as `to_string`/`log`), and *defining* a function with either
+  name is a compile error naming the reservation.
 - **SYN-4** the global type namespace silently merges same-named types
   across modules, last-loaded wins. *unverified*
 - **SYN-6** `if x is y` with an existing binding `y` is an always-true
   pattern match that also overwrites the outer `y`. *unverified*
-- **SYN-7** `not x in xs` parses as `xs.contains(not x)`, contradicting the
-  EBNF. *unverified*
+- ~~SYN-7~~ closed in [166]: `not` moved to its own precedence level between
+  `and` and the comparisons (matching the EBNF's `not_expr`), so
+  `not x in xs` is `not (x in xs)`; the formatter parenthesizes a `not`
+  operand under tighter operators so old trees still round-trip.
 - **PAR-2** (M) function-local `use` parses but imports nothing; **PAR-3**
   (M) `save`/`destroy`/`restore`/`compact` are undocumented
   context-sensitive statement keywords; **SYN-8** (M) the EBNF is wrong on
@@ -186,18 +227,22 @@ Ids are the review's; severity per the taxonomy above. Items marked
 
 - **MIR-1** same-name loop/comprehension binders share one function-global
   MIR memory slot — silent wrong answers in nested loops. *unverified*
-- **MIR-2** (M) comprehension-binder shadowing ICEs three ways; **MIR-4**
-  (M) duplicate integer-literal match arms ICE at LLVM verify; **MIR-5**
-  (M) runtime tuple index ICEs; **MIR-6** (M) the LLVM-array indexing path
-  emits no upper bounds check; **CG-4** (M) `--debug` is a stub (no DWARF).
+- **MIR-2** (M) comprehension-binder shadowing ICEs three ways; ~~MIR-4~~
+  closed in [166] (duplicate unguarded literal arms are a typed
+  "duplicate match arm" error, the dense-switch path dedupes literal case
+  values as a backstop, and non-int/bool literal matches take the
+  comparison-chain path); **MIR-5** (M) runtime tuple index ICEs; **MIR-6**
+  (M) the LLVM-array indexing path emits no upper bounds check; **CG-4** (M)
+  `--debug` is a stub (no DWARF).
 
 ### Tooling / fmt (B unless noted)
 
-- **TDX-1** `jinn fmt` deletes list-comprehension `to N`/`if` clauses;
-  **TDX-2** fmt drops required parens around `not (a equals b)` — both make
-  `fmt --write` unsafe on real code; fix plus an HIR-diff fmt gate.
-  **TDX-3** `jinn run` serves a stale cached binary after a dependency
-  update.
+- ~~TDX-1 / TDX-2~~ closed in [166]: the printer emits list-comprehension
+  `to`/`if` clauses (pinned in `tests/fmt_nondestructive.rs`), and under the
+  new `not` precedence `not a equals b` re-parses as the same tree while a
+  `not` operand under a tighter operator is parenthesized. The HIR-diff fmt
+  gate remains open work. **TDX-3** `jinn run` serves a stale cached binary
+  after a dependency update.
 - **TDX-4..TDX-6, TDX-13** (M) silent test failure off-tty, `jinn bind`
   emits zero externs from zlib.h, tree-sitter fails 15/15 snippets, `.jni`
   reuse breaks multi-module compiles. **STD-10..STD-12, STD-15** (M) bangle
@@ -217,7 +262,9 @@ Ids are the review's; severity per the taxonomy above. Items marked
 
 ### Diagnostics (M)
 
-- **DIAG-2** negative out-of-range literals wrap silently; **DIAG-3** the
+- ~~DIAG-2~~ closed in [166]: `-<literal>` constant-folds at lowering with
+  the expected type propagated, so negative out-of-range literals hit the
+  same (now hard-error) range check as positive ones; **DIAG-3** the
   common newcomer error class lacks locations and did-you-mean; **DIAG-4**
   one error per run across phase boundaries; `src/diagnostic.rs`'s
   structured machinery is dead code.
@@ -423,14 +470,13 @@ unification and are unchecked. `Type::Alias` itself remains unconstructed in
 the frontend — aliases are opaque `Type::Struct(name, [])` nominals tracked
 by name (`Typer::alias_names`).
 
-### T-5 (m) Integer literals are not range-checked at their binding type
+### T-5 — closed in [166]
 
-[164] closed the call-site half of this: passing a wider integer where a
-narrower one is annotated is rejected (`numeric_lossless`). The
-binding-site half remains — an out-of-range literal assigned directly to a
-narrow type (`y is 300` where `y` is `i8`) is silently truncated at the
-bind rather than rejected. A literal range check at the annotated type,
-mirroring the call-site narrowing rule, closes it.
+[164] closed the call-site half (`numeric_lossless`); [166] closed the
+binding-site half: an out-of-range integer literal at an annotated type
+(`y as i8 is 300`, and the negative form `-200`) is a compile error naming
+the range, instead of a wrap-with-warning. Pinned in
+`tests/alpha_hardening_pins.rs`.
 
 ### E-1 (m) `From` conversion resolves by name pattern
 
@@ -509,8 +555,11 @@ fields.
 `JINN_TXN_SNAPSHOT_MAX` (256 MB default) and then `abort()`. The diagnostic
 names the knob and the workaround, so it is not silent, but the cost is
 O(store size) per transaction and has never been measured against a realistic
-store. `@kv` and `@bloom` additionally snapshot their in-memory state per
-transaction; `@versioned` and `@vector` record only a length.
+store. Since [166] the same snapshot is also written into the WAL as the
+`TXN_BEGIN` undo image (fdatasync'd before the first in-transaction write),
+doubling the per-transaction I/O — the fix for both is a page-level or
+row-level undo log. `@kv` and `@bloom` additionally snapshot their in-memory
+state per transaction; `@versioned` and `@vector` record only a length.
 
 ### S-4 (m) A WAL with bad magic terminates the process
 
@@ -528,20 +577,22 @@ allocations, the WAL policy table warns when full, an unrecognized
 `JINN_WAL_SYNC` value warns that it overrides decorators, `.idx` slot reads
 are zero-initialized and checked, migration header reads are checked, and
 rollback's reopen-failure path distinguishes "not rolled back" from "rolled
-back on disk but this process's handle is stale". Still open: torn `.idx`
-slots survive crashes (no checksums), aux sidecar files are `fflush`-only
-(`@versioned` history is not power-loss durable even under `@durable`), and
-a crash between a migration rewrite and the schema re-stamp leaves
-fingerprint 0, which the next open silently adopts as the current schema.
+back on disk but this process's handle is stale". The
+crashed-migration-fingerprint hole closed in [166]: migration rewrites stamp
+a `-1` in-progress sentinel that the next open refuses with guidance instead
+of silently adopting (pinned in `tests/store_schema.rs`). Still open: torn
+`.idx` slots survive crashes (no checksums), and aux sidecar files are
+`fflush`-only (`@versioned` history is not power-loss durable even under
+`@durable`).
 
-### S-10 (m) Store reads take no lock and race handle swaps
+### S-10 — closed in [166]
 
-Read paths (`count`, `all`, queries) load the store `FILE*` without taking
-the writer lock. A concurrent rollback, compact, or migration swaps and
-closes that handle (`jinn_atomic_rewrite_reopen`), so a reader that loaded
-the old pointer can read through a freed `FILE*`. Writers are safe since
-[163] (the lock is taken before the handle is loaded); readers need either
-the same discipline or handle reclamation that defers the `fclose`.
+Every read path (`count`, `all`, queries, aggregates, graph/fts, index
+rebuild) and store open itself now takes the writer lock before loading the
+`FILE*` and releases it after the last file access, so a concurrent
+rollback, compact, or migration can no longer swap the handle under a
+reader. Readers serialize against each other too — coarse but safe; a
+shared-read mode is the refinement if it ever shows up in a profile.
 
 ### S-11 (m) Cancellation mid-transaction leaks the store writer lock
 

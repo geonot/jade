@@ -260,8 +260,15 @@ impl Typer {
         expr: &ast::Expr,
         expected: Option<&Type>,
     ) -> Result<hir::Expr, String> {
-        let _ = expected;
         match expr {
+            ast::Expr::UnaryOp(UnaryOp::Neg, inner, span)
+                if matches!(**inner, ast::Expr::Int(_, _)) =>
+            {
+                let ast::Expr::Int(n, _) = **inner else {
+                    unreachable!()
+                };
+                self.lower_expr_expected(&ast::Expr::Int(n.wrapping_neg(), *span), expected)
+            }
             ast::Expr::UnaryOp(op, inner, span) => {
                 let hi = self.lower_expr(inner)?;
                 let ty = match op {

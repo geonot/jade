@@ -164,6 +164,10 @@ static uint32_t wal_frame_crc(uint32_t payload_len, uint8_t op, int64_t ts,
     return c ^ 0xFFFFFFFFu;
 }
 
+static int wal_frame_len_ok(uint8_t op, uint32_t payload_len) {
+    if (op == JINN_WAL_OP_TXN_BEGIN) return 1;
+    return payload_len <= 64u * 1024 * 1024;
+}
 static long wal_scan_valid_end(FILE *f, int *damaged) {
     fseek(f, 0, SEEK_END);
     long file_end = ftell(f);
@@ -177,7 +181,7 @@ static long wal_scan_valid_end(FILE *f, int *damaged) {
         if (fread(&payload_len, 4, 1, f) != 1 ||
             fread(&op, 1, 1, f) != 1 ||
             fread(&ts, 8, 1, f) != 1) { *damaged = 1; break; }
-        if (payload_len > 64u * 1024 * 1024) { *damaged = 1; break; }
+        if (!wal_frame_len_ok(op, payload_len)) { *damaged = 1; break; }
         long body = ftell(f);
         if (file_end - body < (long)payload_len + 4) { *damaged = 1; break; }
         uint32_t c = JINN_CRC_SEED;
@@ -457,6 +461,7 @@ static void jinn_txn_track_impl(FILE **fpp, FILE *fp, FILE *wal,
     t->path = path ? strdup(path) : NULL;
     t->on_rollback = cb;
     t->rb_arg = arg;
+    if (t->path) jinn_store_wlock(t->path);
     if (wal) {
         fflush(wal);
         fseek(wal, 0, SEEK_END);
@@ -496,9 +501,28 @@ static void jinn_txn_track_impl(FILE **fpp, FILE *fp, FILE *wal,
         }
     }
     fseek(cur_fp, cur, SEEK_SET);
+    if (wal) {
+        if (t->snap_len <= (long)UINT32_MAX) {
+            if (jinn_wal_write(wal, JINN_WAL_OP_TXN_BEGIN, t->snap,
+                               (uint32_t)t->snap_len) == 0) {
+                if (jinn_wal_effective_policy(wal) != JINN_WAL_SYNC_NONE) {
+                    jinn_wal_commit_group(wal);
+                }
+            } else {
+                fprintf(stderr,
+                        "jinn: txn: cannot write the transaction begin frame — "
+                        "crash recovery may keep this transaction's partial "
+                        "writes\n");
+            }
+        } else {
+            fprintf(stderr,
+                    "jinn: txn: store snapshot exceeds 4 GiB — begin frame "
+                    "skipped; crash recovery may keep this transaction's "
+                    "partial writes\n");
+        }
+    }
     t->next = st->files;
     st->files = t;
-    if (t->path) jinn_store_wlock(t->path);
 }
 void jinn_txn_track_store(FILE **fpp, FILE *wal, const char *path) {
     jinn_txn_track_impl(fpp, NULL, wal, path, NULL, NULL);
@@ -575,6 +599,9 @@ void jinn_txn_commit(void) {
                                 "not be durable\n");
                     }
             }
+        }
+        if (t->wal) {
+            (void)jinn_wal_write(t->wal, JINN_WAL_OP_TXN_COMMIT, NULL, 0);
         }
         if (t->wal && jinn_wal_effective_policy(t->wal) != JINN_WAL_SYNC_NONE) {
             jinn_wal_commit_group(t->wal);
@@ -662,6 +689,95 @@ int64_t jinn_wal_size(FILE *wal) {
 }
 static _Thread_local int tl_wal_replay_complete = 1;
 int jinn_wal_replay_was_complete(void) { return tl_wal_replay_complete; }
+static long wal_stop_before_uncommitted(FILE *wal, long file_end,
+                                        long *begin_off_out) {
+    long pending_begin = -1;
+    long valid_end = 8;
+    fseek(wal, 8, SEEK_SET);
+    while (ftell(wal) < file_end) {
+        long frame_start = ftell(wal);
+        uint32_t payload_len;
+        uint8_t  op;
+        int64_t  ts;
+        if (fread(&payload_len, 4, 1, wal) != 1 ||
+            fread(&op, 1, 1, wal) != 1 ||
+            fread(&ts, 8, 1, wal) != 1) break;
+        if (!wal_frame_len_ok(op, payload_len)) break;
+        long body = ftell(wal);
+        if (file_end - body < (long)payload_len + 4) break;
+        uint32_t c = JINN_CRC_SEED;
+        c = crc32_update(c, &payload_len, 4);
+        c = crc32_update(c, &op, 1);
+        c = crc32_update(c, &ts, 8);
+        uint8_t buf[4096];
+        uint32_t left = payload_len;
+        int bad = 0;
+        while (left > 0) {
+            size_t chunk = left < sizeof buf ? left : sizeof buf;
+            if (fread(buf, 1, chunk, wal) != chunk) { bad = 1; break; }
+            c = crc32_update(c, buf, chunk);
+            left -= (uint32_t)chunk;
+        }
+        if (bad) break;
+        uint32_t stored;
+        if (fread(&stored, 4, 1, wal) != 1) break;
+        if ((c ^ 0xFFFFFFFFu) != stored) break;
+        if (op == JINN_WAL_OP_TXN_BEGIN) {
+            pending_begin = frame_start;
+        } else if (op == JINN_WAL_OP_TXN_COMMIT) {
+            pending_begin = -1;
+        }
+        valid_end = ftell(wal);
+    }
+    if (begin_off_out) *begin_off_out = pending_begin;
+    return pending_begin >= 0 ? pending_begin : valid_end;
+}
+int jinn_wal_uncommitted_begin(FILE *wal, unsigned char **snap_out,
+                               int64_t *len_out) {
+    if (snap_out) *snap_out = NULL;
+    if (len_out) *len_out = 0;
+    if (!wal) return 0;
+    long saved = ftell(wal);
+    fseek(wal, 0, SEEK_END);
+    long file_end = ftell(wal);
+    long begin_off = -1;
+    (void)wal_stop_before_uncommitted(wal, file_end, &begin_off);
+    if (begin_off < 0) {
+        fseek(wal, saved, SEEK_SET);
+        return 0;
+    }
+    fseek(wal, begin_off, SEEK_SET);
+    uint32_t payload_len;
+    uint8_t  op;
+    int64_t  ts;
+    if (fread(&payload_len, 4, 1, wal) != 1 ||
+        fread(&op, 1, 1, wal) != 1 ||
+        fread(&ts, 8, 1, wal) != 1) {
+        fseek(wal, saved, SEEK_SET);
+        return 0;
+    }
+    unsigned char *buf = NULL;
+    if (payload_len > 0) {
+        buf = (unsigned char *)malloc(payload_len);
+        if (!buf) {
+            fseek(wal, saved, SEEK_SET);
+            return 0;
+        }
+        if (fread(buf, 1, payload_len, wal) != payload_len) {
+            free(buf);
+            fseek(wal, saved, SEEK_SET);
+            return 0;
+        }
+    }
+    if (snap_out) {
+        *snap_out = buf;
+    } else {
+        free(buf);
+    }
+    if (len_out) *len_out = (int64_t)payload_len;
+    fseek(wal, saved, SEEK_SET);
+    return 1;
+}
 int64_t jinn_wal_replay(FILE *wal, jinn_wal_replay_cb callback, void *user_data) {
     if (!wal || !callback) return -1;
     tl_wal_replay_complete = 1;
@@ -669,17 +785,21 @@ int64_t jinn_wal_replay(FILE *wal, jinn_wal_replay_cb callback, void *user_data)
     long saved = ftell(wal);
     fseek(wal, 0, SEEK_END);
     long file_end = ftell(wal);
+    long stop_at = wal_stop_before_uncommitted(wal, file_end, NULL);
     fseek(wal, 8, SEEK_SET);
     int64_t count = 0;
-    while (ftell(wal) < file_end) {
-        (void)ftell(wal);
+    while (ftell(wal) < stop_at) {
         uint32_t payload_len;
         uint8_t  op;
         int64_t  ts;
         if (fread(&payload_len, 4, 1, wal) != 1) break;
         if (fread(&op, 1, 1, wal) != 1) break;
         if (fread(&ts, 8, 1, wal) != 1) break;
-        if (payload_len > 64 * 1024 * 1024) break;
+        if (!wal_frame_len_ok(op, payload_len)) break;
+        if (op == JINN_WAL_OP_TXN_BEGIN || op == JINN_WAL_OP_TXN_COMMIT) {
+            if (fseek(wal, (long)payload_len + 4, SEEK_CUR) != 0) break;
+            continue;
+        }
         long remaining = file_end - ftell(wal);
         if (remaining < (long)(payload_len + 4)) break;
         uint8_t *payload = NULL;

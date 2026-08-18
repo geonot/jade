@@ -221,11 +221,7 @@ impl Typer {
                     .any(|d| matches!(d, ast::FieldDecorator::Cascade)),
             });
         }
-        let mut hir_methods = Vec::new();
-        for m in &sd.methods {
-            let hm = self.lower_method_by_ptr(&sd.name.as_str(), m)?;
-            hir_methods.push(hm);
-        }
+        let hir_methods = Vec::new();
         Ok(hir::StoreDef {
             def_id: id,
             name: sd.name,

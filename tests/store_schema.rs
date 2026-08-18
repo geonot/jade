@@ -99,3 +99,75 @@ fn migration_bridges_schema_change() {
     );
     assert_eq!(String::from_utf8_lossy(&r3.stdout).trim(), "3");
 }
+
+#[test]
+fn migration_add_default_populates_existing_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let v1 = "store items @simple\n    name as String\n\n*main\n    insert items 'widget'\n    log count items\n";
+    let bin1 = compile_in(dir.path(), "v1", v1);
+    let r1 = run(dir.path(), &bin1);
+    assert!(r1.status.success());
+    assert_eq!(String::from_utf8_lossy(&r1.stdout).trim(), "1");
+
+    let v2 = "store items @simple\n    name as String\n    price as i64\n\nmigration 'add_price' version 1\n    up\n        alter items\n            add price as i64 default 42\n\n*main\n    match items where price equals 42\n        Ok(r) ? log r.name\n        Err(e) ? log 'default missing'\n    log count items\n";
+    let bin2 = compile_in(dir.path(), "v2", v2);
+    let r2 = run(dir.path(), &bin2);
+    assert!(
+        r2.status.success(),
+        "migrated reopen failed:\n{}",
+        String::from_utf8_lossy(&r2.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&r2.stdout).trim(),
+        "widget\n1",
+        "the pre-existing row must carry the migration default"
+    );
+}
+
+#[test]
+fn interrupted_migration_fingerprint_refuses_to_auto_adopt() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = "store items @simple\n    name as String\n\n*main\n    insert items 'a'\n    log count items\n";
+    let bin = compile_in(dir.path(), "app", src);
+    let r1 = run(dir.path(), &bin);
+    assert!(r1.status.success());
+
+    let store = dir.path().join("items.store");
+    let mut bytes = std::fs::read(&store).unwrap();
+    bytes[24..32].copy_from_slice(&(-1i64).to_le_bytes());
+    std::fs::write(&store, &bytes).unwrap();
+
+    let r2 = run(dir.path(), &bin);
+    assert!(
+        !r2.status.success(),
+        "a migration-in-progress fingerprint must refuse to open"
+    );
+    let stderr = String::from_utf8_lossy(&r2.stderr);
+    assert!(
+        stderr.contains("migration was interrupted"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn inflated_header_count_refuses_to_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = "store items @simple\n    name as String\n\n*main\n    insert items 'a'\n    log count items\n";
+    let bin = compile_in(dir.path(), "app", src);
+    let r1 = run(dir.path(), &bin);
+    assert!(r1.status.success());
+
+    let store = dir.path().join("items.store");
+    let mut bytes = std::fs::read(&store).unwrap();
+    bytes[8..16].copy_from_slice(&1_000_000i64.to_le_bytes());
+    std::fs::write(&store, &bytes).unwrap();
+
+    let r2 = run(dir.path(), &bin);
+    assert!(
+        !r2.status.success(),
+        "an inflated header count must refuse to read, stdout: {}",
+        String::from_utf8_lossy(&r2.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&r2.stderr);
+    assert!(stderr.contains("corrupt or truncated"), "stderr: {stderr}");
+}

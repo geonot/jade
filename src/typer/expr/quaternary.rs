@@ -413,9 +413,10 @@ impl Typer {
             (Type::Void, _) => bad_branch.ty.clone(),
             (_, Type::Void) => ok_branch.ty.clone(),
             _ => {
-                let _ =
+                let r =
                     self.infer_ctx
                         .unify_at(&ok_branch.ty, &bad_branch.ty, span, "quaternary arms");
+                self.collect_unify_error(r);
                 ok_branch.ty.clone()
             }
         };
@@ -570,7 +571,11 @@ impl Typer {
                     },
                 );
                 let is_bare_err = matches!(e, ast::Expr::Ident(n, _) if n.as_str() == "err");
-                let body = self.lower_expr(e);
+                let body = if is_bare_err {
+                    self.lower_expr(e)
+                } else {
+                    self.lower_expr_expected(e, Some(ok_ty))
+                };
                 self.pop_scope();
                 let body = body?;
 

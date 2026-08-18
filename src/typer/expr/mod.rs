@@ -72,13 +72,14 @@ impl Typer {
                         if let Some((lo, hi)) = Self::int_type_range(t)
                             && (*n < lo || *n > hi)
                         {
-                            self.warnings.push(format!(
-                                "{}: warning: integer literal {} does not fit in `{}` and \
-                                 wraps to {}; use a wider type, or `as strict` to trap at \
-                                 runtime",
+                            self.type_errors.push(format!(
+                                "{}: integer literal {} does not fit in `{}` (its range is \
+                                 {}..{}); use a wider type, or an explicit cast to wrap to {}",
                                 span.loc(),
                                 n,
                                 t,
+                                lo,
+                                hi,
                                 Self::wrap_literal_to(*n, t),
                             ));
                         }

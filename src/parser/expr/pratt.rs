@@ -185,7 +185,16 @@ impl Parser {
 
     binop!(parse_or,     parse_xor,    { Token::Or => BinOp::Or });
     binop!(parse_xor,    parse_and,    { Token::Xor => BinOp::BitXor });
-    binop!(parse_and,    parse_eq,     { Token::And => BinOp::And });
+    binop!(parse_and,    parse_not,    { Token::And => BinOp::And });
+    pub(in crate::parser) fn parse_not(&mut self) -> Result<Expr, ParseError> {
+        let sp = self.span();
+        if matches!(self.peek(), Token::Not) && !matches!(self.peek_at(1), Token::Equals) {
+            self.advance();
+            Ok(Expr::UnaryOp(UnaryOp::Not, Box::new(self.parse_not()?), sp))
+        } else {
+            self.parse_eq()
+        }
+    }
     pub(in crate::parser) fn parse_eq(&mut self) -> Result<Expr, ParseError> {
         let mut l = self.parse_cmp()?;
         loop {

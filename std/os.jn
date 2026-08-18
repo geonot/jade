@@ -46,7 +46,7 @@ extern *fstat_size(fd as i32) returns i64
         if eq_pos > 0
             prefix is cur.slice(0, eq_pos)
             if prefix equals flag
-                return cur.slice(eq_pos + 1, cur.length)
+                return cur.slice(eq_pos + 1, cur.byte_count)
         if cur equals flag
             return a[i + 1]
         i += 1
@@ -75,7 +75,7 @@ extern *fstat_size(fd as i32) returns i64
 
 *temp_dir
     t is env("TMPDIR")
-    if t.length > 0
+    if t.byte_count > 0
         return t
     "/tmp"
 

@@ -56,7 +56,7 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_call(ensure_fn, &[], ""));
         }
 
-        let fp = self.load_store_fp(store_name)?;
+        let fp = self.store_lock(store_name)?;
         let i64t = self.ctx.i64_type();
 
         let rec_name = format!("__store_{store_name}_rec");
@@ -83,8 +83,9 @@ impl<'ctx> Compiler<'ctx> {
 
         let filter_val = self.value_map[&args[0]];
 
-        let count = self.store_read_count(fp)?;
+        let count = self.store_read_count(fp, rec_size, store_name)?;
         let raw_buf = self.store_load_records(fp, count, rec_size)?;
+        self.store_unlock(store_name, fp)?;
 
         let one = i64t.const_int(1, false);
         let jinn_total =
@@ -263,7 +264,7 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_call(ensure_fn, &[], ""));
         }
 
-        let fp = self.load_store_fp(store_name)?;
+        let fp = self.store_lock(store_name)?;
         let i64t = self.ctx.i64_type();
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
 
@@ -281,8 +282,9 @@ impl<'ctx> Compiler<'ctx> {
             .expect("ICE: struct type not declared");
         let jinn_size = self.type_store_size(jinn_st.into());
 
-        let count = self.store_read_count(fp)?;
+        let count = self.store_read_count(fp, rec_size, store_name)?;
         let raw_buf = self.store_load_records(fp, count, rec_size)?;
+        self.store_unlock(store_name, fp)?;
 
         let header_ty = self.vec_header_type();
         let malloc_fn = self.ensure_malloc();
@@ -397,7 +399,7 @@ impl<'ctx> Compiler<'ctx> {
             b!(self.bld.build_call(ensure_fn, &[], ""));
         }
 
-        let fp = self.load_store_fp(store_name)?;
+        let fp = self.store_lock(store_name)?;
         let i64t = self.ctx.i64_type();
         let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
 
@@ -446,8 +448,9 @@ impl<'ctx> Compiler<'ctx> {
             })
             .collect();
 
-        let count = self.store_read_count(fp)?;
+        let count = self.store_read_count(fp, rec_size, store_name)?;
         let raw_buf = self.store_load_records(fp, count, rec_size)?;
+        self.store_unlock(store_name, fp)?;
 
         let header_ty = self.vec_header_type();
         let malloc_fn = self.ensure_malloc();

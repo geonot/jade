@@ -166,7 +166,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let filter_val = vals[0];
 
-        let count = self.store_read_count(fp)?;
+        let count = self.store_read_count(fp, rec_size, store_name)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
 
         let edges = self.cascade_children(store_name);
@@ -416,7 +416,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let filter_val = vals[0];
 
-        let count = self.store_read_count(fp)?;
+        let count = self.store_read_count(fp, rec_size, store_name)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
 
         let edges = self.cascade_children(store_name);

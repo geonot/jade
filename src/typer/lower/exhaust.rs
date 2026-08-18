@@ -29,6 +29,25 @@ impl Typer {
             ));
         }
 
+        let mut seen_lits: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for arm in arms.iter().filter(|a| a.guard.is_none()) {
+            if let hir::Pat::Lit(e) = &arm.pat {
+                let (key, shown) = match &e.kind {
+                    hir::ExprKind::Int(n) => (format!("i{n}"), n.to_string()),
+                    hir::ExprKind::Bool(b) => (format!("b{b}"), b.to_string()),
+                    hir::ExprKind::Float(f) => (format!("f{:x}", f.to_bits()), f.to_string()),
+                    hir::ExprKind::Str(s) => (format!("s{s}"), format!("'{s}'")),
+                    _ => continue,
+                };
+                if !seen_lits.insert(key) {
+                    return Err(format!(
+                        "duplicate match arm: `{shown}` is matched by an earlier arm and \
+                         can never run"
+                    ));
+                }
+            }
+        }
+
         if let Type::Enum(_) = subject_ty {
             let mut seen: Vec<&str> = Vec::new();
             for arm in arms {

@@ -30,6 +30,17 @@ void jinn_store_check_schema(FILE *fp, int64_t expected_fp,
         if (saved >= 0) fseek(fp, saved, SEEK_SET);
         return;
     }
+    if (stored_fp == -1) {
+        fprintf(stderr,
+                "jinn: store '%s': a schema migration was interrupted before it "
+                "finished — the store's on-disk layout may not match any schema "
+                "version.\n"
+                "      Restore %s.store from a backup, or delete it to recreate "
+                "the store.\n",
+                store_name ? store_name : "?", store_name ? store_name : "?");
+        fflush(stderr);
+        abort();
+    }
     if (stored_fp == 0) {
         fseek(fp, STORE_FP_OFFSET, SEEK_SET);
         fwrite(&expected_fp, 8, 1, fp);
@@ -147,6 +158,9 @@ int64_t jinn_mig_add_field(FILE **store_fp_ptr, const char *store_path,
     if (count == 0) {
         fseek(fp, 16, SEEK_SET);
         fwrite(&new_rec_size, 8, 1, fp);
+        int64_t in_progress = -1;
+        fseek(fp, STORE_FP_OFFSET, SEEK_SET);
+        fwrite(&in_progress, 8, 1, fp);
         fflush(fp);
         return 0;
     }
@@ -173,7 +187,7 @@ int64_t jinn_mig_add_field(FILE **store_fp_ptr, const char *store_path,
             memcpy(dst + field_offset + field_size,
                    src + field_offset, (size_t)tail);
     }
-    MigImage im = { count, new_rec_size, 0, 0, new_data };
+    MigImage im = { count, new_rec_size, -1, 0, new_data };
     if (jinn_atomic_rewrite_reopen(store_path, mig_fill, &im, store_fp_ptr) != 0) {
         free(old_data);
         free(new_data);
@@ -200,6 +214,9 @@ int64_t jinn_mig_drop_field(FILE **store_fp_ptr, const char *store_path,
     if (count == 0) {
         fseek(fp, 16, SEEK_SET);
         fwrite(&new_rec_size, 8, 1, fp);
+        int64_t in_progress = -1;
+        fseek(fp, STORE_FP_OFFSET, SEEK_SET);
+        fwrite(&in_progress, 8, 1, fp);
         fflush(fp);
         return 0;
     }
@@ -224,7 +241,7 @@ int64_t jinn_mig_drop_field(FILE **store_fp_ptr, const char *store_path,
             memcpy(dst + field_offset,
                    src + field_offset + field_size, (size_t)tail);
     }
-    MigImage im = { count, new_rec_size, 0, 0, new_data };
+    MigImage im = { count, new_rec_size, -1, 0, new_data };
     if (jinn_atomic_rewrite_reopen(store_path, mig_fill, &im, store_fp_ptr) != 0) {
         free(old_data);
         free(new_data);

@@ -973,6 +973,9 @@ fn format_expr(e: &Expr) -> String {
                         format!("({})", format_expr(e))
                     }
                     Expr::Ternary(..) => format!("({})", format_expr(e)),
+                    Expr::UnaryOp(UnaryOp::Not, _, _) if !matches!(op, BinOp::And | BinOp::Or) => {
+                        format!("({})", format_expr(e))
+                    }
                     _ => format_expr(e),
                 }
             };
@@ -1107,12 +1110,16 @@ fn format_expr(e: &Expr) -> String {
         Expr::Deref(e, _) => format!("@{}", format_expr(e)),
         Expr::Freeze(e, _) => format!("freeze {}", format_expr(e)),
         Expr::Embed(path, _) => format!("embed '{path}'"),
-        Expr::ListComp(body, bind, iter, _, _, _) => {
-            format!(
-                "[{} for {bind} in {}]",
-                format_expr(body),
-                format_expr(iter)
-            )
+        Expr::ListComp(body, bind, iter, end, cond, _) => {
+            let mut s = format!("[{} for {bind} in {}", format_expr(body), format_expr(iter));
+            if let Some(e) = end {
+                s.push_str(&format!(" to {}", format_expr(e)));
+            }
+            if let Some(c) = cond {
+                s.push_str(&format!(" if {}", format_expr(c)));
+            }
+            s.push(']');
+            s
         }
         Expr::Unreachable(_) => "unreachable".into(),
         Expr::AsFormat(e, fmt, _) => format!("{} as {fmt}", format_expr(e)),

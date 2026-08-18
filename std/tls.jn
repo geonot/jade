@@ -37,21 +37,21 @@ type TlsStream @resource
 
     *read_exact(n as i64) returns String
         out is ""
-        while out.length < n
-            chunk is self.read(n - out.length)
+        while out.byte_count < n
+            chunk is self.read(n - out.byte_count)
             if chunk.length equals 0
                 break
             out is out + chunk
         out
 
     *write(data as String) returns i64
-        extern.jinn_tls_send(self.handle, %data, data.length)
+        extern.jinn_tls_send(self.handle, %data, data.byte_count)
 
     *write_all(data as String) returns bool
         sent is 0
-        while sent < data.length
-            remaining is data.slice(sent, data.length)
-            n is extern.jinn_tls_send(self.handle, %remaining, remaining.length)
+        while sent < data.byte_count
+            remaining is data.slice(sent, data.byte_count)
+            n is extern.jinn_tls_send(self.handle, %remaining, remaining.byte_count)
             if n <= 0
                 return false
             sent is sent + n

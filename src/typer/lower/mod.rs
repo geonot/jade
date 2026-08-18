@@ -36,6 +36,40 @@ impl Typer {
             }
         }
 
+        let mut fn_decl_spans: std::collections::HashMap<Symbol, ast::Span> =
+            std::collections::HashMap::new();
+        for d in &prog.decls {
+            if let ast::Decl::Fn(f) = d {
+                if matches!(f.name.as_str().as_str(), "vec" | "vector") {
+                    self.type_errors.push(format!(
+                        "{}: function name `{}` is reserved: bracket-list literals \
+                         desugar to it; rename this function",
+                        f.span.loc(),
+                        f.name
+                    ));
+                }
+                match fn_decl_spans.entry(f.name) {
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert(f.span);
+                    }
+                    std::collections::hash_map::Entry::Occupied(e) => {
+                        let prev = e.get();
+                        if prev.start != f.span.start || prev.file != f.span.file {
+                            self.type_errors.push(format!(
+                                "{}: function `{}` is defined more than once (previous \
+                                 definition at {}); module functions are flattened as \
+                                 `<module>_<name>`, so a top-level function with that \
+                                 spelling collides with the module's",
+                                f.span.loc(),
+                                f.name,
+                                prev.loc()
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
         let mut alias_map: std::collections::HashMap<Symbol, Type> =
             std::collections::HashMap::new();
         for d in &prog.decls {
@@ -114,6 +148,16 @@ impl Typer {
                     self.declare_actor_def(ad);
                 }
                 ast::Decl::Store(sd) => {
+                    if let Some(m) = sd.methods.first() {
+                        self.type_errors.push(format!(
+                            "{}: store `{}` declares method `{}` — methods inside a \
+                             `store` block are not supported in alpha; move it to a \
+                             top-level function that operates on the store directly",
+                            m.span.loc(),
+                            sd.name,
+                            m.name
+                        ));
+                    }
                     let is_simple = sd.decorators.contains(&ast::StoreDecorator::Simple);
                     let mut fields: Vec<(Symbol, Type)> = Vec::new();
 

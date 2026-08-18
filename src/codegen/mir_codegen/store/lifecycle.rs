@@ -35,7 +35,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let filter_val = self.val(args[0]);
 
-        let count = self.store_read_count(fp)?;
+        let count = self.store_read_count(fp, rec_size, store_name)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
 
         let deleted_idx = sd

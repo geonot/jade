@@ -22,7 +22,7 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
 *compile_with(pattern as String, flags as i64) returns i64
     errcode is 0
     erroffset is 0 as i64
-    extern.pcre2_compile_8(%pattern, pattern.length, flags, %errcode, %erroffset, 0 as %void) as i64
+    extern.pcre2_compile_8(%pattern, pattern.byte_count, flags, %errcode, %erroffset, 0 as %void) as i64
 
 *free(code as i64)
     if code neq 0
@@ -34,7 +34,7 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     if code equals 0
         return false
     md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
-    rc is extern.pcre2_match_8(code as %void, %text, text.length, 0, 0, md, 0 as %void)
+    rc is extern.pcre2_match_8(code as %void, %text, text.byte_count, 0, 0, md, 0 as %void)
     extern.pcre2_match_data_free_8(md)
     extern.pcre2_code_free_8(code as %void)
     rc > 0
@@ -45,7 +45,7 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     if code equals 0
         return ''
     md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
-    rc is extern.pcre2_match_8(code as %void, %text, text.length, 0, 0, md, 0 as %void)
+    rc is extern.pcre2_match_8(code as %void, %text, text.byte_count, 0, 0, md, 0 as %void)
     if rc < 1
         extern.pcre2_match_data_free_8(md)
         extern.pcre2_code_free_8(code as %void)
@@ -69,7 +69,7 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
     offset is 0
     while offset < text.length
-        rc is extern.pcre2_match_8(code as %void, %text, text.length, offset, 0, md, 0 as %void)
+        rc is extern.pcre2_match_8(code as %void, %text, text.byte_count, offset, 0, md, 0 as %void)
         if rc < 1
             break
         ovector is extern.pcre2_get_ovector_pointer_8(md)
@@ -88,7 +88,7 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     if code equals 0
         return out
     md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
-    rc is extern.pcre2_match_8(code as %void, %text, text.length, 0, 0, md, 0 as %void)
+    rc is extern.pcre2_match_8(code as %void, %text, text.byte_count, 0, 0, md, 0 as %void)
     if rc < 1
         extern.pcre2_match_data_free_8(md)
         extern.pcre2_code_free_8(code as %void)
@@ -113,7 +113,7 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
     offset is 0
     while offset < text.length
-        rc is extern.pcre2_match_8(code as %void, %text, text.length, offset, 0, md, 0 as %void)
+        rc is extern.pcre2_match_8(code as %void, %text, text.byte_count, offset, 0, md, 0 as %void)
         if rc < 1
             break
         ovector is extern.pcre2_get_ovector_pointer_8(md)
@@ -141,9 +141,9 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     out is ""
     offset is 0
     while offset <= text.length
-        rc is extern.pcre2_match_8(code as %void, %text, text.length, offset, 0, md, 0 as %void)
+        rc is extern.pcre2_match_8(code as %void, %text, text.byte_count, offset, 0, md, 0 as %void)
         if rc < 1
-            out is out + text.slice(offset, text.length)
+            out is out + text.slice(offset, text.byte_count)
             break
         ovector is extern.pcre2_get_ovector_pointer_8(md)
         s is extern.jinn_ovector_get(ovector, 0)
@@ -162,9 +162,9 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     out is ""
     offset is 0
     while offset <= text.length
-        rc is extern.pcre2_match_8(code as %void, %text, text.length, offset, 0, md, 0 as %void)
+        rc is extern.pcre2_match_8(code as %void, %text, text.byte_count, offset, 0, md, 0 as %void)
         if rc < 1
-            out is out + text.slice(offset, text.length)
+            out is out + text.slice(offset, text.byte_count)
             break
         ovector is extern.pcre2_get_ovector_pointer_8(md)
         s is extern.jinn_ovector_get(ovector, 0)
@@ -180,7 +180,7 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     if code equals 0
         return text
     md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
-    rc is extern.pcre2_match_8(code as %void, %text, text.length, 0, 0, md, 0 as %void)
+    rc is extern.pcre2_match_8(code as %void, %text, text.byte_count, 0, 0, md, 0 as %void)
     if rc < 1
         extern.pcre2_match_data_free_8(md)
         extern.pcre2_code_free_8(code as %void)
@@ -190,7 +190,7 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     e is extern.jinn_ovector_get(ovector, 1)
     extern.pcre2_match_data_free_8(md)
     extern.pcre2_code_free_8(code as %void)
-    text.slice(0, s) + replacement + text.slice(e, text.length)
+    text.slice(0, s) + replacement + text.slice(e, text.byte_count)
 
 
 *split(text as String, pattern as String) returns Vec of String
@@ -202,9 +202,9 @@ extern *jinn_ovector_get(ovector as %void, idx as i64) returns i64
     md is extern.pcre2_match_data_create_from_pattern_8(code as %void, 0 as %void)
     offset is 0
     while offset <= text.length
-        rc is extern.pcre2_match_8(code as %void, %text, text.length, offset, 0, md, 0 as %void)
+        rc is extern.pcre2_match_8(code as %void, %text, text.byte_count, offset, 0, md, 0 as %void)
         if rc < 1
-            out.push(text.slice(offset, text.length))
+            out.push(text.slice(offset, text.byte_count))
             break
         ovector is extern.pcre2_get_ovector_pointer_8(md)
         s is extern.jinn_ovector_get(ovector, 0)

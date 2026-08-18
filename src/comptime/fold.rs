@@ -1,122 +1,6 @@
-use super::eval::try_eval_pure_call;
 use crate::ast::{BinOp, Span, UnaryOp};
 use crate::hir::{self, Block, Expr, ExprKind, Stmt};
-use crate::intern::Symbol;
 use crate::types::Type;
-use std::collections::HashMap;
-
-pub(super) fn fold_block_with_fns(block: &mut Block, pure_fns: &HashMap<Symbol, hir::Fn>) {
-    for stmt in block.iter_mut() {
-        fold_stmt_with_fns(stmt, pure_fns);
-    }
-}
-
-pub(super) fn fold_stmt_with_fns(stmt: &mut Stmt, pure_fns: &HashMap<Symbol, hir::Fn>) {
-    match stmt {
-        Stmt::Bind(bind) => fold_expr_with_fns(&mut bind.value, pure_fns),
-        Stmt::TupleBind(_, e, _) => fold_expr_with_fns(e, pure_fns),
-        Stmt::Assign(lhs, rhs, _) => {
-            fold_expr_with_fns(lhs, pure_fns);
-            fold_expr_with_fns(rhs, pure_fns);
-        }
-        Stmt::Expr(e) => fold_expr_with_fns(e, pure_fns),
-        Stmt::If(i) => {
-            fold_expr_with_fns(&mut i.cond, pure_fns);
-            fold_block_with_fns(&mut i.then, pure_fns);
-            for (c, b) in &mut i.elifs {
-                fold_expr_with_fns(c, pure_fns);
-                fold_block_with_fns(b, pure_fns);
-            }
-            if let Some(b) = &mut i.els {
-                fold_block_with_fns(b, pure_fns);
-            }
-        }
-        Stmt::While(w) => {
-            fold_expr_with_fns(&mut w.cond, pure_fns);
-            fold_block_with_fns(&mut w.body, pure_fns);
-        }
-        Stmt::For(f) => {
-            fold_expr_with_fns(&mut f.iter, pure_fns);
-            if let Some(e) = &mut f.end {
-                fold_expr_with_fns(e, pure_fns);
-            }
-            if let Some(e) = &mut f.step {
-                fold_expr_with_fns(e, pure_fns);
-            }
-            fold_block_with_fns(&mut f.body, pure_fns);
-        }
-        Stmt::Loop(l) => fold_block_with_fns(&mut l.body, pure_fns),
-        Stmt::Ret(Some(e), _, _) => fold_expr_with_fns(e, pure_fns),
-        Stmt::Break(Some(e), _) => fold_expr_with_fns(e, pure_fns),
-        Stmt::Match(m) => {
-            fold_expr_with_fns(&mut m.subject, pure_fns);
-            for arm in &mut m.arms {
-                fold_block_with_fns(&mut arm.body, pure_fns);
-                if let Some(g) = &mut arm.guard {
-                    fold_expr_with_fns(g, pure_fns);
-                }
-            }
-        }
-        Stmt::ErrReturn(e, _, _) => fold_expr_with_fns(e, pure_fns),
-        Stmt::Defer(b, _) => fold_block_with_fns(b, pure_fns),
-        Stmt::StoreInsert(_, exprs, _) => {
-            for e in exprs {
-                fold_expr_with_fns(e, pure_fns);
-            }
-        }
-        Stmt::StoreSet(_, pairs, _, _) => {
-            for (_, e) in pairs {
-                fold_expr_with_fns(e, pure_fns);
-            }
-        }
-        Stmt::Transaction(b, _) => fold_block_with_fns(b, pure_fns),
-        Stmt::Together(_, b, _, _, _) => fold_block_with_fns(b, pure_fns),
-        Stmt::ChannelClose(e, _) => fold_expr_with_fns(e, pure_fns),
-        Stmt::Stop(e, _) => fold_expr_with_fns(e, pure_fns),
-        Stmt::ScopeCancel(_, _) => {}
-        Stmt::Join(e, _) => fold_expr_with_fns(e, pure_fns),
-        Stmt::SimFor(f, _) => {
-            fold_expr_with_fns(&mut f.iter, pure_fns);
-            if let Some(e) = &mut f.end {
-                fold_expr_with_fns(e, pure_fns);
-            }
-            if let Some(e) = &mut f.step {
-                fold_expr_with_fns(e, pure_fns);
-            }
-            fold_block_with_fns(&mut f.body, pure_fns);
-        }
-        Stmt::SimBlock(b, _) => fold_block_with_fns(b, pure_fns),
-        Stmt::Drop(_, _, _, _)
-        | Stmt::Continue(_)
-        | Stmt::Nop(_)
-        | Stmt::Ret(None, _, _)
-        | Stmt::Break(None, _)
-        | Stmt::Asm(_)
-        | Stmt::StoreDelete(_, _, _)
-        | Stmt::StoreDestroy(_, _, _)
-        | Stmt::StoreRestore(_, _, _)
-        | Stmt::StoreSave(_, _)
-        | Stmt::StoreCompact(_, _)
-        | Stmt::UseLocal(_, _, _, _) => {}
-        Stmt::GlobalStore(_, e, _) => fold_expr_with_fns(e, pure_fns),
-    }
-}
-
-pub(super) fn fold_expr_with_fns(expr: &mut Expr, pure_fns: &HashMap<Symbol, hir::Fn>) {
-    fold_expr(expr);
-
-    if let ExprKind::Call(_, name, args) = &expr.kind
-        && args.iter().all(|a| {
-            matches!(
-                a.kind,
-                ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_)
-            )
-        })
-        && let Some(result) = try_eval_pure_call(&name.as_str(), args, pure_fns, 0)
-    {
-        *expr = result;
-    }
-}
 
 pub(super) fn fold_block(block: &mut Block) {
     for stmt in block.iter_mut() {
@@ -468,8 +352,16 @@ pub(super) fn try_fold(expr: &Expr) -> Option<Expr> {
 
 pub(super) fn fold_binop(l: &Expr, op: BinOp, r: &Expr, ty: Type, span: Span) -> Option<Expr> {
     let kind = match (&l.kind, &r.kind) {
-        (ExprKind::Int(a), ExprKind::Int(b)) => fold_int_op(*a, op, *b)?,
-        (ExprKind::Float(a), ExprKind::Float(b)) => fold_float_op(*a, op, *b)?,
+        (ExprKind::Int(a), ExprKind::Int(b))
+            if matches!(l.ty, Type::I64) && matches!(r.ty, Type::I64) =>
+        {
+            fold_int_op(*a, op, *b)?
+        }
+        (ExprKind::Float(a), ExprKind::Float(b))
+            if matches!(l.ty, Type::F64) && matches!(r.ty, Type::F64) =>
+        {
+            fold_float_op(*a, op, *b)?
+        }
         (ExprKind::Bool(a), ExprKind::Bool(b)) => match op {
             BinOp::And => ExprKind::Bool(*a && *b),
             BinOp::Or => ExprKind::Bool(*a || *b),
@@ -529,10 +421,16 @@ pub(super) fn fold_float_op(a: f64, op: BinOp, b: f64) -> Option<ExprKind> {
 
 pub(super) fn fold_unary(op: UnaryOp, e: &Expr, ty: Type, span: Span) -> Option<Expr> {
     match (op, &e.kind) {
-        (UnaryOp::Neg, ExprKind::Int(n)) => Some(make(ExprKind::Int(n.wrapping_neg()), ty, span)),
-        (UnaryOp::Neg, ExprKind::Float(f)) => Some(make(ExprKind::Float(-f), ty, span)),
+        (UnaryOp::Neg, ExprKind::Int(n)) if matches!(e.ty, Type::I64) => {
+            Some(make(ExprKind::Int(n.wrapping_neg()), ty, span))
+        }
+        (UnaryOp::Neg, ExprKind::Float(f)) if matches!(e.ty, Type::F64) => {
+            Some(make(ExprKind::Float(-f), ty, span))
+        }
         (UnaryOp::Not, ExprKind::Bool(b)) => Some(make(ExprKind::Bool(!b), ty, span)),
-        (UnaryOp::BitNot, ExprKind::Int(n)) => Some(make(ExprKind::Int(!n), ty, span)),
+        (UnaryOp::BitNot, ExprKind::Int(n)) if matches!(e.ty, Type::I64) => {
+            Some(make(ExprKind::Int(!n), ty, span))
+        }
         _ => None,
     }
 }
@@ -589,6 +487,9 @@ pub(super) fn fold_builtin(
     span: Span,
 ) -> Option<Expr> {
     use hir::BuiltinFn::*;
+    if !args.iter().all(|a| matches!(a.ty, Type::F64)) {
+        return None;
+    }
     let kind = match builtin {
         Ln | Log2 | Log10 | Exp | Exp2 => {
             let ExprKind::Float(x) = &args[0].kind else {

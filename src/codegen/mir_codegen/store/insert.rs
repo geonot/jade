@@ -54,29 +54,7 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
-        let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
-        let count_for_sid = self.entry_alloca(i64t.into(), "ins.cnt");
-        b!(self.bld.build_call(
-            fseek_fn,
-            &[
-                fp.into(),
-                i64t.const_int(8, false).into(),
-                i32t.const_int(0, false).into()
-            ],
-            ""
-        ));
-        b!(self.bld.build_call(
-            fread_fn,
-            &[
-                count_for_sid.into(),
-                i64t.const_int(8, false).into(),
-                i64t.const_int(1, false).into(),
-                fp.into()
-            ],
-            ""
-        ));
-        let old_cnt = b!(self.bld.build_load(i64t, count_for_sid, "old.cnt")).into_int_value();
+        let old_cnt = self.store_read_count(fp, rec_size, store_name)?;
         let new_sid = b!(self
             .bld
             .build_int_add(old_cnt, i64t.const_int(1, false), "new.sid"));

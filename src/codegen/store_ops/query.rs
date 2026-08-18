@@ -4,33 +4,36 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) fn store_read_count(
         &mut self,
         fp: inkwell::values::PointerValue<'ctx>,
+        rec_size: u64,
+        store_name: &str,
     ) -> Result<inkwell::values::IntValue<'ctx>, String> {
         let i64t = self.ctx.i64_type();
-        let i32t = self.ctx.i32_type();
-        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
-        b!(self.bld.build_call(
-            fseek_fn,
+        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+        if self
+            .module
+            .get_function("jinn_store_read_count_checked")
+            .is_none()
+        {
+            let ft = i64t.fn_type(&[ptr_ty.into(), i64t.into(), ptr_ty.into()], false);
+            self.module.add_function(
+                "jinn_store_read_count_checked",
+                ft,
+                Some(inkwell::module::Linkage::External),
+            );
+        }
+        let path = format!("{store_name}.store\0");
+        let path_str = b!(self.bld.build_global_string_ptr(&path, "rc.path"));
+        let f = crate::codegen::fn_or_die(&self.module, "jinn_store_read_count_checked");
+        let count = self.call_result(b!(self.bld.build_call(
+            f,
             &[
                 fp.into(),
-                i64t.const_int(8, false).into(),
-                i32t.const_int(0, false).into(),
+                i64t.const_int(rec_size, false).into(),
+                path_str.as_pointer_value().into(),
             ],
-            ""
-        ));
-        let count_buf = self.entry_alloca(i64t.into(), "sc.count");
-        b!(self.bld.build_store(count_buf, i64t.const_int(0, false)));
-        let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
-        b!(self.bld.build_call(
-            fread_fn,
-            &[
-                count_buf.into(),
-                i64t.const_int(8, false).into(),
-                i64t.const_int(1, false).into(),
-                fp.into(),
-            ],
-            ""
-        ));
-        Ok(b!(self.bld.build_load(i64t, count_buf, "count")).into_int_value())
+            "count"
+        )));
+        Ok(count.into_int_value())
     }
 
     pub(crate) fn store_load_records(

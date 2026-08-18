@@ -231,3 +231,38 @@ fn versioned_history_inside_an_aborted_transaction_rolls_back() {
         "-1\n1",
     );
 }
+
+#[test]
+fn kill_nine_mid_transaction_recovers_pre_transaction_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let seed = "store ledger\n    v as i64\n\n*main\n    insert ledger 1\n    save ledger\n    log(count ledger)\n";
+    let seed_bin = compile_in(dir.path(), "seed", seed);
+    let r = run_in(dir.path(), &seed_bin);
+    assert!(r.status.success());
+    assert_eq!(String::from_utf8_lossy(&r.stdout).trim(), "1");
+
+    let victim = "store ledger\n    v as i64\n\n*main\n    transaction\n        insert ledger 2\n        __sleep_ms(10000)\n    log('committed')\n";
+    let victim_bin = compile_in(dir.path(), "victim", victim);
+    let mut child = std::process::Command::new(&victim_bin)
+        .current_dir(dir.path())
+        .spawn()
+        .expect("spawn victim");
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+    child.kill().expect("kill -9 victim");
+    let _ = child.wait();
+
+    let check = "store ledger\n    v as i64\n\n*main\n    log(count ledger)\n";
+    let check_bin = compile_in(dir.path(), "check", check);
+    let out = run_in(dir.path(), &check_bin);
+    assert!(
+        out.status.success(),
+        "reopen after mid-transaction kill failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "1",
+        "the killed transaction's partial writes must not survive recovery; stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

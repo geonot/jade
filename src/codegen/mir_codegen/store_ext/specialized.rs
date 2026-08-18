@@ -184,7 +184,8 @@ impl<'ctx> Compiler<'ctx> {
         if args.is_empty() {
             return Err(format!("graph.{direction}() requires a node argument"));
         }
-        let (sd, _st, rec_size, fp) = self.setup_store_access(store_name)?;
+        let (sd, _st, rec_size, _fp) = self.setup_store_access(store_name)?;
+        let fp = self.store_lock(store_name)?;
         let node_val = self.value_map[&args[0]];
 
         let builtin_names = [
@@ -247,42 +248,9 @@ impl<'ctx> Compiler<'ctx> {
             .build_struct_gep(header_ty, result_vec, 2, "g.vec.c"));
         b!(self.bld.build_store(gv_c, i64t.const_int(0, false)));
 
+        let total = self.store_read_count(fp, rec_size, store_name)?;
         let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
-        b!(self.bld.build_call(
-            fseek_fn,
-            &[
-                fp.into(),
-                i64t.const_int(crate::codegen::stores::HEADER_SIZE, false)
-                    .into(),
-                i32t.const_int(0, false).into(),
-            ],
-            ""
-        ));
-
-        let _ftell_fn = crate::codegen::fn_or_die(&self.module, "ftell");
         let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
-
-        b!(self.bld.build_call(
-            fseek_fn,
-            &[
-                fp.into(),
-                i64t.const_int(8, false).into(),
-                i32t.const_int(0, false).into(),
-            ],
-            ""
-        ));
-        let count_alloca = self.entry_alloca(i64t.into(), "g.cnt");
-        b!(self.bld.build_call(
-            fread_fn,
-            &[
-                count_alloca.into(),
-                i64t.const_int(8, false).into(),
-                i64t.const_int(1, false).into(),
-                fp.into(),
-            ],
-            ""
-        ));
-        let total = b!(self.bld.build_load(i64t, count_alloca, "g.total")).into_int_value();
 
         b!(self.bld.build_call(
             fseek_fn,
@@ -432,6 +400,7 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(done_bb);
         let _ = match_count;
+        self.store_unlock(store_name, fp)?;
         Ok(result_vec.into())
     }
 
@@ -439,33 +408,10 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         store_name: &str,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let (_sd, _st, _rec_size, fp) = self.setup_store_access(store_name)?;
-        let i64t = self.ctx.i64_type();
-        let i32t = self.ctx.i32_type();
-        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
-        let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
-
-        b!(self.bld.build_call(
-            fseek_fn,
-            &[
-                fp.into(),
-                i64t.const_int(8, false).into(),
-                i32t.const_int(0, false).into(),
-            ],
-            ""
-        ));
-        let count_alloca = self.entry_alloca(i64t.into(), "ts.cnt_buf");
-        b!(self.bld.build_call(
-            fread_fn,
-            &[
-                count_alloca.into(),
-                i64t.const_int(8, false).into(),
-                i64t.const_int(1, false).into(),
-                fp.into(),
-            ],
-            ""
-        ));
-        let count = b!(self.bld.build_load(i64t, count_alloca, "ts.count")).into_int_value();
+        let (_sd, _st, rec_size, _fp) = self.setup_store_access(store_name)?;
+        let fp = self.store_lock(store_name)?;
+        let count = self.store_read_count(fp, rec_size, store_name)?;
+        self.store_unlock(store_name, fp)?;
         Ok(count.into())
     }
 
@@ -804,7 +750,7 @@ impl<'ctx> Compiler<'ctx> {
             let ensure_fn = self.gen_store_ensure_open(&sd)?;
             b!(self.bld.build_call(ensure_fn, &[], ""));
         }
-        let fp = self.load_store_fp(store_name)?;
+        let fp = self.store_lock(store_name)?;
         let rec_size = self.store_record_size(&sd);
         let rec_st = self
             .module
@@ -815,8 +761,9 @@ impl<'ctx> Compiler<'ctx> {
             .get_struct_type(&format!("__store_{store_name}"))
             .expect("ICE: struct type not declared");
         let jinn_size = self.type_store_size(jinn_st.into());
-        let total = self.store_read_count(fp)?;
+        let total = self.store_read_count(fp, rec_size, store_name)?;
         let raw_buf = self.store_load_records(fp, total, rec_size)?;
+        self.store_unlock(store_name, fp)?;
 
         let jinn_total =
             b!(self

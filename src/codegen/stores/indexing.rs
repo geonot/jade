@@ -306,11 +306,37 @@ impl<'ctx> Compiler<'ctx> {
             for action in &op.actions {
                 match action {
                     crate::ast::AlterAction::Add {
-                        name: _,
+                        name: field_name,
                         ty,
-                        default: _,
+                        default,
                     } => {
                         let field_size = self.field_byte_size(ty);
+                        let default_ptr: inkwell::values::BasicMetadataValueEnum = match default {
+                            None => ptr_ty.const_null().into(),
+                            Some(expr) => {
+                                let bytes = Self::migration_default_bytes(expr, ty, field_size)
+                                    .map_err(|e| {
+                                        format!(
+                                            "migration `{}`: `add {}` on store '{}': {}",
+                                            mig.name, field_name, store_name, e
+                                        )
+                                    })?;
+                                let i8t = self.ctx.i8_type();
+                                let vals: Vec<_> = bytes
+                                    .iter()
+                                    .map(|b| i8t.const_int(*b as u64, false))
+                                    .collect();
+                                let arr = i8t.const_array(&vals);
+                                let g = self.module.add_global(
+                                    i8t.array_type(field_size as u32),
+                                    None,
+                                    "mig.defv",
+                                );
+                                g.set_initializer(&arr);
+                                g.set_linkage(Linkage::Private);
+                                g.as_pointer_value().into()
+                            }
+                        };
 
                         let fp_global = self.module.get_global(&fp_global_name);
                         if let Some(fp_g) = fp_global {
@@ -355,44 +381,84 @@ impl<'ctx> Compiler<'ctx> {
                                     store_path_str.as_pointer_value().into(),
                                     field_offset.into(),
                                     i64t.const_int(field_size, false).into(),
-                                    ptr_ty.const_null().into(),
+                                    default_ptr,
                                 ],
                                 ""
                             ));
                         }
                     }
                     crate::ast::AlterAction::Drop { name: field_name } => {
-                        if let Some(sd) = self.store_defs.get(store_name) {
-                            let sd = sd.clone();
-                            let mut offset: u64 = 0;
-                            let mut field_size: u64 = 0;
-                            for f in &sd.fields {
-                                let sz = self.field_byte_size(&f.ty);
-                                if f.name == *field_name {
-                                    field_size = sz;
-                                    break;
+                        let down_ty = mig
+                            .down
+                            .iter()
+                            .filter(|dop| dop.store_name == *store_name)
+                            .flat_map(|dop| dop.actions.iter())
+                            .find_map(|a| match a {
+                                crate::ast::AlterAction::Add { name, ty, .. }
+                                    if name == field_name =>
+                                {
+                                    Some(ty.clone())
                                 }
-                                offset += sz;
-                            }
-                            if field_size > 0 {
-                                let fp_global = self.module.get_global(&fp_global_name);
-                                if let Some(fp_g) = fp_global {
-                                    let drop_fn = crate::codegen::fn_or_die(
-                                        &self.module,
-                                        "jinn_mig_drop_field",
-                                    );
-                                    b!(self.bld.build_call(
-                                        drop_fn,
-                                        &[
-                                            fp_g.as_pointer_value().into(),
-                                            store_path_str.as_pointer_value().into(),
-                                            i64t.const_int(offset, false).into(),
-                                            i64t.const_int(field_size, false).into(),
-                                        ],
-                                        ""
-                                    ));
-                                }
-                            }
+                                _ => None,
+                            });
+                        let Some(dropped_ty) = down_ty else {
+                            return Err(format!(
+                                "migration `{}`: `drop {}` on store '{}' cannot determine \
+                                 the field's position in the pre-migration record; alpha \
+                                 removes the record's final field — declare the matching \
+                                 `add {} as <type>` in the `down` block to supply its type",
+                                mig.name, field_name, store_name, field_name
+                            ));
+                        };
+                        let field_size = self.field_byte_size(&dropped_ty);
+                        if let Some(fp_g) = self.module.get_global(&fp_global_name) {
+                            let fp =
+                                b!(self
+                                    .bld
+                                    .build_load(ptr_ty, fp_g.as_pointer_value(), "mig.dfp"))
+                                .into_pointer_value();
+                            let fseek = crate::codegen::fn_or_die(&self.module, "fseek");
+                            b!(self.bld.build_call(
+                                fseek,
+                                &[
+                                    fp.into(),
+                                    i64t.const_int(16, false).into(),
+                                    self.ctx.i32_type().const_int(0, false).into()
+                                ],
+                                ""
+                            ));
+                            let rec_size_buf = self.entry_alloca(i64t.into(), "mig.drsz");
+                            let fread = crate::codegen::fn_or_die(&self.module, "fread");
+                            b!(self.bld.build_call(
+                                fread,
+                                &[
+                                    rec_size_buf.into(),
+                                    i64t.const_int(8, false).into(),
+                                    i64t.const_int(1, false).into(),
+                                    fp.into()
+                                ],
+                                ""
+                            ));
+                            let old_rec_size =
+                                b!(self.bld.build_load(i64t, rec_size_buf, "mig.dsz"))
+                                    .into_int_value();
+                            let field_offset = b!(self.bld.build_int_sub(
+                                old_rec_size,
+                                i64t.const_int(field_size, false),
+                                "mig.doff"
+                            ));
+                            let drop_fn =
+                                crate::codegen::fn_or_die(&self.module, "jinn_mig_drop_field");
+                            b!(self.bld.build_call(
+                                drop_fn,
+                                &[
+                                    fp_g.as_pointer_value().into(),
+                                    store_path_str.as_pointer_value().into(),
+                                    field_offset.into(),
+                                    i64t.const_int(field_size, false).into(),
+                                ],
+                                ""
+                            ));
                         }
                     }
                     crate::ast::AlterAction::Rename { .. } => {}
@@ -459,16 +525,112 @@ impl<'ctx> Compiler<'ctx> {
             Type::I16 | Type::U16 => 2,
             Type::I32 | Type::U32 | Type::F32 => 4,
             Type::I64 | Type::U64 | Type::F64 => 8,
-            Type::String => 256,
+            Type::String => super::STRING_BUF_SIZE,
             Type::Struct(name, _) => match &*name.as_str() {
                 "I8" | "U8" | "Bool" => 1,
                 "I16" | "U16" => 2,
                 "I32" | "U32" | "F32" => 4,
                 "I64" | "U64" | "F64" => 8,
-                "String" => 256,
+                "String" => super::STRING_BUF_SIZE,
                 _ => 8,
             },
             _ => 8,
         }
+    }
+
+    fn migration_default_bytes(
+        expr: &crate::ast::Expr,
+        ty: &Type,
+        field_size: u64,
+    ) -> Result<Vec<u8>, String> {
+        enum Lit {
+            Int(i64),
+            Float(f64),
+            Bool(bool),
+            Str(String),
+        }
+        fn lit(e: &crate::ast::Expr) -> Option<Lit> {
+            match e {
+                crate::ast::Expr::Int(n, _) => Some(Lit::Int(*n)),
+                crate::ast::Expr::Float(f, _) => Some(Lit::Float(*f)),
+                crate::ast::Expr::Bool(b, _) => Some(Lit::Bool(*b)),
+                crate::ast::Expr::Str(s, _) => Some(Lit::Str(s.clone())),
+                crate::ast::Expr::UnaryOp(crate::ast::UnaryOp::Neg, inner, _) => {
+                    match lit(inner)? {
+                        Lit::Int(n) => Some(Lit::Int(n.wrapping_neg())),
+                        Lit::Float(f) => Some(Lit::Float(-f)),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        }
+        let Some(v) = lit(expr) else {
+            return Err("alpha supports only literal `default` values in migrations".into());
+        };
+        let kind: String = match ty {
+            Type::I8 => "I8".into(),
+            Type::U8 => "U8".into(),
+            Type::I16 => "I16".into(),
+            Type::U16 => "U16".into(),
+            Type::I32 => "I32".into(),
+            Type::U32 => "U32".into(),
+            Type::I64 => "I64".into(),
+            Type::U64 => "U64".into(),
+            Type::F32 => "F32".into(),
+            Type::F64 => "F64".into(),
+            Type::Bool => "Bool".into(),
+            Type::String => "String".into(),
+            Type::Struct(name, _) => name.as_str(),
+            other => {
+                return Err(format!(
+                    "unsupported field type `{other:?}` for a migration default"
+                ));
+            }
+        };
+        let int_range = |k: &str| -> Option<(i64, i64)> {
+            Some(match k {
+                "I8" => (i8::MIN as i64, i8::MAX as i64),
+                "I16" => (i16::MIN as i64, i16::MAX as i64),
+                "I32" => (i32::MIN as i64, i32::MAX as i64),
+                "I64" => (i64::MIN, i64::MAX),
+                "U8" => (0, u8::MAX as i64),
+                "U16" => (0, u16::MAX as i64),
+                "U32" => (0, u32::MAX as i64),
+                "U64" => (0, i64::MAX),
+                _ => return None,
+            })
+        };
+        let mut out = vec![0u8; field_size as usize];
+        match (kind.as_str(), v) {
+            (k @ ("I8" | "U8" | "I16" | "U16" | "I32" | "U32" | "I64" | "U64"), Lit::Int(n)) => {
+                if let Some((lo, hi)) = int_range(k)
+                    && (n < lo || n > hi)
+                {
+                    return Err(format!("default {n} does not fit in `{k}`"));
+                }
+                let sz = (field_size as usize).min(8);
+                out[..sz].copy_from_slice(&n.to_le_bytes()[..sz]);
+            }
+            ("Bool", Lit::Bool(b)) => out[0] = b as u8,
+            ("Bool", Lit::Int(n)) => out[0] = (n != 0) as u8,
+            ("F32", Lit::Float(f)) => out[..4].copy_from_slice(&(f as f32).to_le_bytes()),
+            ("F32", Lit::Int(n)) => out[..4].copy_from_slice(&(n as f32).to_le_bytes()),
+            ("F64", Lit::Float(f)) => out[..8].copy_from_slice(&f.to_le_bytes()),
+            ("F64", Lit::Int(n)) => out[..8].copy_from_slice(&(n as f64).to_le_bytes()),
+            ("String", Lit::Str(s)) => {
+                let bytes = s.as_bytes();
+                let cap = (field_size as usize).saturating_sub(8);
+                let n = bytes.len().min(cap);
+                out[..8].copy_from_slice(&(n as i64).to_le_bytes());
+                out[8..8 + n].copy_from_slice(&bytes[..n]);
+            }
+            (k, _) => {
+                return Err(format!(
+                    "the `default` literal does not match field type `{k}`"
+                ));
+            }
+        }
+        Ok(out)
     }
 }

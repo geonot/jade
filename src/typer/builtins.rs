@@ -247,7 +247,7 @@ impl Typer {
             "__file_exists" if args.len() == 1 && !self.fns.contains_key(name) => {
                 Some(self.lower_simple_builtin(args, hir::BuiltinFn::FileExists, Type::Bool, span))
             }
-            "vec" | "vector" if !self.fns.contains_key(name) => {
+            "vec" | "vector" => {
                 let hargs = match self.lower_exprs(args) {
                     Ok(v) => v,
                     Err(e) => return Some(Err(e)),
