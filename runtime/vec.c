@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -103,6 +104,34 @@ void __jinn_str_clone(jinn_sso_t *out, const jinn_sso_t *src) {
     memcpy(out->bytes, &dst, 8);
     memcpy(out->bytes + 8, &len, 8);
     memcpy(out->bytes + 16, &cap, 8);
+}
+void __jinn_map_grow(void *hdr) {
+    if (!hdr) return;
+    jinn_vec_header_t *h = (jinn_vec_header_t *)hdr;
+    if (h->cap <= 0 || h->len * 4 < h->cap * 3) return;
+    int64_t old_cap = h->cap;
+    int64_t new_cap = old_cap * 2;
+    unsigned char *old = (unsigned char *)h->ptr;
+    unsigned char *neu = (unsigned char *)calloc((size_t)new_cap, 64);
+    if (!neu) {
+        fprintf(stderr, "jinn runtime: out of memory growing map (%lld entries)\n",
+                (long long)new_cap);
+        abort();
+    }
+    for (int64_t i = 0; i < old_cap; i++) {
+        unsigned char *e = old + i * 64;
+        if (!e[56]) continue;
+        uint64_t hash;
+        memcpy(&hash, e, 8);
+        int64_t j = (int64_t)(hash & (uint64_t)(new_cap - 1));
+        while (neu[j * 64 + 56]) {
+            j = (j + 1) & (new_cap - 1);
+        }
+        memcpy(neu + j * 64, e, 64);
+    }
+    free(old);
+    h->ptr = neu;
+    h->cap = new_cap;
 }
 void *__jinn_vec_clone_pod(void *hdr, int64_t elem_size) {
     if (!hdr) return NULL;

@@ -50,6 +50,65 @@ impl Typer {
         }
     }
 
+    pub(in crate::typer) fn check_call_arg(
+        &mut self,
+        callee: &str,
+        i: usize,
+        pt: &Type,
+        arg_ty: &Type,
+        span: Span,
+    ) -> Result<(), String> {
+        let r = self
+            .infer_ctx
+            .unify_at_tolerant(pt, arg_ty, span, "function argument");
+        if self.concrete_container_mismatch(pt, arg_ty) {
+            return Err(format!(
+                "argument {} of `{}` has the wrong element type: expected `{}`, \
+                 found `{}` — container element types must match exactly",
+                i + 1,
+                callee,
+                self.infer_ctx.resolve(pt),
+                self.infer_ctx.resolve(arg_ty),
+            ));
+        }
+        if let Err(e) = r {
+            let pl = self.infer_ctx.shallow_resolve(pt);
+            let al = self.infer_ctx.shallow_resolve(arg_ty);
+            if let (Type::Fn(pp, _), Type::Fn(ap, _)) = (&pl, &al)
+                && pp.len() != ap.len()
+            {
+                return Err(format!(
+                    "argument {} of `{}` is a function taking {} argument(s), \
+                     but a function taking {} argument(s) is required",
+                    i + 1,
+                    callee,
+                    ap.len(),
+                    pp.len()
+                ));
+            }
+            let lax = |this: &mut Self, t: &Type| {
+                matches!(t, Type::Ptr(_) | Type::Param(_)) || this.infer_ctx.type_has_unresolved(t)
+            };
+            let param_is_alias = matches!(
+                &pl,
+                Type::Struct(n, a) if a.is_empty() && self.alias_names.contains(n)
+            );
+            let arg_ok = if param_is_alias {
+                matches!(al, Type::Ptr(_) | Type::Param(_))
+            } else {
+                lax(self, &al)
+            };
+            if !(lax(self, &pl) || arg_ok || Self::numeric_lossless(&al, &pl)) {
+                return Err(format!(
+                    "argument {} of `{}` has the wrong type: {e}",
+                    i + 1,
+                    callee
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn concrete_container_mismatch(&mut self, pl: &Type, al: &Type) -> bool {
         let pl = self.infer_ctx.shallow_resolve(pl);
         let al = self.infer_ctx.shallow_resolve(al);
@@ -129,35 +188,7 @@ impl Typer {
                 }
                 for (i, ha) in hargs.iter().enumerate() {
                     if let Some(pt) = inst_params.get(i) {
-                        let r =
-                            self.infer_ctx
-                                .unify_at_tolerant(pt, &ha.ty, span, "function argument");
-
-                        if let Err(e) = r {
-                            let pl = self.infer_ctx.shallow_resolve(pt);
-                            let al = self.infer_ctx.shallow_resolve(&ha.ty);
-
-                            let lax = |this: &mut Self, t: &Type| {
-                                matches!(t, Type::Ptr(_) | Type::Param(_))
-                                    || this.infer_ctx.type_has_unresolved(t)
-                            };
-                            let param_is_alias = matches!(
-                                &pl,
-                                Type::Struct(n, a) if a.is_empty() && self.alias_names.contains(n)
-                            );
-                            let arg_ok = if param_is_alias {
-                                matches!(al, Type::Ptr(_) | Type::Param(_))
-                            } else {
-                                lax(self, &al)
-                            };
-                            if !(lax(self, &pl) || arg_ok || Self::numeric_lossless(&al, &pl)) {
-                                return Err(format!(
-                                    "argument {} of `{}` has the wrong type: {e}",
-                                    i + 1,
-                                    name
-                                ));
-                            }
-                        }
+                        self.check_call_arg(&name.as_str(), i, pt, &ha.ty, span)?;
                     }
                 }
 
@@ -261,44 +292,7 @@ impl Typer {
                 }
                 for (i, ha) in hargs.iter().enumerate() {
                     if let Some(pt) = param_tys.get(i) {
-                        let r =
-                            self.infer_ctx
-                                .unify_at_tolerant(pt, &ha.ty, span, "function argument");
-                        if self.concrete_container_mismatch(pt, &ha.ty) {
-                            return Err(format!(
-                                "argument {} of `{}` has the wrong element type: expected `{}`, \
-                                 found `{}` — container element types must match exactly",
-                                i + 1,
-                                name,
-                                self.infer_ctx.resolve(pt),
-                                self.infer_ctx.resolve(&ha.ty),
-                            ));
-                        }
-                        if let Err(e) = r {
-                            let pl = self.infer_ctx.shallow_resolve(pt);
-                            let al = self.infer_ctx.shallow_resolve(&ha.ty);
-
-                            let lax = |this: &mut Self, t: &Type| {
-                                matches!(t, Type::Ptr(_) | Type::Param(_))
-                                    || this.infer_ctx.type_has_unresolved(t)
-                            };
-                            let param_is_alias = matches!(
-                                &pl,
-                                Type::Struct(n, a) if a.is_empty() && self.alias_names.contains(n)
-                            );
-                            let arg_ok = if param_is_alias {
-                                matches!(al, Type::Ptr(_) | Type::Param(_))
-                            } else {
-                                lax(self, &al)
-                            };
-                            if !(lax(self, &pl) || arg_ok || Self::numeric_lossless(&al, &pl)) {
-                                return Err(format!(
-                                    "argument {} of `{}` has the wrong type: {e}",
-                                    i + 1,
-                                    name
-                                ));
-                            }
-                        }
+                        self.check_call_arg(&name.as_str(), i, pt, &ha.ty, span)?;
                     }
                 }
                 for (i, ha) in hargs.iter_mut().enumerate() {

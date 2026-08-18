@@ -22,6 +22,7 @@ pub fn run(
         .map(|t| t.name)
         .filter(|n| fn_names.contains(&crate::intern::Symbol::intern(&format!("{n}_drop"))))
         .collect();
+    let heap_structs = compute_heap_structs(&prog.types);
     for func in &mut prog.functions {
         run_on_function(
             func,
@@ -31,6 +32,7 @@ pub fn run(
             &mut errors,
             consuming,
             &resources,
+            &heap_structs,
         );
     }
     if errors.is_empty() {
@@ -40,12 +42,62 @@ pub fn run(
     }
 }
 
+fn compute_heap_structs(
+    types: &[mir::TypeDef],
+) -> std::collections::HashSet<crate::intern::Symbol> {
+    use crate::intern::Symbol;
+    let by_name: HashMap<Symbol, &mir::TypeDef> = types.iter().map(|t| (t.name, t)).collect();
+    fn owns_heap(
+        ty: &Type,
+        by_name: &HashMap<crate::intern::Symbol, &mir::TypeDef>,
+        seen: &mut HashSet<crate::intern::Symbol>,
+    ) -> bool {
+        match ty {
+            Type::String
+            | Type::Vec(_)
+            | Type::Map(_, _)
+            | Type::Fn(_, _)
+            | Type::Coroutine(_)
+            | Type::Generator(_)
+            | Type::Channel(_) => true,
+            Type::Struct(n, _) => {
+                if !seen.insert(*n) {
+                    return false;
+                }
+                let r = by_name
+                    .get(n)
+                    .map(|td| td.fields.iter().any(|(_, ft)| owns_heap(ft, by_name, seen)))
+                    .unwrap_or(false);
+                seen.remove(n);
+                r
+            }
+            Type::Tuple(ts) => ts.iter().any(|t| owns_heap(t, by_name, seen)),
+            Type::Array(t, _) | Type::Alias(_, t) | Type::Newtype(_, t) | Type::Frozen(t) => {
+                owns_heap(t, by_name, seen)
+            }
+            _ => false,
+        }
+    }
+    types
+        .iter()
+        .filter(|td| {
+            let mut seen: HashSet<crate::intern::Symbol> = HashSet::new();
+            seen.insert(td.name);
+            td.fields
+                .iter()
+                .any(|(_, ft)| owns_heap(ft, &by_name, &mut seen))
+        })
+        .map(|td| td.name)
+        .collect()
+}
+
 pub(super) fn insert_missing_return_drops(
     func: &mut mir::Function,
     consuming: &verify::ConsumingMap,
     resources: &std::collections::HashSet<crate::intern::Symbol>,
+    heap_structs: &std::collections::HashSet<crate::intern::Symbol>,
 ) -> u32 {
-    let missing = verify::must_held_at_returns(func, consuming, resources);
+    let missing = verify::must_held_at_returns(func, consuming, resources, heap_structs);
     let mut inserted = 0u32;
     for (bi, items) in missing {
         let span = func.blocks[bi]
@@ -128,6 +180,7 @@ fn suppress_moved_enum_payload_drops(func: &mut mir::Function) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_on_function(
     func: &mut mir::Function,
     hints: &mut DropHints,
@@ -136,8 +189,12 @@ fn run_on_function(
     errors: &mut Vec<String>,
     consuming: &verify::ConsumingMap,
     resources: &std::collections::HashSet<crate::intern::Symbol>,
+    heap_structs: &std::collections::HashSet<crate::intern::Symbol>,
 ) {
-    hints.stats.return_drops_inserted += insert_missing_return_drops(func, consuming, resources);
+    hints.stats.return_drops_inserted +=
+        insert_missing_return_drops(func, consuming, resources, heap_structs);
+    hints.stats.return_drops_inserted +=
+        verify::insert_edge_escape_drops(func, consuming, resources, heap_structs);
     suppress_moved_enum_payload_drops(func);
 
     let uses = count_uses(func);
@@ -178,7 +235,12 @@ fn run_on_function(
 
     if checked {
         errors.extend(verify::verify_function(func));
-        errors.extend(verify::verify_function_leaks(func, consuming, resources));
+        errors.extend(verify::verify_function_leaks(
+            func,
+            consuming,
+            resources,
+            heap_structs,
+        ));
     }
 }
 

@@ -25,6 +25,7 @@ impl Typer {
             Type::Frozen(inner) => (self.infer_ctx.shallow_resolve(&inner), true),
             other => (other, false),
         };
+        let obj_ty = self.normalize_named_ty(obj_ty);
         let obj_ty = match &obj_ty {
             Type::Struct(n, targs)
                 if !targs.is_empty()
@@ -172,10 +173,32 @@ impl Typer {
         }
 
         if matches!(obj_ty, Type::String) {
-            let hargs: Vec<hir::Expr> = args
+            let expected: Vec<Type> = crate::builtin_methods::StrMethod::from_name(method)
+                .map(|m| m.param_tys())
+                .unwrap_or_default();
+            let mut hargs: Vec<hir::Expr> = args
                 .iter()
-                .map(|e| self.lower_expr(e))
+                .enumerate()
+                .map(|(i, e)| self.lower_expr_expected(e, expected.get(i)))
                 .collect::<Result<_, _>>()?;
+            for (i, ha) in hargs.iter().enumerate() {
+                if let Some(pt) = expected.get(i) {
+                    self.check_call_arg(&format!("String.{method}"), i, pt, &ha.ty, span)?;
+                }
+            }
+            for (i, ha) in hargs.iter_mut().enumerate() {
+                if let Some(pt) = expected.get(i) {
+                    let taken = std::mem::replace(
+                        ha,
+                        hir::Expr {
+                            kind: hir::ExprKind::Int(0),
+                            ty: Type::I64,
+                            span,
+                        },
+                    );
+                    *ha = self.maybe_coerce_to(taken, pt);
+                }
+            }
             let ret_ty = Self::string_method_ret_ty(method).unwrap_or(Type::I64);
             return Ok(hir::Expr {
                 kind: hir::ExprKind::StringMethod(Box::new(hobj), method.into(), hargs),
@@ -607,6 +630,24 @@ impl Typer {
                     self.peel_frozen_arg(mangled, i + 1, param_tys.get(i + 1), ha, span)?;
                     self.coerce_arg_to_view(param_tys.get(i + 1), ha, span);
                 }
+                for (i, ha) in hargs.iter().enumerate() {
+                    if let Some(pt) = param_tys.get(i + 1) {
+                        self.check_call_arg(&format!("{type_name}.{method}"), i, pt, &ha.ty, span)?;
+                    }
+                }
+                for (i, ha) in hargs.iter_mut().enumerate() {
+                    if let Some(pt) = param_tys.get(i + 1) {
+                        let taken = std::mem::replace(
+                            ha,
+                            hir::Expr {
+                                kind: hir::ExprKind::Int(0),
+                                ty: Type::I64,
+                                span,
+                            },
+                        );
+                        *ha = self.maybe_coerce_to(taken, pt);
+                    }
+                }
                 self.called_mono_methods
                     .insert(Symbol::intern(&method_name));
                 return Ok(hir::Expr {
@@ -700,7 +741,7 @@ impl Typer {
                     "method call implies struct type",
                 );
                 let method_name = format!("{}_{}", type_name, method);
-                let hargs: Vec<hir::Expr> = args
+                let mut hargs: Vec<hir::Expr> = args
                     .iter()
                     .enumerate()
                     .map(|(i, e)| {
@@ -708,6 +749,24 @@ impl Typer {
                         self.lower_expr_expected(e, expected)
                     })
                     .collect::<Result<_, _>>()?;
+                for (i, ha) in hargs.iter().enumerate() {
+                    if let Some(pt) = param_tys.get(i + 1) {
+                        self.check_call_arg(&format!("{type_name}.{method}"), i, pt, &ha.ty, span)?;
+                    }
+                }
+                for (i, ha) in hargs.iter_mut().enumerate() {
+                    if let Some(pt) = param_tys.get(i + 1) {
+                        let taken = std::mem::replace(
+                            ha,
+                            hir::Expr {
+                                kind: hir::ExprKind::Int(0),
+                                ty: Type::I64,
+                                span,
+                            },
+                        );
+                        *ha = self.maybe_coerce_to(taken, pt);
+                    }
+                }
                 self.called_mono_methods
                     .insert(Symbol::intern(&method_name));
                 return Ok(hir::Expr {

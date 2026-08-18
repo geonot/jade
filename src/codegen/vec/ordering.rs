@@ -38,6 +38,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(body_bb);
         let gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "rev.gep")) };
         let elem = b!(self.bld.build_load(lty, gep, "rev.elem"));
+        let elem = self.owned_elem_copy(elem, elem_ty)?;
         self.vec_push_raw(out_hdr, elem, lty, elem_size)?;
         let next = b!(self
             .bld
@@ -77,6 +78,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(cp_body);
         let gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[ci], "sort.cg")) };
         let elem = b!(self.bld.build_load(lty, gep, "sort.ce"));
+        let elem = self.owned_elem_copy(elem, elem_ty)?;
         self.vec_push_raw(out_hdr, elem, lty, elem_size)?;
         let cn = b!(self
             .bld

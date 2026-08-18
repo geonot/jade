@@ -34,7 +34,19 @@ impl Lowerer {
                             self.mark_method_call_borrow(v);
                             v
                         } else {
-                            self.lower_expr_owned(&b.value)
+                            let v = self.lower_expr_owned(&b.value);
+                            if matches!(b.value.ty, Type::Channel(_))
+                                && !matches!(b.ownership, hir::Ownership::Borrowed)
+                                && matches!(b.value.kind, ExprKind::Var(..))
+                            {
+                                self.emit(
+                                    InstKind::Clone(v, b.value.ty.clone()),
+                                    b.value.ty.clone(),
+                                    b.value.span,
+                                )
+                            } else {
+                                v
+                            }
                         }
                     }
                 };
@@ -102,6 +114,17 @@ impl Lowerer {
             }
             hir::Stmt::Assign(target, value, _span) => {
                 let val = self.lower_expr_owned(value);
+                let val = if matches!(value.ty, Type::Channel(_))
+                    && matches!(value.kind, ExprKind::Var(..))
+                {
+                    self.emit(
+                        InstKind::Clone(val, value.ty.clone()),
+                        value.ty.clone(),
+                        value.span,
+                    )
+                } else {
+                    val
+                };
                 match &target.kind {
                     ExprKind::Var(def_id, name) => {
                         if let Some((field_sym, _)) = self.field_lookup(*def_id) {

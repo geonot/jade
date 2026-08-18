@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::intern::Symbol;
-use crate::mir::{self, BlockId, InstKind, Terminator, ValueId};
+use crate::mir::{self, BlockId, InstKind, Instruction, Terminator, ValueId};
 use crate::types::Type;
 
 use super::mir_drops::inst_operands;
@@ -301,17 +301,49 @@ const INSERTING_METHODS: &[&str] = &[
     "push_all",
 ];
 
+const FRESH_CONTAINER_METHODS: &[&str] = &[
+    "slice",
+    "trim",
+    "trim_left",
+    "trim_right",
+    "replace",
+    "to_upper",
+    "to_lower",
+    "repeat",
+    "__clone",
+    "join",
+    "split",
+    "lines",
+    "map",
+    "filter",
+    "take",
+    "skip",
+    "reverse",
+    "sort",
+    "chain",
+    "zip",
+    "enumerate",
+    "flatten",
+    "collect",
+    "keys",
+    "values",
+    "pop",
+    "shift",
+    "remove",
+];
+
 fn owning_allocs(
     func: &mir::Function,
     consuming: &ConsumingMap,
     resources: &HashSet<Symbol>,
+    _heap_structs: &HashSet<Symbol>,
 ) -> HashMap<ValueId, Type> {
     let mut owning = HashMap::new();
     for block in &func.blocks {
         for inst in &block.insts {
             let Some(dest) = inst.dest else { continue };
             match &inst.kind {
-                InstKind::VecNew(_) | InstKind::MapInit => {
+                InstKind::VecNew(_) | InstKind::MapInit | InstKind::ChanCreate(..) => {
                     owning.insert(dest, inst.ty.clone());
                 }
                 InstKind::StructInit(name, _) if resources.contains(name) => {
@@ -320,11 +352,23 @@ fn owning_allocs(
                 InstKind::ClosureCreate(_, captures) if !captures.is_empty() => {
                     owning.insert(dest, inst.ty.clone());
                 }
-                InstKind::Clone(_, _) if matches!(inst.ty, Type::Vec(_) | Type::Map(_, _)) => {
+                InstKind::Clone(_, _)
+                    if matches!(inst.ty, Type::Vec(_) | Type::Map(_, _) | Type::String) =>
+                {
+                    owning.insert(dest, inst.ty.clone());
+                }
+                InstKind::BinOp(_, _, _) if matches!(inst.ty, Type::String) => {
+                    owning.insert(dest, inst.ty.clone());
+                }
+                InstKind::MethodCall(_, name, _, borrow)
+                    if !*borrow
+                        && matches!(inst.ty, Type::String | Type::Vec(_) | Type::Map(_, _))
+                        && FRESH_CONTAINER_METHODS.contains(&&*name.as_str()) =>
+                {
                     owning.insert(dest, inst.ty.clone());
                 }
                 InstKind::Call(name, _)
-                    if matches!(inst.ty, Type::Vec(_) | Type::Map(_, _))
+                    if matches!(inst.ty, Type::Vec(_) | Type::Map(_, _) | Type::String)
                         && (consuming.contains_key(name) || is_store_vec_alloc(&name.as_str())) =>
                 {
                     owning.insert(dest, inst.ty.clone());
@@ -439,15 +483,11 @@ fn process_must_held(
     held
 }
 
-pub(super) fn must_held_at_returns(
+fn must_held_entry_states(
     func: &mir::Function,
+    owning: &HashMap<ValueId, Type>,
     consuming: &ConsumingMap,
-    resources: &HashSet<Symbol>,
-) -> Vec<(usize, Vec<(ValueId, Type)>)> {
-    let owning = owning_allocs(func, consuming, resources);
-    if owning.is_empty() {
-        return Vec::new();
-    }
+) -> Vec<Option<HashSet<ValueId>>> {
     let index_of: HashMap<BlockId, usize> = func
         .blocks
         .iter()
@@ -466,7 +506,7 @@ pub(super) fn must_held_at_returns(
             let Some(entry) = entry_state[bi].clone() else {
                 continue;
             };
-            let exit = process_must_held(func, bi, &owning, consuming, &entry);
+            let exit = process_must_held(func, bi, owning, consuming, &entry);
             if exit_state[bi].as_ref() != Some(&exit) {
                 exit_state[bi] = Some(exit.clone());
                 changed = true;
@@ -497,6 +537,20 @@ pub(super) fn must_held_at_returns(
             break;
         }
     }
+    entry_state
+}
+
+pub(super) fn must_held_at_returns(
+    func: &mir::Function,
+    consuming: &ConsumingMap,
+    resources: &HashSet<Symbol>,
+    heap_structs: &HashSet<Symbol>,
+) -> Vec<(usize, Vec<(ValueId, Type)>)> {
+    let owning = owning_allocs(func, consuming, resources, heap_structs);
+    if owning.is_empty() {
+        return Vec::new();
+    }
+    let entry_state = must_held_entry_states(func, &owning, consuming);
 
     let mut out = Vec::new();
     for (bi, entry) in entry_state.iter().enumerate() {
@@ -521,12 +575,169 @@ pub(super) fn must_held_at_returns(
     out
 }
 
+pub(super) fn insert_edge_escape_drops(
+    func: &mut mir::Function,
+    consuming: &ConsumingMap,
+    resources: &HashSet<Symbol>,
+    heap_structs: &HashSet<Symbol>,
+) -> u32 {
+    let owning = owning_allocs(func, consuming, resources, heap_structs);
+    if owning.is_empty() {
+        return 0;
+    }
+    let entry_states = must_held_entry_states(func, &owning, consuming);
+    let index_of: HashMap<BlockId, usize> = func
+        .blocks
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (b.id, i))
+        .collect();
+    let n = func.blocks.len();
+
+    let mut mentions: Vec<HashSet<ValueId>> = Vec::with_capacity(n);
+    for b in &func.blocks {
+        let mut m: HashSet<ValueId> = HashSet::new();
+        for phi in &b.phis {
+            for (_, v) in &phi.incoming {
+                m.insert(*v);
+            }
+        }
+        for inst in &b.insts {
+            m.extend(inst_operands(&inst.kind));
+        }
+        m.extend(terminator_operands(&b.terminator));
+        mentions.push(m);
+    }
+    let succs: Vec<Vec<usize>> = func
+        .blocks
+        .iter()
+        .map(|b| {
+            b.terminator
+                .successors()
+                .iter()
+                .filter_map(|s| index_of.get(s).copied())
+                .collect()
+        })
+        .collect();
+
+    let mut reach: Vec<Vec<bool>> = Vec::with_capacity(n);
+    for bi in 0..n {
+        let mut seen = vec![false; n];
+        let mut stack: Vec<usize> = succs[bi].clone();
+        while let Some(b) = stack.pop() {
+            if seen[b] {
+                continue;
+            }
+            seen[b] = true;
+            for &s in &succs[b] {
+                stack.push(s);
+            }
+        }
+        reach.push(seen);
+    }
+
+    let mut candidates: Vec<(usize, ValueId, Type)> = Vec::new();
+    for bi in 0..n {
+        let Some(entry) = &entry_states[bi] else {
+            continue;
+        };
+        let Terminator::Goto(t) = &func.blocks[bi].terminator else {
+            continue;
+        };
+        let Some(&ti) = index_of.get(t) else {
+            continue;
+        };
+        if reach[bi][bi] {
+            continue;
+        }
+        let held = process_must_held(func, bi, &owning, consuming, entry);
+        if held.is_empty() {
+            continue;
+        }
+        let this_id = func.blocks[bi].id;
+        let mut edge_used: HashSet<ValueId> = HashSet::new();
+        for phi in &func.blocks[ti].phis {
+            for (pred, v) in &phi.incoming {
+                if *pred == this_id {
+                    edge_used.insert(*v);
+                }
+            }
+        }
+        let mut reach_used: HashSet<ValueId> = HashSet::new();
+        for (b, reachable) in reach[bi].iter().enumerate() {
+            if *reachable {
+                reach_used.extend(mentions[b].iter().copied());
+            }
+        }
+        for v in held.iter() {
+            if edge_used.contains(v) || reach_used.contains(v) {
+                continue;
+            }
+            let ty = owning.get(v).cloned().unwrap_or(Type::Void);
+            if matches!(ty, Type::Void) {
+                continue;
+            }
+            candidates.push((bi, *v, ty));
+        }
+    }
+
+    let mut by_value: HashMap<ValueId, Vec<usize>> = HashMap::new();
+    for (ci, (_, v, _)) in candidates.iter().enumerate() {
+        by_value.entry(*v).or_default().push(ci);
+    }
+    let mut keep = vec![false; candidates.len()];
+    for (_, cis) in by_value {
+        let mut remaining = cis;
+        while !remaining.is_empty() {
+            let pick_pos = remaining
+                .iter()
+                .position(|&c| {
+                    remaining
+                        .iter()
+                        .all(|&o| o == c || !reach[candidates[o].0][candidates[c].0])
+                })
+                .unwrap_or(0);
+            let c = remaining.remove(pick_pos);
+            keep[c] = true;
+            remaining.retain(|&o| !reach[candidates[c].0][candidates[o].0]);
+        }
+    }
+
+    let mut inserted = 0u32;
+    let mut per_block: HashMap<usize, Vec<(ValueId, Type)>> = HashMap::new();
+    for (ci, (bi, v, ty)) in candidates.into_iter().enumerate() {
+        if keep[ci] {
+            per_block.entry(bi).or_default().push((v, ty));
+        }
+    }
+    for (bi, mut dead) in per_block {
+        dead.sort_by_key(|(v, _)| v.0);
+        let span = func.blocks[bi]
+            .insts
+            .last()
+            .map(|i| i.span)
+            .unwrap_or(func.span);
+        for (v, ty) in dead {
+            func.blocks[bi].insts.push(Instruction {
+                dest: None,
+                kind: InstKind::Drop(v, ty),
+                ty: Type::Void,
+                span,
+                def_id: None,
+            });
+            inserted += 1;
+        }
+    }
+    inserted
+}
+
 pub(super) fn verify_function_leaks(
     func: &mir::Function,
     consuming: &ConsumingMap,
     resources: &HashSet<Symbol>,
+    heap_structs: &HashSet<Symbol>,
 ) -> Vec<String> {
-    must_held_at_returns(func, consuming, resources)
+    must_held_at_returns(func, consuming, resources, heap_structs)
         .into_iter()
         .flat_map(|(bi, items)| {
             let name = func.name;
@@ -724,8 +935,12 @@ mod tests {
                 Terminator::Return(None),
             ),
         ]);
-        let errs =
-            verify_function_leaks(&f, &ConsumingMap::new(), &std::collections::HashSet::new());
+        let errs = verify_function_leaks(
+            &f,
+            &ConsumingMap::new(),
+            &std::collections::HashSet::new(),
+            &std::collections::HashSet::new(),
+        );
         assert!(errs.iter().any(|e| e.contains("it leaks")), "{errs:?}");
     }
 
@@ -745,8 +960,13 @@ mod tests {
             Terminator::Return(None),
         )]);
         assert!(
-            verify_function_leaks(&f, &ConsumingMap::new(), &std::collections::HashSet::new())
-                .is_empty()
+            verify_function_leaks(
+                &f,
+                &ConsumingMap::new(),
+                &std::collections::HashSet::new(),
+                &std::collections::HashSet::new()
+            )
+            .is_empty()
         );
     }
 
@@ -767,7 +987,12 @@ mod tests {
         )]);
         let mut consuming = ConsumingMap::new();
         consuming.insert(Symbol::intern("peek"), vec![false]);
-        let errs = verify_function_leaks(&f, &consuming, &std::collections::HashSet::new());
+        let errs = verify_function_leaks(
+            &f,
+            &consuming,
+            &std::collections::HashSet::new(),
+            &std::collections::HashSet::new(),
+        );
         assert!(errs.iter().any(|e| e.contains("it leaks")), "{errs:?}");
         let fixed = {
             let mut f2 = f;
@@ -775,9 +1000,15 @@ mod tests {
                 &mut f2,
                 &consuming,
                 &std::collections::HashSet::new(),
+                &std::collections::HashSet::new(),
             );
             assert_eq!(n, 1);
-            verify_function_leaks(&f2, &consuming, &std::collections::HashSet::new())
+            verify_function_leaks(
+                &f2,
+                &consuming,
+                &std::collections::HashSet::new(),
+                &std::collections::HashSet::new(),
+            )
         };
         assert!(fixed.is_empty(), "{fixed:?}");
     }
@@ -810,14 +1041,20 @@ mod tests {
             &mut f2,
             &ConsumingMap::new(),
             &std::collections::HashSet::new(),
+            &std::collections::HashSet::new(),
         );
         assert_eq!(
             n, 0,
             "conditionally-moved value must not get an unconditional drop"
         );
         assert!(
-            verify_function_leaks(&f2, &ConsumingMap::new(), &std::collections::HashSet::new())
-                .is_empty()
+            verify_function_leaks(
+                &f2,
+                &ConsumingMap::new(),
+                &std::collections::HashSet::new(),
+                &std::collections::HashSet::new()
+            )
+            .is_empty()
         );
     }
 
@@ -853,8 +1090,13 @@ mod tests {
             ),
         ]);
         assert!(
-            verify_function_leaks(&f, &ConsumingMap::new(), &std::collections::HashSet::new())
-                .is_empty()
+            verify_function_leaks(
+                &f,
+                &ConsumingMap::new(),
+                &std::collections::HashSet::new(),
+                &std::collections::HashSet::new()
+            )
+            .is_empty()
         );
     }
 
@@ -869,8 +1111,12 @@ mod tests {
             ],
             Terminator::Return(None),
         )]);
-        let errs =
-            verify_function_leaks(&f, &ConsumingMap::new(), &std::collections::HashSet::new());
+        let errs = verify_function_leaks(
+            &f,
+            &ConsumingMap::new(),
+            &std::collections::HashSet::new(),
+            &std::collections::HashSet::new(),
+        );
         assert!(errs.iter().any(|e| e.contains("it leaks")), "{errs:?}");
     }
 

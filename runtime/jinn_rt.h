@@ -96,7 +96,7 @@ struct jinn_coro {
     void              *san_fiber;
     void              *san_ret_fiber;
 };
-#define JINN_STACK_SIZE  (64 * 1024)
+#define JINN_STACK_SIZE  (256 * 1024)
 #define JINN_GUARD_SIZE  4096
 jinn_coro_t *jinn_coro_create(void (*entry)(void*), void *arg);
 void         jinn_coro_destroy(jinn_coro_t *c);
@@ -241,8 +241,11 @@ struct jinn_chan {
     jinn_waitq_node_t *recv_waitq;
     jinn_waitq_node_t *recv_waitq_tail;
     _Atomic(int32_t)   lock;
+    _Atomic(int64_t)   refs;
 };
 jinn_chan_t *jinn_chan_create(size_t elem_size, size_t capacity);
+void        jinn_chan_retain(jinn_chan_t *ch);
+void        jinn_chan_release(jinn_chan_t *ch);
 int         jinn_chan_send(jinn_chan_t *ch, const void *data);
 int         jinn_chan_recv(jinn_chan_t *ch, void *data_out);
 int         jinn_chan_try_recv(jinn_chan_t *ch, void *data_out);
@@ -455,6 +458,7 @@ int jinn_terminal_disable_raw(int fd);
 int jinn_terminal_size(int32_t *out_cols, int32_t *out_rows);
 void *__jinn_vec_slice(void *hdr, int64_t start, int64_t end, int64_t elem_size);
 void *__jinn_vec_clone_pod(void *hdr, int64_t elem_size);
+void __jinn_map_grow(void *hdr);
 jinn_sso_t __jinn_str_slice(jinn_sso_t str, int64_t start, int64_t end);
 int32_t __jinn_str_cmp(const char *a, int64_t alen, const char *b, int64_t blen);
 void __jinn_str_clone(jinn_sso_t *out, const jinn_sso_t *src);

@@ -13,6 +13,10 @@ impl Lowerer {
             | ExprKind::DeferredMethod(obj, name, args)
             | ExprKind::VecMethod(obj, name, args)
             | ExprKind::MapMethod(obj, name, args) => {
+                if name.as_str() == "__clone" && matches!(obj.ty, Type::Channel(_)) {
+                    let obj_val = self.lower_expr(obj);
+                    return self.emit(InstKind::Clone(obj_val, obj.ty.clone()), ty, span);
+                }
                 let obj_val = self.lower_expr(obj);
                 let vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
                 self.emit(InstKind::MethodCall(obj_val, *name, vals, false), ty, span)

@@ -138,7 +138,7 @@ impl<'ctx> Compiler<'ctx> {
         let cap_gep = b!(self.bld.build_struct_gep(header_ty, header_ptr, 2, "dmd.c"));
         let cap = b!(self.bld.build_load(i64t, cap_gep, "dmd.cap")).into_int_value();
 
-        let bucket_size = i64t.const_int(48, false);
+        let bucket_size = i64t.const_int(64, false);
 
         let loop_bb = self.ctx.append_basic_block(fv, "dmd.loop");
         let check_bb = self.ctx.append_basic_block(fv, "dmd.check");
@@ -161,7 +161,7 @@ impl<'ctx> Compiler<'ctx> {
         let _entry_ptr = unsafe { b!(self.bld.build_gep(i8t, data_ptr, &[offset], "dmd.ep")) };
         let occ_off = b!(self
             .bld
-            .build_int_add(offset, i64t.const_int(40, false), "dmd.ooff"));
+            .build_int_add(offset, i64t.const_int(56, false), "dmd.ooff"));
         let occ_ptr = unsafe { b!(self.bld.build_gep(i8t, data_ptr, &[occ_off], "dmd.ocp")) };
         let occ = b!(self.bld.build_load(i8t, occ_ptr, "dmd.occ")).into_int_value();
         let is_occupied = b!(self.bld.build_int_compare(

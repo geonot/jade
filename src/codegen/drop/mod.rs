@@ -62,7 +62,22 @@ impl<'ctx> Compiler<'ctx> {
             }
 
             Type::Channel(_) => {
-                self.drop_ptr_allocated(val)?;
+                if val.is_pointer_value() {
+                    let release = self
+                        .module
+                        .get_function("jinn_chan_release")
+                        .unwrap_or_else(|| {
+                            let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                            let ft = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
+                            self.module.add_function(
+                                "jinn_chan_release",
+                                ft,
+                                Some(inkwell::module::Linkage::External),
+                            )
+                        });
+                    self.needs_runtime = true;
+                    b!(self.bld.build_call(release, &[val.into()], "ch.release"));
+                }
             }
             Type::Fn(_, _) => {
                 self.drop_closure(val)?;

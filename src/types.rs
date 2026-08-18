@@ -100,7 +100,6 @@ impl Type {
             | Self::TypeVar(_)
             | Self::Ptr(_)
             | Self::ActorRef(_)
-            | Self::Channel(_)
             | Self::View(_) => true,
             Self::Array(inner, _) => inner.is_trivially_droppable(),
             Self::Vec(_) | Self::Map(_, _) => false,
@@ -116,6 +115,8 @@ impl Type {
         }
         match self {
             Self::String => true,
+            Self::Channel(_) => true,
+            Self::Enum(_) => true,
             Self::Vec(elem) | Self::Array(elem, _) => elem.is_value_clonable(),
             Self::Tuple(tys) => tys.iter().all(|t| t.is_value_clonable()),
             Self::Struct(_, _) => true,

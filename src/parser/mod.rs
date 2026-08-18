@@ -114,6 +114,22 @@ impl Parser {
             .decls
             .iter()
             .any(|d| matches!(d, Decl::Fn(f) if f.name == "main"));
+        if has_explicit_main
+            && let Some(stmt) = prog.decls.iter().find_map(|d| match d {
+                Decl::TopStmt(s) => Some(s),
+                _ => None,
+            })
+        {
+            let sp = stmt.span();
+            return Err(ParseError::Error {
+                line: sp.line,
+                col: sp.col,
+                msg: "top-level statements cannot be combined with an explicit `*main` — \
+                      they would never run; move them into `*main` (constants declared \
+                      with `NAME is <value>` are fine)"
+                    .into(),
+            });
+        }
         let has_top_stmts = prog
             .decls
             .iter()

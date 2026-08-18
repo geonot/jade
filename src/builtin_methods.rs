@@ -229,6 +229,18 @@ impl StrMethod {
         }
     }
 
+    pub fn param_tys(self) -> Vec<Type> {
+        match self {
+            Self::Contains | Self::StartsWith | Self::EndsWith | Self::Find | Self::Split => {
+                vec![Type::String]
+            }
+            Self::Replace => vec![Type::String, Type::String],
+            Self::CharAt | Self::Repeat => vec![Type::I64],
+            Self::Slice | Self::View => vec![Type::I64, Type::I64],
+            _ => vec![],
+        }
+    }
+
     pub fn is_exclusive(self) -> bool {
         !matches!(
             self,

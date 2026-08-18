@@ -83,6 +83,7 @@ jinn_chan_t *jinn_chan_create(size_t elem_size, size_t capacity) {
     ch->recv_waitq = NULL;
     ch->recv_waitq_tail = NULL;
     atomic_store(&ch->lock, 0);
+    atomic_store(&ch->refs, 1);
     return ch;
 }
 void jinn_chan_destroy(jinn_chan_t *ch) {
@@ -90,6 +91,17 @@ void jinn_chan_destroy(jinn_chan_t *ch) {
     jinn_chan_close(ch);
     free(ch->buffer);
     free(ch);
+}
+void jinn_chan_retain(jinn_chan_t *ch) {
+    if (!ch) return;
+    atomic_fetch_add_explicit(&ch->refs, 1, memory_order_relaxed);
+}
+void jinn_chan_release(jinn_chan_t *ch) {
+    if (!ch) return;
+    int64_t prev = atomic_fetch_sub_explicit(&ch->refs, 1, memory_order_acq_rel);
+    if (prev == 1) {
+        jinn_chan_destroy(ch);
+    }
 }
 void jinn_chan_close(jinn_chan_t *ch) {
     if (!ch) return;

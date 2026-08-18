@@ -84,6 +84,11 @@ impl Typer {
                 }
             }
         }
+        for (i, ha) in hargs.iter().enumerate() {
+            if let Some(pt) = mono_param_tys.get(i) {
+                self.check_call_arg(name, i, pt, &ha.ty, span)?;
+            }
+        }
         Ok(hir::Expr {
             kind: hir::ExprKind::Call(id, mangled, hargs),
             ty: ret,

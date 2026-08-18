@@ -68,9 +68,25 @@ impl<'ctx> Compiler<'ctx> {
         Ok(header_ptr.into())
     }
 
+    fn ensure_map_grow(&mut self) -> inkwell::values::FunctionValue<'ctx> {
+        self.needs_runtime = true;
+        self.module
+            .get_function("__jinn_map_grow")
+            .unwrap_or_else(|| {
+                let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+                let ft = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
+                self.module.add_function(
+                    "__jinn_map_grow",
+                    ft,
+                    Some(inkwell::module::Linkage::External),
+                )
+            })
+    }
+
     fn map_probe(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
+        key_val: BasicValueEnum<'ctx>,
         hash: inkwell::values::IntValue<'ctx>,
         match_bb: inkwell::basic_block::BasicBlock<'ctx>,
         empty_bb: inkwell::basic_block::BasicBlock<'ctx>,
@@ -132,6 +148,7 @@ impl<'ctx> Compiler<'ctx> {
             .build_conditional_branch(is_occ, check_bb, empty_bb));
 
         self.bld.position_at_end(check_bb);
+        let keycmp_bb = self.ctx.append_basic_block(fv, "mp.keycmp");
         let shp = unsafe {
             b!(self
                 .bld
@@ -141,7 +158,53 @@ impl<'ctx> Compiler<'ctx> {
         let heq = b!(self
             .bld
             .build_int_compare(IntPredicate::EQ, sh, hash, "mp.heq"));
-        b!(self.bld.build_conditional_branch(heq, match_bb, next_bb));
+        b!(self.bld.build_conditional_branch(heq, keycmp_bb, next_bb));
+
+        self.bld.position_at_end(keycmp_bb);
+        let stored_key_ptr = unsafe {
+            b!(self
+                .bld
+                .build_gep(i8t, entry_ptr, &[i64t.const_int(8, false)], "mp.skp"))
+        };
+        let stored_key = b!(self
+            .bld
+            .build_load(self.string_type(), stored_key_ptr, "mp.sk"));
+        let sk_data = self.string_data(stored_key)?;
+        let sk_len = self.string_len(stored_key)?.into_int_value();
+        let pk_data = self.string_data(key_val)?;
+        let pk_len = self.string_len(key_val)?.into_int_value();
+        let str_cmp = self
+            .module
+            .get_function("__jinn_str_cmp")
+            .unwrap_or_else(|| {
+                let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+                let ft = self.ctx.i32_type().fn_type(
+                    &[ptr_ty.into(), i64t.into(), ptr_ty.into(), i64t.into()],
+                    false,
+                );
+                self.module.add_function(
+                    "__jinn_str_cmp",
+                    ft,
+                    Some(inkwell::module::Linkage::External),
+                )
+            });
+        self.needs_runtime = true;
+        let cmp = b!(self.bld.build_call(
+            str_cmp,
+            &[sk_data.into(), sk_len.into(), pk_data.into(), pk_len.into()],
+            "mp.kcmp"
+        ))
+        .try_as_basic_value()
+        .basic()
+        .expect("ICE: __jinn_str_cmp returned void")
+        .into_int_value();
+        let keq = b!(self.bld.build_int_compare(
+            IntPredicate::EQ,
+            cmp,
+            self.ctx.i32_type().const_int(0, false),
+            "mp.keq"
+        ));
+        b!(self.bld.build_conditional_branch(keq, match_bb, next_bb));
 
         self.bld.position_at_end(next_bb);
         let ni = b!(self
@@ -171,7 +234,10 @@ impl<'ctx> Compiler<'ctx> {
         let empty_bb = self.ctx.append_basic_block(fv, "ms.empty");
         let done_bb = self.ctx.append_basic_block(fv, "ms.done");
 
-        let (entry_ptr, occ_ptr) = self.map_probe(header_ptr, hash, overwrite_bb, empty_bb)?;
+        let grow = self.ensure_map_grow();
+        b!(self.bld.build_call(grow, &[header_ptr.into()], "ms.grow"));
+        let (entry_ptr, occ_ptr) =
+            self.map_probe(header_ptr, key_val, hash, overwrite_bb, empty_bb)?;
 
         let val_ptr = unsafe {
             b!(self
@@ -241,7 +307,7 @@ impl<'ctx> Compiler<'ctx> {
         let nf_bb = self.ctx.append_basic_block(fv, "mg.nf");
         let merge_bb = self.ctx.append_basic_block(fv, "mg.merge");
 
-        let (entry_ptr, _) = self.map_probe(header_ptr, hash, found_bb, nf_bb)?;
+        let (entry_ptr, _) = self.map_probe(header_ptr, key_val, hash, found_bb, nf_bb)?;
 
         let val_ptr = unsafe {
             b!(self
@@ -273,7 +339,7 @@ impl<'ctx> Compiler<'ctx> {
         let nf_bb = self.ctx.append_basic_block(fv, "mh.nf");
         let merge_bb = self.ctx.append_basic_block(fv, "mh.merge");
 
-        self.map_probe(header_ptr, hash, found_bb, nf_bb)?;
+        self.map_probe(header_ptr, key_val, hash, found_bb, nf_bb)?;
 
         b!(self.bld.build_unconditional_branch(merge_bb));
 
@@ -304,7 +370,7 @@ impl<'ctx> Compiler<'ctx> {
         let found_bb = self.ctx.append_basic_block(fv, "mr.found");
         let done_bb = self.ctx.append_basic_block(fv, "mr.done");
 
-        let (_, occ_ptr) = self.map_probe(header_ptr, hash, found_bb, done_bb)?;
+        let (_, occ_ptr) = self.map_probe(header_ptr, key_val, hash, found_bb, done_bb)?;
 
         b!(self.bld.build_store(occ_ptr, i8t.const_int(0, false)));
         let len_gep = b!(self

@@ -1,6 +1,18 @@
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
+    pub(in crate::codegen) fn owned_elem_copy(
+        &mut self,
+        elem: BasicValueEnum<'ctx>,
+        elem_ty: &Type,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        if !elem_ty.is_trivially_droppable() && elem_ty.is_value_clonable() {
+            self.clone_value(elem, elem_ty)
+        } else {
+            Ok(elem)
+        }
+    }
+
     pub(in crate::codegen) fn vec_map_dynamic(
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
@@ -99,6 +111,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(keep1, push_bb, cont_bb));
 
         self.bld.position_at_end(push_bb);
+        let elem = self.owned_elem_copy(elem, elem_ty)?;
         self.vec_push_raw(out_hdr, elem, lty, elem_size)?;
         b!(self.bld.build_unconditional_branch(cont_bb));
 
@@ -399,6 +412,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(body_bb);
         let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "ts.gep")) };
         let elem = b!(self.bld.build_load(lty, elem_gep, "ts.elem"));
+        let elem = self.owned_elem_copy(elem, elem_ty)?;
         self.vec_push_raw(out_hdr, elem, lty, elem_size)?;
         let next = b!(self
             .bld
@@ -443,6 +457,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(body_bb);
         let gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "slc.gep")) };
         let elem = b!(self.bld.build_load(lty, gep, "slc.elem"));
+        let elem = self.owned_elem_copy(elem, elem_ty)?;
         self.vec_push_raw(out_hdr, elem, lty, elem_size)?;
         let next = b!(self
             .bld
@@ -481,6 +496,7 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(body_bb);
             let gep = unsafe { b!(self.bld.build_gep(lty, data, &[idx], "ch.gep")) };
             let elem = b!(self.bld.build_load(lty, gep, "ch.elem"));
+            let elem = self.owned_elem_copy(elem, elem_ty)?;
             self.vec_push_raw(out_hdr, elem, lty, elem_size)?;
             let next = b!(self
                 .bld
@@ -519,6 +535,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(body_bb);
         let gep = unsafe { b!(self.bld.build_gep(lty, data, &[idx], "en.gep")) };
         let elem = b!(self.bld.build_load(lty, gep, "en.elem"));
+        let elem = self.owned_elem_copy(elem, elem_ty)?;
         let mut tup = tuple_lty.get_undef();
         tup = b!(self.bld.build_insert_value(tup, idx, 0, "en.t0")).into_struct_value();
         tup = b!(self.bld.build_insert_value(tup, elem, 1, "en.t1")).into_struct_value();
@@ -590,6 +607,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(ibody_bb);
         let igep = unsafe { b!(self.bld.build_gep(inner_lty, idata, &[ii], "fl.igep")) };
         let elem = b!(self.bld.build_load(inner_lty, igep, "fl.elem"));
+        let elem = self.owned_elem_copy(elem, inner_elem_ty)?;
         self.vec_push_raw(out_hdr, elem, inner_lty, inner_size)?;
         b!(self.bld.build_unconditional_branch(inext_bb));
 
@@ -646,8 +664,10 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(body_bb);
         let a_gep = unsafe { b!(self.bld.build_gep(lty_a, data_a, &[idx], "zip.a")) };
         let a_val = b!(self.bld.build_load(lty_a, a_gep, "zip.av"));
+        let a_val = self.owned_elem_copy(a_val, elem_ty)?;
         let b_gep = unsafe { b!(self.bld.build_gep(lty_b, data_b, &[idx], "zip.b")) };
         let b_val = b!(self.bld.build_load(lty_b, b_gep, "zip.bv"));
+        let b_val = self.owned_elem_copy(b_val, other_elem_ty)?;
         let mut tup = tuple_lty.get_undef();
         tup = b!(self.bld.build_insert_value(tup, a_val, 0, "zip.t0")).into_struct_value();
         tup = b!(self.bld.build_insert_value(tup, b_val, 1, "zip.t1")).into_struct_value();

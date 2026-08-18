@@ -357,6 +357,31 @@ impl Typer {
                 })
                 .collect::<Result<_, String>>()?;
 
+            let any_named_g = hinits_g.iter().any(|fi| fi.name.is_some());
+            let missing_g: Vec<String> = gtd
+                .fields
+                .iter()
+                .enumerate()
+                .filter(|(i, f)| {
+                    let provided = if any_named_g {
+                        hinits_g.iter().any(|fi| fi.name == Some(f.name))
+                    } else {
+                        *i < hinits_g.len()
+                    };
+                    !provided && f.default.is_none()
+                })
+                .map(|(_, f)| format!("`{}`", f.name))
+                .collect();
+            if !missing_g.is_empty() {
+                return Err(format!(
+                    "{}: constructor `{}` is missing required field(s) {} — every field \
+                     without a declared default must be provided",
+                    span.loc(),
+                    name,
+                    missing_g.join(", ")
+                ));
+            }
+
             let mut type_map = std::collections::HashMap::new();
             for (i, fi) in hinits_g.iter().enumerate() {
                 let field_def = if let Some(fname) = &fi.name {
@@ -517,6 +542,30 @@ impl Typer {
         }
 
         if let Some(fields) = self.structs.get(name).cloned() {
+            let any_named_check = hinits.iter().any(|fi| fi.name.is_some());
+            let defaults = self.struct_field_defaults.get(&Symbol::intern(name));
+            let missing: Vec<String> = fields
+                .iter()
+                .enumerate()
+                .filter(|(i, (fname, _))| {
+                    let provided = if any_named_check {
+                        hinits.iter().any(|fi| fi.name == Some(*fname))
+                    } else {
+                        *i < hinits.len()
+                    };
+                    !provided && !defaults.is_some_and(|d| d.contains(fname))
+                })
+                .map(|(_, (fname, _))| format!("`{fname}`"))
+                .collect();
+            if !missing.is_empty() {
+                return Err(format!(
+                    "{}: constructor `{}` is missing required field(s) {} — every field \
+                     without a declared default must be provided",
+                    span.loc(),
+                    name,
+                    missing.join(", ")
+                ));
+            }
             if self.inferred_field_structs.contains(&Symbol::intern(name)) {
                 let any_named = hinits.iter().any(|fi| fi.name.is_some());
                 let needs_mono = fields.iter().enumerate().any(|(i, (fname, declared_ty))| {

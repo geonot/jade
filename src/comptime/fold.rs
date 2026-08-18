@@ -492,8 +492,8 @@ pub(super) fn fold_int_op(a: i64, op: BinOp, b: i64) -> Option<ExprKind> {
         BinOp::Add => Some(ExprKind::Int(a.wrapping_add(b))),
         BinOp::Sub => Some(ExprKind::Int(a.wrapping_sub(b))),
         BinOp::Mul => Some(ExprKind::Int(a.wrapping_mul(b))),
-        BinOp::Div if b != 0 => Some(ExprKind::Int(a / b)),
-        BinOp::Mod if b != 0 => Some(ExprKind::Int(a % b)),
+        BinOp::Div if b != 0 && !(a == i64::MIN && b == -1) => Some(ExprKind::Int(a / b)),
+        BinOp::Mod if b != 0 && !(a == i64::MIN && b == -1) => Some(ExprKind::Int(a % b)),
         BinOp::Shl if (0..64).contains(&b) => Some(ExprKind::Int(a.wrapping_shl(b as u32))),
         BinOp::Shr if (0..64).contains(&b) => Some(ExprKind::Int(a.wrapping_shr(b as u32))),
         BinOp::Ushr if (0..64).contains(&b) => {
@@ -551,13 +551,13 @@ pub(super) fn fold_cast(e: &Expr, to_ty: &Type, span: Span) -> Option<Expr> {
             Some(make(ExprKind::Float(*n as f64), to_ty.clone(), span))
         }
         (ExprKind::Int(n), Type::F32) => {
-            Some(make(ExprKind::Float(*n as f64), to_ty.clone(), span))
+            Some(make(ExprKind::Float(*n as f32 as f64), to_ty.clone(), span))
         }
         (ExprKind::Float(f), Type::I64) => {
             Some(make(ExprKind::Int(*f as i64), to_ty.clone(), span))
         }
         (ExprKind::Float(f), Type::I32) => {
-            Some(make(ExprKind::Int(*f as i64), to_ty.clone(), span))
+            Some(make(ExprKind::Int(*f as i32 as i64), to_ty.clone(), span))
         }
         (ExprKind::Int(n), Type::I8) => {
             Some(make(ExprKind::Int(*n as i8 as i64), to_ty.clone(), span))

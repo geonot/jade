@@ -24,16 +24,19 @@ acting on its details.
 
 ## Where the language stands
 
-**Open: 0 blockers, 0 majors, 41 minors, 5 coverage gaps.** The 2026-08-16
-pass ([163]) closed all seven blockers and all twelve majors the [162]
-adversarial review opened, each with a pinning test; the 2026-08-18 pass
-([164]) closed a further batch of accept-then-corrupt holes an independent
-expert-panel assessment found (enum-payload and generic-`take` double-frees,
-missed `@resource` destructors on early return, crashy non-exhaustive matches,
-first-write-wins generic-enum construction, lax call-site unification,
-function-value capability laundering, an enum-payload alignment UB, and two
-double-evaluation frontend holes). The closures are honest about their residue:
-what remains of each closed item is filed below as a minor with its own id.
+**Open: 28 blockers, ~40 majors, 41+ minors, 5+ coverage gaps** — all from
+the 2026-08-18 18-area adversarial review (ids `TYP-*`, `STO-*`, `STD-*`,
+`DIST-*`, `HIR-*`, `SYN-*`, `PAR-*`, `TDX-*`, `MIR-*`, `CG-*`, `PERF-*`,
+`DIAG-*`, `GATE-*`), which falsified the previous "0 blockers / 0 majors"
+headline by reproducing ~28 blockers and ~53 majors from clean directories on
+first-week-plausible code, all invisible to the green gate battery. The [165]
+pass closed the two soundness workstreams on the critical path (type/ownership
+interior and memory-safety completeness — 18 of the review's blockers) plus a
+batch of cheap high-signal blockers, each pinned in
+`tests/alpha_hardening_pins.rs`; what remains is filed in the review backlog
+section below with the review's stable ids. The pre-review sections further
+down ([162]/[164] residue, ids `O-*`, `T-*`, `E-*`, `S-*`, `X-*`, `N-*`,
+`P-*`) still stand.
 
 - **Memory and ownership** — the [162] accept-then-corrupt holes are closed:
   consuming calls in condition/scrutinee/iterator position are move-tracked,
@@ -93,6 +96,154 @@ what remains of each closed item is filed below as a minor with its own id.
   (`V-1`–`V-5`); their silence is not evidence.
 
 ---
+
+## Alpha review backlog (2026-08-18 review)
+
+The open remainder of the 18-area adversarial review, grouped by workstream.
+Ids are the review's; severity per the taxonomy above. Items marked
+*unverified* carry finder-confirmed evidence but no adversarial re-check.
+
+### Store engine (B unless noted; the review's WS-3, all week+-class)
+
+- **STO-1** kill -9 mid-`transaction` durably persists a partial transaction —
+  the WAL has no begin/commit frames, recovery replays whatever landed.
+- **STO-2 / DIST-5** concurrent store access from two actors or tasks is
+  memory- and disk-unsafe: reads take no lock and race the writer on the
+  shared `FILE*` cursor. Alpha scope-gate proposed: compile-error on store
+  access from actor handlers until locking lands.
+- **STO-3** `migration ... drop <field>` computes offsets against the
+  post-migration layout — silently does nothing, then logs the migration as
+  applied.
+- **STO-5** the read path trusts the data-file header unconditionally —
+  an inflated count or truncated `.store` yields silently-accepted garbage
+  rows.
+- **STO-6** a crashed migration durably leaves `fingerprint=0`, which
+  auto-adopts on next open.
+- **STO-4** (M) migration `add ... default <expr>` parses the default and
+  discards it; **STO-8** (M) store string fields silently truncate at 248
+  bytes; **STORE-1** (M) mismatched quaternary-bind arms accepted then
+  malformed-lower; **DIST-4** (M) `store` + `extern *malloc` fails to link
+  (extern declarations are not deduplicated by symbol).
+
+### Distributed / std surface (B unless noted)
+
+- **DIST-1** mutating a call-returned struct through a free-function
+  parameter writes to a dead spill temp — the caller sees stale values.
+  Root of **STD-7** (raft inertness).
+- **DIST-3** std/net `write`/`write_all`/`send_to` send `.length` (scalar
+  count) bytes instead of `.byte_count` — silently truncates non-ASCII.
+  Same class as **STD-1** (~50 sites across 11 FFI-facing modules),
+  **STD-2** (AEAD cannot decrypt its own ciphertext), **STD-3**
+  (argon verify always false), **STD-4** (http non-ASCII body deadlock).
+- **STD-5** dataframe sort loses and duplicates rows; **STD-8** json
+  stringify corrupts >6-significant-digit numbers (`%g`).
+- **DIST-8** (M) blocking socket syscalls pin scheduler workers — 8 idle
+  connections starve a server; needs an IO reactor. **DIST-9** (M)
+  `supervisor` does not parse (see N-4). **DIST-2/STD-13** (M) std/raft is
+  aspirational — demote from stable, with dataframe, bangle, and the crypto
+  stack, until behaviorally tested (**Tier demotion**, hours).
+
+### Comptime and name resolution (B unless noted)
+
+- **HIR-1** comptime eval treats failure inside a taken if-branch as
+  fall-through — folds pure calls to the wrong constant. *unverified*
+- **HIR-2 / HIR-5** comptime folds all integer arithmetic at i64 and floats
+  at f64 regardless of declared width, and compares/divides unsigned
+  operands with signed semantics. *unverified* Recommended vehicle for both:
+  cut `src/comptime/eval.rs` to literal-only folding for alpha.
+- **HIR-6** module-name mangling is textual (`{module}_{fn}`) — a user
+  function with a colliding name silently replaces the module function.
+  *unverified*
+- **HIR-7** (M) methods declared inside a `store` block are typed but never
+  lowered — every call fails at codegen.
+
+### Parser and surface (B unless noted)
+
+- **PAR-1** a user function named `vector` silently hijacks every
+  bracket-list literal. *unverified*
+- **SYN-4** the global type namespace silently merges same-named types
+  across modules, last-loaded wins. *unverified*
+- **SYN-6** `if x is y` with an existing binding `y` is an always-true
+  pattern match that also overwrites the outer `y`. *unverified*
+- **SYN-7** `not x in xs` parses as `xs.contains(not x)`, contradicting the
+  EBNF. *unverified*
+- **PAR-2** (M) function-local `use` parses but imports nothing; **PAR-3**
+  (M) `save`/`destroy`/`restore`/`compact` are undocumented
+  context-sensitive statement keywords; **SYN-8** (M) the EBNF is wrong on
+  ≥7 constructs; **SYN-9** (M) contextual keywords reserve identifiers
+  inconsistently; **SYN-10** (M) no sort-by-key for Vec-of-struct;
+  **SYN-11** (M) unknown-method errors carry no location and type as i64.
+
+### Types (B unless noted)
+
+- **TYP-5** generic-struct monomorphization mangles names unescaped with
+  first-write-wins registration — `Pair_i64_i64` collides.
+- **TYP-6..TYP-10** (M) nested generic enum construction, enum trait impls
+  on self, mono cache misses, literal range bypass via backward inference,
+  trait coherence only via the duplicate-DefId backstop.
+
+### Codegen / MIR (B unless noted)
+
+- **MIR-1** same-name loop/comprehension binders share one function-global
+  MIR memory slot — silent wrong answers in nested loops. *unverified*
+- **MIR-2** (M) comprehension-binder shadowing ICEs three ways; **MIR-4**
+  (M) duplicate integer-literal match arms ICE at LLVM verify; **MIR-5**
+  (M) runtime tuple index ICEs; **MIR-6** (M) the LLVM-array indexing path
+  emits no upper bounds check; **CG-4** (M) `--debug` is a stub (no DWARF).
+
+### Tooling / fmt (B unless noted)
+
+- **TDX-1** `jinn fmt` deletes list-comprehension `to N`/`if` clauses;
+  **TDX-2** fmt drops required parens around `not (a equals b)` — both make
+  `fmt --write` unsafe on real code; fix plus an HIR-diff fmt gate.
+  **TDX-3** `jinn run` serves a stale cached binary after a dependency
+  update.
+- **TDX-4..TDX-6, TDX-13** (M) silent test failure off-tty, `jinn bind`
+  emits zero externs from zlib.h, tree-sitter fails 15/15 snippets, `.jni`
+  reuse breaks multi-module compiles. **STD-10..STD-12, STD-15** (M) bangle
+  404s every route, process.run truncates at 64KB, fmt+os ICE, five error
+  dialects across std.
+
+### Performance and benchmark honesty (M)
+
+- **PERF-1b** stack-promote non-escaping bracket-list literals (the
+  `jinn_xmalloc` linkage half landed in [165]; array_ops is ~1× vs C).
+- **PERF-2** the in-tree Rust array_ops baseline runs 30× the iterations —
+  the published J/RUST ratio is false. **PERF-5/6/7/9** store_ops,
+  `sim_for`/`dispatch_yield`, concurrency, and actor benchmark baselines
+  are strawmen or unverified — fix or drop the rows.
+- **PERF-3/4/STO-7** WAL recovery is O(n²) with no clean-exit checkpoint;
+  point queries re-read the whole table; WAL grows unboundedly under churn.
+
+### Diagnostics (M)
+
+- **DIAG-2** negative out-of-range literals wrap silently; **DIAG-3** the
+  common newcomer error class lacks locations and did-you-mean; **DIAG-4**
+  one error per run across phase boundaries; `src/diagnostic.rs`'s
+  structured machinery is dead code.
+
+### Leak-class residue from [165] (m)
+
+- **LK-1** chained-concat intermediates (`a + b + c`) leak the heap
+  intermediate; the rebind case is closed.
+- **LK-2** heap-struct values on early-exit paths can still leak: the
+  struct-init owning extension was reverted (struct SSA forks on field
+  mutation made "drop the init value" unsound; the audit suite caught it).
+- **LK-3** `continue`-path scope leaks in some shapes: the edge-escape drop
+  sweep's cycle guard skips in-loop blocks.
+- **LK-4** map overwrite leaks the superseded value and the new key's
+  buffer (MAP-1 class); heap-key maps leak key buffers on drop.
+- **LK-5** channels held by actors at stop, and unreceived channel-handle
+  messages, release nothing — bounded leak, never a use-after-free.
+
+### Gate hardening (G)
+
+- **GATE-1** the documented channel-race TSan gate does not exist;
+  **GATE-2** `ci/sanitize-corpus.sh` and `ci/fuzz-ownership.py` run in no
+  pipeline; **GATE-3** 36/51 std modules have zero executed behavior
+  coverage; **GATE-4** doc examples compile but never run; wire an
+  LSan-gated leak corpus (the WS-2 probes) as the highest-value single
+  change.
 
 ## Memory and ownership
 

@@ -109,8 +109,9 @@ static void emit_thread_overflow_msg(void *addr) {
         "  limit with `ulimit -s` before running.\n";
     (void)write(STDERR_FILENO, advice, sizeof(advice) - 1);
 }
+static struct sigaction g_prev_segv_action;
+static struct sigaction g_prev_bus_action;
 static void crash_handler(int sig, siginfo_t *si, void *uctx) {
-    (void)uctx;
     void *fault = si ? si->si_addr : NULL;
     jinn_worker_t *w = tl_worker;
     jinn_coro_t *c = w ? w->current : NULL;
@@ -142,6 +143,16 @@ static void crash_handler(int sig, siginfo_t *si, void *uctx) {
     (void)write(STDERR_FILENO, " at ", 4);
     write_hex_addr(fault);
     (void)write(STDERR_FILENO, "\n", 1);
+    struct sigaction *prev = (sig == SIGBUS) ? &g_prev_bus_action : &g_prev_segv_action;
+    if ((prev->sa_flags & SA_SIGINFO) && prev->sa_sigaction) {
+        prev->sa_sigaction(sig, si, uctx);
+        return;
+    }
+    if (!(prev->sa_flags & SA_SIGINFO) && prev->sa_handler != SIG_DFL &&
+        prev->sa_handler != SIG_IGN && prev->sa_handler) {
+        prev->sa_handler(sig);
+        return;
+    }
     struct sigaction dfl = {0};
     dfl.sa_handler = SIG_DFL;
     sigemptyset(&dfl.sa_mask);
@@ -158,8 +169,8 @@ void jinn_install_crash_handlers(void) {
     sa.sa_sigaction = crash_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_RESTART;
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGSEGV, &sa, &g_prev_segv_action);
+    sigaction(SIGBUS, &sa, &g_prev_bus_action);
 }
 void jinn_install_worker_sigaltstack(void) {
     install_sigaltstack_for_thread();

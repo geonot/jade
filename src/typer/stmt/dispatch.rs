@@ -591,6 +591,26 @@ impl Typer {
                     let existing_ty = existing.ty.clone();
                     let value = self.maybe_coerce_to(value, &existing_ty);
 
+                    let old_unmoved = self.moves.entries_for(id).is_empty();
+                    if old_unmoved && matches!(existing.ownership, crate::hir::Ownership::Owned) {
+                        let resolved_old = {
+                            let was_strict = self.infer_ctx.is_strict();
+                            self.infer_ctx.set_strict(false);
+                            let r = self.infer_ctx.resolve(&existing_ty);
+                            self.infer_ctx.set_strict(was_strict);
+                            r
+                        };
+                        if self.needs_drop(&resolved_old) {
+                            self.stage_old_drop_unchecked(
+                                id,
+                                b.name,
+                                &existing_ty,
+                                resolved_old,
+                                &value,
+                                b.span,
+                            );
+                        }
+                    }
                     self.clear_all_moved_for(id);
                     self.update_var(
                         &b.name.as_str(),
@@ -792,6 +812,36 @@ impl Typer {
                     }
                 }
 
+                if let ast::Expr::Index(obj, idx, ispan) = target
+                    && matches!(obj.as_ref(), ast::Expr::Ident(..))
+                {
+                    let hobj = self.lower_expr(obj)?;
+                    if let Type::Map(key_ty, val_ty) = self.infer_ctx.shallow_resolve(&hobj.ty) {
+                        let hkey = self.lower_expr_expected(idx, Some(&key_ty))?;
+                        let _ = self
+                            .infer_ctx
+                            .unify_at(&key_ty, &hkey.ty, *ispan, "map index key");
+                        let hval = self.lower_expr_expected(value, Some(&val_ty))?;
+                        let r = self.infer_ctx.unify_at(
+                            &val_ty,
+                            &hval.ty,
+                            *span,
+                            "map index assignment",
+                        );
+                        self.collect_unify_error(r);
+                        let hval = self.maybe_coerce_to(hval, &val_ty);
+                        return Ok(hir::Stmt::Expr(hir::Expr {
+                            kind: hir::ExprKind::MapMethod(
+                                Box::new(hobj),
+                                "set".into(),
+                                vec![hkey, hval],
+                            ),
+                            ty: Type::Void,
+                            span: *span,
+                        }));
+                    }
+                }
+
                 self.suppress_moved_field_check += 1;
                 let ht = self.lower_expr(target)?;
                 self.suppress_moved_field_check -= 1;
@@ -823,6 +873,7 @@ impl Typer {
                         self.moves.clear_place(&pl);
                     }
                 }
+                self.stage_assign_old_drop(&ht, &hv, *span);
                 Ok(hir::Stmt::Assign(ht, hv, *span))
             }
 

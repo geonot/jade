@@ -2,10 +2,92 @@ use super::*;
 use crate::types::Type;
 use std::collections::{HashMap, HashSet};
 
+pub struct CallSigs {
+    sigs: HashMap<crate::intern::Symbol, (Vec<Type>, bool)>,
+}
+
+impl CallSigs {
+    pub fn of(prog: &Program) -> Self {
+        let mut sigs = HashMap::new();
+        for e in &prog.externs {
+            sigs.insert(e.name, (e.params.clone(), true));
+        }
+        for f in &prog.functions {
+            sigs.insert(
+                f.name,
+                (f.params.iter().map(|p| p.ty.clone()).collect(), false),
+            );
+        }
+        CallSigs { sigs }
+    }
+}
+
+fn call_arg_ok(want: &Type, got: &Type) -> bool {
+    if ty_compatible(want, got) {
+        return true;
+    }
+    let w = unwrap_transparent(want);
+    let g = unwrap_transparent(got);
+    if (w.is_num() || matches!(w, Type::Bool)) && (g.is_num() || matches!(g, Type::Bool)) {
+        return true;
+    }
+    if matches!(w, Type::Ptr(_) | Type::Param(_)) || matches!(g, Type::Ptr(_) | Type::Param(_)) {
+        return true;
+    }
+    if matches!(w, Type::View(_)) || matches!(g, Type::View(_)) {
+        return true;
+    }
+    false
+}
+
+fn check_call_sites(
+    f: &Function,
+    value_ty: &HashMap<ValueId, Type>,
+    sigs: &CallSigs,
+    errors: &mut Vec<String>,
+) {
+    for bb in &f.blocks {
+        for inst in &bb.insts {
+            let InstKind::Call(name, args) = &inst.kind else {
+                continue;
+            };
+            let Some((ptys, is_extern)) = sigs.sigs.get(name) else {
+                continue;
+            };
+            if !is_extern && args.len() != ptys.len() {
+                errors.push(format!(
+                    "call to `{}` in {} passes {} argument(s) but the callee takes {}",
+                    name.as_str(),
+                    bb.id,
+                    args.len(),
+                    ptys.len()
+                ));
+                continue;
+            }
+            for (i, (a, p)) in args.iter().zip(ptys.iter()).enumerate() {
+                if let Some(at) = value_ty.get(a)
+                    && !call_arg_ok(p, at)
+                {
+                    errors.push(format!(
+                        "call to `{}` in {}: argument {} has type {:?} but the callee \
+                         parameter has type {:?}",
+                        name.as_str(),
+                        bb.id,
+                        i + 1,
+                        at,
+                        p
+                    ));
+                }
+            }
+        }
+    }
+}
+
 pub fn verify_program(prog: &Program) -> Result<(), Vec<String>> {
     let mut errors = Vec::new();
+    let sigs = CallSigs::of(prog);
     for func in &prog.functions {
-        if let Err(es) = verify_function(func) {
+        if let Err(es) = verify_function_inner(func, Some(&sigs)) {
             for e in es {
                 errors.push(format!("[fn {}] {}", func.name.as_str(), e));
             }
@@ -19,6 +101,10 @@ pub fn verify_program(prog: &Program) -> Result<(), Vec<String>> {
 }
 
 pub fn verify_function(f: &Function) -> Result<(), Vec<String>> {
+    verify_function_inner(f, None)
+}
+
+fn verify_function_inner(f: &Function, sigs: Option<&CallSigs>) -> Result<(), Vec<String>> {
     let mut errors: Vec<String> = Vec::new();
 
     let mut block_ids: HashSet<BlockId> = HashSet::new();
@@ -53,6 +139,10 @@ pub fn verify_function(f: &Function) -> Result<(), Vec<String>> {
                 redef(v, &inst.ty, "inst", &mut value_ty, &mut errors);
             }
         }
+    }
+
+    if let Some(sigs) = sigs {
+        check_call_sites(f, &value_ty, sigs, &mut errors);
     }
 
     let preds = f.predecessors();
@@ -208,6 +298,20 @@ fn ty_compatible(a: &Type, b: &Type) -> bool {
         | (Enum(n1), Enum(n2))
         | (Struct(n1, _), Enum(n2))
         | (Enum(n1), Struct(n2, _)) => n1 == n2,
+
+        (Vec(x), Vec(y)) => ty_compatible(x, y),
+        (Map(k1, v1), Map(k2, v2)) => ty_compatible(k1, k2) && ty_compatible(v1, v2),
+        (Array(x, n1), Array(y, n2)) => n1 == n2 && ty_compatible(x, y),
+        (View(x), View(y)) => ty_compatible(x, y),
+        (Channel(x), Channel(y)) => ty_compatible(x, y),
+        (Tuple(xs), Tuple(ys)) => {
+            xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| ty_compatible(x, y))
+        }
+        (Fn(p1, r1), Fn(p2, r2)) => {
+            p1.len() == p2.len()
+                && p1.iter().zip(p2).all(|(x, y)| ty_compatible(x, y))
+                && ty_compatible(r1, r2)
+        }
 
         (TypeVar(_), _) | (_, TypeVar(_)) => true,
         _ => false,

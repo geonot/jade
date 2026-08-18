@@ -132,7 +132,10 @@ impl Typer {
         let ends_with_jump = stmts.last().is_some_and(|s| {
             matches!(
                 s,
-                hir::Stmt::Ret(..) | hir::Stmt::Break(..) | hir::Stmt::Continue(..)
+                hir::Stmt::Ret(..)
+                    | hir::Stmt::ErrReturn(..)
+                    | hir::Stmt::Break(..)
+                    | hir::Stmt::Continue(..)
             )
         });
         if ends_with_jump {
@@ -163,7 +166,10 @@ impl Typer {
         let ends_with_jump = stmts.last().is_some_and(|s| {
             matches!(
                 s,
-                hir::Stmt::Ret(..) | hir::Stmt::Break(..) | hir::Stmt::Continue(..)
+                hir::Stmt::Ret(..)
+                    | hir::Stmt::ErrReturn(..)
+                    | hir::Stmt::Break(..)
+                    | hir::Stmt::Continue(..)
             )
         });
         if ends_with_jump {
@@ -189,7 +195,10 @@ impl Typer {
         let ends_with_jump = stmts.last().is_some_and(|s| {
             matches!(
                 s,
-                hir::Stmt::Ret(..) | hir::Stmt::Break(..) | hir::Stmt::Continue(..)
+                hir::Stmt::Ret(..)
+                    | hir::Stmt::ErrReturn(..)
+                    | hir::Stmt::Break(..)
+                    | hir::Stmt::Continue(..)
             )
         });
         if ends_with_jump {
@@ -258,6 +267,8 @@ impl Typer {
             hir::Stmt::Bind(b) => {
                 let resolved = self.infer_ctx.resolve(&b.value.ty);
                 if Self::expr_type_needs_drop(&resolved)
+                    && !(matches!(b.ownership, crate::hir::Ownership::Borrowed)
+                        && b.name.as_str().starts_with("__old_"))
                     && let hir::ExprKind::Var(id, _) = &b.value.kind
                 {
                     out.insert(*id);
@@ -1550,6 +1561,140 @@ impl Typer {
             }
         }
         ids.extend(added);
+    }
+
+    pub(in crate::typer) fn stage_assign_old_drop(
+        &mut self,
+        target: &hir::Expr,
+        rhs: &hir::Expr,
+        span: crate::ast::Span,
+    ) {
+        let hir::ExprKind::Var(tid, tname) = &target.kind else {
+            return;
+        };
+        let resolved = {
+            let was_strict = self.infer_ctx.is_strict();
+            self.infer_ctx.set_strict(false);
+            let r = self.infer_ctx.resolve(&target.ty);
+            self.infer_ctx.set_strict(was_strict);
+            r
+        };
+        if !self.needs_drop(&resolved) {
+            return;
+        }
+        if !self
+            .find_var_by_id(*tid)
+            .is_some_and(|v| matches!(v.ownership, crate::hir::Ownership::Owned))
+        {
+            return;
+        }
+        if !self.moves.entries_for(*tid).is_empty() {
+            return;
+        }
+        self.stage_old_drop_unchecked(*tid, *tname, &target.ty, resolved, rhs, span);
+    }
+
+    pub(in crate::typer) fn stage_old_drop_unchecked(
+        &mut self,
+        tid: crate::hir::DefId,
+        tname: crate::intern::Symbol,
+        ty: &Type,
+        resolved: Type,
+        rhs: &hir::Expr,
+        span: crate::ast::Span,
+    ) {
+        if !self.assign_old_drop_safe(rhs, tid) {
+            return;
+        }
+        let old_id = self.fresh_id();
+        let old_nm: crate::intern::Symbol = format!("__old_{}_{}", tname, old_id.0).into();
+        self.pending_prelude_stmts.push(hir::Stmt::Bind(hir::Bind {
+            def_id: old_id,
+            name: old_nm,
+            value: hir::Expr {
+                kind: hir::ExprKind::Var(tid, tname),
+                ty: ty.clone(),
+                span,
+            },
+            ty: ty.clone(),
+            ownership: crate::hir::Ownership::Borrowed,
+            atomic: false,
+            access_mod: None,
+            span,
+        }));
+        self.pending_post_stmts
+            .push(hir::Stmt::Drop(old_id, old_nm, resolved, span));
+    }
+
+    fn assign_old_drop_safe(&mut self, rhs: &hir::Expr, target: crate::hir::DefId) -> bool {
+        let mut ids: std::collections::HashSet<crate::hir::DefId> =
+            std::collections::HashSet::new();
+        Self::collect_hir_var_ids_expr(rhs, &mut ids);
+        if !ids.contains(&target) {
+            return true;
+        }
+        self.fresh_reading_expr(rhs, target)
+    }
+
+    fn fresh_reading_expr(&mut self, e: &hir::Expr, target: crate::hir::DefId) -> bool {
+        let operand_ok = |this: &mut Self, x: &hir::Expr| -> bool {
+            match &x.kind {
+                hir::ExprKind::Var(..) => true,
+                _ => {
+                    let mut ids: std::collections::HashSet<crate::hir::DefId> =
+                        std::collections::HashSet::new();
+                    Self::collect_hir_var_ids_expr(x, &mut ids);
+                    !ids.contains(&target) || this.fresh_reading_expr(x, target)
+                }
+            }
+        };
+        match &e.kind {
+            hir::ExprKind::BinOp(l, _, r) => operand_ok(self, l) && operand_ok(self, r),
+            hir::ExprKind::Coerce(inner, _) | hir::ExprKind::Cast(inner, _) => {
+                self.fresh_reading_expr(inner, target)
+            }
+            hir::ExprKind::StringMethod(recv, m, args) => {
+                let fresh = matches!(
+                    &*m.as_str(),
+                    "slice"
+                        | "trim"
+                        | "trim_left"
+                        | "trim_right"
+                        | "replace"
+                        | "to_upper"
+                        | "to_lower"
+                        | "repeat"
+                        | "__clone"
+                        | "split"
+                        | "lines"
+                );
+                fresh && operand_ok(self, recv) && args.iter().all(|a| operand_ok(self, a))
+            }
+            hir::ExprKind::VecMethod(recv, m, args) => {
+                let fresh = matches!(
+                    &*m.as_str(),
+                    "map"
+                        | "filter"
+                        | "take"
+                        | "skip"
+                        | "slice"
+                        | "reverse"
+                        | "sort"
+                        | "chain"
+                        | "zip"
+                        | "enumerate"
+                        | "flatten"
+                        | "collect"
+                        | "join"
+                );
+                fresh && operand_ok(self, recv) && args.iter().all(|a| operand_ok(self, a))
+            }
+            hir::ExprKind::MapMethod(recv, m, args) => {
+                let fresh = matches!(&*m.as_str(), "keys" | "values");
+                fresh && operand_ok(self, recv) && args.iter().all(|a| operand_ok(self, a))
+            }
+            _ => false,
+        }
     }
 
     pub(in crate::typer) fn emit_scope_drops_excluding(

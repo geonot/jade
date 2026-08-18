@@ -204,7 +204,25 @@ impl<'ctx> Compiler<'ctx> {
         self.di_compile_unit = Some(di_cu);
     }
 
+    fn apply_stack_probes(&self) {
+        let probe = self
+            .ctx
+            .create_string_attribute("probe-stack", "inline-asm");
+        for fv in self.module.get_functions() {
+            if fv.count_basic_blocks() == 0 {
+                continue;
+            }
+            if fv
+                .get_string_attribute(inkwell::attributes::AttributeLoc::Function, "probe-stack")
+                .is_none()
+            {
+                fv.add_attribute(inkwell::attributes::AttributeLoc::Function, probe);
+            }
+        }
+    }
+
     pub fn emit_ir(&self) -> String {
+        self.apply_stack_probes();
         self.module.print_to_string().to_string()
     }
 
@@ -223,6 +241,7 @@ impl<'ctx> Compiler<'ctx> {
         &self,
         opt: OptimizationLevel,
     ) -> Result<TargetMachine, String> {
+        self.apply_stack_probes();
         let passes = match opt {
             OptimizationLevel::None => "default<O0>",
             OptimizationLevel::Less => "default<O1>",

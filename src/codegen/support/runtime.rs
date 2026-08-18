@@ -162,7 +162,9 @@ impl<'ctx> Compiler<'ctx> {
         let ft = ptr_ty.fn_type(&[i64t.into()], false);
         let func = self
             .module
-            .add_function("jinn_xmalloc", ft, Some(Linkage::WeakAny));
+            .add_function("jinn_xmalloc", ft, Some(Linkage::Internal));
+        func.add_attribute(AttributeLoc::Function, self.attr("nounwind"));
+        func.add_attribute(AttributeLoc::Function, self.attr("alwaysinline"));
 
         let entry = self.ctx.append_basic_block(func, "entry");
         let ok_bb = self.ctx.append_basic_block(func, "ok");

@@ -1,4 +1,77 @@
 # Changelog
+- **[165]** (2026-08-18) alpha-remediation pass — an 18-area adversarial review falsified the [163]/[164] "0 blockers / 0 majors" headline (~28 blockers, ~53 majors reproduced from clean directories); this pass closes the two soundness workstreams on the critical path (type/ownership interior, memory-safety completeness — 18 of the review's blockers) plus the two one-line quick wins and a batch of cheap surface blockers, each pinned in `tests/alpha_hardening_pins.rs`; the open remainder is filed in docs/roadmap.md under "Alpha review backlog" with the review's stable ids
+
+Full suite is 2338 + 20 new pins, green; fmt/clippy clean. array_ops measured
+~1× vs C after the linkage fix (was 23×).
+
+- **Type interior (TYP-1..4, TYP-11, NEST-1).** A shared `check_call_arg`
+  helper (post-hoc unify + container-element check + Fn-arity check +
+  `numeric_lossless` tolerance) now runs on monomorphized generic calls,
+  struct and candidate method calls, and String builtin methods (which
+  gained a parameter-type table) — `pick(1, 'hello')`, mistyped method
+  args, and wrong-arity lambdas reject instead of running on garbage.
+  `log` of i8/i16/u8/u16 sign/zero-extends before the printf vararg.
+  A new MIR call-argument-type verifier (TYP-11, in `mir/verify.rs`, under
+  the existing `JINN_MIR_VERIFY` release gate) checks every `Call` against
+  the callee signature — it caught a real `Vec(Struct)`-vs-`Vec(Enum)`
+  representation split in std/json during bring-up, and `ty_compatible`
+  now recurses structurally through containers. Nested field access
+  (`q.p.b`) typed its result from a fresh var defaulting to i64 because
+  struct fields registered named user types as `Param(name)`;
+  `normalize_named_ty` at field-access and method-receiver resolution fixes
+  the class (the probe printed stack garbage for a nested f64 before).
+- **Ownership and clones (COPY-MOVE, SLICE-1, MAP-2, STD-6).** `copy` of a
+  type with no value clone is a hard error naming the type instead of a
+  silent move. Enums gained a real deep clone (`__clone_enum_*`, mirroring
+  the drop generator including boxed recursive payloads) — previously
+  enum "clones" were shallow byte-copies, a latent double-free armed by
+  any leak fix. All nine copying Vec transforms clone non-trivial elements
+  instead of aliasing raw bytes. `drop_map_deep` walked 48-byte buckets
+  with occ@40 against the real 64-byte/occ@56 entry layout — heap-valued
+  maps crashed on drop. Vec combinators segfaulted on struct elements
+  because `indirect_call_vals` passed structs by value into pointer-ABI
+  lambdas — fixed centrally with an argument spill.
+- **Memory-safety completeness (STK-1, CG-2/3, DIST-6/7, MIR-3).** Every
+  emitted function carries `"probe-stack"="inline-asm"`; coroutine stacks
+  are 256 KB lazy-commit; the crash handler chains the previous (ASan)
+  sigaction. Rebinding a heap value now drops the superseded allocation
+  (typer-side borrowed temp-bind + post-drop, guarded by a conservative
+  "RHS only reads the target and yields a fresh value" analysis) — the
+  canonical `buf is buf + chunk` server loop no longer leaks per
+  iteration. `ErrReturn` joined the `ends_with_jump` matches (scope drops
+  used to land after it as dead code), and the return-drop safety net
+  recognizes owned Strings from concat, fresh-returning methods, and
+  clones. A new edge-escape sweep drops owned-dead values on
+  abandoned-scope `goto` edges (break paths) with per-value reachability
+  filtering. Channels are refcounted end to end (`jinn_chan_retain/release`,
+  creation +1, scope drops release, duplication retains, params borrow):
+  200k reply-channels complete under an 80 MB cap with per-iteration
+  frees.
+- **Cheap blockers (CAP-1, SYN-1/2/3/5, DIAG-1, HIR-3/4).** The
+  callee-expression fallthrough in capability scanning now charges
+  `IndirectCall` — `get_fn()(x)` can no longer launder effects under
+  `needs pure`. Maps grow (`__jinn_map_grow`, load-factor 3/4 doubling
+  with in-place rehash by stored hash) — the 17th key no longer hangs at
+  100% CPU — and probe matches compare key bytes, not just the 64-bit
+  hash. `m['k']` / `m['k'] is v` wire to `get`/`set` instead of ICEing.
+  Top-level statements alongside an explicit `*main` are a parse error
+  instead of silently deleted. Struct constructors error on missing
+  required fields (named or positional; declared defaults still fill).
+  Comptime folding of `i64::MIN / -1` refuses to fold instead of ICEing
+  (the runtime's clean trap fires), and float→i32 / int→f32 cast folds
+  saturate and round-trip like the runtime.
+- **Benchmark honesty (PERF-1a).** The codegen'd `jinn_xmalloc` wrapper is
+  `internal` + `alwaysinline` instead of `WeakAny` — LLVM sees through to
+  `malloc` and elides; the wrapper vanishes from optimized IR entirely (an
+  IR-grep pin holds it there). array_ops: 23× → ~1× vs C.
+
+What did not make it, and why, is filed honestly in the roadmap backlog:
+store hardening (WS-3) untouched, the comptime width bugs (HIR-1/2/5)
+recommended for the literal-only cut, chained-concat intermediates and
+`continue`-path scope leaks still open, and the struct-init owning
+extension reverted after the audit suite showed "drop the init value" is
+unsound once struct SSA forks on field mutation.
+
 - **[164]** (2026-08-18) assessment-hardening pass — an independent expert-panel review surfaced a fresh batch of accept-then-corrupt holes the [162] adversarial pass missed; all close here, each pinned with a runnable test, and the roadmap headline holds at 0 blockers / 0 majors
 
 A ground-up assessment of the compiler — nine reviewer perspectives (type

@@ -90,10 +90,15 @@ impl Typer {
         self.infer_ctx.set_strict(false);
         let resolved = self.infer_ctx.resolve(&e.ty);
         self.infer_ctx.set_strict(was_strict);
-        if !matches!(resolved, Type::String) {
+        if !matches!(resolved, Type::String | Type::Channel(_)) {
             return;
         }
         let span = e.span;
+        let out_ty = if matches!(resolved, Type::String) {
+            Type::String
+        } else {
+            resolved
+        };
         let old = std::mem::replace(
             e,
             hir::Expr {
@@ -104,7 +109,7 @@ impl Typer {
         );
         *e = hir::Expr {
             kind: hir::ExprKind::StringMethod(Box::new(old), "__clone".into(), vec![]),
-            ty: Type::String,
+            ty: out_ty,
             span,
         };
     }

@@ -22,10 +22,36 @@ impl<'ctx> Compiler<'ctx> {
         }
         match ty {
             Type::String => self.clone_string(val),
+            Type::Channel(_) => {
+                if val.is_pointer_value() {
+                    let retain =
+                        self.module
+                            .get_function("jinn_chan_retain")
+                            .unwrap_or_else(|| {
+                                let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                                let ft = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
+                                self.module.add_function(
+                                    "jinn_chan_retain",
+                                    ft,
+                                    Some(inkwell::module::Linkage::External),
+                                )
+                            });
+                    self.needs_runtime = true;
+                    b!(self.bld.build_call(retain, &[val.into()], "ch.retain"));
+                }
+                Ok(val)
+            }
             Type::Vec(elem) => self.clone_vec(val, elem),
             Type::Array(elem, n) => self.clone_array(val, elem, *n),
             Type::Tuple(tys) => self.clone_tuple(val, tys),
-            Type::Struct(name, _) => self.clone_struct(val, &name.as_str()),
+            Type::Enum(name) => self.clone_enum(val, &name.as_str()),
+            Type::Struct(name, _) => {
+                if self.enums.contains_key(&name.as_str()) {
+                    self.clone_enum(val, &name.as_str())
+                } else {
+                    self.clone_struct(val, &name.as_str())
+                }
+            }
             Type::Alias(_, inner) | Type::Newtype(_, inner) | Type::Frozen(inner) => {
                 self.clone_value(val, inner)
             }
@@ -376,6 +402,163 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_call(cfn, &[dst_slot.into(), src_slot.into()], ""));
         Ok(b!(self.bld.build_load(lty_st, dst_slot, "stc.cv")))
+    }
+
+    fn clone_enum(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+        name: &str,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let variants = match self.enums.get(name) {
+            Some(v) => v.clone(),
+            None => return Ok(val),
+        };
+        let any_needs_clone = variants
+            .iter()
+            .any(|(_, tys)| tys.iter().any(|t| !t.is_trivially_droppable()));
+        if !any_needs_clone {
+            return Ok(val);
+        }
+        let st = match self.module.get_struct_type(name) {
+            Some(s) => s,
+            None => return Ok(val),
+        };
+
+        let fn_name = format!("__clone_enum_{name}");
+        let fv = if let Some(f) = self.module.get_function(&fn_name) {
+            f
+        } else {
+            let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+            let ft = self
+                .ctx
+                .void_type()
+                .fn_type(&[ptr_ty.into(), ptr_ty.into()], false);
+            let f =
+                self.module
+                    .add_function(&fn_name, ft, Some(inkwell::module::Linkage::Internal));
+            self.tag_fn(f);
+            let entry = self.ctx.append_basic_block(f, "entry");
+            let old_fn = self.cur_fn;
+            let old_bb = self.bld.get_insert_block();
+            self.cur_fn = Some(f);
+            self.bld.position_at_end(entry);
+
+            let out_ptr = f
+                .get_nth_param(0)
+                .expect("ICE: enum clone missing out param")
+                .into_pointer_value();
+            let in_ptr = f
+                .get_nth_param(1)
+                .expect("ICE: enum clone missing in param")
+                .into_pointer_value();
+
+            let raw = b!(self.bld.build_load(st, in_ptr, "ce.raw"));
+            b!(self.bld.build_store(out_ptr, raw));
+
+            let i32t = self.ctx.i32_type();
+            let tag_gep = b!(self.bld.build_struct_gep(st, out_ptr, 0, "ce.tag"));
+            let tag = b!(self.bld.build_load(i32t, tag_gep, "ce.tv")).into_int_value();
+            let done_bb = self.ctx.append_basic_block(f, "ce.done");
+
+            struct VariantClone {
+                tag_val: u32,
+                field_types: Vec<Type>,
+            }
+            let mut clone_variants: Vec<VariantClone> = Vec::new();
+            for (vname, vtys) in &variants {
+                let tag_val = match self.variant_tags.get(vname) {
+                    Some((_, t)) => *t,
+                    None => continue,
+                };
+                let needs = vtys.iter().any(|t| !t.is_trivially_droppable());
+                if needs {
+                    clone_variants.push(VariantClone {
+                        tag_val,
+                        field_types: vtys.clone(),
+                    });
+                }
+            }
+            let case_bbs: Vec<_> = clone_variants
+                .iter()
+                .map(|vc| {
+                    let bb = self
+                        .ctx
+                        .append_basic_block(f, &format!("ce.v{}", vc.tag_val));
+                    (i32t.const_int(vc.tag_val as u64, false), bb)
+                })
+                .collect();
+            b!(self.bld.build_switch(tag, done_bb, &case_bbs));
+
+            for (vc, (_tag_iv, case_bb)) in clone_variants.iter().zip(case_bbs.iter()) {
+                self.bld.position_at_end(*case_bb);
+                let payload_gep = b!(self.bld.build_struct_gep(st, out_ptr, 1, "ce.payload"));
+                let mut byte_offset: u64 = 0;
+                for fty in vc.field_types.iter() {
+                    let is_rec = Compiler::is_recursive_field(fty, name);
+                    let slot_size: u64 = if is_rec {
+                        8
+                    } else {
+                        self.type_store_size(self.llvm_ty(fty))
+                    };
+                    if fty.is_trivially_droppable() && !is_rec {
+                        byte_offset += (slot_size + 7) & !7;
+                        continue;
+                    }
+                    let f_ptr = if byte_offset == 0 {
+                        payload_gep
+                    } else {
+                        let off = self.ctx.i64_type().const_int(byte_offset, false);
+                        unsafe {
+                            b!(self
+                                .bld
+                                .build_gep(self.ctx.i8_type(), payload_gep, &[off], "ce.vf"))
+                        }
+                    };
+                    if is_rec {
+                        let heap =
+                            b!(self.bld.build_load(ptr_ty, f_ptr, "ce.box")).into_pointer_value();
+                        let inner_lty = self.llvm_ty(fty);
+                        let inner = b!(self.bld.build_load(inner_lty, heap, "ce.boxv"));
+                        let cloned = self.clone_value(inner, fty)?;
+                        let malloc = self.ensure_malloc();
+                        let sz = self.type_store_size(inner_lty);
+                        let new_box = b!(self.bld.build_call(
+                            malloc,
+                            &[self.ctx.i64_type().const_int(sz, false).into()],
+                            "ce.nbox"
+                        ))
+                        .try_as_basic_value()
+                        .basic()
+                        .expect("ICE: malloc returned void")
+                        .into_pointer_value();
+                        b!(self.bld.build_store(new_box, cloned));
+                        b!(self.bld.build_store(f_ptr, new_box));
+                    } else {
+                        let f_val = b!(self.bld.build_load(self.llvm_ty(fty), f_ptr, "ce.vfv"));
+                        let cloned = self.clone_value(f_val, fty)?;
+                        b!(self.bld.build_store(f_ptr, cloned));
+                    }
+                    byte_offset += (slot_size + 7) & !7;
+                }
+                b!(self.bld.build_unconditional_branch(done_bb));
+            }
+
+            self.bld.position_at_end(done_bb);
+            b!(self.bld.build_return(None));
+            self.cur_fn = old_fn;
+            if let Some(bb) = old_bb {
+                self.bld.position_at_end(bb);
+            }
+            f
+        };
+
+        let in_slot = self.entry_alloca(st.into(), "ce.in");
+        let out_slot = self.entry_alloca(st.into(), "ce.out");
+        b!(self.bld.build_store(in_slot, val));
+        b!(self
+            .bld
+            .build_call(fv, &[out_slot.into(), in_slot.into()], ""));
+        Ok(b!(self.bld.build_load(st, out_slot, "ce.cv")))
     }
 
     fn type_references_struct_for_clone(ty: &Type, name: &str) -> bool {

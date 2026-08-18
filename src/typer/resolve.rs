@@ -276,6 +276,14 @@ impl Typer {
             self.inferred_field_structs.insert(td.name);
         }
         self.structs.insert(td.name, fields);
+        self.struct_field_defaults.insert(
+            td.name,
+            td.fields
+                .iter()
+                .filter(|f| f.default.is_some())
+                .map(|f| f.name)
+                .collect(),
+        );
         self.struct_attrs.insert(td.name, td.layout.clone());
     }
 

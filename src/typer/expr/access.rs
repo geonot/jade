@@ -376,6 +376,7 @@ impl Typer {
                     Type::Frozen(inner) => self.infer_ctx.shallow_resolve(&inner),
                     other => other,
                 };
+                let resolved_ty = self.normalize_named_ty(resolved_ty);
 
                 if let Type::Row(store) = &resolved_ty
                     && let Some(rels) = self.store_relations.get(store)
@@ -715,6 +716,18 @@ impl Typer {
         match expr {
             ast::Expr::Index(arr, idx, span) => {
                 let harr = self.lower_expr(arr)?;
+
+                if let Type::Map(key_ty, val_ty) = self.infer_ctx.shallow_resolve(&harr.ty) {
+                    let hidx = self.lower_expr_expected(idx, Some(&key_ty))?;
+                    let _ = self
+                        .infer_ctx
+                        .unify_at(&key_ty, &hidx.ty, *span, "map index key");
+                    return Ok(hir::Expr {
+                        kind: hir::ExprKind::MapMethod(Box::new(harr), "get".into(), vec![hidx]),
+                        ty: *val_ty,
+                        span: *span,
+                    });
+                }
                 let hidx = self.lower_expr(idx)?;
 
                 let peeled_ty = harr.ty.clone();

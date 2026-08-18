@@ -60,21 +60,7 @@ impl<'ctx> Compiler<'ctx> {
                 "log"
             ));
         } else {
-            let print_val: BasicMetadataValueEnum<'ctx> = if matches!(ty, Type::Bool) {
-                let iv = val.into_int_value();
-                let ext = if iv.get_type().get_bit_width() == 1 {
-                    b!(self.bld.build_int_z_extend(iv, self.ctx.i32_type(), "bext"))
-                } else {
-                    iv
-                };
-                ext.into()
-            } else if matches!(ty, Type::F32) {
-                let fv = val.into_float_value();
-                let f64t = self.ctx.f64_type();
-                b!(self.bld.build_float_ext(fv, f64t, "fpext")).into()
-            } else {
-                val.into()
-            };
+            let print_val = self.printf_vararg_val(val, ty)?;
             b!(self
                 .bld
                 .build_call(printf, &[fs.as_pointer_value().into(), print_val], "log"));
@@ -127,21 +113,7 @@ impl<'ctx> Compiler<'ctx> {
                 "eprint"
             ));
         } else {
-            let print_val: BasicMetadataValueEnum<'ctx> = if matches!(ty, Type::Bool) {
-                let iv = val.into_int_value();
-                let ext = if iv.get_type().get_bit_width() == 1 {
-                    b!(self.bld.build_int_z_extend(iv, self.ctx.i32_type(), "bext"))
-                } else {
-                    iv
-                };
-                ext.into()
-            } else if matches!(ty, Type::F32) {
-                let fv = val.into_float_value();
-                let f64t = self.ctx.f64_type();
-                b!(self.bld.build_float_ext(fv, f64t, "fpext")).into()
-            } else {
-                val.into()
-            };
+            let print_val = self.printf_vararg_val(val, ty)?;
             b!(self.bld.build_call(
                 fprintf,
                 &[stderr_val.into(), fs.as_pointer_value().into(), print_val],
@@ -181,21 +153,7 @@ impl<'ctx> Compiler<'ctx> {
                 "print"
             ));
         } else {
-            let print_val: BasicMetadataValueEnum<'ctx> = if matches!(ty, Type::Bool) {
-                let iv = val.into_int_value();
-                let ext = if iv.get_type().get_bit_width() == 1 {
-                    b!(self.bld.build_int_z_extend(iv, self.ctx.i32_type(), "bext"))
-                } else {
-                    iv
-                };
-                ext.into()
-            } else if matches!(ty, Type::F32) {
-                let fv = val.into_float_value();
-                let f64t = self.ctx.f64_type();
-                b!(self.bld.build_float_ext(fv, f64t, "fpext")).into()
-            } else {
-                val.into()
-            };
+            let print_val = self.printf_vararg_val(val, ty)?;
             b!(self
                 .bld
                 .build_call(printf, &[fs.as_pointer_value().into(), print_val], "print"));
@@ -342,6 +300,45 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_call(printf, &[cf.as_pointer_value().into()], "log.clc"));
         Ok(())
+    }
+
+    pub(crate) fn printf_vararg_val(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+        ty: &Type,
+    ) -> Result<BasicMetadataValueEnum<'ctx>, String> {
+        let i32t = self.ctx.i32_type();
+        Ok(match ty {
+            Type::Bool => {
+                let iv = val.into_int_value();
+                if iv.get_type().get_bit_width() < 32 {
+                    b!(self.bld.build_int_z_extend(iv, i32t, "bext")).into()
+                } else {
+                    iv.into()
+                }
+            }
+            Type::F32 => {
+                let fv = val.into_float_value();
+                b!(self.bld.build_float_ext(fv, self.ctx.f64_type(), "fpext")).into()
+            }
+            Type::I8 | Type::I16 => {
+                let iv = val.into_int_value();
+                if iv.get_type().get_bit_width() < 32 {
+                    b!(self.bld.build_int_s_extend(iv, i32t, "sext")).into()
+                } else {
+                    iv.into()
+                }
+            }
+            Type::U8 | Type::U16 => {
+                let iv = val.into_int_value();
+                if iv.get_type().get_bit_width() < 32 {
+                    b!(self.bld.build_int_z_extend(iv, i32t, "zext")).into()
+                } else {
+                    iv.into()
+                }
+            }
+            _ => val.into(),
+        })
     }
 
     pub(crate) fn fmt_for_ty(&self, ty: &Type) -> &'static str {

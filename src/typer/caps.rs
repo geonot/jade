@@ -307,6 +307,7 @@ impl Scanner<'_> {
                         self.scan_expr(callee);
                     }
                     _ => {
+                        self.out.caps.insert(Capability::IndirectCall);
                         self.scan_expr(callee);
                     }
                 }

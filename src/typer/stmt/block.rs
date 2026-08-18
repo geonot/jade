@@ -153,6 +153,7 @@ impl Typer {
                 stmts.push(p);
             }
             stmts.push(stmt);
+            stmts.append(&mut self.pending_post_stmts);
         }
         if self.deferred_quantified_vars.len() > deferred_snapshot {
             let vars_to_default: Vec<u32> = self

@@ -143,6 +143,7 @@ pub struct Typer {
     pub(crate) mono_enums: Vec<hir::EnumDef>,
     pub(crate) mono_types: Vec<hir::TypeDef>,
     pub(crate) inferred_field_structs: std::collections::HashSet<Symbol>,
+    pub(crate) struct_field_defaults: HashMap<Symbol, std::collections::HashSet<Symbol>>,
     pub(crate) source_dir: Option<PathBuf>,
     pub(crate) test_mode: bool,
     pub(crate) actors:
@@ -193,6 +194,7 @@ pub struct Typer {
     pub(crate) defer_read_vars: std::collections::HashMap<DefId, crate::ast::Span>,
     pub(crate) payload_bind_subjects: std::collections::HashMap<DefId, place::Place>,
     pub(crate) pending_prelude_stmts: Vec<hir::Stmt>,
+    pub(crate) pending_post_stmts: Vec<hir::Stmt>,
 
     pub(crate) suppress_moved_field_check: u32,
     pub(crate) current_method_type: Option<String>,
@@ -278,6 +280,7 @@ impl Typer {
             mono_enums: Vec::new(),
             mono_types: Vec::new(),
             inferred_field_structs: std::collections::HashSet::new(),
+            struct_field_defaults: HashMap::new(),
             source_dir: None,
             test_mode: false,
             actors: IndexMap::new(),
@@ -325,6 +328,7 @@ impl Typer {
             defer_read_vars: std::collections::HashMap::new(),
             payload_bind_subjects: std::collections::HashMap::new(),
             pending_prelude_stmts: Vec::new(),
+            pending_post_stmts: Vec::new(),
             suppress_moved_field_check: 0,
             current_method_type: None,
             modules: std::collections::HashSet::new(),
@@ -785,6 +789,14 @@ impl Typer {
         }
     }
 
+    pub(crate) fn normalize_named_ty(&self, ty: Type) -> Type {
+        match ty {
+            Type::Param(n) if self.structs.contains_key(&n) => Type::Struct(n, vec![]),
+            Type::Param(n) if self.enums.contains_key(&n) => Type::Enum(n),
+            other => other,
+        }
+    }
+
     fn ownership_for_type(ty: &Type) -> Ownership {
         match ty {
             Type::Ptr(_) => Ownership::Raw,
@@ -811,6 +823,13 @@ impl Typer {
                 if resource {
                     return Err(format!(
                         "cannot `copy` a @resource type ({ty}): use `take` (move) instead"
+                    ));
+                }
+                if !ty.is_value_clonable() && self.needs_drop(ty) {
+                    return Err(format!(
+                        "cannot `copy` a value of type {ty}: deep-copy is not defined \
+                         for this type, so the copy would silently become a move; \
+                         use `take` to move it explicitly"
                     ));
                 }
                 promote_owned()
@@ -842,6 +861,7 @@ impl Typer {
             | Type::Map(_, _)
             | Type::Coroutine(_)
             | Type::Generator(_)
+            | Type::Channel(_)
             | Type::Fn(_, _) => true,
 
             Type::Struct(_, _) | Type::Enum(_) | Type::Tuple(_) | Type::Array(_, _) => {
