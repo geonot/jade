@@ -49,6 +49,16 @@ impl Typer {
         coerce: bool,
     ) -> Result<hir::Expr, String> {
         let mangled = self.monomorphize_fn(name, type_map)?;
+        let base = Symbol::intern(name);
+        if let Some(access) = self.fn_param_access.get(&base).cloned() {
+            self.fn_param_access.insert(mangled, access);
+        }
+        if let Some(mutates) = self.fn_param_mutates.get(&base).cloned() {
+            self.fn_param_mutates.insert(mangled, mutates);
+        }
+        if let Some(sites) = self.fn_param_consume_sites.get(&base).cloned() {
+            self.fn_param_consume_sites.insert(mangled, sites);
+        }
         let (id, mono_param_tys, ret) = self
             .fns
             .get(&mangled)

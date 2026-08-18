@@ -77,10 +77,36 @@ struct Scanner<'a> {
     param_names: HashSet<Symbol>,
     opaque_locals: HashSet<Symbol>,
     local_alias: HashMap<Symbol, Symbol>,
+    fn_names: &'a HashSet<Symbol>,
     ctx: &'a CapContext,
 }
 
 impl Scanner<'_> {
+    fn alias_root(&self, name: Symbol) -> Symbol {
+        let mut cur = name;
+        let mut seen: HashSet<Symbol> = HashSet::new();
+        while let Some(next) = self.local_alias.get(&cur) {
+            if !seen.insert(cur) {
+                break;
+            }
+            cur = *next;
+        }
+        cur
+    }
+
+    fn scan_call_arg(&mut self, a: &ast::Expr) {
+        if let ast::Expr::Ident(name, _) = a {
+            let root = self.alias_root(*name);
+            if !self.param_names.contains(&root)
+                && !self.opaque_locals.contains(&root)
+                && self.fn_names.contains(&root)
+            {
+                self.out.callees.insert(root);
+            }
+        }
+        self.scan_expr(a);
+    }
+
     fn store_op(&mut self, store: Symbol) {
         let path = Some(format!("./{store}.store"));
         self.out.caps.insert(Capability::FsRead(path.clone()));
@@ -265,11 +291,15 @@ impl Scanner<'_> {
                     ast::Expr::Ident(name, _) => {
                         if self.param_names.contains(name) || self.opaque_locals.contains(name) {
                             self.out.caps.insert(Capability::IndirectCall);
-                        } else if let Some(src) = self.local_alias.get(name) {
-                            let src = *src;
-                            self.out.callees.insert(src);
                         } else {
-                            self.out.callees.insert(*name);
+                            let root = self.alias_root(*name);
+                            if self.param_names.contains(&root)
+                                || self.opaque_locals.contains(&root)
+                            {
+                                self.out.caps.insert(Capability::IndirectCall);
+                            } else {
+                                self.out.callees.insert(root);
+                            }
                         }
                     }
                     ast::Expr::Field(..) | ast::Expr::Index(..) => {
@@ -281,7 +311,7 @@ impl Scanner<'_> {
                     }
                 }
                 for a in args {
-                    self.scan_expr(a);
+                    self.scan_call_arg(a);
                 }
             }
             ast::Expr::Method(recv, method, args, _) => {
@@ -297,7 +327,7 @@ impl Scanner<'_> {
                     self.scan_expr(recv);
                 }
                 for a in args {
-                    self.scan_expr(a);
+                    self.scan_call_arg(a);
                 }
             }
             ast::Expr::Pipe(recv, func, args, _) => {
@@ -526,6 +556,8 @@ pub(in crate::typer) fn analyze(
         }
     }
 
+    let fn_names: HashSet<Symbol> = item_lookup.keys().copied().collect();
+
     let mut primitive: HashMap<Symbol, CapSet> = HashMap::new();
     let mut graph: HashMap<Symbol, HashSet<Symbol>> = HashMap::new();
     for it in items {
@@ -535,6 +567,7 @@ pub(in crate::typer) fn analyze(
             param_names: it.fun.params.iter().map(|p| p.name).collect(),
             opaque_locals: HashSet::new(),
             local_alias: HashMap::new(),
+            fn_names: &fn_names,
             ctx,
         };
         scanner.scan_block(&it.fun.body);

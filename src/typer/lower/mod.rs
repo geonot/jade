@@ -44,6 +44,8 @@ impl Typer {
                     if !f.type_bounds.is_empty() {
                         self.generic_bounds.insert(f.name, f.type_bounds.clone());
                     }
+                    self.fn_param_access
+                        .insert(f.name, f.params.iter().map(|p| p.access_mod).collect());
                     self.generic_fns
                         .insert(f.name, self.normalize_generic_fn(f));
                 }

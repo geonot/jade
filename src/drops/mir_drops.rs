@@ -14,6 +14,14 @@ pub fn run(
     let mut next_slot: u32 = 0;
     let checked = verify::enabled();
     let mut errors: Vec<String> = Vec::new();
+    let fn_names: std::collections::HashSet<crate::intern::Symbol> =
+        prog.functions.iter().map(|f| f.name).collect();
+    let resources: std::collections::HashSet<crate::intern::Symbol> = prog
+        .types
+        .iter()
+        .map(|t| t.name)
+        .filter(|n| fn_names.contains(&crate::intern::Symbol::intern(&format!("{n}_drop"))))
+        .collect();
     for func in &mut prog.functions {
         run_on_function(
             func,
@@ -22,6 +30,7 @@ pub fn run(
             checked,
             &mut errors,
             consuming,
+            &resources,
         );
     }
     if errors.is_empty() {
@@ -34,8 +43,9 @@ pub fn run(
 pub(super) fn insert_missing_return_drops(
     func: &mut mir::Function,
     consuming: &verify::ConsumingMap,
+    resources: &std::collections::HashSet<crate::intern::Symbol>,
 ) -> u32 {
-    let missing = verify::must_held_at_returns(func, consuming);
+    let missing = verify::must_held_at_returns(func, consuming, resources);
     let mut inserted = 0u32;
     for (bi, items) in missing {
         let span = func.blocks[bi]
@@ -60,6 +70,64 @@ pub(super) fn insert_missing_return_drops(
     inserted
 }
 
+fn suppress_moved_enum_payload_drops(func: &mut mir::Function) {
+    use std::collections::HashSet;
+
+    let mut escapes: HashSet<ValueId> = HashSet::new();
+    for b in &func.blocks {
+        for inst in &b.insts {
+            match &inst.kind {
+                InstKind::Store(_, v)
+                | InstKind::GlobalStore(_, v)
+                | InstKind::FieldStore(_, _, v)
+                | InstKind::IndexStore(_, _, v)
+                | InstKind::ChanSend(_, v) => {
+                    escapes.insert(*v);
+                }
+                _ => {}
+            }
+        }
+        if let Terminator::Return(Some(v)) = &b.terminator {
+            escapes.insert(*v);
+        }
+    }
+    loop {
+        let mut changed = false;
+        for b in &func.blocks {
+            for phi in &b.phis {
+                if escapes.contains(&phi.dest) {
+                    for (_, src) in &phi.incoming {
+                        changed |= escapes.insert(*src);
+                    }
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    let mut moved_enums: HashSet<ValueId> = HashSet::new();
+    for b in &func.blocks {
+        for inst in &b.insts {
+            if let (Some(dest), InstKind::FieldGet(obj, field)) = (inst.dest, &inst.kind)
+                && field.as_str().starts_with("__v")
+                && !inst.ty.is_trivially_droppable()
+                && escapes.contains(&dest)
+            {
+                moved_enums.insert(*obj);
+            }
+        }
+    }
+    if moved_enums.is_empty() {
+        return;
+    }
+    for b in &mut func.blocks {
+        b.insts
+            .retain(|inst| !matches!(&inst.kind, InstKind::Drop(v, Type::Enum(_)) if moved_enums.contains(v)));
+    }
+}
+
 fn run_on_function(
     func: &mut mir::Function,
     hints: &mut DropHints,
@@ -67,8 +135,10 @@ fn run_on_function(
     checked: bool,
     errors: &mut Vec<String>,
     consuming: &verify::ConsumingMap,
+    resources: &std::collections::HashSet<crate::intern::Symbol>,
 ) {
-    hints.stats.return_drops_inserted += insert_missing_return_drops(func, consuming);
+    hints.stats.return_drops_inserted += insert_missing_return_drops(func, consuming, resources);
+    suppress_moved_enum_payload_drops(func);
 
     let uses = count_uses(func);
     hints.stats.total_bindings_analyzed += uses.len() as u32;
@@ -108,7 +178,7 @@ fn run_on_function(
 
     if checked {
         errors.extend(verify::verify_function(func));
-        errors.extend(verify::verify_function_leaks(func, consuming));
+        errors.extend(verify::verify_function_leaks(func, consuming, resources));
     }
 }
 

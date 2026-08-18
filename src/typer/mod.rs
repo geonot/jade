@@ -188,6 +188,7 @@ pub struct Typer {
     pub(crate) suppress_whole_struct_check: u32,
 
     pub(crate) const_vars: std::collections::HashSet<DefId>,
+    pub(crate) loop_counter_vars: std::collections::HashSet<DefId>,
 
     pub(crate) defer_read_vars: std::collections::HashMap<DefId, crate::ast::Span>,
     pub(crate) payload_bind_subjects: std::collections::HashMap<DefId, place::Place>,
@@ -320,6 +321,7 @@ impl Typer {
             const_expansion_stack: Vec::new(),
             instantiated_generics: std::collections::HashSet::new(),
             const_vars: std::collections::HashSet::new(),
+            loop_counter_vars: std::collections::HashSet::new(),
             defer_read_vars: std::collections::HashMap::new(),
             payload_bind_subjects: std::collections::HashMap::new(),
             pending_prelude_stmts: Vec::new(),

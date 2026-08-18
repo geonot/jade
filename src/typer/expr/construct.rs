@@ -309,7 +309,13 @@ impl Typer {
             return Err("Pool type removed".into());
         }
 
-        if let Some((enum_name, tag)) = self.variant_tags.get(name).cloned() {
+        let is_generic_variant = self
+            .generic_enums
+            .values()
+            .any(|edef| edef.variants.iter().any(|v| v.name.as_str() == name));
+
+        if !is_generic_variant && let Some((enum_name, tag)) = self.variant_tags.get(name).cloned()
+        {
             let variant_fields: Vec<Type> = self
                 .enums
                 .get(&enum_name)

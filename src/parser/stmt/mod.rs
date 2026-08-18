@@ -22,6 +22,18 @@ impl Parser {
             }
             let stmt = self.parse_stmt()?;
 
+            if matches!(stmt, Stmt::Bind(_))
+                && self.pos > 0
+                && !self.check(Token::Newline)
+                && !self.check(Token::Dedent)
+                && !self.eof()
+                && !matches!(self.tok[self.pos - 1].token, Token::Dedent | Token::Newline)
+            {
+                return Err(self.error(
+                    "unexpected token after binding — each statement must be on its own line",
+                ));
+            }
+
             for pre in self.pending_pre_stmts.drain(..).collect::<Vec<_>>() {
                 items.push(pre);
             }

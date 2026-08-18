@@ -5,6 +5,65 @@ use crate::intern::Symbol;
 use crate::types::Type;
 
 impl Typer {
+    fn concrete_ty_differs(&mut self, a: &Type, b: &Type) -> bool {
+        let ra = self.infer_ctx.resolve(a);
+        let rb = self.infer_ctx.resolve(b);
+        let primitive = |t: &Type| t.is_num() || matches!(t, Type::Bool | Type::String);
+        if primitive(&ra) && primitive(&rb) {
+            ra != rb
+        } else {
+            false
+        }
+    }
+
+    fn numeric_lossless(from: &Type, to: &Type) -> bool {
+        fn int_rank(t: &Type) -> Option<(u8, bool)> {
+            Some(match t {
+                Type::I8 => (1, true),
+                Type::I16 => (2, true),
+                Type::I32 => (4, true),
+                Type::I64 => (8, true),
+                Type::U8 => (1, false),
+                Type::U16 => (2, false),
+                Type::U32 => (4, false),
+                Type::U64 => (8, false),
+                _ => return None,
+            })
+        }
+        match (from, to) {
+            (Type::F32, Type::F64) => true,
+            (Type::F32, Type::F32) | (Type::F64, Type::F64) => true,
+            (a, Type::F64) if int_rank(a).is_some() => true,
+            (a, Type::F32) if int_rank(a).map(|(w, _)| w <= 2).unwrap_or(false) => true,
+            (a, b) => match (int_rank(a), int_rank(b)) {
+                (Some((fw, fs)), Some((tw, ts))) => {
+                    if fs == ts {
+                        tw >= fw
+                    } else if ts && !fs {
+                        tw > fw
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            },
+        }
+    }
+
+    fn concrete_container_mismatch(&mut self, pl: &Type, al: &Type) -> bool {
+        let pl = self.infer_ctx.shallow_resolve(pl);
+        let al = self.infer_ctx.shallow_resolve(al);
+        match (&pl, &al) {
+            (Type::Vec(a), Type::Vec(b)) | (Type::Array(a, _), Type::Array(b, _)) => {
+                self.concrete_ty_differs(a, b)
+            }
+            (Type::Map(ak, av), Type::Map(bk, bv)) => {
+                self.concrete_ty_differs(ak, bk) || self.concrete_ty_differs(av, bv)
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn lower_call_expected(
         &mut self,
         callee: &ast::Expr,
@@ -91,7 +150,7 @@ impl Typer {
                             } else {
                                 lax(self, &al)
                             };
-                            if !(lax(self, &pl) || arg_ok || (pl.is_num() && al.is_num())) {
+                            if !(lax(self, &pl) || arg_ok || Self::numeric_lossless(&al, &pl)) {
                                 return Err(format!(
                                     "argument {} of `{}` has the wrong type: {e}",
                                     i + 1,
@@ -205,6 +264,16 @@ impl Typer {
                         let r =
                             self.infer_ctx
                                 .unify_at_tolerant(pt, &ha.ty, span, "function argument");
+                        if self.concrete_container_mismatch(pt, &ha.ty) {
+                            return Err(format!(
+                                "argument {} of `{}` has the wrong element type: expected `{}`, \
+                                 found `{}` — container element types must match exactly",
+                                i + 1,
+                                name,
+                                self.infer_ctx.resolve(pt),
+                                self.infer_ctx.resolve(&ha.ty),
+                            ));
+                        }
                         if let Err(e) = r {
                             let pl = self.infer_ctx.shallow_resolve(pt);
                             let al = self.infer_ctx.shallow_resolve(&ha.ty);
@@ -222,7 +291,7 @@ impl Typer {
                             } else {
                                 lax(self, &al)
                             };
-                            if !(lax(self, &pl) || arg_ok || (pl.is_num() && al.is_num())) {
+                            if !(lax(self, &pl) || arg_ok || Self::numeric_lossless(&al, &pl)) {
                                 return Err(format!(
                                     "argument {} of `{}` has the wrong type: {e}",
                                     i + 1,

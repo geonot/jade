@@ -80,7 +80,8 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(());
         }
 
-        let payload_ty = self.ctx.i8_type().array_type(max_payload as u32);
+        let payload_words = max_payload.div_ceil(8);
+        let payload_ty = self.ctx.i64_type().array_type(payload_words as u32);
         st.set_body(&[i32t.into(), payload_ty.into()], false);
         self.enums.insert(name.into(), resolved);
         Ok(())

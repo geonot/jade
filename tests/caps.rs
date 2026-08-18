@@ -153,3 +153,19 @@ fn spawn_joins_loop_handler_caps() {
         "fs.write 'tick.txt'",
     );
 }
+
+#[test]
+fn function_passed_as_argument_launders_its_caps() {
+    rejects(
+        "use io\n\n*writer\n    io.write_file('x.txt', 'x')\n\n*apply(f)\n    f()\n\n*launder needs pure\n    apply(writer)\n\n*main\n    launder()\n",
+        "fs.write 'x.txt'",
+    );
+}
+
+#[test]
+fn aliased_function_argument_launders_its_caps() {
+    rejects(
+        "use io\n\n*writer\n    io.write_file('x.txt', 'x')\n\n*apply(f)\n    f()\n\n*launder needs pure\n    g is writer\n    apply(g)\n\n*main\n    launder()\n",
+        "fs.write 'x.txt'",
+    );
+}

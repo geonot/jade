@@ -559,6 +559,14 @@ impl Typer {
                             b.name.as_str()
                         ));
                     }
+                    if self.loop_counter_vars.contains(&id) {
+                        return Err(format!(
+                            "cannot assign to loop counter `{}`: it is advanced by the loop \
+                             and the assignment would not affect iteration; use a separate \
+                             local for a running value",
+                            b.name.as_str()
+                        ));
+                    }
                     let rebind_place = crate::typer::place::Place::var(id, b.name);
                     if let Some(entry) = self
                         .iter_borrow_conflict(&rebind_place)
@@ -1050,6 +1058,9 @@ impl Typer {
                         scheme: None,
                     },
                 );
+                if !is_collection_for {
+                    self.loop_counter_vars.insert(bind_id);
+                }
 
                 let (bind2_id, bind2, bind2_ty) = if let Some(ref b2) = f.bind2 {
                     let id2 = self.fresh_id();

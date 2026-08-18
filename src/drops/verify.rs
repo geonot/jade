@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::intern::Symbol;
 use crate::mir::{self, BlockId, InstKind, Terminator, ValueId};
 use crate::types::Type;
 
@@ -300,13 +301,20 @@ const INSERTING_METHODS: &[&str] = &[
     "push_all",
 ];
 
-fn owning_allocs(func: &mir::Function, consuming: &ConsumingMap) -> HashMap<ValueId, Type> {
+fn owning_allocs(
+    func: &mir::Function,
+    consuming: &ConsumingMap,
+    resources: &HashSet<Symbol>,
+) -> HashMap<ValueId, Type> {
     let mut owning = HashMap::new();
     for block in &func.blocks {
         for inst in &block.insts {
             let Some(dest) = inst.dest else { continue };
             match &inst.kind {
                 InstKind::VecNew(_) | InstKind::MapInit => {
+                    owning.insert(dest, inst.ty.clone());
+                }
+                InstKind::StructInit(name, _) if resources.contains(name) => {
                     owning.insert(dest, inst.ty.clone());
                 }
                 InstKind::ClosureCreate(_, captures) if !captures.is_empty() => {
@@ -434,8 +442,9 @@ fn process_must_held(
 pub(super) fn must_held_at_returns(
     func: &mir::Function,
     consuming: &ConsumingMap,
+    resources: &HashSet<Symbol>,
 ) -> Vec<(usize, Vec<(ValueId, Type)>)> {
-    let owning = owning_allocs(func, consuming);
+    let owning = owning_allocs(func, consuming, resources);
     if owning.is_empty() {
         return Vec::new();
     }
@@ -512,8 +521,12 @@ pub(super) fn must_held_at_returns(
     out
 }
 
-pub(super) fn verify_function_leaks(func: &mir::Function, consuming: &ConsumingMap) -> Vec<String> {
-    must_held_at_returns(func, consuming)
+pub(super) fn verify_function_leaks(
+    func: &mir::Function,
+    consuming: &ConsumingMap,
+    resources: &HashSet<Symbol>,
+) -> Vec<String> {
+    must_held_at_returns(func, consuming, resources)
         .into_iter()
         .flat_map(|(bi, items)| {
             let name = func.name;
@@ -711,7 +724,8 @@ mod tests {
                 Terminator::Return(None),
             ),
         ]);
-        let errs = verify_function_leaks(&f, &ConsumingMap::new());
+        let errs =
+            verify_function_leaks(&f, &ConsumingMap::new(), &std::collections::HashSet::new());
         assert!(errs.iter().any(|e| e.contains("it leaks")), "{errs:?}");
     }
 
@@ -730,7 +744,10 @@ mod tests {
             ],
             Terminator::Return(None),
         )]);
-        assert!(verify_function_leaks(&f, &ConsumingMap::new()).is_empty());
+        assert!(
+            verify_function_leaks(&f, &ConsumingMap::new(), &std::collections::HashSet::new())
+                .is_empty()
+        );
     }
 
     #[test]
@@ -750,13 +767,17 @@ mod tests {
         )]);
         let mut consuming = ConsumingMap::new();
         consuming.insert(Symbol::intern("peek"), vec![false]);
-        let errs = verify_function_leaks(&f, &consuming);
+        let errs = verify_function_leaks(&f, &consuming, &std::collections::HashSet::new());
         assert!(errs.iter().any(|e| e.contains("it leaks")), "{errs:?}");
         let fixed = {
             let mut f2 = f;
-            let n = super::super::mir_drops::insert_missing_return_drops(&mut f2, &consuming);
+            let n = super::super::mir_drops::insert_missing_return_drops(
+                &mut f2,
+                &consuming,
+                &std::collections::HashSet::new(),
+            );
             assert_eq!(n, 1);
-            verify_function_leaks(&f2, &consuming)
+            verify_function_leaks(&f2, &consuming, &std::collections::HashSet::new())
         };
         assert!(fixed.is_empty(), "{fixed:?}");
     }
@@ -785,12 +806,19 @@ mod tests {
             block(2, vec![], Terminator::Return(None)),
         ]);
         let mut f2 = f;
-        let n = super::super::mir_drops::insert_missing_return_drops(&mut f2, &ConsumingMap::new());
+        let n = super::super::mir_drops::insert_missing_return_drops(
+            &mut f2,
+            &ConsumingMap::new(),
+            &std::collections::HashSet::new(),
+        );
         assert_eq!(
             n, 0,
             "conditionally-moved value must not get an unconditional drop"
         );
-        assert!(verify_function_leaks(&f2, &ConsumingMap::new()).is_empty());
+        assert!(
+            verify_function_leaks(&f2, &ConsumingMap::new(), &std::collections::HashSet::new())
+                .is_empty()
+        );
     }
 
     #[test]
@@ -824,7 +852,10 @@ mod tests {
                 Terminator::Return(None),
             ),
         ]);
-        assert!(verify_function_leaks(&f, &ConsumingMap::new()).is_empty());
+        assert!(
+            verify_function_leaks(&f, &ConsumingMap::new(), &std::collections::HashSet::new())
+                .is_empty()
+        );
     }
 
     #[test]
@@ -838,7 +869,8 @@ mod tests {
             ],
             Terminator::Return(None),
         )]);
-        let errs = verify_function_leaks(&f, &ConsumingMap::new());
+        let errs =
+            verify_function_leaks(&f, &ConsumingMap::new(), &std::collections::HashSet::new());
         assert!(errs.iter().any(|e| e.contains("it leaks")), "{errs:?}");
     }
 

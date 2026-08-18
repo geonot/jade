@@ -1,4 +1,73 @@
 # Changelog
+- **[164]** (2026-08-18) assessment-hardening pass — an independent expert-panel review surfaced a fresh batch of accept-then-corrupt holes the [162] adversarial pass missed; all close here, each pinned with a runnable test, and the roadmap headline holds at 0 blockers / 0 majors
+
+A ground-up assessment of the compiler — nine reviewer perspectives (type
+system, memory model, effects and capabilities, codegen and layout,
+frontend, tooling) run adversarially against the [163] "0 blockers" claim
+— found soundness holes that review did not cover. Each was confirmed
+against the live compiler before the fix and pinned with a runnable test
+(`tests/assessment_soundness.rs`, plus two capability cases in
+`tests/caps.rs`). Full suite is 2338 tests, green; fmt/clippy clean.
+
+- **Memory and ownership.** Three double-free / missed-destructor shapes
+  close. Returning a heap payload out of a `match` arm
+  (`Full(v) ? v.length`) no longer double-frees: a new MIR drops pass
+  (`suppress_moved_enum_payload_drops`) removes the whole-enum `Drop` when
+  a `__v`-prefixed heap payload field escapes through a store, send,
+  return, or phi, and a narrow consuming-inference rule (`arm_tail_ident` +
+  `ctor_field_ty`) marks the matched value consuming only when an arm's
+  tail is a bare aggregate payload binder — the borrow case (`v.length`)
+  still drops. Generic `of T` parameters spelled `take` (or inferred
+  consuming) actually move their argument: the generic-declaration path now
+  populates `fn_param_access`, and `monomorphize_call` copies the access /
+  mutates / consume-site tables from the base name to the mangled one, so
+  the call site tombstones the argument instead of aliasing it — the
+  double-free becomes a clean use-after-move diagnostic. `@resource`
+  destructors run on early-return paths: the must-hold drop analysis
+  (`owning_allocs`) now treats a `StructInit` of a type with a
+  `{name}_drop` function as an owning allocation, so an early `return`
+  inside its scope inserts the drop (verified: `DROP / 100 / 1`), with no
+  double-drop on the fall-through.
+- **Types and diagnostics.** Exhaustiveness stopped accepting crashy
+  matches: multi-field enum variants require joint coverage (not
+  per-column), and `i8`–`u64` / `f32` / `f64` / `String` / tuple
+  scrutinees require a wildcard — the `i32` and tuple SIGSEGV paths are
+  gone, while generic enums stay lenient (no false positives).
+  Generic-enum variant construction instantiates from the argument type
+  instead of the first-seen cache: `Som('hi there')` after an `Opt of i64`
+  binding builds `Opt__G_string` and prints the string, where before it
+  reused the `i64`-shaped monomorph and read the payload type-confused.
+  Call-site unification rejects genuine mismatches that the tolerant-unify
+  escape used to wave through — concrete container element mismatches
+  (`Vec of f64` where `Vec of i64` is expected) and numeric narrowing
+  (`i64` into `i8`) — while a widening lattice (`numeric_lossless`) still
+  admits int→wider-int of the same signedness, int→`f64`, and `f32`→`f64`.
+- **Effects and capabilities.** The function-value laundering class closes
+  at the argument boundary: passing a named function as a bare-identifier
+  argument (`apply(writer)`), or a one/two-hop local alias of one
+  (`g is writer` then `apply(g)`), now taints the caller's capability row
+  with the callee's real capabilities (`scan_call_arg` + a transitive
+  `alias_root` chase), so `needs pure` rejects it naming `fs.write`
+  rather than only the generic indirect-call marker. `normalize_path`
+  keeps a leading `/`, so an absolute write can no longer normalize into a
+  same-named relative capability scope.
+- **Codegen and layout.** Tagged-union payloads lay out as `[⌈N/8⌉ × i64]`
+  instead of `[N × i8]`, forcing 8-byte payload alignment — the `align 8`
+  at offset-4 UB on an enum carrying an `i64`/`f64` payload is gone, and
+  the size model matches.
+- **Frontend.** A chained comparison whose middle operand is not pure
+  (`0 < bump() < 10`) is rejected instead of silently evaluating it twice;
+  a pure middle (`0 < n < 10`) still desugars. A second statement sharing a
+  binding's line (`x is 1 y is 2`) is a parse error instead of silently
+  dropping the tail — paren-less command calls are unaffected.
+
+Residue filed on the roadmap: enum layout is fixed but actor-message
+param packing is not (`P-6`); integer-literal range truncation at bind
+time is distinct from the call-site coercion now checked (`T-5`);
+non-`@resource` struct heap-field leaks on early return remain O-1/O-2's
+class; capability laundering through a consuming call *inside* a match arm
+remains E-2's.
+
 - **[163]** (2026-08-16) alpha-hardening pass — all seven blockers and all twelve majors from the [162] review close with pinning tests; the roadmap headline reaches 0 blockers / 0 majors; corpus re-measured under ASan+LSan at zero corruption, 34 leaking (down one)
 
 Worked in four batches — typer soundness, store durability, type-system

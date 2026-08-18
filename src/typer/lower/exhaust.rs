@@ -22,7 +22,7 @@ impl Typer {
             let ty_name = match subject_ty {
                 Type::Enum(n) => format!("`{n}`"),
                 Type::Bool => "Bool".to_string(),
-                _ => format!("{:?}", subject_ty),
+                other => format!("`{other}`"),
             };
             return Err(format!(
                 "non-exhaustive match on {ty_name}: missing {missing_str}"
@@ -63,7 +63,10 @@ impl Typer {
             return vec![];
         }
 
-        let ty = self.resolve_ty(ty.clone());
+        let mut ty = self.resolve_ty(ty.clone());
+        while let Type::Alias(_, inner) | Type::Newtype(_, inner) = ty {
+            ty = self.resolve_ty((*inner).clone());
+        }
 
         match &ty {
             Type::Enum(name) => {
@@ -83,24 +86,25 @@ impl Typer {
 
                     if sub_lists.is_empty() {
                         if field_tys.is_empty() {
-                            missing.push(vname.as_str());
+                            missing.push(vname.as_str().to_string());
                         } else {
                             let fields = vec!["_"; field_tys.len()].join(", ");
                             missing.push(format!("{}({})", vname, fields));
                         }
-                    } else if !field_tys.is_empty() {
-                        for (i, ft) in field_tys.iter().enumerate() {
-                            let col: Vec<&hir::Pat> =
-                                sub_lists.iter().filter_map(|subs| subs.get(i)).collect();
-                            let sub_missing = self.find_missing_patterns(&col, ft);
-                            for sm in &sub_missing {
-                                let fields: Vec<String> = field_tys
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(j, _)| if j == i { sm.clone() } else { "_".to_string() })
-                                    .collect();
-                                missing.push(format!("{}({})", vname, fields.join(", ")));
-                            }
+                    } else if field_tys.len() == 1 {
+                        let col: Vec<&hir::Pat> =
+                            sub_lists.iter().filter_map(|subs| subs.first()).collect();
+                        for sm in self.find_missing_patterns(&col, &field_tys[0]) {
+                            missing.push(format!("{}({})", vname, sm));
+                        }
+                    } else if field_tys.len() > 1 {
+                        let has_irrefutable = sub_lists.iter().any(|subs| {
+                            subs.iter()
+                                .all(|p| matches!(p, hir::Pat::Wild(_) | hir::Pat::Bind(..)))
+                        });
+                        if !has_irrefutable {
+                            let fields = vec!["_"; field_tys.len()].join(", ");
+                            missing.push(format!("{}({})", vname, fields));
                         }
                     }
                 }
@@ -124,9 +128,35 @@ impl Typer {
                 }
                 missing
             }
-            Type::I64 | Type::F64 | Type::String => {
-                vec!["_".to_string()]
+            Type::Tuple(elem_tys) => {
+                let rows: Vec<&Vec<hir::Pat>> = flat
+                    .iter()
+                    .filter_map(|p| match p {
+                        hir::Pat::Tuple(subs, _) => Some(subs),
+                        _ => None,
+                    })
+                    .collect();
+                let has_irrefutable = rows.iter().any(|subs| {
+                    subs.iter()
+                        .all(|p| matches!(p, hir::Pat::Wild(_) | hir::Pat::Bind(..)))
+                });
+                if has_irrefutable {
+                    vec![]
+                } else {
+                    vec![format!("({})", vec!["_"; elem_tys.len().max(1)].join(", "))]
+                }
             }
+            Type::I8
+            | Type::I16
+            | Type::I32
+            | Type::I64
+            | Type::U8
+            | Type::U16
+            | Type::U32
+            | Type::U64
+            | Type::F32
+            | Type::F64
+            | Type::String => vec!["_".to_string()],
             _ => vec![],
         }
     }

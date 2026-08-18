@@ -4,7 +4,11 @@ The single list of known open work on Jinn. Items are grouped by subsystem and
 carry a stable id so commits and changelog entries can name them. (This list
 was rewritten and renumbered on 2026-08-14; changelog entries [160] and earlier
 use the previous ids. The 2026-08-16 pass ([163]) closed every blocker and
-major from the 2026-08-15 review; closed ids are retired, not reused.)
+major from the 2026-08-15 review; closed ids are retired, not reused. The
+2026-08-18 pass ([164]) ran a fresh nine-perspective assessment adversarially
+against the [163] "0 blockers" claim, closed the accept-then-corrupt holes it
+found — each pinned in `tests/assessment_soundness.rs` — and filed their
+residue below.)
 
 Severity:
 
@@ -20,30 +24,49 @@ acting on its details.
 
 ## Where the language stands
 
-**Open: 0 blockers, 0 majors, 39 minors, 5 coverage gaps.** The 2026-08-16
+**Open: 0 blockers, 0 majors, 41 minors, 5 coverage gaps.** The 2026-08-16
 pass ([163]) closed all seven blockers and all twelve majors the [162]
-adversarial review opened, each with a pinning test. The closures are honest
-about their residue: what remains of each closed item is filed below as a
-minor with its own id.
+adversarial review opened, each with a pinning test; the 2026-08-18 pass
+([164]) closed a further batch of accept-then-corrupt holes an independent
+expert-panel assessment found (enum-payload and generic-`take` double-frees,
+missed `@resource` destructors on early return, crashy non-exhaustive matches,
+first-write-wins generic-enum construction, lax call-site unification,
+function-value capability laundering, an enum-payload alignment UB, and two
+double-evaluation frontend holes). The closures are honest about their residue:
+what remains of each closed item is filed below as a minor with its own id.
 
 - **Memory and ownership** — the [162] accept-then-corrupt holes are closed:
   consuming calls in condition/scrutinee/iterator position are move-tracked,
   multi-level projection binds reject instead of aliasing, read-only
   enforcement (freeze and views) follows the place root and mutation
   inference walks nested receivers, and unannotated borrowed params no
-  longer mint second owners through the monomorphization path. The leak
-  tail and inference ergonomics remain (`O-1`–`O-10`).
+  longer mint second owners through the monomorphization path. [164] closed
+  three more double-free / missed-destructor shapes: returning a heap
+  payload out of a `match` arm no longer double-frees, a generic `take`
+  parameter actually moves its argument (the double-free is now a
+  use-after-move diagnostic), and `@resource` destructors run on
+  early-return paths. The leak tail and inference ergonomics remain
+  (`O-1`–`O-10`).
 - **Types and diagnostics** — alias-typed arguments reject at the call site,
   annotated method bodies are checked per instantiation, bare `! E`
   functions Ok-wrap their implicit unit exit, numeric method return types
   infer (and `min`/`max`/`is_nan`/`signum`/`recip`/`to_int` gained real
   lowerings), and capturing lambdas stay monomorphic instead of losing
-  their captures. Diagnostics never leak compiler internals
-  (`tests/diagnostic_hygiene.rs` gates it).
+  their captures. Since [164], non-exhaustive matches on integer, float,
+  string, and tuple scrutinees are rejected instead of compiling to a
+  crash, generic-enum variant construction instantiates from the argument
+  type instead of a first-write-wins cache, and call-site unification
+  rejects container-element and numeric-narrowing mismatches the
+  tolerant-unify escape used to accept. Diagnostics never leak compiler
+  internals (`tests/diagnostic_hygiene.rs` gates it).
 - **Errors and capabilities** — the function-value false-accept class is
   closed at its worst points: a call through a field or element callee, or
   through a local bound from a field/element/call result, now taints the
-  row as an indirect call (`needs` rejects it). Residue in `E-2`.
+  row as an indirect call (`needs` rejects it). Since [164], passing a
+  named function — or a one/two-hop local alias of one — as an argument
+  taints the caller with the callee's real capabilities, so a `needs pure`
+  function cannot launder a writer through a higher-order call. Residue in
+  `E-2`.
 - **Persistent store** — transactions on one store are serialized across
   tasks (rollback can no longer erase another task's committed writes),
   `save` syncs the data file before checkpointing the WAL, `@relaxed`
@@ -126,9 +149,14 @@ Vec-returning store calls (`all`, relation traversal, `distinct`, group
 queries) are classified as owning allocations
 (`src/drops/verify.rs::is_store_vec_alloc`), so their expression-position
 temps drop on straight-line paths; a new vec-returning store call must be
-added to that list or its temps leak. Still outside the covered set: `String`
-temps in expressions, method-call results and subjects on early-return paths
-(`O-1`'s class), per-iteration reallocation in loops (including closure
+added to that list or its temps leak. Since [164] a `StructInit` of a type
+with a `{name}_drop` function (a `@resource`) is also an owning allocation, so
+its destructor runs on early-return paths, and the whole-enum `Drop` is
+suppressed when a `__v`-prefixed heap payload field escapes through a store,
+send, return, or phi (returning a payload out of a `match` no longer
+double-frees). Still outside the covered set: `String` temps in expressions,
+plain-struct heap fields and method-call results and subjects on early-return
+paths (`O-1`'s class), per-iteration reallocation in loops (including closure
 environments), recursive-enum tree temps, and quaternary subjects with
 heap-bearing results. Measured surface: 34 of 514 corpus programs leak under
 `ci/sanitize-corpus.sh` (re-measured after [163]; zero corruption).
@@ -244,6 +272,15 @@ unification and are unchecked. `Type::Alias` itself remains unconstructed in
 the frontend — aliases are opaque `Type::Struct(name, [])` nominals tracked
 by name (`Typer::alias_names`).
 
+### T-5 (m) Integer literals are not range-checked at their binding type
+
+[164] closed the call-site half of this: passing a wider integer where a
+narrower one is annotated is rejected (`numeric_lossless`). The
+binding-site half remains — an out-of-range literal assigned directly to a
+narrow type (`y is 300` where `y` is `i8`) is silently truncated at the
+bind rather than rejected. A literal range check at the annotated type,
+mirroring the call-site narrowing rule, closes it.
+
 ### E-1 (m) `From` conversion resolves by name pattern
 
 Error-type conversion is recognized by a name-pattern lookup
@@ -261,13 +298,19 @@ only produce false rejections for `needs`-annotated functions. Since [163],
 the genuine false-accept class is closed at its worst points: a call whose
 callee expression is a field or element, and a call through a local bound
 from a field, element, or call result, taint the row as an indirect call.
+Since [164] a named function — or a one/two-hop local alias of one — passed
+as a bare-identifier argument (`apply(writer)`, `g is writer` then
+`apply(g)`) taints the caller with the callee's real capabilities
+(`scan_call_arg` + `alias_root`), closing the higher-order laundering path.
 Remaining under-approximations: (1) relation *traversal* (`row.owner`,
 `row.children`) reads the target store without deriving its `fs` capability —
 the caps scan is AST-level and cannot see that a field access is a store
 read; (2) a *method-form* call on an unresolvable receiver whose name matches
 no user method contributes nothing (taint here would misfire on every builtin
-container method name); (3) modules imported through `.jni` interface files
-have no bodies to scan (interface reuse is off by default — `X-3`).
+container method name); (3) a consuming call *inside* a `match` arm can still
+launder its capability where the arm-local dataflow hides the callee; (4)
+modules imported through `.jni` interface files have no bodies to scan
+(interface reuse is off by default — `X-3`).
 
 ### E-3 (m) Capability ceilings and manifests are design only
 
@@ -529,6 +572,17 @@ transaction-snapshot OOM; bad WAL magic and unopenable store files
 `exit(2)`; kv/index/column/fts mutators report IO errors to `stderr` and
 continue. Aligning the code with the contract (typed errors through a
 fallible store surface) is the open work — see `S-4`.
+
+### P-6 (m) Actor-message payload packing is not 8-byte aligned
+
+[164] fixed tagged-union payload layout — enum payloads now lay out as
+`[⌈N/8⌉ × i64]` (`src/codegen/decl.rs::declare_tagged_union`), forcing
+8-byte alignment and removing the `align 8` at offset-4 UB on an enum
+carrying an `i64`/`f64` payload. Actor-message payload packing was left on
+its own path: an aligned message store/load pair is a separate change with
+a matching-offset risk, and enum layout was the confirmed UB. Round the
+actor payload offsets the same way, in lockstep on the store and load
+sides.
 
 ---
 

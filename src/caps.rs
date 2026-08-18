@@ -63,6 +63,7 @@ impl Capability {
 }
 
 fn normalize_path(p: &str) -> String {
+    let absolute = p.starts_with('/');
     let mut out: Vec<&str> = Vec::new();
     for seg in p.split('/') {
         match seg {
@@ -77,7 +78,12 @@ fn normalize_path(p: &str) -> String {
             s => out.push(s),
         }
     }
-    out.join("/")
+    let joined = out.join("/");
+    if absolute {
+        format!("/{joined}")
+    } else {
+        joined
+    }
 }
 
 fn path_within(inner: &Option<String>, outer: &Option<String>) -> bool {

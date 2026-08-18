@@ -210,6 +210,25 @@ impl crate::typer::Typer {
             .unwrap_or_default()
     }
 
+    fn arm_tail_ident(body: &[Stmt]) -> Option<Symbol> {
+        match body.last()? {
+            Stmt::Expr(Expr::Ident(n, _)) => Some(*n),
+            Stmt::Ret(Some(Expr::Ident(n, _)), _) => Some(*n),
+            _ => None,
+        }
+    }
+
+    fn ctor_field_ty(&self, variant: Symbol, idx: usize) -> Option<Type> {
+        for variants in self.enums.values() {
+            for (vname, ftys) in variants {
+                if *vname == variant {
+                    return ftys.get(idx).cloned();
+                }
+            }
+        }
+        None
+    }
+
     fn kill_pat_binders(p: &ast::Pat, events: &mut HashMap<Symbol, Vec<Option<Symbol>>>) {
         match p {
             ast::Pat::Ident(n, _) => {
@@ -623,9 +642,21 @@ impl crate::typer::Typer {
             Stmt::Loop(l) => self.scan_block(&l.body, alias, ctx, escaping, false, cond),
             Stmt::Match(m) => {
                 self.scan_expr_sinks(&m.subject, alias, ctx, escaping, cond);
+                let subj_slots = Self::expr_alias(&m.subject, alias);
                 for arm in &m.arms {
                     if let Some(g) = &arm.guard {
                         self.scan_expr_sinks(g, alias, ctx, escaping, cond);
+                    }
+                    if !subj_slots.is_empty()
+                        && let Some(tail) = Self::arm_tail_ident(&arm.body)
+                        && let ast::Pat::Ctor(variant, subs, _) = &arm.pat
+                        && let Some(idx) = subs
+                            .iter()
+                            .position(|p| matches!(p, ast::Pat::Ident(n, _) if *n == tail))
+                        && let Some(fty) = self.ctor_field_ty(*variant, idx)
+                        && !annotated_non_consumable(&Some(fty))
+                    {
+                        escaping.record(subj_slots.clone(), m.subject.span(), cond);
                     }
                     self.scan_block(&arm.body, alias, ctx, escaping, is_tail, true);
                 }

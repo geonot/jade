@@ -213,6 +213,28 @@ impl Parser {
         Ok(l)
     }
 
+    fn is_pure_operand(e: &Expr) -> bool {
+        match e {
+            Expr::Int(..)
+            | Expr::Float(..)
+            | Expr::Str(..)
+            | Expr::Bool(..)
+            | Expr::None(..)
+            | Expr::Void(..)
+            | Expr::Ident(..)
+            | Expr::Placeholder(..)
+            | Expr::IndexPlaceholder(..) => true,
+            Expr::BinOp(a, _, b, _) => Self::is_pure_operand(a) && Self::is_pure_operand(b),
+            Expr::UnaryOp(_, a, _)
+            | Expr::As(a, _, _)
+            | Expr::Ref(a, _)
+            | Expr::Deref(a, _)
+            | Expr::Field(a, _, _) => Self::is_pure_operand(a),
+            Expr::Index(a, b, _) => Self::is_pure_operand(a) && Self::is_pure_operand(b),
+            _ => false,
+        }
+    }
+
     pub(in crate::parser) fn parse_cmp(&mut self) -> Result<Expr, ParseError> {
         let mut l = self.parse_bitor()?;
 
@@ -230,6 +252,12 @@ impl Parser {
                 self.advance();
                 let r = self.parse_bitor()?;
                 if let Some(pr) = prev_right.take() {
+                    if !Self::is_pure_operand(&pr) {
+                        return Err(self.error(
+                            "chained comparison would evaluate the middle operand twice; \
+                             bind it to a name first, or join the comparisons with `and`",
+                        ));
+                    }
                     let right = Expr::BinOp(Box::new(pr), op, Box::new(r.clone()), sp);
                     l = Expr::BinOp(Box::new(l), BinOp::And, Box::new(right), sp);
                 } else {
