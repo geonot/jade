@@ -41,7 +41,7 @@ pub(super) fn compile_and_link(
     cpu: Option<&str>,
     features: Option<&str>,
     standalone: bool,
-) {
+) -> Vec<std::path::PathBuf> {
     let src = fs::read_to_string(input)
         .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", input.display())));
     let file_sym = Symbol::intern(&input.display().to_string());
@@ -60,8 +60,16 @@ pub(super) fn compile_and_link(
     loaded.insert(Symbol::intern(&input_canon.to_string_lossy()));
     let (packages, pkg_id_map) = load_packages_with_ids(base_dir);
     let mut std_files: HashSet<Symbol> = HashSet::new();
-    resolve_modules(&mut prog, base_dir, &mut loaded, &packages, &mut std_files)
-        .unwrap_or_else(|e| die(&e));
+    let mut resolved_files: Vec<std::path::PathBuf> = vec![input_canon.clone()];
+    resolve_modules(
+        &mut prog,
+        base_dir,
+        &mut loaded,
+        &packages,
+        &mut std_files,
+        &mut resolved_files,
+    )
+    .unwrap_or_else(|e| die(&e));
 
     if !standalone && !test_mode {
         let has_main = prog
@@ -82,8 +90,8 @@ pub(super) fn compile_and_link(
         .unwrap_or_else(|| Symbol::intern("main"));
     let root_pkg_id = {
         let mut all_sources: Vec<u8> = src.as_bytes().to_vec();
-        for path in &loaded {
-            if let Ok(extra) = std::fs::read(path.as_str()) {
+        for path in resolved_files.iter().skip(1) {
+            if let Ok(extra) = std::fs::read(path) {
                 all_sources.extend_from_slice(&extra);
             }
         }
@@ -307,4 +315,5 @@ pub(super) fn compile_and_link(
         Ok(s) => die(&format!("linker failed with {s}")),
         Err(e) => die(&format!("cc: {e}")),
     }
+    resolved_files
 }

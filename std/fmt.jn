@@ -57,7 +57,7 @@
     s.slice(0, max_len - suffix.length) + suffix
 
 
-*join(items, sep as String)
+*join(items as Vec of String, sep as String)
     if items.length equals 0
         return ""
     result is ""

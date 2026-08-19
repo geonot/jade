@@ -236,6 +236,7 @@ fn analyze_typed_inner(src: &str, dir: Option<PathBuf>) -> TypedAnalysis {
             &mut loaded,
             &packages,
             &mut std_files,
+            &mut Vec::new(),
         ) {
             a.diagnostics.push(located_diag(
                 1,

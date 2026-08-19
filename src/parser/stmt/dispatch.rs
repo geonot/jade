@@ -364,10 +364,10 @@ impl Parser {
                 };
                 Ok(Stmt::Defer(body, sp))
             }
-            Token::Use => {
-                let u = self.parse_use_decl()?;
-                Ok(Stmt::UseLocal(u))
-            }
+            Token::Use => Err(self.error(
+                "`use` is only allowed at the top level of a file; move this import \
+                 above the first declaration",
+            )),
             Token::Atomic => {
                 let sp = self.span();
                 self.advance();

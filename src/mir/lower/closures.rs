@@ -18,15 +18,19 @@ impl Lowerer {
         let param_names: HashSet<Symbol> = params.iter().map(|p| p.name).collect();
         let mut refs = HashSet::new();
         collect_var_refs_block(body, &mut refs);
-        let mut ref_names: Vec<Symbol> = refs.into_iter().collect();
-        ref_names.sort_by_key(|n| n.as_str().to_string());
+        let mut ref_names: Vec<(Symbol, Symbol)> = refs
+            .into_iter()
+            .map(|(id, name)| (self.var_key(id, name), name))
+            .collect();
+        ref_names.sort_by_key(|(key, name)| (name.as_str().to_string(), *key == *name));
+        ref_names.dedup_by_key(|(_, name)| *name);
 
         let mut capture_info: Vec<(Symbol, ValueId, Type)> = Vec::new();
-        for name in &ref_names {
+        for (key, name) in &ref_names {
             if !param_names.contains(name)
-                && let Some(cap_ty) = self.var_types.get(name).cloned()
+                && let Some(cap_ty) = self.var_types.get(key).cloned()
             {
-                let val = self.read_var(*name, self.current_block, cap_ty.clone(), span);
+                let val = self.read_var(*key, self.current_block, cap_ty.clone(), span);
                 capture_info.push((*name, val, cap_ty));
             }
         }
@@ -106,7 +110,12 @@ impl Lowerer {
             }
         }
         if !lambda_lowerer.current_block_has_terminator() {
-            lambda_lowerer.set_terminator(Terminator::Return(Some(last)));
+            let ret = if matches!(lambda_lowerer.func.ret_ty, Type::Void) {
+                None
+            } else {
+                Some(last)
+            };
+            lambda_lowerer.set_terminator(Terminator::Return(ret));
         }
 
         self.lambda_fns.push(lambda_lowerer.func);
@@ -120,13 +129,13 @@ impl Lowerer {
     }
 }
 
-pub(super) fn collect_var_refs_block(body: &[hir::Stmt], refs: &mut HashSet<Symbol>) {
+pub(super) fn collect_var_refs_block(body: &[hir::Stmt], refs: &mut HashSet<(hir::DefId, Symbol)>) {
     for stmt in body {
         collect_var_refs_stmt(stmt, refs);
     }
 }
 
-fn collect_var_refs_stmt(stmt: &hir::Stmt, refs: &mut HashSet<Symbol>) {
+fn collect_var_refs_stmt(stmt: &hir::Stmt, refs: &mut HashSet<(hir::DefId, Symbol)>) {
     match stmt {
         hir::Stmt::Bind(b) => collect_var_refs_expr(&b.value, refs),
         hir::Stmt::Assign(target, value, _) => {
@@ -191,10 +200,10 @@ fn collect_var_refs_stmt(stmt: &hir::Stmt, refs: &mut HashSet<Symbol>) {
     }
 }
 
-fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut HashSet<Symbol>) {
+fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut HashSet<(hir::DefId, Symbol)>) {
     match &expr.kind {
-        ExprKind::Var(_, name) => {
-            refs.insert(*name);
+        ExprKind::Var(id, name) => {
+            refs.insert((*id, *name));
         }
         ExprKind::BinOp(left, _, right) => {
             collect_var_refs_expr(left, refs);
@@ -325,9 +334,7 @@ fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut HashSet<Symbol>) {
         ExprKind::Lambda(inner_params, stmts) => {
             let mut inner = HashSet::new();
             collect_var_refs_block(stmts, &mut inner);
-            for p in inner_params {
-                inner.remove(&p.name);
-            }
+            inner.retain(|(_, n)| !inner_params.iter().any(|p| p.name == *n));
             refs.extend(inner);
         }
         _ => {}

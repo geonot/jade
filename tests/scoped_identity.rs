@@ -27,7 +27,12 @@ impl Workspace {
         let dir = self.cache.join("example.com").join(name).join(version);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("project.jn"), manifest).unwrap();
-        std::fs::write(dir.join("lib.jn"), format!("fn {name}_helper\n  1\n")).unwrap();
+        std::fs::create_dir_all(dir.join("source")).unwrap();
+        std::fs::write(
+            dir.join("source").join(format!("{name}.jn")),
+            format!("*{name}_helper\n  1\n"),
+        )
+        .unwrap();
         git(&dir, &["init", "-q"]);
         git(&dir, &["config", "user.email", "t@example.com"]);
         git(&dir, &["config", "user.name", "t"]);
@@ -120,7 +125,7 @@ fn public_transitive_reach_in_builds() {
         "name is 'foo'\nversion is '1.0.0'\nentry is 'main.jn'\n\
          require('baz', 'https://example.com/baz', '1.0.0')\n",
     );
-    w.main_src("*main\n  use baz/bar\n  log 1\n");
+    w.main_src("use baz/bar\n\n*main\n  log 1\n");
     let (ok, log) = w.build();
     assert!(ok, "public reach-in should build:\n{log}");
     assert_eq!(w.run_output(), "1");
@@ -144,7 +149,7 @@ fn internal_transitive_reach_in_is_hard_error() {
         "name is 'foo'\nversion is '1.0.0'\nentry is 'main.jn'\n\
          require('baz', 'https://example.com/baz', '1.0.0')\n",
     );
-    w.main_src("*main\n  use baz/bar\n  log 1\n");
+    w.main_src("use baz/bar\n\n*main\n  log 1\n");
     let (ok, log) = w.build();
     assert!(!ok, "internal reach-in must fail:\n{log}");
     assert!(log.contains("visibility internal"), "{log}");

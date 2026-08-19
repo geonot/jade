@@ -372,3 +372,52 @@ fn quaternary_err_arm_type_mismatch_rejects() {
         &["type"],
     );
 }
+
+#[test]
+fn mutation_through_a_free_function_param_reaches_the_caller() {
+    accepts_and_prints(
+        "type Server\n    name as String\n    term as i64\n    log_entries as Vec of i64\n\n*new_server(n as String) returns Server\n    Server(name is n, term is 0, log_entries is vec())\n\n*tick(s as Server)\n    s.term is s.term + 1\n\n*main\n    s is new_server('n1')\n    tick(s)\n    tick(s)\n    tick(s)\n    log s.term\n",
+        "3",
+    );
+}
+
+#[test]
+fn same_name_binders_in_sibling_and_nested_loops_do_not_share_a_slot() {
+    accepts_and_prints(
+        "*main\n    total is 0\n    for i in 0 to 3\n        for j in 0 to 3\n            total is total + 1\n    log total\n    for i in 0 to 2\n        log i\n    for i in 0 to 2\n        log i * 10\n",
+        "9\n0\n1\n0\n10",
+    );
+}
+
+#[test]
+fn a_match_arm_binding_that_shadows_an_existing_name_rejects() {
+    rejects(
+        "enum E\n    A(i64)\n    B\n\n*main\n    y is 5\n    e is A(1)\n    match e\n        y ? log y\n        B ? log 0\n",
+        &["always matches", "shadows"],
+    );
+}
+
+#[test]
+fn a_generic_instantiation_cannot_collide_with_a_declared_type() {
+    accepts_and_prints(
+        "type Pair of A, B\n    l as A\n    r as B\n\ntype Pair_i64_i64\n    v as i64\n\n*main\n    p is Pair(l is 1, r is 2)\n    q is Pair_i64_i64(v is 9)\n    log p.l\n    log q.v\n",
+        "1\n9",
+    );
+}
+
+#[test]
+fn a_runtime_tuple_index_rejects_instead_of_compiling() {
+    rejects(
+        "*main\n    t is (1, 'two', 3.0)\n    i is 1\n    log t[i]\n",
+        &["tuple indices must be integer literals"],
+    );
+    rejects("*main\n    t is (1, 2)\n    log t[7]\n", &["out of range"]);
+}
+
+#[test]
+fn a_function_local_use_is_rejected_with_placement_guidance() {
+    rejects(
+        "*main\n    use math\n    log 1\n",
+        &["only allowed at the top level"],
+    );
+}

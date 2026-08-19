@@ -328,6 +328,8 @@ void jinn_store_truncation_warn(int64_t original_len, int64_t max_len);
 void jinn_store_reserve(FILE *fp, int64_t count, int64_t rec_size);
 uint64_t jinn_fnv1a(const void *data, int64_t len);
 long jinn_popen_read(const char *cmd, char *buf, long buf_size, int *exit_code);
+char *jinn_popen_read_all(const char *cmd, long *out_len, int *exit_code);
+char *jinn_spawn_capture_all(const void *vec_ptr, long *out_len, int *exit_code);
 int  jinn_system(const char *cmd);
 long jinn_exec_capture(const char *prog, char *const argv[], char *buf, long buf_size, int *exit_code);
 int  jinn_exec_argv(const char *prog, char *const argv[], int *exit_code);

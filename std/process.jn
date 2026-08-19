@@ -1,5 +1,7 @@
 
 extern *jinn_popen_read(cmd as %i8, buf as %i8, buf_size as i64, exit_code as %i32) returns i64
+extern *jinn_popen_read_all(cmd as %i8, out_len as %i64, exit_code as %i32) returns %i8
+extern *jinn_spawn_capture_all(vec_ptr as %i8, out_len as %i64, exit_code as %i32) returns %i8
 extern *jinn_system(cmd as %i8) returns i32
 extern *jinn_exec_capture(prog as %i8, argv as %i8, buf as %i8, buf_size as i64, exit_code as %i32) returns i64
 extern *jinn_spawn_capture(vec_ptr as %i8, buf as %i8, buf_size as i64, exit_code as %i32) returns i64
@@ -18,17 +20,12 @@ type ProcessResult
         self.output.split("\n")
 
 *run(cmd as String) returns ProcessResult
-    buf_size is 65536
-    buf is extern.malloc(buf_size)
+    out_len is 0
     exit_code is 0
-    n is extern.jinn_popen_read(%cmd, buf, buf_size, %exit_code as %i32)
-    if n < 0
-        extern.free(buf)
+    buf is extern.jinn_popen_read_all(%cmd, %out_len as %i64, %exit_code as %i32)
+    if out_len < 0
         return ProcessResult(output is "", exit_code is -1)
-    if n >= buf_size - 1
-        extern.free(buf)
-        return ProcessResult(output is "[output truncated at 64KB]", exit_code is exit_code)
-    out is __string_from_raw(buf, n, buf_size)
+    out is __string_from_raw(buf, out_len, out_len + 1)
     ProcessResult(output is out, exit_code is exit_code)
 
 *exec(cmd as String) returns i32
@@ -83,20 +80,15 @@ type ProcessResult
 
 
 *run_argv(prog as String, args as Vec of String) returns ProcessResult
-    buf_size is 65536
-    buf is extern.malloc(buf_size)
+    out_len is 0
     exit_code is 0
     argv is [prog]
     loop args
         argv.push($)
-    n is extern.jinn_spawn_capture(%argv, buf, buf_size, %exit_code as %i32)
-    if n < 0
-        extern.free(buf)
+    buf is extern.jinn_spawn_capture_all(%argv, %out_len as %i64, %exit_code as %i32)
+    if out_len < 0
         return ProcessResult(output is "", exit_code is -1)
-    if n >= buf_size - 1
-        extern.free(buf)
-        return ProcessResult(output is "[output truncated at 64KB]", exit_code is exit_code)
-    out is __string_from_raw(buf, n, buf_size)
+    out is __string_from_raw(buf, out_len, out_len + 1)
     ProcessResult(output is out, exit_code is exit_code)
 
 *spawn_exec(prog as String, args as Vec of String) returns i32

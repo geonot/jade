@@ -41,8 +41,16 @@ column says what its ratio means — in the CSV itself, not just here:
 
 Output equality for the comparable set is verified (byte-identical
 stdout, jinn vs C) as of the 2026-07-30 baseline. That check caught
-`array_ops` running 30× more iterations on the C side than the Jinn side
-— see below.
+an `array_ops` iteration-count mismatch — see below.
+
+### Corrected on 2026-08-18 ([167])
+
+The in-tree **Rust** `array_ops` baseline ran 1,500,000,000 iterations
+against Jinn's and C's 50,000,000 (30×), and the Python baseline ran
+10,000,000 (0.2×) — every published J/RUST ratio derived from that file
+was invalid. Both now run 50,000,000 like Jinn and C. Separately, the
+24.66× `array_ops` J/C row below predates the [165] `jinn_xmalloc`
+linkage fix; the current measurement is ~1× vs C (roadmap PERF-1b).
 
 ### Two rows corrected on 2026-08-06
 

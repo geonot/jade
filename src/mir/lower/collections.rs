@@ -27,7 +27,8 @@ impl Lowerer {
             }
             ExprKind::MapNew => self.emit(InstKind::MapInit, ty, span),
 
-            ExprKind::ListComp(body_expr, _def_id, bind, iter, end, cond) => {
+            ExprKind::ListComp(body_expr, def_id, bind, iter, end, cond) => {
+                let bind_sym = self.alias_binder(*def_id, Symbol::intern(bind));
                 let vec_val = self.emit(InstKind::VecNew(vec![]), ty.clone(), span);
                 let iter_val = self.lower_expr(iter);
 
@@ -47,7 +48,7 @@ impl Lowerer {
                 } else {
                     self.emit(InstKind::VecLen(iter_val), Type::I64, span)
                 };
-                let idx_name = Symbol::intern(&format!("__listcomp_idx_{bind}"));
+                let idx_name = Symbol::intern(&format!("__listcomp_idx_{}", bind_sym.as_str()));
                 self.emit_void_typed(InstKind::Store(idx_name, init_val), Type::I64, span);
 
                 self.set_terminator(Terminator::Goto(cond_bb));
@@ -65,9 +66,9 @@ impl Lowerer {
 
                 if end.is_none() {
                     let elem = self.emit(InstKind::Index(iter_val, idx), ty.clone(), span);
-                    self.write_var(Symbol::intern(bind), self.current_block, elem);
+                    self.write_var(bind_sym, self.current_block, elem);
                 } else {
-                    self.write_var(Symbol::intern(bind), self.current_block, idx);
+                    self.write_var(bind_sym, self.current_block, idx);
                 }
                 let elem_val = self.lower_expr(body_expr);
                 if let Some(c) = cond {

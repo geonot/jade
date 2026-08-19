@@ -36,6 +36,12 @@ impl Lowerer {
                 self.emit(InstKind::Void, Type::Void, w.span)
             }
             hir::Stmt::For(f) => {
+                let mut f = f.clone();
+                f.bind = self.alias_binder(f.bind_id, f.bind);
+                if let (Some(id2), Some(b2)) = (f.bind2_id, f.bind2) {
+                    f.bind2 = Some(self.alias_binder(id2, b2));
+                }
+                let f = &f;
                 let iter_val = self.lower_expr(&f.iter);
                 let cond_bb = self.new_block("for.cond");
                 let body_bb = self.new_block("for.body");
@@ -255,6 +261,12 @@ impl Lowerer {
                 self.emit(InstKind::Void, Type::Void, l.span)
             }
             hir::Stmt::SimFor(f, span) => {
+                let mut f = f.clone();
+                f.bind = self.alias_binder(f.bind_id, f.bind);
+                if let (Some(id2), Some(b2)) = (f.bind2_id, f.bind2) {
+                    f.bind2 = Some(self.alias_binder(id2, b2));
+                }
+                let f = &f;
                 let iter_val = self.lower_expr(&f.iter);
                 let cond_bb = self.new_block("simfor.cond");
                 let body_bb = self.new_block("simfor.body");

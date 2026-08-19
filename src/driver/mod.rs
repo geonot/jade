@@ -191,8 +191,10 @@ pub fn run() {
                 let cache_dir = dirs_cache();
                 let _ = fs::create_dir_all(&cache_dir);
                 let cached_bin = cache_dir.join(format!("jinn_run_{:016x}", hash));
-                if !cached_bin.exists() {
-                    compile_and_link(
+                let deps_path = cache_dir.join(format!("jinn_run_{:016x}.deps", hash));
+                let no_cache = std::env::var("JINN_NO_RUN_CACHE").is_ok_and(|v| v == "1");
+                if no_cache || !cached_bin.exists() || !run_deps_manifest_valid(&deps_path) {
+                    let deps = compile_and_link(
                         &entry,
                         &cached_bin,
                         2,
@@ -205,6 +207,7 @@ pub fn run() {
                         cli.features.as_deref(),
                         cli.standalone,
                     );
+                    write_run_deps_manifest(&deps_path, &deps);
                 }
                 let status = Command::new(&cached_bin).args(&args).status();
                 match status {
@@ -231,7 +234,12 @@ pub fn run() {
                 let _ = fs::remove_file("./.jinn_test_tmp");
                 match status {
                     Ok(s) if s.success() => println!("all tests passed"),
-                    Ok(s) => std::process::exit(s.code().unwrap_or(1)),
+                    Ok(s) => {
+                        if s.code().is_none() {
+                            eprintln!("test binary terminated by a signal ({s})");
+                        }
+                        std::process::exit(s.code().unwrap_or(1))
+                    }
                     Err(e) => die(&format!("test failed: {e}")),
                 }
             }
@@ -254,8 +262,15 @@ pub fn run() {
                 }
                 let packages = load_packages(base_dir);
                 let mut std_files: HashSet<Symbol> = HashSet::new();
-                resolve_modules(&mut prog, base_dir, &mut loaded, &packages, &mut std_files)
-                    .unwrap_or_else(|e| die(&e));
+                resolve_modules(
+                    &mut prog,
+                    base_dir,
+                    &mut loaded,
+                    &packages,
+                    &mut std_files,
+                    &mut Vec::new(),
+                )
+                .unwrap_or_else(|e| die(&e));
                 let mut typer = Typer::new();
                 typer.set_source_dir(base_dir.to_path_buf());
                 typer.set_std_files(std_files);
@@ -396,8 +411,15 @@ pub fn run() {
     let packages = load_packages(base_dir);
 
     let mut std_files: HashSet<Symbol> = HashSet::new();
-    resolve_modules(&mut prog, base_dir, &mut loaded, &packages, &mut std_files)
-        .unwrap_or_else(|e| die(&e));
+    resolve_modules(
+        &mut prog,
+        base_dir,
+        &mut loaded,
+        &packages,
+        &mut std_files,
+        &mut Vec::new(),
+    )
+    .unwrap_or_else(|e| die(&e));
 
     if !cli.lib && !cli.test && !cli.standalone {
         let has_main = prog
@@ -804,4 +826,39 @@ fn collect_sibling_sources(entry: &std::path::Path) -> Vec<(String, Vec<u8>)> {
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
+}
+
+fn run_dep_hash(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
+}
+
+fn write_run_deps_manifest(path: &std::path::Path, deps: &[PathBuf]) {
+    let mut out = String::new();
+    for d in deps {
+        if let Ok(bytes) = fs::read(d) {
+            out.push_str(&format!("{:016x}\t{}\n", run_dep_hash(&bytes), d.display()));
+        }
+    }
+    let _ = fs::write(path, out);
+}
+
+fn run_deps_manifest_valid(path: &std::path::Path) -> bool {
+    let Ok(text) = fs::read_to_string(path) else {
+        return false;
+    };
+    for line in text.lines() {
+        let Some((h, p)) = line.split_once('\t') else {
+            return false;
+        };
+        let Ok(bytes) = fs::read(p) else {
+            return false;
+        };
+        if format!("{:016x}", run_dep_hash(&bytes)) != h {
+            return false;
+        }
+    }
+    true
 }

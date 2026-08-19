@@ -136,7 +136,8 @@ impl Lowerer {
                                 target.span,
                             );
                         } else {
-                            self.write_var(*name, self.current_block, val);
+                            let key = self.var_key(*def_id, *name);
+                            self.write_var(key, self.current_block, val);
                         }
                     }
                     ExprKind::Field(obj, field, _) => {
@@ -172,9 +173,10 @@ impl Lowerer {
                 val
             }
             hir::Stmt::Expr(e) => self.lower_expr(e),
-            hir::Stmt::Drop(_, name, ty, span) => {
-                if self.var_types.contains_key(name) {
-                    let val = self.read_var(*name, self.current_block, ty.clone(), *span);
+            hir::Stmt::Drop(id, name, ty, span) => {
+                let key = self.var_key(*id, *name);
+                if self.var_types.contains_key(&key) {
+                    let val = self.read_var(key, self.current_block, ty.clone(), *span);
                     self.emit_void(InstKind::Drop(val, ty.clone()), *span);
                 }
                 self.emit(InstKind::Void, Type::Void, *span)

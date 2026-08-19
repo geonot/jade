@@ -153,13 +153,15 @@ impl Typer {
                 })
                 .collect();
 
-            let ty_suffix = gtd
+            let ordered: Vec<Type> = gtd
                 .type_params
                 .iter()
-                .map(|tp| format!("{}", type_map.get(tp).unwrap()))
-                .collect::<Vec<_>>()
-                .join("_");
-            let mangled = Symbol::intern(&format!("{name}_{ty_suffix}"));
+                .map(|tp| type_map.get(tp).cloned().unwrap())
+                .collect();
+            let mangled = Symbol::intern(&Self::mangle_mono_struct(name, &ordered));
+            if let Err(e) = self.check_mono_collision(mangled, name) {
+                self.type_errors.push(e);
+            }
             self.infer_ctx
                 .record_mono_origin(mangled, Symbol::intern(name), type_args.to_vec());
 
@@ -432,18 +434,15 @@ impl Typer {
             });
 
             let (ctor_name, expr_ty) = if all_concrete {
-                let ty_suffix = gtd
-                    .type_params
-                    .iter()
-                    .map(|tp| format!("{}", type_map.get(tp).unwrap_or(&Type::I64)))
-                    .collect::<Vec<_>>()
-                    .join("_");
-                let mangled = Symbol::intern(&format!("{name}_{ty_suffix}"));
                 let ordered_args: Vec<Type> = gtd
                     .type_params
                     .iter()
                     .map(|tp| type_map.get(tp).cloned().unwrap_or(Type::I64))
                     .collect();
+                let mangled = Symbol::intern(&Self::mangle_mono_struct(name, &ordered_args));
+                if let Err(e) = self.check_mono_collision(mangled, name) {
+                    self.type_errors.push(e);
+                }
                 self.infer_ctx
                     .record_mono_origin(mangled, Symbol::intern(name), ordered_args);
 

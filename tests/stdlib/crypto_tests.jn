@@ -1,0 +1,74 @@
+use std/crypto
+use std/aes
+use std/argon
+use std/sha
+
+test 'sha256 known vectors'
+    assert sha.sha256('abc') equals 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+    assert sha.sha256('') equals 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    assert sha.sha256('héllo wörld') equals 'a1003f7d04a4115711d0b48a2eaf1359ce565d2d2a6fd65098dfcffadeeef59f'
+
+test 'hmac sha256 known vector'
+    assert crypto.hmac_sha256('key', 'The quick brown fox jumps over the lazy dog') equals 'f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8'
+
+test 'hex round trip on random bytes'
+    data is crypto.random_bytes(32)
+    assert data.byte_count equals 32
+    hexed is crypto.to_hex(data)
+    assert hexed.byte_count equals 64
+    back is crypto.from_hex(hexed)
+    assert crypto.secure_compare(data, back)
+
+test 'secure compare distinguishes binary strings'
+    a is crypto.random_bytes(16)
+    b is crypto.random_bytes(16)
+    assert crypto.secure_compare(a, a)
+    assert not crypto.secure_compare(a, b)
+    assert not crypto.secure_compare(a, a + b)
+
+test 'chacha20 poly1305 round trip'
+    key is crypto.random_key()
+    nonce is crypto.random_nonce()
+    r is crypto.chacha20_poly1305_encrypt(key, nonce, 'secret message é', 'aad')
+    assert r.ok
+    pt is crypto.chacha20_poly1305_decrypt(key, nonce, r.ciphertext, 'aad', r.tag)
+    assert pt equals 'secret message é'
+
+test 'chacha20 poly1305 rejects a bad tag'
+    key is crypto.random_key()
+    nonce is crypto.random_nonce()
+    r is crypto.chacha20_poly1305_encrypt(key, nonce, 'payload', '')
+    assert r.ok
+    bad_tag is crypto.random_bytes(16)
+    pt is crypto.chacha20_poly1305_decrypt(key, nonce, r.ciphertext, '', bad_tag)
+    assert pt.byte_count equals 0
+
+test 'aes gcm round trip'
+    key is crypto.random_bytes(32)
+    iv is crypto.random_bytes(12)
+    r is aes.gcm_encrypt(key, iv, 'gcm payload ü', 'hdr')
+    assert r.ok
+    pt is aes.gcm_decrypt(key, iv, r.ciphertext, 'hdr', r.tag)
+    assert pt equals 'gcm payload ü'
+
+test 'aes cbc round trip'
+    key is crypto.random_bytes(32)
+    iv is crypto.random_bytes(16)
+    ct is aes.cbc_encrypt(key, iv, 'cbc payload ö')
+    assert ct.byte_count > 0
+    pt is aes.cbc_decrypt(key, iv, ct)
+    assert pt equals 'cbc payload ö'
+
+test 'argon derive is deterministic and salt sensitive'
+    a is argon.derive('pw', 'saltsaltsalt', 1, 16, 1, 16)
+    b is argon.derive('pw', 'saltsaltsalt', 1, 16, 1, 16)
+    c is argon.derive('pw', 'SALTSALTSALT', 1, 16, 1, 16)
+    assert a.byte_count equals 16
+    assert crypto.secure_compare(a, b)
+    assert not crypto.secure_compare(a, c)
+
+test 'argon password hash verifies'
+    enc is argon.hash_password('hunter2')
+    assert enc.byte_count > 0
+    assert argon.verify_password('hunter2', enc)
+    assert not argon.verify_password('hunter3', enc)

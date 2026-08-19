@@ -22,7 +22,8 @@ impl Lowerer {
                     let self_state = self.field_self();
                     return self.emit(InstKind::FieldGet(self_state, field_sym), field_ty, span);
                 }
-                self.read_var(*name, self.current_block, ty, span)
+                let key = self.var_key(*def_id, *name);
+                self.read_var(key, self.current_block, ty, span)
             }
 
             ExprKind::BinOp(lhs, op, rhs) => {

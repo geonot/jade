@@ -1,0 +1,52 @@
+use std/raft
+
+test 'a new server starts as a follower at term 0'
+    s is raft.new_server('n1', vector('n2', 'n3'))
+    assert raft.state_name(s.state) equals 'follower'
+    assert s.persistent.current_term equals 0
+
+test 'an election timeout advances the term and the state'
+    s is raft.new_server('n1', vector('n2', 'n3'))
+    fired is raft.tick(s, 10000)
+    assert fired
+    assert raft.state_name(s.state) equals 'candidate'
+    assert s.persistent.current_term equals 1
+    assert s.votes_granted equals 1
+
+test 'repeated ticks accumulate on the caller'
+    s is raft.new_server('n1', vector('n2'))
+    raft.tick(s, 5)
+    raft.tick(s, 5)
+    raft.tick(s, 5)
+    assert s.elapsed_ms equals 15
+
+test 'a peer grants its vote to an up-to-date candidate'
+    peer is raft.new_server('n2', vector('n1', 'n3'))
+    rv is RequestVote(term is 1, candidate_id is 'n1', last_log_index is 0, last_log_term is 0)
+    reply is raft.handle_request_vote(peer, rv)
+    assert reply.vote_granted
+    assert peer.persistent.voted_for equals 'n1'
+
+test 'a peer refuses a stale-term candidate'
+    peer is raft.new_server('n2', vector('n1', 'n3'))
+    raft.tick(peer, 10000)
+    rv is RequestVote(term is 0, candidate_id is 'n1', last_log_index is 0, last_log_term is 0)
+    reply is raft.handle_request_vote(peer, rv)
+    assert not reply.vote_granted
+
+test 'a quorum of votes promotes the candidate to leader'
+    s is raft.new_server('n1', vector('n2', 'n3'))
+    raft.tick(s, 10000)
+    assert raft.state_name(s.state) equals 'candidate'
+    granted is RequestVoteReply(term is 1, vote_granted is true)
+    raft.handle_request_vote_reply(s, granted)
+    assert raft.state_name(s.state) equals 'leader'
+    assert s.leader_id equals 'n1'
+
+test 'a higher term in a reply demotes the candidate to follower'
+    s is raft.new_server('n1', vector('n2', 'n3'))
+    raft.tick(s, 10000)
+    stale is RequestVoteReply(term is 99, vote_granted is false)
+    raft.handle_request_vote_reply(s, stale)
+    assert raft.state_name(s.state) equals 'follower'
+    assert s.persistent.current_term equals 99

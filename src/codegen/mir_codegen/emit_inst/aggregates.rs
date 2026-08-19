@@ -505,20 +505,13 @@ impl<'ctx> Compiler<'ctx> {
                             ));
                             Ok(elem)
                         } else {
-                            let st = base_val.get_type();
-                            let alloca = self.entry_alloca(st, "tup.idx");
-                            b!(self.bld.build_store(alloca, base_val));
-                            let elem_ty = self.llvm_ty(&inst.ty);
-                            let zero = self.ctx.i64_type().const_int(0, false);
-                            let ptr = unsafe {
-                                b!(self.bld.build_gep(
-                                    st,
-                                    alloca,
-                                    &[zero, idx_val.into_int_value()],
-                                    "tup.ptr"
-                                ))
-                            };
-                            Ok(b!(self.bld.build_load(elem_ty, ptr, "tup.val")))
+                            Err(format!(
+                                "{}: indexing a struct-shaped value needs a \
+                                 compile-time-constant index (tuple and struct element \
+                                 types differ per position); use a Vec for runtime \
+                                 indexing",
+                                inst.span.loc()
+                            ))
                         }
                     } else {
                         Ok(self.ctx.i8_type().const_int(0, false).into())

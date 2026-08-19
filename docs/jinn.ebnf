@@ -40,6 +40,7 @@ decl          = fn_decl
               | err_decl
               | test_decl
               | const_decl
+              | supervisor_decl
               | annotated_fn_decl .
 
 (* ===== functions ===== *)
@@ -81,6 +82,15 @@ generic_params = "<" identifier { "," identifier } ">" .
 
 actor_decl    = "actor" identifier
                 NEWLINE INDENT { actor_member NEWLINE } DEDENT .
+
+(* A supervisor names actor children and a restart strategy; it is started
+   with the synthesized `<name>_start()`. *)
+supervisor_decl = "supervisor" identifier NEWLINE INDENT
+                  { ( "strategy" "is" sup_strategy
+                    | "children" NEWLINE INDENT { identifier NEWLINE } DEDENT )
+                    NEWLINE }
+                  DEDENT .
+sup_strategy  = "one_for_one" | "one_for_all" | "rest_for_one" .
 actor_member  = field_def | handler_def .
 (* Message handlers are introduced by `@name` (async handler) or
    `*name` (synchronous, request/response). A single `*loop` handler

@@ -250,14 +250,19 @@ type DivResult
     quotient_chunks is vec()
     shift is a.chunks.length - b.chunks.length
     while shift >= 0
+        shifted is __shift_left(absolute(b), shift)
         count is 0
-        loop
-            shifted is __shift_left(absolute(b), shift)
-            c is __cmp_mag(remainder, shifted)
-            if c < 0
-                break
-            remainder is BigInt(chunks is __sub_mag(remainder, shifted), sign is 1)
-            count is count + 1
+        if __cmp_mag(remainder, shifted) >= 0
+            lo is 1
+            hi is BASE - 1
+            while lo < hi
+                mid is lo + (hi - lo + 1) / 2
+                if __cmp_mag(__mul_small(shifted, mid), remainder) <= 0
+                    lo is mid
+                else
+                    hi is mid - 1
+            count is lo
+            remainder is BigInt(chunks is __sub_mag(remainder, __mul_small(shifted, count)), sign is 1)
         quotient_chunks.push(count)
         shift is shift - 1
     qr2 is vec()
@@ -268,6 +273,22 @@ type DivResult
     while qr2.length > 1 and qr2.get(qr2.length - 1) equals 0
         qr2.pop()
     DivResult(quot is BigInt(chunks is qr2, sign is 1), rem is remainder)
+
+*__mul_small(a as BigInt, m as i64) returns BigInt
+    if m equals 0
+        return zero()
+    result is vec()
+    carry is 0
+    i is 0
+    while i < a.chunks.length
+        cur is a.chunks.get(i) * m + carry
+        result.push(cur mod BASE)
+        carry is cur / BASE
+        i is i + 1
+    while carry > 0
+        result.push(carry mod BASE)
+        carry is carry / BASE
+    BigInt(chunks is result, sign is 1)
 
 *__shift_left(a as BigInt, n as i64)
     if is_zero(a)

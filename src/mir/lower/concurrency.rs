@@ -121,16 +121,22 @@ impl Lowerer {
                 {
                     let mut refs = std::collections::HashSet::new();
                     super::closures::collect_var_refs_block(body, &mut refs);
-                    let mut captures: Vec<(Symbol, Type)> = refs
+                    let mut resolved: Vec<(Symbol, Symbol)> = refs
                         .into_iter()
-                        .filter_map(|n| self.var_types.get(&n).map(|t| (n, t.clone())))
+                        .map(|(id, n)| (self.var_key(id, n), n))
                         .collect();
-                    captures.sort_by_key(|(n, _)| *n);
+                    resolved.sort_by_key(|(key, n)| (n.as_str().to_string(), *key == *n));
+                    resolved.dedup_by_key(|(_, n)| *n);
 
-                    let mut cap_vals: Vec<ValueId> = captures
-                        .iter()
-                        .map(|(n, t)| self.read_var(*n, self.current_block, t.clone(), span))
-                        .collect();
+                    let mut captures: Vec<(Symbol, Type)> = Vec::new();
+                    let mut cap_vals: Vec<ValueId> = Vec::new();
+                    for (key, n) in resolved {
+                        let Some(t) = self.var_types.get(&key).cloned() else {
+                            continue;
+                        };
+                        cap_vals.push(self.read_var(key, self.current_block, t.clone(), span));
+                        captures.push((n, t));
+                    }
                     for (sn, sv) in self.scope_named.clone() {
                         captures.push((
                             Symbol::intern(&format!("__scope_{sn}")),
@@ -166,14 +172,20 @@ impl Lowerer {
             }
 
             ExprKind::GeneratorCreate(def_id, name, body, captures) => {
+                let mut refs = std::collections::HashSet::new();
+                super::closures::collect_var_refs_block(body, &mut refs);
+                let mut alias_of: std::collections::HashMap<Symbol, Symbol> =
+                    std::collections::HashMap::new();
+                for (id, n) in refs {
+                    let key = self.var_key(id, n);
+                    if key != n {
+                        alias_of.insert(n, key);
+                    }
+                }
                 let mut arg_ids: Vec<ValueId> = Vec::with_capacity(captures.len());
                 for (cap_name, cap_ty) in captures {
-                    arg_ids.push(self.read_var(
-                        *cap_name,
-                        self.current_block,
-                        cap_ty.clone(),
-                        span,
-                    ));
+                    let key = alias_of.get(cap_name).copied().unwrap_or(*cap_name);
+                    arg_ids.push(self.read_var(key, self.current_block, cap_ty.clone(), span));
                 }
                 self.lower_coroutine_with_def(*name, *def_id, body, captures, span);
                 self.emit(

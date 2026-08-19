@@ -193,12 +193,66 @@ FILE *jinn_rewrite_commit(JinnRewrite *rw, FILE *old_fp) {
     rewrite_free(rw);
     return nf;
 }
+#define JINN_PROC_LOCK_MAX 64
+static struct {
+    char path[256];
+} jinn_proc_locks[JINN_PROC_LOCK_MAX];
+static int jinn_proc_lock_n = 0;
+static pthread_mutex_t jinn_proc_lock_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static void jinn_store_process_lock(const char *path) {
+    pthread_mutex_lock(&jinn_proc_lock_mu);
+    for (int i = 0; i < jinn_proc_lock_n; i++) {
+        if (strcmp(jinn_proc_locks[i].path, path) == 0) {
+            pthread_mutex_unlock(&jinn_proc_lock_mu);
+            return;
+        }
+    }
+    size_t plen = strlen(path);
+    char *lock_path = (char *)malloc(plen + 6);
+    if (!lock_path) {
+        pthread_mutex_unlock(&jinn_proc_lock_mu);
+        fprintf(stderr, "jinn: store: out of memory acquiring the process lock "
+                        "for %s\n", path);
+        exit(2);
+    }
+    memcpy(lock_path, path, plen);
+    memcpy(lock_path + plen, ".lock", 6);
+    int fd = open(lock_path, O_CREAT | O_RDWR | O_CLOEXEC, 0644);
+    if (fd < 0) {
+        pthread_mutex_unlock(&jinn_proc_lock_mu);
+        fprintf(stderr, "jinn: store: cannot create lock file %s: %s\n",
+                lock_path, strerror(errno));
+        free(lock_path);
+        exit(2);
+    }
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) {
+        pthread_mutex_unlock(&jinn_proc_lock_mu);
+        fprintf(stderr,
+                "jinn: store '%s' is open in another process — the store layer "
+                "is single-process in alpha; close the other process, or point "
+                "this one at its own store\n",
+                path);
+        close(fd);
+        free(lock_path);
+        exit(2);
+    }
+    free(lock_path);
+    if (jinn_proc_lock_n < JINN_PROC_LOCK_MAX) {
+        snprintf(jinn_proc_locks[jinn_proc_lock_n].path,
+                 sizeof jinn_proc_locks[jinn_proc_lock_n].path, "%s", path);
+        jinn_proc_lock_n++;
+    }
+    pthread_mutex_unlock(&jinn_proc_lock_mu);
+}
+
 FILE *jinn_store_open_data(const char *path, int transient, int *created) {
     if (created) *created = 0;
     if (!path) {
         fprintf(stderr, "jinn: store: internal error — no path to open\n");
         exit(2);
     }
+    jinn_store_process_lock(path);
     if (!transient) {
         errno = 0;
         FILE *f = fopen(path, "r+b");

@@ -252,3 +252,37 @@ jobs:
           sudo apt-get install -y llvm-21 llvm-21-dev clang-21 lld-21 pkg-config libssl-dev libsqlite3-dev
       - name: Run sanitize sweep
         run: ./ci/sanitize.sh
+
+  sanitize-corpus:
+    # Executable-corpus ASan+LSan sweep + ownership-mutation fuzz (GATE-2).
+    # Compiles every corpus program against an instrumented runtime and runs
+    # it; any memory corruption fails the job. Leaks are reported but do not
+    # gate (the tracked O-2 residue) — JINN_SAN_STRICT=1 flips that once the
+    # leak tail is worked down.
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      LLVM_SYS_211_PREFIX: /usr/lib/llvm-21
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install LLVM 21 + build deps
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg lsb-release software-properties-common
+          wget https://apt.llvm.org/llvm-snapshot.gpg.key
+          sudo apt-key add llvm-snapshot.gpg.key
+          sudo add-apt-repository "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main"
+          sudo apt-get update
+          sudo apt-get install -y llvm-21 llvm-21-dev clang-21 lld-21 pkg-config libssl-dev libsqlite3-dev
+
+      - name: Corpus sanitizer sweep
+        run: ./ci/sanitize-corpus.sh
+
+      - name: Ownership mutation fuzz
+        run: python3 ci/fuzz-ownership.py

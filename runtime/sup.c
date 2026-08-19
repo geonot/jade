@@ -19,6 +19,7 @@ struct jinn_sup {
     size_t                 cap_children;
     int                    restart_count;
     int                    started;
+    pthread_mutex_t        lock;
 };
 typedef struct {
     jinn_sup_t *sup;
@@ -33,6 +34,7 @@ jinn_sup_t *jinn_sup_create(jinn_sup_strategy_t strategy) {
     s->cap_children = 4;
     s->children = (jinn_sup_child_slot_t *)calloc(s->cap_children, sizeof(*s->children));
     if (!s->children) { free(s); return NULL; }
+    pthread_mutex_init(&s->lock, NULL);
     return s;
 }
 size_t jinn_sup_register(jinn_sup_t *sup, jinn_sup_factory_t factory,
@@ -98,6 +100,7 @@ static void sup_on_child_exit(void *arg) {
     size_t idx = a->idx;
     free(a);
     if (!sup || idx >= sup->n_children) return;
+    pthread_mutex_lock(&sup->lock);
     jinn_sup_child_slot_t *slot = &sup->children[idx];
     slot->alive = 0;
     if (slot->mb_ptr) {
@@ -105,6 +108,11 @@ static void sup_on_child_exit(void *arg) {
         slot->mb_ptr = NULL;
     }
     if (sup->restart_count >= JINN_SUP_MAX_RESTARTS) {
+        fprintf(stderr,
+                "jinn: supervisor: child '%s' exceeded the restart cap (%d) — "
+                "no longer supervising it\n",
+                slot->name ? slot->name : "?", JINN_SUP_MAX_RESTARTS);
+        pthread_mutex_unlock(&sup->lock);
         return;
     }
     sup->restart_count++;
@@ -130,13 +138,20 @@ static void sup_on_child_exit(void *arg) {
         }
         break;
     }
+    pthread_mutex_unlock(&sup->lock);
 }
 void jinn_sup_start(jinn_sup_t *sup) {
-    if (!sup || sup->started) return;
+    if (!sup) return;
+    pthread_mutex_lock(&sup->lock);
+    if (sup->started) {
+        pthread_mutex_unlock(&sup->lock);
+        return;
+    }
     sup->started = 1;
     for (size_t i = 0; i < sup->n_children; i++) {
         jinn_sup_spawn_one(sup, i);
     }
+    pthread_mutex_unlock(&sup->lock);
 }
 int jinn_sup_restart_count(jinn_sup_t *sup) {
     return sup ? sup->restart_count : 0;
@@ -153,5 +168,6 @@ void jinn_sup_destroy(jinn_sup_t *sup) {
         }
     }
     free(sup->children);
+    pthread_mutex_destroy(&sup->lock);
     free(sup);
 }

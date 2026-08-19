@@ -55,6 +55,25 @@ impl<'ctx> Compiler<'ctx> {
         header_ptr: inkwell::values::PointerValue<'ctx>,
         elem_ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
+        if !matches!(
+            elem_ty,
+            Type::I64
+                | Type::I32
+                | Type::I16
+                | Type::I8
+                | Type::U64
+                | Type::U32
+                | Type::U16
+                | Type::U8
+                | Type::Bool
+                | Type::F64
+        ) {
+            return Err(format!(
+                "sort() needs an ordered scalar element type, but this Vec holds \
+                 `{elem_ty}`; use `sort.sort_strings` for strings, or sort a Vec of \
+                 the key field for structs"
+            ));
+        }
         let i64t = self.ctx.i64_type();
         let lty = self.llvm_ty(elem_ty);
         let elem_size = self.type_store_size(lty);

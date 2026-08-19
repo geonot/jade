@@ -209,7 +209,7 @@ impl Lowerer {
 
                         if let Pat::Ctor(_, ctor_tag, sub_pats, _) = &arm.pat {
                             for (i, sp) in sub_pats.iter().enumerate() {
-                                if let Pat::Bind(_, name, ty, _) = sp {
+                                if let Pat::Bind(bid, name, ty, _) = sp {
                                     let field = self.emit(
                                         InstKind::FieldGet(
                                             subj,
@@ -218,30 +218,33 @@ impl Lowerer {
                                         ty.clone(),
                                         arm.span,
                                     );
-                                    self.write_var(*name, self.current_block, field);
+                                    let key = self.alias_binder(*bid, *name);
+                                    self.write_var(key, self.current_block, field);
                                 }
                             }
                         }
-                        if let Pat::Bind(_, name, _ty, _) = &arm.pat {
-                            self.write_var(*name, self.current_block, subj);
+                        if let Pat::Bind(bid, name, _ty, _) = &arm.pat {
+                            let key = self.alias_binder(*bid, *name);
+                            self.write_var(key, self.current_block, subj);
                         }
 
                         if let Pat::Tuple(sub_pats, _) = &arm.pat {
                             for (i, sp) in sub_pats.iter().enumerate() {
-                                if let Pat::Bind(_, name, ty, _) = sp {
+                                if let Pat::Bind(bid, name, ty, _) = sp {
                                     let field = self.emit(
                                         InstKind::FieldGet(subj, Symbol::intern(&format!("_{i}"))),
                                         ty.clone(),
                                         arm.span,
                                     );
-                                    self.write_var(*name, self.current_block, field);
+                                    let key = self.alias_binder(*bid, *name);
+                                    self.write_var(key, self.current_block, field);
                                 }
                             }
                         }
 
                         if let Pat::Array(sub_pats, _) = &arm.pat {
                             for (i, sp) in sub_pats.iter().enumerate() {
-                                if let Pat::Bind(_, name, ty, _) = sp {
+                                if let Pat::Bind(bid, name, ty, _) = sp {
                                     let idx = self.emit(
                                         InstKind::IntConst(i as i64),
                                         Type::I64,
@@ -249,7 +252,8 @@ impl Lowerer {
                                     );
                                     let elem =
                                         self.emit(InstKind::Index(subj, idx), ty.clone(), arm.span);
-                                    self.write_var(*name, self.current_block, elem);
+                                    let key = self.alias_binder(*bid, *name);
+                                    self.write_var(key, self.current_block, elem);
                                 }
                             }
                         }
@@ -278,8 +282,9 @@ impl Lowerer {
                             Pat::Wild(_) => {
                                 self.set_terminator(Terminator::Goto(arm_bb));
                             }
-                            Pat::Bind(_, name, _ty, _) => {
-                                self.write_var(*name, self.current_block, subj);
+                            Pat::Bind(bid, name, _ty, _) => {
+                                let key = self.alias_binder(*bid, *name);
+                                self.write_var(key, self.current_block, subj);
                                 self.set_terminator(Terminator::Goto(arm_bb));
                             }
                             Pat::Lit(lit_expr) => {
@@ -385,8 +390,9 @@ impl Lowerer {
                                         Pat::Wild(_) => {
                                             self.set_terminator(Terminator::Goto(arm_bb));
                                         }
-                                        Pat::Bind(_, name, _ty, _) => {
-                                            self.write_var(*name, self.current_block, subj);
+                                        Pat::Bind(bid, name, _ty, _) => {
+                                            let key = self.alias_binder(*bid, *name);
+                                            self.write_var(key, self.current_block, subj);
                                             self.set_terminator(Terminator::Goto(arm_bb));
                                         }
                                         Pat::Range(lo, hi, _) => {
@@ -453,13 +459,14 @@ impl Lowerer {
                         self.switch_to(arm_bb);
                         self.seal_block(arm_bb);
 
-                        if let Pat::Bind(_, name, _ty, _) = &arm.pat {
-                            self.write_var(*name, self.current_block, subj);
+                        if let Pat::Bind(bid, name, _ty, _) = &arm.pat {
+                            let key = self.alias_binder(*bid, *name);
+                            self.write_var(key, self.current_block, subj);
                         }
 
                         if let Pat::Ctor(_, ctor_tag, sub_pats, _) = &arm.pat {
                             for (i, sp) in sub_pats.iter().enumerate() {
-                                if let Pat::Bind(_, name, ty, _) = sp {
+                                if let Pat::Bind(bid, name, ty, _) = sp {
                                     let field = self.emit(
                                         InstKind::FieldGet(
                                             subj,
@@ -468,27 +475,29 @@ impl Lowerer {
                                         ty.clone(),
                                         arm.span,
                                     );
-                                    self.write_var(*name, self.current_block, field);
+                                    let key = self.alias_binder(*bid, *name);
+                                    self.write_var(key, self.current_block, field);
                                 }
                             }
                         }
 
                         if let Pat::Tuple(sub_pats, _) = &arm.pat {
                             for (i, sp) in sub_pats.iter().enumerate() {
-                                if let Pat::Bind(_, name, ty, _) = sp {
+                                if let Pat::Bind(bid, name, ty, _) = sp {
                                     let field = self.emit(
                                         InstKind::FieldGet(subj, Symbol::intern(&format!("_{i}"))),
                                         ty.clone(),
                                         arm.span,
                                     );
-                                    self.write_var(*name, self.current_block, field);
+                                    let key = self.alias_binder(*bid, *name);
+                                    self.write_var(key, self.current_block, field);
                                 }
                             }
                         }
 
                         if let Pat::Array(sub_pats, _) = &arm.pat {
                             for (i, sp) in sub_pats.iter().enumerate() {
-                                if let Pat::Bind(_, name, ty, _) = sp {
+                                if let Pat::Bind(bid, name, ty, _) = sp {
                                     let idx = self.emit(
                                         InstKind::IntConst(i as i64),
                                         Type::I64,
@@ -496,7 +505,8 @@ impl Lowerer {
                                     );
                                     let elem =
                                         self.emit(InstKind::Index(subj, idx), ty.clone(), arm.span);
-                                    self.write_var(*name, self.current_block, elem);
+                                    let key = self.alias_binder(*bid, *name);
+                                    self.write_var(key, self.current_block, elem);
                                 }
                             }
                         }

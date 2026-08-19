@@ -176,6 +176,40 @@ impl Typer {
         }
     }
 
+    pub(crate) fn mangle_mono_struct(base: &str, args: &[Type]) -> String {
+        let mut name = base.to_string();
+        name.push_str("__G_");
+        for (i, t) in args.iter().enumerate() {
+            if i > 0 {
+                name.push('_');
+            }
+            name.push_str(&Self::encode_type_for_mangle(&t.to_string()));
+        }
+        name
+    }
+
+    pub(crate) fn check_mono_collision(
+        &mut self,
+        mangled: Symbol,
+        base: &str,
+    ) -> Result<(), String> {
+        let origin_base = self.infer_ctx.mono_origin(&mangled).map(|(b, _)| *b);
+        match origin_base {
+            Some(obase) if obase.as_str() != base => Err(format!(
+                "instantiating `{base}` produces the internal name `{mangled}`, which \
+                 collides with an instantiation of `{obase}`; rename one of the two \
+                 generic types"
+            )),
+            None if self.structs.contains_key(&mangled) || self.enums.contains_key(&mangled) => {
+                Err(format!(
+                    "instantiating `{base}` produces the internal name `{mangled}`, \
+                     which is already a declared type; rename the type or the generic"
+                ))
+            }
+            _ => Ok(()),
+        }
+    }
+
     pub(in crate::typer) fn monomorphize_generic_struct_annotation(
         &mut self,
         base_name: &str,
@@ -188,12 +222,11 @@ impl Typer {
             return None;
         }
 
-        let ty_suffix = type_args
-            .iter()
-            .map(|t| format!("{t}"))
-            .collect::<Vec<_>>()
-            .join("_");
-        let mangled: Symbol = format!("{base_name}_{ty_suffix}").into();
+        let mangled: Symbol = Self::mangle_mono_struct(base_name, type_args).into();
+        if let Err(e) = self.check_mono_collision(mangled, base_name) {
+            self.type_errors.push(e);
+            return None;
+        }
         self.infer_ctx
             .record_mono_origin(mangled, Symbol::intern(base_name), type_args.to_vec());
         if self.structs.contains_key(&mangled) {
@@ -344,12 +377,10 @@ impl Typer {
     ) -> Result<Symbol, String> {
         use crate::hir;
 
-        let ty_suffix = arg_tys
-            .iter()
-            .map(|t| format!("{t}"))
-            .collect::<Vec<_>>()
-            .join("_");
-        let mangled: Symbol = format!("{base_name}_{ty_suffix}").into();
+        let mangled: Symbol = Self::mangle_mono_struct(base_name, arg_tys).into();
+        if let Err(e) = self.check_mono_collision(mangled, base_name) {
+            return Err(format!("{}: {}", span.loc(), e));
+        }
         self.infer_ctx
             .record_mono_origin(mangled, Symbol::intern(base_name), arg_tys.to_vec());
 
@@ -666,6 +697,9 @@ impl Typer {
             .iter()
             .map(|tp| type_map.get(tp).cloned().unwrap_or(Type::I64))
             .collect();
+        if let Err(e) = self.check_mono_collision(mangled, name) {
+            self.type_errors.push(e);
+        }
         self.infer_ctx
             .record_mono_origin(mangled, Symbol::intern(name), ordered_args);
         if self.enums.contains_key(&mangled) {

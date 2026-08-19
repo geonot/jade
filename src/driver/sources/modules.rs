@@ -41,6 +41,7 @@ pub(crate) fn resolve_modules(
     loaded: &mut HashSet<Symbol>,
     packages: &HashMap<Symbol, PathBuf>,
     std_files: &mut HashSet<Symbol>,
+    resolved_files: &mut Vec<PathBuf>,
 ) -> Result<(), String> {
     let uses: Vec<(Vec<Symbol>, Option<Vec<Symbol>>)> = prog
         .decls
@@ -108,6 +109,13 @@ pub(crate) fn resolve_modules(
             }
         }
 
+        if path.len() > 1
+            && let Some(pkg_path) = packages.get(name)
+        {
+            candidates.push((pkg_path.join("source").join(format!("{name}.jn")), false));
+            candidates.push((pkg_path.join("src").join(format!("{name}.jn")), false));
+        }
+
         if let Ok(pkg_paths) = std::env::var("JINN_PACKAGE_PATH") {
             for pkg_dir in pkg_paths.split(':') {
                 let pkg_dir = PathBuf::from(pkg_dir);
@@ -124,6 +132,7 @@ pub(crate) fn resolve_modules(
             && interface_reuse_enabled()
             && let Ok(iface) = crate::interface::InterfaceFile::read_from(&jni_path)
         {
+            resolved_files.push(jni_path.clone());
             let importable: Vec<Decl> = iface
                 .to_decls()
                 .into_iter()
@@ -135,6 +144,7 @@ pub(crate) fn resolve_modules(
             continue;
         }
 
+        resolved_files.push(candidate.clone());
         let src = fs::read_to_string(&candidate)
             .map_err(|e| format!("cannot read {}: {e}", candidate.display()))?;
         let file_sym = Symbol::intern(&candidate.display().to_string());
@@ -156,6 +166,7 @@ pub(crate) fn resolve_modules(
             loaded,
             packages,
             std_files,
+            resolved_files,
         )?;
 
         let all_decls = std::mem::take(&mut mod_prog.decls);

@@ -243,3 +243,52 @@ fn frozen_payloads_to_actor_handlers_are_rejected_with_guidance() {
         &["cannot send a frozen value", "send a copy"],
     );
 }
+
+#[test]
+fn loop_and_match_binders_are_capturable_by_closures_and_tasks() {
+    accepts_and_prints(
+        "*main\n    total is 0\n    for i in 0 to 3\n        f is |x| x + i\n        total is total + f(10)\n    log total\n",
+        "33",
+    );
+    accepts_and_prints(
+        "enum E\n    A(i64)\n    B\n\n*main\n    e is A(7)\n    match e\n        A(n) ?\n            f is |x| x + n\n            log f(1)\n        B ? log 0\n",
+        "8",
+    );
+    accepts_and_prints_sorted(
+        "*work(id as i64)\n    log(id)\n\n*main\n    base is 100\n    together\n        for i in 0 to 3\n            dispatch\n                work(base + i)\n",
+        &["100", "101", "102"],
+    );
+    accepts_and_prints_sorted(
+        "enum E\n    A(i64)\n    B\n\n*work(id as i64)\n    log(id)\n\n*main\n    e is A(7)\n    match e\n        A(n) ?\n            together\n                dispatch\n                    work(n)\n        B ? log 0\n",
+        &["7"],
+    );
+}
+
+fn accepts_and_prints_sorted(src: &str, expected: &[&str]) {
+    let c = compile(src);
+    assert!(c.ok(), "must compile: {}", c.stderr());
+    let run = c.run();
+    assert!(
+        run.status.success(),
+        "must run clean, got {:?}\nstderr: {}",
+        run.status.code(),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let mut got: Vec<String> = String::from_utf8_lossy(&run.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    got.sort();
+    let mut want: Vec<String> = expected.iter().map(|s| s.to_string()).collect();
+    want.sort();
+    assert_eq!(got, want, "source:\n{src}");
+}
+
+#[test]
+fn a_void_returning_lambda_lowers_to_a_void_return() {
+    accepts_and_prints(
+        "*apply(f as (i64) returns void, n as i64)\n    f(n)\n\n*main\n    apply(|x| log x, 5)\n",
+        "5",
+    );
+}

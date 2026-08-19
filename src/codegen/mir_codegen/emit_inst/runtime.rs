@@ -83,6 +83,17 @@ impl<'ctx> Compiler<'ctx> {
                             .build_call(printf, &[gv.as_pointer_value().into()], ""));
                     }
 
+                    let fflush = self.module.get_function("fflush").unwrap_or_else(|| {
+                        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+                        let ft = self.ctx.i32_type().fn_type(&[ptr_ty.into()], false);
+                        self.module
+                            .add_function("fflush", ft, Some(Linkage::External))
+                    });
+                    let null = self
+                        .ctx
+                        .ptr_type(inkwell::AddressSpace::default())
+                        .const_null();
+                    b!(self.bld.build_call(fflush, &[null.into()], ""));
                     let abort = self.module.get_function("abort").unwrap_or_else(|| {
                         let ft = self.ctx.void_type().fn_type(&[], false);
                         self.module

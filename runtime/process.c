@@ -101,6 +101,133 @@ static int wait_child_with_timeout(pid_t pid, int *exit_code, long timeout_ms) {
         nanosleep(&ns, NULL);
     }
 }
+static long proc_read_all_fd(int fd, char **out_buf) {
+    long cap = 65536, total = 0;
+    char *buf = (char *)malloc((size_t)cap);
+    if (!buf) return -1;
+    for (;;) {
+        if (total == cap - 1) {
+            long ncap = cap * 2;
+            char *nb = (char *)realloc(buf, (size_t)ncap);
+            if (!nb) {
+                free(buf);
+                return -1;
+            }
+            buf = nb;
+            cap = ncap;
+        }
+        ssize_t n = read(fd, buf + total, (size_t)(cap - 1 - total));
+        if (n <= 0) break;
+        total += (long)n;
+    }
+    buf[total] = '\0';
+    char *shrunk = (char *)realloc(buf, (size_t)(total + 1));
+    *out_buf = shrunk ? shrunk : buf;
+    return total;
+}
+static long proc_read_all_fp(FILE *fp, char **out_buf) {
+    long cap = 65536, total = 0;
+    char *buf = (char *)malloc((size_t)cap);
+    if (!buf) return -1;
+    for (;;) {
+        if (total == cap - 1) {
+            long ncap = cap * 2;
+            char *nb = (char *)realloc(buf, (size_t)ncap);
+            if (!nb) {
+                free(buf);
+                return -1;
+            }
+            buf = nb;
+            cap = ncap;
+        }
+        size_t n = fread(buf + total, 1, (size_t)(cap - 1 - total), fp);
+        if (n == 0) break;
+        total += (long)n;
+    }
+    buf[total] = '\0';
+    char *shrunk = (char *)realloc(buf, (size_t)(total + 1));
+    *out_buf = shrunk ? shrunk : buf;
+    return total;
+}
+char *jinn_popen_read_all(const char *cmd, long *out_len, int *exit_code) {
+    if (!out_len || !exit_code) {
+        errno = EINVAL;
+        return NULL;
+    }
+    *out_len = -1;
+    if (!shell_enabled()) {
+        *exit_code = -1;
+        errno = EPERM;
+        return NULL;
+    }
+    FILE *fp = popen(cmd, "r");
+    if (!fp) {
+        *exit_code = -1;
+        return NULL;
+    }
+    char *buf = NULL;
+    long total = proc_read_all_fp(fp, &buf);
+    int status = pclose(fp);
+    *exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    if (total < 0) {
+        *exit_code = -1;
+        return NULL;
+    }
+    *out_len = total;
+    return buf;
+}
+char *jinn_spawn_capture_all(const void *vec_ptr, long *out_len, int *exit_code) {
+    if (!out_len || !exit_code) {
+        errno = EINVAL;
+        return NULL;
+    }
+    *out_len = -1;
+    if (!vec_ptr) {
+        *exit_code = -1;
+        errno = EINVAL;
+        return NULL;
+    }
+    const jinn_vec_hdr_t *vec = (const jinn_vec_hdr_t *)vec_ptr;
+    char **argv = jinn_vec_to_argv(vec);
+    if (!argv) {
+        *exit_code = -1;
+        return NULL;
+    }
+    int pipefd[2];
+    if (pipe(pipefd) < 0) {
+        free_argv_proc(argv, vec->len);
+        *exit_code = -1;
+        return NULL;
+    }
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        free_argv_proc(argv, vec->len);
+        *exit_code = -1;
+        return NULL;
+    }
+    if (pid == 0) {
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+        close(pipefd[1]);
+        execvp(argv[0], (char *const *)argv);
+        _exit(127);
+    }
+    close(pipefd[1]);
+    char *buf = NULL;
+    long total = proc_read_all_fd(pipefd[0], &buf);
+    close(pipefd[0]);
+    free_argv_proc(argv, vec->len);
+    if (wait_child_with_timeout(pid, exit_code, 0) != 0 || total < 0) {
+        free(buf);
+        *exit_code = total < 0 ? -1 : *exit_code;
+        return NULL;
+    }
+    *out_len = total;
+    return buf;
+}
 long jinn_popen_read(const char *cmd, char *buf, long buf_size, int *exit_code) {
     if (!buf || buf_size <= 0 || !exit_code) {
         errno = EINVAL;

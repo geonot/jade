@@ -137,6 +137,13 @@ impl Typer {
                             dm.span,
                             "deferred struct method return",
                         );
+                    } else {
+                        self.type_errors.push(format!(
+                            "{}: unknown method `{}` on `{}`",
+                            dm.span.loc(),
+                            dm.method,
+                            type_name
+                        ));
                     }
                 }
                 Type::Coroutine(yield_ty) => {
@@ -182,6 +189,26 @@ impl Typer {
                             dm.span,
                             "deferred float method return",
                         );
+                        continue;
+                    }
+                    if matches!(
+                        recv_ty,
+                        Type::I64
+                            | Type::I32
+                            | Type::I16
+                            | Type::I8
+                            | Type::U64
+                            | Type::U32
+                            | Type::U16
+                            | Type::U8
+                            | Type::Bool
+                    ) {
+                        self.type_errors.push(format!(
+                            "{}: unknown method `{}` on `{}`",
+                            dm.span.loc(),
+                            dm.method,
+                            recv_ty
+                        ));
                         continue;
                     }
                     if matches!(recv_ty, Type::TypeVar(_)) {
@@ -370,6 +397,11 @@ impl Typer {
                 .iter()
                 .map(|df| (df.field_name.as_str(), &df.field_ty))
                 .collect();
+
+            let container_pseudo = |n: &str| matches!(n, "length" | "byte_count");
+            if required_fields.iter().all(|(req, _)| container_pseudo(req)) {
+                continue;
+            }
 
             let extra_constraints: Vec<(Symbol, Type)> = self
                 .field_constraints

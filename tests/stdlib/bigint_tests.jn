@@ -1,0 +1,58 @@
+use std/bigint
+
+test 'from_int / format round trip'
+    assert bigint.format(bigint.from_int(0)) equals '0'
+    assert bigint.format(bigint.from_int(7)) equals '7'
+    assert bigint.format(bigint.from_int(-42)) equals '-42'
+    assert bigint.format(bigint.from_int(1000000000)) equals '1000000000'
+
+test 'from_str / format round trip'
+    assert bigint.format(bigint.from_str('123456789012345678901234567890')) equals '123456789012345678901234567890'
+    assert bigint.format(bigint.from_str('-99999999999999999999')) equals '-99999999999999999999'
+
+test 'add / sub / mul'
+    assert bigint.format(bigint.add(bigint.from_int(999999999), bigint.from_int(1))) equals '1000000000'
+    assert bigint.format(bigint.sub(bigint.from_int(1000), bigint.from_int(7))) equals '993'
+    assert bigint.format(bigint.mul(bigint.from_int(999999999), bigint.from_int(999999999))) equals '999999998000000001'
+
+test 'div / modulo with single-chunk divisor'
+    assert bigint.format(bigint.div(bigint.from_int(1000), bigint.from_int(7))) equals '142'
+    assert bigint.format(bigint.modulo(bigint.from_int(1000), bigint.from_int(7))) equals '6'
+    assert bigint.format(bigint.modulo(bigint.from_str('12345678901234567890'), bigint.from_int(97))) equals '3'
+
+test 'div / modulo with multi-chunk divisor'
+    a is bigint.from_str('999999998000000001')
+    b is bigint.from_str('1000000007')
+    assert bigint.format(bigint.div(a, b)) equals '999999991'
+    assert bigint.format(bigint.modulo(a, b)) equals '64'
+
+test 'div quotient digits near the chunk base terminate'
+    a is bigint.from_str('50000000000000000000000')
+    b is bigint.from_str('500000000000000000')
+    assert bigint.format(bigint.div(a, b)) equals '100000'
+    c is bigint.from_str('999999999999999999999999999999')
+    d is bigint.from_str('1000000000000000000001')
+    assert bigint.format(bigint.div(c, d)) equals '999999999'
+    assert bigint.format(bigint.modulo(c, d)) equals '999999999999000000000'
+
+test 'div exact and smaller-dividend edges'
+    assert bigint.format(bigint.div(bigint.from_int(7), bigint.from_int(7))) equals '1'
+    assert bigint.format(bigint.modulo(bigint.from_int(7), bigint.from_int(7))) equals '0'
+    assert bigint.format(bigint.div(bigint.from_int(6), bigint.from_int(7))) equals '0'
+    assert bigint.format(bigint.modulo(bigint.from_int(6), bigint.from_int(7))) equals '6'
+
+test 'power'
+    b is bigint.from_int(2)
+    assert bigint.format(bigint.power(b, 0)) equals '1'
+    assert bigint.format(bigint.power(b, 10)) equals '1024'
+    assert bigint.format(bigint.power(b, 64)) equals '18446744073709551616'
+    assert bigint.format(bigint.power(bigint.from_int(10), 30)) equals '1000000000000000000000000000000'
+
+test 'modpow'
+    m is bigint.from_int(1000000007)
+    assert bigint.format(bigint.modpow(bigint.from_int(3), bigint.from_int(200), m)) equals '136318165'
+    assert bigint.format(bigint.modpow(bigint.from_int(2), bigint.from_int(1000), m)) equals '688423210'
+
+test 'gcd'
+    assert bigint.format(bigint.gcd(bigint.from_int(1071), bigint.from_int(462))) equals '21'
+    assert bigint.format(bigint.gcd(bigint.from_str('123456789012345678'), bigint.from_str('987654321098765432'))) equals '2'

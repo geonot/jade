@@ -396,6 +396,20 @@ impl Typer {
         for a in &m.arms {
             self.restore_moved_fields(pre_match.clone());
             self.push_scope();
+            if let ast::Pat::Ident(name, span) = &a.pat
+                && !self.variant_tags.contains_key(name)
+                && !self.consts.contains_key(name)
+                && self.find_var(&name.as_str()).is_some()
+            {
+                return Err(format!(
+                    "{}: pattern `{}` always matches — it binds a new variable that \
+                     shadows the existing `{}` rather than comparing against it; use \
+                     `equals` (or a guard) to compare, or pick a fresh name to bind",
+                    span.loc(),
+                    name,
+                    name
+                ));
+            }
             let pat = self.lower_pat(&a.pat, &subj_ty)?;
             let mut pat_binds = std::collections::HashSet::new();
             Self::collect_pat_bind_ids(&pat, &mut pat_binds);

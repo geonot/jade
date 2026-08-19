@@ -301,9 +301,10 @@ type DataFrame
 
 
 *new(col_names as Vec of String) returns DataFrame
-    data is vec()
+    data as Vec of Vec of String is vec()
     loop col_names
-        data.push(vec())
+        col as Vec of String is vec()
+        data.push(col)
     DataFrame(columns is col_names, data is data, nrows is 0, ncols is col_names.length)
 
 *from_csv(rows as Vec of Vec of String) returns DataFrame
@@ -405,13 +406,9 @@ type DataFrame
         key_idx is indices.get(i)
         key_val is values.get(key_idx)
         j is i - 1
-        while j >= 0
-            j_val is values.get(indices.get(j))
-            if j_val > key_val
-                indices.set(j + 1, indices.get(j))
-                j is j - 1
-            else
-                j is -1
+        while j >= 0 and values.get(indices.get(j)) > key_val
+            indices.set(j + 1, indices.get(j))
+            j is j - 1
         indices.set(j + 1, key_idx)
         i is i + 1
 
@@ -421,12 +418,8 @@ type DataFrame
         key_idx is indices.get(i)
         key_val is convert.parse_float(values.get(key_idx))
         j is i - 1
-        while j >= 0
-            j_val is convert.parse_float(values.get(indices.get(j)))
-            if j_val > key_val
-                indices.set(j + 1, indices.get(j))
-                j is j - 1
-            else
-                j is -1
+        while j >= 0 and convert.parse_float(values.get(indices.get(j))) > key_val
+            indices.set(j + 1, indices.get(j))
+            j is j - 1
         indices.set(j + 1, key_idx)
         i is i + 1

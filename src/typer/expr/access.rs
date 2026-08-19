@@ -740,10 +740,25 @@ impl Typer {
                     Type::Vec(et) => *et.clone(),
                     Type::Ptr(et) => *et.clone(),
                     Type::Map(_, vt) => *vt.clone(),
-                    Type::Tuple(tys) => const_idx
-                        .and_then(|i| tys.get(i).cloned())
-                        .or_else(|| tys.first().cloned())
-                        .unwrap_or_else(|| self.infer_ctx.fresh_var()),
+                    Type::Tuple(tys) => match const_idx {
+                        None => {
+                            return Err(format!(
+                                "{}: tuple indices must be integer literals — a tuple's \
+                                 element types differ per position, so the index must be \
+                                 known at compile time; use a Vec for runtime indexing",
+                                span.loc()
+                            ));
+                        }
+                        Some(i) if i >= tys.len() => {
+                            return Err(format!(
+                                "{}: tuple index {} is out of range for a {}-element tuple",
+                                span.loc(),
+                                i,
+                                tys.len()
+                            ));
+                        }
+                        Some(i) => tys[i].clone(),
+                    },
                     _ => self.infer_ctx.fresh_var(),
                 };
                 Ok(hir::Expr {

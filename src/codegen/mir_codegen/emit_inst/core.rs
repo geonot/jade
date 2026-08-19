@@ -47,12 +47,14 @@ impl<'ctx> Compiler<'ctx> {
                         let ptypes = fv.get_type().get_param_types();
                         let md = self.coerce_call_args(&arg_vals, args, &ptypes);
                         let csv = b!(self.bld.build_call(fv, &md, "call"));
-                        Ok(self.call_result(csv))
+                        let res = self.call_result(csv);
+                        Ok(self.canonicalize_struct_call_result(inst, res))
                     } else if let Some(fv) = self.module.get_function(&name.as_str()) {
                         let ptypes = fv.get_type().get_param_types();
                         let md = self.coerce_call_args(&arg_vals, args, &ptypes);
                         let csv = b!(self.bld.build_call(fv, &md, "call"));
-                        Ok(self.call_result(csv))
+                        let res = self.call_result(csv);
+                        Ok(self.canonicalize_struct_call_result(inst, res))
                     } else {
                         const LIBM_UNARY_F64: &[&str] = &[
                             "fabs", "sqrt", "floor", "ceil", "round", "trunc", "sin", "cos", "tan",
@@ -884,6 +886,31 @@ impl<'ctx> Compiler<'ctx> {
                 _ => return Ok(None),
             })?,
         ))
+    }
+
+    pub(in crate::codegen) fn canonicalize_struct_call_result(
+        &mut self,
+        inst: &mir::Instruction,
+        res: BasicValueEnum<'ctx>,
+    ) -> BasicValueEnum<'ctx> {
+        let Some(dest) = inst.dest else {
+            return res;
+        };
+        if !matches!(inst.ty, Type::Struct(_, _) | Type::Tuple(_)) || !res.is_struct_value() {
+            return res;
+        }
+        if self.self_allocs.contains_key(&dest) {
+            return res;
+        }
+        let st = res.get_type();
+        let slot = self.entry_alloca(st, "call.res");
+        if self.bld.build_store(slot, res).is_err() {
+            return res;
+        }
+        self.self_allocs.insert(dest, slot);
+        self.self_alloc_types.insert(dest, st);
+        self.local_struct_values.insert(dest);
+        slot.into()
     }
 
     pub(in crate::codegen) fn coerce_call_args(

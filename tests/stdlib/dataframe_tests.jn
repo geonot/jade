@@ -1,0 +1,44 @@
+use std/dataframe
+
+test 'sort_by keeps every row and orders them'
+    df is dataframe.new(['k', 'id'])
+    df.add_row(['3', 'row_a'])
+    df.add_row(['1', 'row_b'])
+    df.add_row(['2', 'row_c'])
+    sorted is df.sort_by('k')
+    assert sorted.nrows equals 3
+    assert sorted.at(0, 'id') equals 'row_b'
+    assert sorted.at(1, 'id') equals 'row_c'
+    assert sorted.at(2, 'id') equals 'row_a'
+
+test 'sort_by on already sorted input is identity'
+    df is dataframe.new(['k'])
+    df.add_row(['1'])
+    df.add_row(['2'])
+    sorted is df.sort_by('k')
+    assert sorted.nrows equals 2
+    assert sorted.at(0, 'k') equals '1'
+    assert sorted.at(1, 'k') equals '2'
+
+test 'sort_by_num orders numerically and is stable on duplicates'
+    df is dataframe.new(['price', 'name'])
+    df.add_row(['10', 'a'])
+    df.add_row(['2', 'b'])
+    df.add_row(['10', 'c'])
+    df.add_row(['1', 'd'])
+    sorted is df.sort_by_num('price')
+    assert sorted.nrows equals 4
+    assert sorted.at(0, 'name') equals 'd'
+    assert sorted.at(1, 'name') equals 'b'
+    assert sorted.at(2, 'name') equals 'a'
+    assert sorted.at(3, 'name') equals 'c'
+
+test 'filters and aggregates still work'
+    df is dataframe.new(['n'])
+    df.add_row(['1'])
+    df.add_row(['5'])
+    df.add_row(['3'])
+    big is df.where_gt('n', 2.0)
+    assert big.nrows equals 2
+    assert df.sum('n') equals 9.0
+    assert df.nunique('n') equals 3

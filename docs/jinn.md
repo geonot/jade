@@ -1260,6 +1260,38 @@ insert scratch 1
 log count ledger
 ```
 
+### Store lifecycle statements
+
+Four statement forms manage a store's data and file. Like `insert` and
+`delete`, they are context-sensitive keywords — `save`, `destroy`, `restore`,
+and `compact` are ordinary identifiers everywhere except statement position in
+front of a store name:
+
+- `save <store>` — syncs the data file and checkpoints (truncates) the WAL.
+- `delete <store> where ...` — soft-deletes matching rows (tombstones); they
+  stop appearing in reads but stay on disk.
+- `destroy <store> where ...` — hard-deletes matching rows.
+- `restore <store> where ...` — clears the tombstones of soft-deleted rows,
+  bringing them back.
+- `compact <store>` — rewrites the file without tombstoned rows, reclaiming
+  their space.
+
+<!-- doctest:prelude
+store users
+    name as String
+    age as i64
+-->
+```jinn
+insert users 'Alice', 30
+insert users 'Bob', 25
+delete users where name equals 'Bob'
+restore users where name equals 'Bob'
+destroy users where age > 29
+compact users
+save users
+log count users
+```
+
 ### Constraint failures are errors
 
 `insert` and `set` are fallible: attach handler arms (`?` / `!!`) and they

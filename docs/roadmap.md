@@ -24,7 +24,7 @@ acting on its details.
 
 ## Where the language stands
 
-**Open: ~8 blockers, ~30 majors, 40+ minors, 5+ coverage gaps** — the
+**Open: ~2 blockers, ~24 majors, 40+ minors, 5+ coverage gaps** — the
 remainder of the 2026-08-18 18-area adversarial review (ids `TYP-*`, `STO-*`,
 `STD-*`, `DIST-*`, `HIR-*`, `SYN-*`, `PAR-*`, `TDX-*`, `MIR-*`, `CG-*`,
 `PERF-*`, `DIAG-*`, `GATE-*`), which falsified the previous "0 blockers /
@@ -42,10 +42,17 @@ errors, duplicate-fn and duplicate-arm rejection, `vector` reservation,
 shortest-round-trip float printing) — pinned across
 `tests/alpha_hardening_pins.rs`, `tests/store_schema.rs`,
 `tests/store_transactions.rs`, and `tests/fmt_nondestructive.rs`.
-Remaining blockers: `DIST-1` (dead spill temp), `DIST-5r` (cross-process
-store access), `STD-5` (dataframe sort), `SYN-4`, `SYN-6`, `MIR-1`,
-`TYP-5`, `TDX-3`. The pre-review sections further down ([162]/[164]
-residue, ids `O-*`, `T-*`, `E-*`, `S-*`, `X-*`, `N-*`, `P-*`) still stand.
+The [167] pass closed the seven remaining review blockers — `DIST-1` (the
+dead spill temp, root of raft's inertness), `DIST-5r` (cross-process store
+access), `STD-5` (dataframe sort), `SYN-6`, `MIR-1`, `TYP-5`, `TDX-3` — plus
+`MIR-5`, `PAR-2`, `PAR-3`, `PERF-2`, and the tier demotion, each pinned in
+`tests/alpha_hardening_pins.rs`, `tests/closure_captures.rs`, or a new
+`tests/stdlib/*_tests.jn` suite. Fixing `DIST-1` exposed **`CG-7`** (extern
+out-parameter writes are invisible to the caller), filed below as the one
+new blocker; `SYN-4` is the other, and it was re-confirmed with a fresh
+reproduction in the same pass. The pre-review sections further down
+([162]/[164] residue, ids `O-*`, `T-*`, `E-*`, `S-*`, `X-*`, `N-*`, `P-*`)
+still stand.
 
 - **Memory and ownership** — the [162] accept-then-corrupt holes are closed:
   consuming calls in condition/scrutinee/iterator position are move-tracked,
@@ -110,6 +117,96 @@ residue, ids `O-*`, `T-*`, `E-*`, `S-*`, `X-*`, `N-*`, `P-*`) still stand.
 
 ---
 
+## Next batch ([168]) — proposed
+
+Sequenced after [167]. Every item below carries a reproduction taken on the
+[167] tree, so the batch starts from measurement rather than inherited
+claims. Workstreams are ordered by what unblocks the most downstream work;
+**A** and **B** are the two live blockers and should land before the rest.
+
+### WS-A — Address-taken values and FFI out-parameters (`CG-7`, `STD-11`)
+
+The last accept-then-corrupt hole of the `DIST-1` family, one level lower.
+`%x` on a local lowers to `ref` of an *SSA value*; codegen spills it to a
+throwaway alloca and later reads of `x` still read the SSA value, so an
+extern's writes through the pointer are silently dropped.
+
+1. Force an address-taken binder to memory during MIR lowering: when
+   `ExprKind::Ref` targets a `Var`, materialize that binder's slot (it may
+   currently have none — a plain `n is 0` stays a pure SSA constant) and
+   record it as address-taken.
+2. Make every later `read_var` of an address-taken binder load from the slot
+   instead of returning the SSA value, and every `write_var` store to it.
+   This is the standard "escaped locals live in memory" demotion; the
+   existing `var_allocs` / `Store` / `Load` machinery already provides the
+   slot, so the work is in the SSA construction, not codegen.
+3. Re-point `std/process.jn` at the fixed path, then give `process` a
+   behavioral suite (`tests/stdlib/process_tests.jn`) covering exit codes, a
+   >64 KB capture, and `run_argv`, and return it to the stable tier.
+4. Audit the other `%x`-into-extern sites in `std/` (`net`, `convert`, `os`)
+   for the same shape — they currently pass an address *inward*, but nothing
+   enforces that.
+
+Pin: an extern that writes through an out-parameter, and the `process.run`
+round trip. Risk: the demotion touches SSA construction, which every lowering
+path shares — expect the corpus differential to be the real gate.
+
+### WS-B — Module-scope type identity (`SYN-4`, `SYN-9`)
+
+Types are global and unqualified by design, so two modules declaring `Point`
+collide and the loser's own constructors fail to type-check against the
+winner's fields — with a diagnostic naming the wrong file. Intern type names
+with their defining module, keep the unqualified spelling for lookup, and
+make an actual collision a diagnostic that names both declaration sites.
+`SYN-9` (contextual keywords reserve identifiers inconsistently) belongs here
+because it is the same question asked of the keyword table — settle both
+against `jinn.ebnf` in one pass.
+
+### WS-C — Diagnostic honesty (`SYN-11`, `CG-8`, `DIAG-*`)
+
+Small, high-signal, no design risk except `CG-8`.
+
+- `SYN-11` is half done: thread the span onto the unknown-method error and
+  suppress the "unsolved type variable defaulted to i64" warning that
+  precedes it.
+- `CG-8` needs a decision, not just code: `$` inside a `dispatch` body is
+  silently reinterpreted as a placeholder-lambda that is created and
+  discarded. Either reject it the way a lambda already does, or let `$` be
+  captured like any other binder now that captures resolve by `DefId`.
+- Sweep the remaining `DIAG-*` items while the diagnostic paths are open.
+
+### WS-D — Provisional tier exit (`STD-10`, `STD-12`, `STD-15`, `DIST-2`)
+
+Three modules carry no stability promise. `bangle` 404s every route;
+`raft` converges single-node but has no multi-node replication, log matching,
+or commit advancement under test; `process` is blocked on WS-A. Each needs
+its defect fixed *and* a `tests/stdlib/*_tests.jn` suite before it can leave
+the tier — that is the criterion `stdlib.md` now states.
+
+### WS-E — Tooling (`TDX-4`, `TDX-5`, `TDX-6`, `TDX-13`)
+
+Silent test failure off-tty, `jinn bind` emitting zero externs from
+`zlib.h`, tree-sitter failing 15/15 snippets, `.jni` reuse breaking
+multi-module compiles. Independent of A–D; good parallel work.
+
+### WS-F — Concurrency (`DIST-8`, `N-6r`, `N-9`) — stretch
+
+Blocking socket syscalls pin scheduler workers (8 idle connections starve a
+server), sleeps and IO parks are not cancellation points, and the
+synchronous actor-call protocol does not exist. This is the largest design
+surface of the six and should not be started until A and B are closed.
+
+### Verify-and-retire (cheap, do first)
+
+Two ids look closed as side effects of [167] and need only their original
+reproductions re-run before retirement: **`MIR-2`** (comprehension-binder
+shadowing — three plausible shapes now compile and produce correct values,
+apparently via `MIR-1`'s `DefId` keying) and **`MIR-6`** (the user-facing
+bracket-list path is a `Vec` and does trap on an out-of-range index, so the
+unchecked LLVM-array path may not be reachable from source at all).
+
+---
+
 ## Alpha review backlog (2026-08-18 review)
 
 The open remainder of the 18-area adversarial review, grouped by workstream.
@@ -147,18 +244,32 @@ Residue:
   be silenced by link order (the weak no-op in `kv.c` now warns), and the read
   path clamps corrupt on-disk lengths instead of reading out of bounds.
   Raising the cap is an on-disk format change.
-- **DIST-5r** (B) *cross-process* store access remains unsafe: per-op `flock`
-  serializes operations, but a rewrite (compact, rollback, migration) in one
-  process leaves other processes' `FILE*` handles stale. The single-writer
-  policy is only enforced per-op, not per-open.
+- ~~DIST-5r~~ closed in [167]: the single-process policy is now enforced *at
+  open*, not per-op. `jinn_store_open_data` takes an exclusive non-blocking
+  `flock` on `<store>.lock` and a second process exits 2 naming the store
+  ("open in another process — the store layer is single-process in alpha"),
+  so a rewrite in one process can no longer leave another's `FILE*` stale.
+  Shared multi-process access stays out of scope for alpha.
 - Read serialization is coarse: readers now exclude each other and writers per
   store. Fine for alpha; a shared-read lock is the obvious refinement.
 
 ### Distributed / std surface (B unless noted)
 
-- **DIST-1** mutating a call-returned struct through a free-function
-  parameter writes to a dead spill temp — the caller sees stale values.
-  Root of **STD-7** (raft inertness).
+- ~~DIST-1 / STD-7~~ closed in [167]. A struct-returning `Call` was the only
+  struct producer without a def-site memory slot: `StructInit` allocates one
+  and `Load` registers the variable's, but a call result stayed a raw SSA
+  aggregate, so `coerce_call_args` spilled it to a fresh `struct.arg` temp
+  that nothing read back — the callee mutated the temp and the caller kept
+  the stale value. `canonicalize_struct_call_result` now gives every
+  `Struct`/`Tuple` call result an entry slot at its definition, registered in
+  `self_allocs`/`self_alloc_types`/`local_struct_values`, so every use goes
+  through the same slot and the lazy retroactive `value_map` swap the
+  MethodCall path used to perform is no longer reachable for call results.
+  Measured: three `tick(s)` calls on a `s is new_server(…)` receiver read
+  back `0` before and `3` after (pinned,
+  `mutation_through_a_free_function_param_reaches_the_caller`). This was the
+  root of raft's inertness — single-node election now converges
+  follower → candidate → leader (`tests/stdlib/raft_tests.jn`).
 - ~~DIST-3 / STD-1 / STD-2 / STD-3 / STD-4~~ closed in [166]: a line-audited
   sweep converted every inventoried string-byte context — FFI length
   arguments, `malloc` sizes, send loops, `Content-Length`, byte-indexed
@@ -170,15 +281,22 @@ Residue:
   behaviorally untested — GATE-3 still applies. Remaining `.length`-bounded
   scalar byte *loops* (toml, glob, args, bangle, path, date, hex tails) are
   `O-9`'s class: correct on ASCII, wrong-or-quadratic beyond it.
-- **STD-5** dataframe sort loses and duplicates rows. ~~STD-8~~ closed in
+- ~~STD-5~~ closed in [167]: `dataframe`'s two insertion sorts ended their
+  inner loop by assigning `j is -1`, then used that same `j` as the insertion
+  index — every non-trivial sort wrote the key to slot 0, losing and
+  duplicating rows. Both now use a real `while j >= 0 and …` guard, and the
+  module gained `tests/stdlib/dataframe_tests.jn`. ~~STD-8~~ closed in
   [166]: float `to_string` (and therefore json stringify) uses a
   shortest-round-trip formatter (`jinn_f64_format`: `%.15g` → `%.17g` with a
   `strtod` round-trip check) instead of 6-significant-digit `%g`.
 - **DIST-8** (M) blocking socket syscalls pin scheduler workers — 8 idle
   connections starve a server; needs an IO reactor. **DIST-9** (M)
   `supervisor` does not parse (see N-4). **DIST-2/STD-13** (M) std/raft is
-  aspirational — demote from stable, with dataframe, bangle, and the crypto
-  stack, until behaviorally tested (**Tier demotion**, hours).
+  aspirational. The demotion landed in [167]: `stdlib.md` now carries a
+  **Provisional modules** tier (`raft`, `bangle`, `process`) and `dataframe`
+  and the crypto stack left it by gaining behavioral suites. Raft's
+  single-node election converges since `DIST-1` closed; multi-node
+  replication, log matching, and commit advancement remain unexercised.
 
 ### Comptime and name resolution (closed in [166])
 
@@ -200,40 +318,115 @@ Residue:
 - ~~PAR-1~~ closed in [166]: the `vec`/`vector` builtin now always wins (the
   same class as `to_string`/`log`), and *defining* a function with either
   name is a compile error naming the reservation.
-- **SYN-4** the global type namespace silently merges same-named types
-  across modules, last-loaded wins. *unverified*
-- **SYN-6** `if x is y` with an existing binding `y` is an always-true
-  pattern match that also overwrites the outer `y`. *unverified*
+- **SYN-4** (B) the global type namespace merges same-named types across
+  modules, last-loaded wins. **Confirmed 2026-08-18** and worse than filed:
+  with `alpha.jn` and `beta.jn` each declaring a different `type Point`,
+  beta's declaration replaces alpha's and alpha's *own* constructor is then
+  checked against beta's fields — the compile fails with
+  "`alpha.jn:5:5`: constructor `Point` is missing required field(s) `name`,
+  `tag`", blaming a file that declares neither. Types are global and
+  unqualified by design (`stdlib.md`), so the fix is a module-qualified
+  interning key plus a collision diagnostic, not per-module namespaces.
+- ~~SYN-6~~ closed in [167]: a `match` arm whose pattern is a bare
+  identifier that already names a variable in scope (and is not a variant tag
+  or constant) is now a compile error — "pattern `y` always matches — it
+  binds a new variable that shadows the existing `y` rather than comparing
+  against it" — with guidance toward `equals` or a fresh name.
 - ~~SYN-7~~ closed in [166]: `not` moved to its own precedence level between
   `and` and the comparisons (matching the EBNF's `not_expr`), so
   `not x in xs` is `not (x in xs)`; the formatter parenthesizes a `not`
   operand under tighter operators so old trees still round-trip.
-- **PAR-2** (M) function-local `use` parses but imports nothing; **PAR-3**
-  (M) `save`/`destroy`/`restore`/`compact` are undocumented
-  context-sensitive statement keywords; **SYN-8** (M) the EBNF is wrong on
+- ~~PAR-2~~ closed in [167]: `use` inside a function body is a parse error
+  pointing at the top of the file, matching the EBNF, which only ever listed
+  `use_decl` under `decl`. The scoped package-visibility check
+  (`resolve_scoped_use` / `resolve_scoped_path_use`) was wired only to the
+  statement form and so went dead with it — it now runs on top-level
+  `Decl::Use`, and module resolution resolves a reach-in path (`use baz/bar`)
+  to the reached package rather than only to a submodule of `baz`.
+  ~~PAR-3~~ closed in [167]: `save`/`destroy`/`restore`/`compact` are
+  documented in `jinn.md` ("Store lifecycle statements") with a compiled
+  example. **SYN-8** (M) the EBNF is wrong on
   ≥7 constructs; **SYN-9** (M) contextual keywords reserve identifiers
   inconsistently; **SYN-10** (M) no sort-by-key for Vec-of-struct;
-  **SYN-11** (M) unknown-method errors carry no location and type as i64.
+  **SYN-11** (M) unknown-method errors carry no location and type as i64 —
+  *half closed in [167]*: an unknown method on a struct or a concrete scalar
+  is now a real error (`unknown method \`frobnicate\``) instead of silently
+  typing as i64, but it still carries **no location** and is preceded by a
+  spurious "unsolved type variable defaulted to i64" warning pointing at the
+  call. Finish by threading the span and suppressing the defaulting warning
+  when the method is already known-unresolved.
 
 ### Types (B unless noted)
 
-- **TYP-5** generic-struct monomorphization mangles names unescaped with
-  first-write-wins registration — `Pair_i64_i64` collides.
+- ~~TYP-5~~ closed in [167]: instantiations mangle through
+  `mangle_mono_struct` (a `__G_` marker plus per-argument encoding) instead
+  of a bare `_`-join, and `check_mono_collision` rejects the residual cases —
+  an instantiation whose internal name is already a declared type, or one
+  that collides with a different generic's instantiation — naming both. A
+  `Pair of A, B` instantiated at `i64, i64` and a hand-declared
+  `Pair_i64_i64` now coexist (pinned).
 - **TYP-6..TYP-10** (M) nested generic enum construction, enum trait impls
   on self, mono cache misses, literal range bypass via backward inference,
   trait coherence only via the duplicate-DefId backstop.
 
 ### Codegen / MIR (B unless noted)
 
-- **MIR-1** same-name loop/comprehension binders share one function-global
-  MIR memory slot — silent wrong answers in nested loops. *unverified*
-- **MIR-2** (M) comprehension-binder shadowing ICEs three ways; ~~MIR-4~~
+- ~~MIR-1~~ closed in [167]: `for`/`sim for`/`loop` and list-comprehension
+  binders are keyed by their `DefId` (`alias_binder` mints `name#b<id>`,
+  `var_key` resolves reads and writes), so same-name binders in nested or
+  sibling loops no longer share one function-global slot. Aliasing alone
+  broke every *capture* site, which resolves free variables by source name:
+  `collect_var_refs_*` now carries the binder `DefId` so lambdas,
+  `dispatch` bodies, and generators look the outer value up by its aliased
+  storage key while the parameter keeps the plain source name (pinned in
+  `tests/closure_captures.rs`).
+- **MIR-2** (M) comprehension-binder shadowing ICEd three ways — *appears
+  closed as a side effect of `MIR-1`'s `DefId` keying*: an outer `i` shadowed
+  by `[i * 2 for i in 0 to 4]`, the same over a parameter, and a
+  comprehension inside a `for` all now compile and produce the right values.
+  Re-run the review's original three repros before retiring the id. ~~MIR-4~~
   closed in [166] (duplicate unguarded literal arms are a typed
   "duplicate match arm" error, the dense-switch path dedupes literal case
   values as a backstop, and non-int/bool literal matches take the
-  comparison-chain path); **MIR-5** (M) runtime tuple index ICEs; **MIR-6**
-  (M) the LLVM-array indexing path emits no upper bounds check; **CG-4** (M)
+  comparison-chain path); ~~MIR-5~~ closed in [167] (a non-literal tuple index is a typed error
+  naming the reason — element types differ per position — and a literal index
+  past the end reports the arity); **MIR-6**
+  (M) the LLVM-array indexing path emits no upper bounds check — note the
+  user-facing bracket-list path is a `Vec` and *does* trap
+  ("runtime error: vec index out of bounds"), so this needs its original
+  repro to confirm it is reachable from source at all; **CG-4** (M)
   `--debug` is a stub (no DWARF).
+- **CG-7** (B) *new in [167]* — **an extern out-parameter's writes are
+  invisible to the caller.** `%x` on a local lowers to `ref` of an *SSA
+  value*, which codegen materializes by spilling to a throwaway alloca;
+  subsequent reads of `x` still read the original SSA value, so anything the
+  callee wrote through the pointer is dropped. Reproduction (`n` stays `0`):
+
+  ```
+  n is 0
+  b is extern.jinn_popen_read_all(%cmd, %n as %i64, %ec as %i32)
+  log n
+  ```
+
+  The MIR is explicit — `v1 = int 0`, `v5 = ref v1`, `call …`, then
+  `log v1` — and the emitted IR folds both reads to the constant `0` after
+  passing the alloca to an opaque call. This is the same class as `DIST-1`
+  (a value with no def-site slot spilled to a temp nothing reads back), one
+  level lower: `Ref` of a local must force that binder to memory and make
+  every later read load from that slot. Blast radius in `std/` is narrow —
+  `process.jn`'s `exit_code` and `out_len` are the only true out-parameters;
+  the other `%x` uses pass an address inward — but it silently produces wrong
+  answers for any FFI binding written the obvious way, and it is why
+  `STD-11`'s fix does not work yet.
+- **CG-8** (M) *new in [167]* — `$` does not survive crossing into a
+  `dispatch` body. `dollar_stack` is empty inside the task, so
+  `typer/expr/access.rs` reinterprets `work($)` as a placeholder-lambda; the
+  body compiles to a `closure_create` that is immediately discarded and the
+  program silently prints nothing. A lambda in the same position rejects
+  cleanly ("`$` has no value here"); `dispatch` should either match that
+  diagnostic or let `$` be captured like any other binder. Until [167] this
+  shape ICE'd in LLVM verification instead (a void-typed lambda returning a
+  value — fixed separately), so the failure is now silent, which is worse.
 
 ### Tooling / fmt (B unless noted)
 
@@ -241,20 +434,28 @@ Residue:
   `to`/`if` clauses (pinned in `tests/fmt_nondestructive.rs`), and under the
   new `not` precedence `not a equals b` re-parses as the same tree while a
   `not` operand under a tighter operator is parenthesized. The HIR-diff fmt
-  gate remains open work. **TDX-3** `jinn run` serves a stale cached binary
-  after a dependency update.
+  gate remains open work. ~~TDX-3~~ closed in [167]: `jinn run` writes a
+  `.deps` manifest of content hashes for every resolved source and recompiles
+  when any of them changes, so editing an imported module is picked up
+  (`JINN_NO_RUN_CACHE=1` forces a rebuild).
 - **TDX-4..TDX-6, TDX-13** (M) silent test failure off-tty, `jinn bind`
   emits zero externs from zlib.h, tree-sitter fails 15/15 snippets, `.jni`
-  reuse breaks multi-module compiles. **STD-10..STD-12, STD-15** (M) bangle
-  404s every route, process.run truncates at 64KB, fmt+os ICE, five error
-  dialects across std.
+  reuse breaks multi-module compiles. **STD-10, STD-12, STD-15** (M) bangle
+  404s every route, fmt+os ICE, five error dialects across std. **STD-11**
+  changed shape in [167]: the 64 KB cap is gone (`jinn_popen_read_all` /
+  `jinn_spawn_capture_all` grow a buffer to EOF), but `process.run` now
+  returns an *empty* string because it reads the length through an extern
+  out-parameter — see `CG-7`. `process` is demoted to provisional until that
+  lands.
 
 ### Performance and benchmark honesty (M)
 
 - **PERF-1b** stack-promote non-escaping bracket-list literals (the
   `jinn_xmalloc` linkage half landed in [165]; array_ops is ~1× vs C).
-- **PERF-2** the in-tree Rust array_ops baseline runs 30× the iterations —
-  the published J/RUST ratio is false. **PERF-5/6/7/9** store_ops,
+- ~~PERF-2~~ closed in [167]: the Rust `array_ops` baseline ran
+  1,500,000,000 iterations and the Python one 10,000,000 against Jinn's and
+  C's 50,000,000; both now run 50,000,000 and `benchmarks/README.md` records
+  the correction. **PERF-5/6/7/9** store_ops,
   `sim_for`/`dispatch_yield`, concurrency, and actor benchmark baselines
   are strawmen or unverified — fix or drop the rows.
 - **PERF-3/4/STO-7** WAL recovery is O(n²) with no clean-exit checkpoint;

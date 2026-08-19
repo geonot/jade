@@ -22,17 +22,40 @@ impl Typer {
         }
         self.register_prelude_types();
 
+        let mut type_decl_spans: std::collections::HashMap<Symbol, ast::Span> =
+            std::collections::HashMap::new();
         for d in &prog.decls {
-            let name = match d {
-                ast::Decl::Type(td) if td.type_params.is_empty() => Some(td.name),
-                ast::Decl::Enum(ed) if ed.type_params.is_empty() => Some(ed.name),
-                ast::Decl::ErrDef(ed) => Some(ed.name),
-                ast::Decl::Actor(ad) => Some(ad.name),
-                ast::Decl::Store(sd) => Some(sd.name),
+            let entry = match d {
+                ast::Decl::Type(td) => Some((td.name, td.span, td.type_params.is_empty())),
+                ast::Decl::Enum(ed) => Some((ed.name, ed.span, ed.type_params.is_empty())),
+                ast::Decl::ErrDef(ed) => Some((ed.name, ed.span, true)),
+                ast::Decl::Actor(ad) => Some((ad.name, ad.span, true)),
+                ast::Decl::Store(sd) => Some((sd.name, sd.span, true)),
                 _ => None,
             };
-            if let Some(name) = name {
-                self.declared_type_names.insert(name);
+            if let Some((name, span, concrete)) = entry {
+                if concrete {
+                    self.declared_type_names.insert(name);
+                }
+                match type_decl_spans.entry(name) {
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert(span);
+                    }
+                    std::collections::hash_map::Entry::Occupied(e) => {
+                        let prev = e.get();
+                        if prev.start != span.start || prev.file != span.file {
+                            self.type_errors.push(format!(
+                                "{}: type `{}` is defined more than once (previous \
+                                 definition at {}); type names are global — a type in an \
+                                 imported module collides with a top-level type of the \
+                                 same name",
+                                span.loc(),
+                                name,
+                                prev.loc()
+                            ));
+                        }
+                    }
+                }
             }
         }
 
@@ -130,6 +153,16 @@ impl Typer {
                     self.declare_extern_sig(ef);
                 }
                 ast::Decl::Use(u) => {
+                    let scoped = if u.path.len() == 1 {
+                        self.resolve_scoped_use(u.path[0]).map(|_| ())
+                    } else if u.path.len() > 1 {
+                        self.resolve_scoped_path_use(&u.path).map(|_| ())
+                    } else {
+                        Ok(())
+                    };
+                    if let Err(e) = scoped {
+                        self.type_errors.push(e);
+                    }
                     let mod_name = u
                         .alias
                         .unwrap_or_else(|| u.path.last().cloned().unwrap_or_default());

@@ -1,4 +1,121 @@
 # Changelog
+- **[167]** (2026-08-18) alpha review blockers close out — the last seven review blockers land (`DIST-1` dead spill temp, `DIST-5r` cross-process store, `STD-5` dataframe sort, `SYN-6`, `MIR-1`, `TYP-5`, `TDX-3`) plus `MIR-5`/`PAR-2`/`PAR-3`/`PERF-2` and the std tier demotion; fixing `DIST-1` makes raft's election converge and exposes one new blocker (`CG-7`, extern out-parameters)
+
+Full suite is 2385, green; fmt/clippy clean. 15 new pins across
+`tests/alpha_hardening_pins.rs`, `tests/closure_captures.rs`, and three new
+`tests/stdlib/` suites (bigint, dataframe, crypto, raft).
+
+- **DIST-1 / STD-7 — the dead spill temp.** A struct-returning `Call` was the
+  only struct producer without a def-site memory slot: `StructInit` allocates
+  one and `Load` registers the variable's, but a call result stayed a raw SSA
+  aggregate. So when it was passed to a by-pointer parameter,
+  `coerce_call_args` spilled it to a fresh `struct.arg` temp that nothing read
+  back — the callee mutated the temp and the caller kept the stale value.
+  `canonicalize_struct_call_result` now gives every `Struct`/`Tuple` call
+  result an entry slot at its definition site, registered in
+  `self_allocs`/`self_alloc_types`/`local_struct_values`, so every use resolves
+  through the same slot and the retroactive `value_map` swap the MethodCall
+  path performed lazily is no longer reachable for call results. Measured:
+  three `tick(s)` calls against `s is new_server(…)` read back `0` before and
+  `3` after. This was the root of raft's inertness — single-node election now
+  converges follower → candidate → leader, pinned in a new
+  `tests/stdlib/raft_tests.jn` (7 suites), so `stdlib.md`'s "has never been
+  observed to converge" is retired.
+- **MIR-1 — same-name binders, and the capture regression it caused.**
+  `for`/`sim for`/`loop` and list-comprehension binders are keyed by `DefId`
+  (`alias_binder` mints `name#b<id>`, `var_key` resolves reads and writes),
+  so same-name binders in nested or sibling loops stop sharing one
+  function-global slot. Aliasing alone broke *every* capture site, because
+  they resolve free variables by source name: a lambda or `dispatch` body
+  referring to a `for` binder failed with `Load of undefined variable`.
+  `collect_var_refs_*` now carries the binder `DefId`, so lambdas, scope
+  tasks, and generators look the outer value up by its aliased storage key
+  while the task/lambda parameter keeps the plain source name (the sub-lowerer
+  has its own empty alias map). Four capture shapes pinned.
+- **Void-returning lambdas.** Lambda lowering emitted `return <value>` even
+  when the lambda's type was `Fn(_, Void)`. Reachable from ordinary code —
+  `apply(|x| log x, 5)` against a `(i64) returns void` parameter fails MIR
+  verification ("return in bb0 yields type I64 but function ret_ty is Void")
+  without the fix. Found while probing captures; pinned.
+- **DIST-5r — cross-process store access.** The single-process policy is now
+  enforced at *open* rather than per-op: `jinn_store_open_data` takes an
+  exclusive non-blocking `flock` on `<store>.lock`, and a second process exits
+  2 naming the store instead of running with a `FILE*` that another process's
+  rewrite can invalidate. Verified with two concurrent processes.
+- **STD-5 — dataframe sort.** Both insertion sorts ended their inner loop by
+  assigning `j is -1` and then used that same `j` as the insertion index, so
+  every non-trivial sort wrote the key to slot 0 — losing and duplicating
+  rows. Replaced with a real `while j >= 0 and …` guard; `dataframe` and the
+  crypto stack gained behavioral suites and left the provisional tier.
+- **SYN-6, TYP-5, MIR-5, PAR-2, PAR-3.** A `match` arm whose pattern is a bare
+  identifier already bound in scope is a compile error naming the shadowing
+  instead of an always-true match that overwrites the outer binding. Generic
+  instantiations mangle through `mangle_mono_struct` (a `__G_` marker plus
+  per-argument encoding) with `check_mono_collision` rejecting the residual
+  cases, so `Pair of A, B` at `i64, i64` and a declared `Pair_i64_i64` coexist.
+  A non-literal tuple index is a typed error (element types differ per
+  position) and a literal index past the end reports the arity. `use` inside a
+  function body is a parse error pointing at the top of the file, matching the
+  EBNF — which meant the scoped package-visibility check, wired only to the
+  statement form, went dead with it; it now runs on top-level `Decl::Use`, and
+  module resolution resolves a reach-in path (`use baz/bar`) to the reached
+  package. `save`/`destroy`/`restore`/`compact` are documented in `jinn.md`
+  with a compiled example.
+- **TDX-3 — stale `jinn run` cache.** `jinn run` writes a `.deps` manifest of
+  content hashes for every resolved source and recompiles when any changes;
+  `JINN_NO_RUN_CACHE=1` forces a rebuild. Verified by editing an imported
+  module between runs (`1` then `42`).
+- **bigint `__divmod`.** The multi-chunk path computed each quotient digit by
+  repeated subtraction — cost linear in the digit's *value*, up to `BASE`-1 ≈
+  10⁹ iterations, each allocating two vectors — and recomputed the shifted
+  divisor inside that loop. Replaced with a binary search for the digit
+  (~30 iterations) against a new `__mul_small`, with the shift hoisted to once
+  per position; `hi` is `BASE-1` because the digit is provably `< BASE` at
+  every position. `modpow(3, 200, 1000000007)` went from non-terminating
+  (>8 s, ~1000 s projected) to 5 ms. Validated differentially against Python:
+  280/280 `div`/`modulo` outputs over 140 random pairs (1–40 digits plus
+  chunk-boundary edges) and 75/75 `power`/`modpow`/`gcd` assertions; pinned in
+  `tests/stdlib/bigint_tests.jn`.
+- **PERF-2, GATE-2, supervisor, process.** The in-tree Rust `array_ops`
+  baseline ran 1,500,000,000 iterations and the Python one 10,000,000 against
+  Jinn's and C's 50,000,000 — every published J/RUST ratio from that file was
+  invalid; both now run 50,000,000. CI gained a `sanitize-corpus` job
+  (executable-corpus ASan+LSan sweep plus the ownership-mutation fuzzer).
+  `jinn_sup_*` takes a lock around child-exit and start, and reports a child
+  that exceeds the restart cap instead of going quiet. `process.run` lost its
+  64 KB truncation (`jinn_popen_read_all` / `jinn_spawn_capture_all` grow to
+  EOF) — but see below.
+- **New: `CG-7` (B) — extern out-parameters are ignored.** `%x` on a local
+  lowers to `ref` of an *SSA value*, which codegen spills to a throwaway
+  alloca; later reads of `x` still read the original SSA value, so the
+  callee's writes through the pointer are dropped. The MIR is explicit
+  (`v1 = int 0`, `v5 = ref v1`, `call …`, `log v1`) and the emitted IR folds
+  both reads to the constant `0`. Same class as `DIST-1` one level lower: a
+  value with no def-site slot spilled to a temp nothing reads back. This is
+  why `STD-11`'s fix does not work — `process.run` now returns an *empty*
+  string rather than a truncated one, so `process` is demoted to provisional
+  alongside `raft` and `bangle`. Fixing it means forcing an address-taken
+  binder to memory in MIR lowering, which is the next batch's first item.
+- **Next batch scoped.** `docs/roadmap.md` gains a **Next batch ([168])**
+  section sequencing the remaining work into six workstreams, each item
+  carrying a reproduction taken on this tree rather than an inherited claim:
+  WS-A address-taken values and FFI out-parameters (`CG-7`, `STD-11`), WS-B
+  module-scope type identity (`SYN-4`, `SYN-9`), WS-C diagnostic honesty
+  (`SYN-11`, `CG-8`), WS-D provisional-tier exit, WS-E tooling, WS-F
+  concurrency. Two ids (`MIR-2`, `MIR-6`) are flagged verify-and-retire:
+  both look closed as side effects of this pass and need only their original
+  repros re-run. `SYN-4` was re-confirmed in the process and loses its
+  *unverified* mark — two modules each declaring `type Point` make the
+  loser's own constructor fail against the winner's fields, with the
+  diagnostic naming the wrong file.
+- **New: `CG-8` (M) — `$` does not cross into a `dispatch` body.**
+  `dollar_stack` is empty inside the task, so `work($)` is reinterpreted as a
+  placeholder-lambda that is created and discarded; the program silently
+  prints nothing. A lambda in the same position rejects cleanly. Until the
+  void-lambda fix above this shape ICE'd instead, so the failure mode is now
+  silent — filed, not fixed, because the right answer (reject like a lambda,
+  or capture `$` like any binder) is a language decision.
+
 - **[166]** (2026-08-18) WS-3 store-engine close + comptime cut + std byte-count sweep — the review's store workstream lands whole (transactional WAL framing with undo images, locked and validated reads, real migration defaults/drops, the fingerprint sentinel), `src/comptime/` is cut to literal-only type-gated folding, the std `.length`-as-byte-count class is swept at 118 audited sites, and the cheap parser/typer/MIR/fmt blockers close (`not` precedence, literal range errors, duplicate-fn/arm rejection, `vector` reservation, shortest-round-trip float printing)
 
 Full suite is 2358 + 19 new pins, green; fmt/clippy clean.

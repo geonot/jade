@@ -97,7 +97,7 @@ more** — `--emit-hir` does not even run codegen, so anything past the frontend
 Alpha-stable is not a guarantee that every function returns the right answer,
 and not yet a guarantee of API stability across versions.
 
-## Alpha-stable modules (50)
+## Alpha-stable modules (47)
 
 | Domain | Modules |
 | --- | --- |
@@ -106,10 +106,25 @@ and not yet a guarantee of API stability across versions.
 | Text | `strings`, `regex`, `glob`, `codec`, `hex`, `uuid` |
 | Data formats | `json`, `csv`, `toml`, `dataframe` |
 | Crypto | `crypto`, `aes`, `argon`, `blake`, `sha`, `tls` |
-| I/O and OS | `io`, `fs`, `path`, `os`, `args`, `process`, `signal`, `terminal`, `logging` |
-| Networking | `net`, `http`, `url`, `bangle` |
+| I/O and OS | `io`, `fs`, `path`, `os`, `args`, `signal`, `terminal`, `logging` |
+| Networking | `net`, `http`, `url` |
 | Time | `time`, `date` |
-| Concurrency / systems | `event`, `raft` |
+| Concurrency / systems | `event` |
+
+## Provisional modules
+
+These compile and link (the two gates pass) but their observable behavior has
+never been meaningfully exercised, and known behavioral defects are on file —
+so they carry **no stability promise** until they gain behavioral tests:
+
+| Module | Why provisional |
+| --- | --- |
+| `raft` | Aspirational. Its inertness was rooted in DIST-1 (mutation through a free-function parameter never reached the caller), closed in [167] — single-node election now converges follower → candidate → leader, pinned in `tests/stdlib/raft_tests.jn`. Multi-node replication, log matching, and commit advancement remain unexercised (roadmap DIST-2/STD-7). |
+| `bangle` | Routes 404 in the only end-to-end probe run against it (roadmap STD-10). |
+| `process` | `run`/`run_argv` return an empty string: [167] removed their 64 KB truncation, but the replacement reads its length through an extern out-parameter, and those writes are invisible to the caller (roadmap CG-7). |
+
+(`dataframe` and the crypto stack left this list in [167]: dataframe's sort
+defect was fixed and both gained behavioral suites in `tests/stdlib/`.)
 
 ## Experimental modules
 

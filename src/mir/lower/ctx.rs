@@ -42,9 +42,22 @@ pub(super) struct Lowerer {
     pub(super) scope_named: Vec<(crate::intern::Symbol, ValueId)>,
 
     pub(super) borrowed_params: HashSet<Symbol>,
+
+    pub(super) binder_alias: HashMap<crate::hir::DefId, Symbol>,
 }
 
 impl Lowerer {
+    pub(super) fn alias_binder(&mut self, id: crate::hir::DefId, name: Symbol) -> Symbol {
+        *self
+            .binder_alias
+            .entry(id)
+            .or_insert_with(|| Symbol::intern(&format!("{}#b{}", name.as_str(), id.0)))
+    }
+
+    pub(super) fn var_key(&self, id: crate::hir::DefId, name: Symbol) -> Symbol {
+        self.binder_alias.get(&id).copied().unwrap_or(name)
+    }
+
     pub(super) fn new(name: &str, def_id: crate::hir::DefId, span: Span) -> Self {
         let entry = BlockId(0);
         let func = Function {
@@ -100,6 +113,7 @@ impl Lowerer {
             unreachable_blocks: HashSet::new(),
             field_ctx: None,
             borrowed_params: HashSet::new(),
+            binder_alias: HashMap::new(),
             scope_stack: Vec::new(),
             scope_named: Vec::new(),
         }
@@ -202,11 +216,12 @@ impl Lowerer {
             return;
         }
         match &obj.kind {
-            ExprKind::Var(_, name) => {
+            ExprKind::Var(id, name) => {
                 if self.borrowed_params.contains(name) {
                     return;
                 }
-                self.write_var(*name, self.current_block, updated);
+                let key = self.var_key(*id, *name);
+                self.write_var(key, self.current_block, updated);
             }
             ExprKind::Field(parent, parent_field, _) => {
                 self.lower_field_assign(parent, &parent_field.as_str(), updated, span);

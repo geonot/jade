@@ -200,7 +200,7 @@ fn ebnf_keywords_are_reserved_in_lexer() {
 
     let non_keyword_allow: HashSet<&str> = [
         "i64", "i32", "u64", "u32", "f64", "f32", "bool", "string", "char", "void", "self",
-        "block", "on", "vec",
+        "block", "on", "vec", "children", "strategy",
     ]
     .into_iter()
     .collect();
