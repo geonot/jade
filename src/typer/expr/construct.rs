@@ -227,7 +227,7 @@ impl Typer {
         self.lower_struct_or_variant(name, inits, span)
     }
 
-    fn edit_distance(a: &str, b: &str) -> usize {
+    pub(in crate::typer) fn edit_distance(a: &str, b: &str) -> usize {
         let a: Vec<char> = a.to_ascii_lowercase().chars().collect();
         let b: Vec<char> = b.to_ascii_lowercase().chars().collect();
         let mut prev: Vec<usize> = (0..=b.len()).collect();

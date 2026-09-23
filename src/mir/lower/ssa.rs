@@ -7,7 +7,14 @@ use crate::types::Type;
 impl Lowerer {
     pub(super) fn write_var(&mut self, name: Symbol, block: BlockId, val: ValueId) {
         let ty = self.value_type(val);
-        self.var_types.insert(name, ty);
+        self.var_types.insert(name, ty.clone());
+        if self.addr_taken.contains(&name) {
+            let span = self.value_span(val);
+            let prev = self.current_block;
+            self.current_block = block;
+            self.emit_void_typed(InstKind::Store(name, val), ty, span);
+            self.current_block = prev;
+        }
         self.current_def.entry(block).or_default().insert(name, val);
     }
 
@@ -18,6 +25,13 @@ impl Lowerer {
         ty: Type,
         span: Span,
     ) -> ValueId {
+        if self.addr_taken.contains(&name) {
+            let prev = self.current_block;
+            self.current_block = block;
+            let v = self.emit(InstKind::Load(name), ty, span);
+            self.current_block = prev;
+            return v;
+        }
         if let Some(&v) = self.current_def.get(&block).and_then(|m| m.get(&name)) {
             return v;
         }

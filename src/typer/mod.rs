@@ -215,6 +215,8 @@ pub struct Typer {
 
     pub(crate) dollar_stack: Vec<(DefId, Type)>,
 
+    pub(crate) task_body_depth: usize,
+
     pub(crate) root_pkg_id: Option<crate::pkgid::PkgId>,
     pub(crate) dep_pkg_ids: std::collections::HashMap<crate::intern::Symbol, crate::pkgid::PkgId>,
     pub(crate) scoped_use_map: crate::pkgid::ScopedUseMap,
@@ -340,6 +342,7 @@ impl Typer {
             last_inferred_errors: std::collections::BTreeSet::new(),
             escape_tiers: std::collections::HashMap::new(),
             dollar_stack: Vec::new(),
+            task_body_depth: 0,
             root_pkg_id: None,
             dep_pkg_ids: std::collections::HashMap::new(),
             scoped_use_map: crate::pkgid::ScopedUseMap::new(),

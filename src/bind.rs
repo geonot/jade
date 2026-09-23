@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -5,7 +6,10 @@ pub fn bind_header(path: &Path) -> Result<String, String> {
     let src =
         fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
 
-    let cleaned = strip_preprocessor(&strip_comments(&src));
+    let mut seen: Vec<String> = Vec::new();
+    let expanded = inline_local_includes(&src, path, &mut seen, 0);
+    let cleaned = strip_extern_linkage(&strip_preprocessor(&strip_comments(&src)));
+    let cleaned_expanded = strip_extern_linkage(&strip_preprocessor(&strip_comments(&expanded)));
     let mut out = String::new();
     out.push_str(&format!(
         "# Auto-generated Jinn bindings from {}\n\
@@ -14,20 +18,77 @@ pub fn bind_header(path: &Path) -> Result<String, String> {
         path.display()
     ));
 
-    for decl in parse_declarations(&cleaned) {
+    let decls = parse_declarations(&cleaned);
+    let mut aliases: HashMap<String, CType> = HashMap::new();
+    for decl in parse_declarations(&cleaned_expanded) {
+        if let CDecl::Typedef(name, ty) = decl {
+            aliases.insert(name, ty);
+        }
+    }
+
+    for decl in decls {
         match decl {
-            CDecl::Function(f) => {
+            CDecl::Function(mut f) => {
+                f.ret = resolve_alias(&f.ret, &aliases, 0);
+                for p in &mut f.params {
+                    p.ty = resolve_alias(&p.ty, &aliases, 0);
+                }
                 out.push_str(&emit_extern(&f));
                 out.push('\n');
             }
             CDecl::Struct(name) => {
                 out.push_str(&format!("# struct {name} (opaque)\n"));
             }
-            CDecl::Typedef(_) => {}
+            CDecl::Typedef(..) => {}
         }
     }
 
     Ok(out)
+}
+
+fn inline_local_includes(src: &str, path: &Path, seen: &mut Vec<String>, depth: u32) -> String {
+    if depth > 4 {
+        return src.to_string();
+    }
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let mut out = String::with_capacity(src.len());
+    for line in src.lines() {
+        let t = line.trim();
+        let target = t
+            .strip_prefix('#')
+            .map(str::trim_start)
+            .and_then(|r| r.strip_prefix("include"))
+            .map(str::trim)
+            .and_then(|r| match r.chars().next() {
+                Some('"') => r[1..].split('"').next(),
+                Some('<') => r[1..].split('>').next(),
+                _ => None,
+            });
+        if let Some(name) = target {
+            let candidates = [dir.join(name), Path::new("/usr/include").join(name)];
+            let mut inlined = false;
+            for candidate in candidates {
+                let key = candidate.display().to_string();
+                if seen.contains(&key) {
+                    inlined = true;
+                    break;
+                }
+                if let Ok(text) = fs::read_to_string(&candidate) {
+                    seen.push(key);
+                    out.push_str(&inline_local_includes(&text, &candidate, seen, depth + 1));
+                    out.push('\n');
+                    inlined = true;
+                    break;
+                }
+            }
+            if inlined {
+                continue;
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
 }
 
 fn strip_comments(src: &str) -> String {
@@ -78,12 +139,80 @@ fn strip_preprocessor(src: &str) -> String {
     out
 }
 
+fn strip_extern_linkage(src: &str) -> String {
+    let mut out = String::new();
+    let mut linkage = 0usize;
+    let mut depth = 0u32;
+    for line in src.lines() {
+        let t = line.trim();
+        if depth == 0 {
+            if t.starts_with("extern \"") && t.ends_with('{') {
+                linkage += 1;
+                continue;
+            }
+            if t == "}" && linkage > 0 {
+                linkage -= 1;
+                continue;
+            }
+        }
+        for ch in t.chars() {
+            match ch {
+                '{' => depth += 1,
+                '}' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+fn strip_macro_tokens(s: &str) -> String {
+    let tokens: Vec<&str> = s.split_whitespace().collect();
+    let has_primitive = tokens.iter().any(|t| {
+        let bare = t.trim_matches('*');
+        matches!(
+            bare,
+            "void"
+                | "char"
+                | "short"
+                | "int"
+                | "long"
+                | "float"
+                | "double"
+                | "signed"
+                | "unsigned"
+        ) || bare.ends_with("_t")
+    });
+    if !has_primitive {
+        return s.to_string();
+    }
+    let kept: Vec<&str> = tokens
+        .into_iter()
+        .filter(|t| {
+            let bare = t.trim_matches('*');
+            if bare.is_empty() {
+                return true;
+            }
+            !(bare
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+                && bare.chars().any(|c| c.is_ascii_uppercase()))
+        })
+        .collect();
+    if kept.is_empty() {
+        return s.to_string();
+    }
+    kept.join(" ")
+}
+
 #[derive(Debug)]
 #[allow(dead_code)]
 enum CDecl {
     Function(CFn),
     Struct(String),
-    Typedef(String),
+    Typedef(String, CType),
 }
 
 #[derive(Debug)]
@@ -127,6 +256,20 @@ enum CType {
     Named(String),
 }
 
+fn resolve_alias(ty: &CType, aliases: &HashMap<String, CType>, depth: u32) -> CType {
+    if depth > 8 {
+        return ty.clone();
+    }
+    match ty {
+        CType::Named(n) => match aliases.get(n) {
+            Some(target) => resolve_alias(target, aliases, depth + 1),
+            None => ty.clone(),
+        },
+        CType::Ptr(inner) => CType::Ptr(Box::new(resolve_alias(inner, aliases, depth + 1))),
+        _ => ty.clone(),
+    }
+}
+
 fn parse_declarations(src: &str) -> Vec<CDecl> {
     let mut decls = Vec::new();
 
@@ -149,8 +292,8 @@ fn parse_declarations(src: &str) -> Vec<CDecl> {
         }
 
         if trimmed.starts_with("typedef") {
-            if let Some(name) = try_parse_typedef_name(trimmed) {
-                decls.push(CDecl::Typedef(name));
+            if let Some((name, ty)) = try_parse_typedef(trimmed) {
+                decls.push(CDecl::Typedef(name, ty));
             }
             continue;
         }
@@ -217,17 +360,22 @@ fn try_parse_struct_name(line: &str) -> Option<String> {
     Some(name.to_string())
 }
 
-fn try_parse_typedef_name(line: &str) -> Option<String> {
+fn try_parse_typedef(line: &str) -> Option<(String, CType)> {
     let line = line
         .strip_prefix("typedef")?
         .trim()
         .strip_suffix(';')?
         .trim();
-    let name = line.rsplit_once(|c: char| c.is_whitespace() || c == '*')?.1;
-    if name.is_empty() {
+    if line.contains('(') || line.contains(',') {
         return None;
     }
-    Some(name.to_string())
+    let split = line.rfind(|c: char| c.is_whitespace() || c == '*')?;
+    let name = line[split + 1..].trim();
+    let target = line[..split + 1].trim();
+    if name.is_empty() || target.is_empty() || !is_jinn_ident(name) {
+        return None;
+    }
+    Some((name.to_string(), parse_c_type(target)))
 }
 
 fn try_parse_function(line: &str) -> Option<CFn> {
@@ -294,7 +442,8 @@ fn parse_c_type(s: &str) -> CType {
     let s = s.trim();
 
     let s_no_const = s.replace("const ", "").replace(" const", "");
-    let s = s_no_const.trim();
+    let s_no_macros = strip_macro_tokens(s_no_const.trim());
+    let s = s_no_macros.trim();
 
     let ptr_count = s.chars().filter(|&c| c == '*').count();
     let base = s.replace('*', "").trim().to_string();
@@ -450,7 +599,10 @@ fn ctype_to_jinn(ty: &CType) -> String {
         | CType::UInt64 => "i64".to_string(),
         CType::Float => "f32".to_string(),
         CType::Double => "f64".to_string(),
-        CType::Ptr(inner) => format!("%{}", ctype_to_jinn(inner)),
+        CType::Ptr(inner) => match inner.as_ref() {
+            CType::Void | CType::Named(_) => "%i8".to_string(),
+            _ => format!("%{}", ctype_to_jinn(inner)),
+        },
         CType::Named(_) => "void".to_string(),
     }
 }

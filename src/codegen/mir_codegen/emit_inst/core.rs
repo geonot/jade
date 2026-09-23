@@ -827,6 +827,15 @@ impl<'ctx> Compiler<'ctx> {
                         Err(format!("Load of undefined variable `{name}`"))
                     }
                 }
+                mir::InstKind::AddrOf(name) => {
+                    if let Some((ptr, _)) = self.var_allocs.get(name).cloned() {
+                        Ok(ptr.into())
+                    } else if let Some((ptr, _)) = self.find_var(&name.as_str()).cloned() {
+                        Ok(ptr.into())
+                    } else {
+                        Err(format!("AddrOf of undefined variable `{name}`"))
+                    }
+                }
                 mir::InstKind::Store(name, val) => {
                     let effective_ty = match &inst.ty {
                         Type::Ptr(inner)

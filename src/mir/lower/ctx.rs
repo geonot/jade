@@ -44,6 +44,8 @@ pub(super) struct Lowerer {
     pub(super) borrowed_params: HashSet<Symbol>,
 
     pub(super) binder_alias: HashMap<crate::hir::DefId, Symbol>,
+
+    pub(super) addr_taken: HashSet<Symbol>,
 }
 
 impl Lowerer {
@@ -56,6 +58,40 @@ impl Lowerer {
 
     pub(super) fn var_key(&self, id: crate::hir::DefId, name: Symbol) -> Symbol {
         self.binder_alias.get(&id).copied().unwrap_or(name)
+    }
+
+    pub(super) fn mark_address_taken(&mut self, body: &[hir::Stmt]) {
+        let mut taken = HashSet::new();
+        super::closures::collect_addr_taken_block(body, &mut taken);
+        taken.retain(|n| !self.borrowed_params.contains(n));
+        if taken.is_empty() {
+            return;
+        }
+        self.addr_taken.extend(taken);
+
+        let entry = self.func.entry;
+        let params: Vec<(Symbol, Type, ValueId)> = self
+            .func
+            .params
+            .iter()
+            .filter(|p| self.addr_taken.contains(&p.name))
+            .map(|p| {
+                let val = self
+                    .current_def
+                    .get(&entry)
+                    .and_then(|m| m.get(&p.name))
+                    .copied()
+                    .unwrap_or(p.value);
+                (p.name, p.ty.clone(), val)
+            })
+            .collect();
+        let prev = self.current_block;
+        self.current_block = entry;
+        let span = self.func.span;
+        for (name, ty, val) in params {
+            self.emit_void_typed(InstKind::Store(name, val), ty, span);
+        }
+        self.current_block = prev;
     }
 
     pub(super) fn new(name: &str, def_id: crate::hir::DefId, span: Span) -> Self {
@@ -114,6 +150,7 @@ impl Lowerer {
             field_ctx: None,
             borrowed_params: HashSet::new(),
             binder_alias: HashMap::new(),
+            addr_taken: HashSet::new(),
             scope_stack: Vec::new(),
             scope_named: Vec::new(),
         }
@@ -323,6 +360,51 @@ impl Lowerer {
             }
         }
         None
+    }
+
+    pub(super) fn value_span(&self, val: ValueId) -> Span {
+        for bb in &self.func.blocks {
+            for inst in &bb.insts {
+                if inst.dest == Some(val) {
+                    return inst.span;
+                }
+            }
+        }
+        self.func.span
+    }
+
+    pub(super) fn addressable_scalar(ty: &Type) -> bool {
+        matches!(
+            ty,
+            Type::I8
+                | Type::I16
+                | Type::I32
+                | Type::I64
+                | Type::U8
+                | Type::U16
+                | Type::U32
+                | Type::U64
+                | Type::F32
+                | Type::F64
+                | Type::Bool
+                | Type::Ptr(_)
+        )
+    }
+
+    pub(super) fn take_address(
+        &mut self,
+        key: Symbol,
+        var_ty: Type,
+        ptr_ty: Type,
+        span: Span,
+    ) -> ValueId {
+        if !self.addr_taken.contains(&key) {
+            let cur = self.read_var(key, self.current_block, var_ty.clone(), span);
+            self.emit_void_typed(InstKind::Store(key, cur), var_ty.clone(), span);
+            self.addr_taken.insert(key);
+            self.var_types.insert(key, var_ty);
+        }
+        self.emit(InstKind::AddrOf(key), ptr_ty, span)
     }
 
     pub(super) fn value_type(&self, val: ValueId) -> Type {

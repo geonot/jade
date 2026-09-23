@@ -5,6 +5,63 @@ use crate::intern::Symbol;
 use crate::types::Type;
 
 impl Typer {
+    fn unknown_method_error(&self, obj_ty: &Type, method: &str, span: Span) -> Option<String> {
+        let (subject, known): (String, Vec<String>) = match obj_ty {
+            Type::Struct(n, targs)
+                if targs.is_empty()
+                    && self.structs.contains_key(n)
+                    && !self.generic_types.contains_key(n)
+                    && !self.generic_enums.contains_key(n)
+                    && !n.as_str().starts_with("__") =>
+            {
+                let prefix = format!("{n}_");
+                let mut names: Vec<String> = self
+                    .fns
+                    .keys()
+                    .filter_map(|f| f.as_str().strip_prefix(&prefix).map(str::to_string))
+                    .collect();
+                names.sort();
+                names.dedup();
+                (n.as_str().to_string(), names)
+            }
+            Type::I8
+            | Type::I16
+            | Type::I32
+            | Type::I64
+            | Type::U8
+            | Type::U16
+            | Type::U32
+            | Type::U64
+            | Type::Bool => (format!("{obj_ty}"), Vec::new()),
+            _ => return None,
+        };
+
+        let budget = (method.len() / 3).clamp(1, 3);
+        let near = known
+            .iter()
+            .map(|c| (Self::edit_distance(method, c), c))
+            .filter(|(d, _)| *d <= budget)
+            .min_by_key(|(d, c)| (*d, c.len()))
+            .map(|(_, c)| c.clone());
+
+        Some(match near {
+            Some(c) => format!(
+                "{}: unknown method `{}` on `{}` — did you mean `{}`?",
+                span.loc(),
+                method,
+                subject,
+                c
+            ),
+            None => format!(
+                "{}: unknown method `{}` on `{}`: no method with that name is declared on \
+                 the type and no implemented trait provides one",
+                span.loc(),
+                method,
+                subject
+            ),
+        })
+    }
+
     pub(crate) fn lower_method_call(
         &mut self,
         obj: &ast::Expr,
@@ -836,6 +893,12 @@ impl Typer {
                 ret_ty: ret_ty.clone(),
                 span,
             });
+        } else if let Some(err) = self.unknown_method_error(&obj_ty, method, span) {
+            self.type_errors.push(err);
+
+            let _ = self
+                .infer_ctx
+                .unify_at(&ret_ty, &Type::I64, span, "unknown method placeholder");
         }
         Ok(hir::Expr {
             kind: hir::ExprKind::DeferredMethod(Box::new(hobj), method.into(), hargs),

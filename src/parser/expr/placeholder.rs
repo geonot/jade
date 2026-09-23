@@ -74,6 +74,8 @@ pub(in crate::parser) fn contains_placeholder(expr: &Expr) -> bool {
         Expr::Array(elems, _) => elems.iter().any(contains_placeholder),
         Expr::Tuple(elems, _) => elems.iter().any(contains_placeholder),
         Expr::Pipe(l, r, _, _) => contains_placeholder(l) || contains_placeholder(r),
+        Expr::DispatchBlock(_, body, _) => body.iter().any(contains_placeholder_in_stmt),
+        Expr::Block(body, _) => body.iter().any(contains_placeholder_in_stmt),
         _ => false,
     }
 }
@@ -160,6 +162,10 @@ pub(in crate::parser) fn replace_placeholder(expr: &Expr, name: &str) -> Expr {
             extra.iter().map(|e| replace_placeholder(e, name)).collect(),
             *sp,
         ),
+        Expr::DispatchBlock(n, body, sp) => {
+            Expr::DispatchBlock(*n, replace_placeholder_in_block(body, name), *sp)
+        }
+        Expr::Block(body, sp) => Expr::Block(replace_placeholder_in_block(body, name), *sp),
         other => other.clone(),
     }
 }
@@ -193,6 +199,14 @@ pub(in crate::parser) fn contains_placeholder_in_stmt(stmt: &Stmt) -> bool {
             contains_placeholder(&f.iter) || f.body.iter().any(contains_placeholder_in_stmt)
         }
         Stmt::Loop(l) => l.body.iter().any(contains_placeholder_in_stmt),
+        Stmt::Defer(b, _) | Stmt::Transaction(b, _) | Stmt::SimBlock(b, _) => {
+            b.iter().any(contains_placeholder_in_stmt)
+        }
+        Stmt::Together(_, b, h, _) => {
+            b.iter().any(contains_placeholder_in_stmt)
+                || h.ok_arm.as_deref().is_some_and(contains_placeholder)
+                || h.err_arm.as_deref().is_some_and(contains_placeholder)
+        }
         Stmt::Ret(Some(e), _) => contains_placeholder(e),
         Stmt::Break(Some(e), _) => contains_placeholder(e),
         Stmt::Match(m) => {
@@ -267,6 +281,32 @@ pub(in crate::parser) fn replace_placeholder_in_stmt(stmt: &Stmt, name: &str) ->
             body: replace_placeholder_in_block(&l.body, name),
             span: l.span,
         }),
+        Stmt::Defer(b, sp) => Stmt::Defer(replace_placeholder_in_block(b, name), *sp),
+        Stmt::Transaction(b, sp) => Stmt::Transaction(replace_placeholder_in_block(b, name), *sp),
+        Stmt::SimBlock(b, sp) => Stmt::SimBlock(replace_placeholder_in_block(b, name), *sp),
+        Stmt::Together(lbl, b, h, sp) => Stmt::Together(
+            *lbl,
+            replace_placeholder_in_block(b, name),
+            TogetherHandler {
+                ok_arm: h.ok_arm.as_ref().map(|e| Box::new(replace_placeholder(e, name))),
+                err_arm: h.err_arm.as_ref().map(|e| Box::new(replace_placeholder(e, name))),
+            },
+            *sp,
+        ),
+        Stmt::SimFor(f, sp) => Stmt::SimFor(
+            For {
+                label: f.label,
+                bind: f.bind,
+                bind2: f.bind2,
+                iter: replace_placeholder(&f.iter, name),
+                end: f.end.as_ref().map(|e| replace_placeholder(e, name)),
+                step: f.step.as_ref().map(|e| replace_placeholder(e, name)),
+                body: replace_placeholder_in_block(&f.body, name),
+                access_mod: f.access_mod,
+                span: f.span,
+            },
+            *sp,
+        ),
         Stmt::Ret(val, sp) => Stmt::Ret(val.as_ref().map(|e| replace_placeholder(e, name)), *sp),
         Stmt::Break(val, sp) => {
             Stmt::Break(val.as_ref().map(|e| replace_placeholder(e, name)), *sp)
@@ -314,6 +354,8 @@ pub(in crate::parser) fn contains_index_placeholder(expr: &Expr) -> bool {
         Expr::Array(elems, _) => elems.iter().any(contains_index_placeholder),
         Expr::Tuple(elems, _) => elems.iter().any(contains_index_placeholder),
         Expr::Pipe(l, r, _, _) => contains_index_placeholder(l) || contains_index_placeholder(r),
+        Expr::DispatchBlock(_, body, _) => body.iter().any(contains_index_placeholder_in_stmt),
+        Expr::Block(body, _) => body.iter().any(contains_index_placeholder_in_stmt),
         _ => false,
     }
 }
@@ -386,6 +428,10 @@ pub(in crate::parser) fn replace_index_placeholder(expr: &Expr, name: &str) -> E
                 .collect(),
             *sp,
         ),
+        Expr::DispatchBlock(n, body, sp) => {
+            Expr::DispatchBlock(*n, replace_index_placeholder_in_block(body, name), *sp)
+        }
+        Expr::Block(body, sp) => Expr::Block(replace_index_placeholder_in_block(body, name), *sp),
         other => other.clone(),
     }
 }
@@ -425,6 +471,14 @@ pub(in crate::parser) fn contains_index_placeholder_in_stmt(stmt: &Stmt) -> bool
                 || f.body.iter().any(contains_index_placeholder_in_stmt)
         }
         Stmt::Loop(l) => l.body.iter().any(contains_index_placeholder_in_stmt),
+        Stmt::Defer(b, _) | Stmt::Transaction(b, _) | Stmt::SimBlock(b, _) => {
+            b.iter().any(contains_index_placeholder_in_stmt)
+        }
+        Stmt::Together(_, b, h, _) => {
+            b.iter().any(contains_index_placeholder_in_stmt)
+                || h.ok_arm.as_deref().is_some_and(contains_index_placeholder)
+                || h.err_arm.as_deref().is_some_and(contains_index_placeholder)
+        }
         Stmt::Ret(Some(e), _) => contains_index_placeholder(e),
         Stmt::Break(Some(e), _) => contains_index_placeholder(e),
         Stmt::Match(m) => {
@@ -502,6 +556,32 @@ pub(in crate::parser) fn replace_index_placeholder_in_stmt(stmt: &Stmt, name: &s
             body: replace_index_placeholder_in_block(&l.body, name),
             span: l.span,
         }),
+        Stmt::Defer(b, sp) => Stmt::Defer(replace_index_placeholder_in_block(b, name), *sp),
+        Stmt::Transaction(b, sp) => Stmt::Transaction(replace_index_placeholder_in_block(b, name), *sp),
+        Stmt::SimBlock(b, sp) => Stmt::SimBlock(replace_index_placeholder_in_block(b, name), *sp),
+        Stmt::Together(lbl, b, h, sp) => Stmt::Together(
+            *lbl,
+            replace_index_placeholder_in_block(b, name),
+            TogetherHandler {
+                ok_arm: h.ok_arm.as_ref().map(|e| Box::new(replace_index_placeholder(e, name))),
+                err_arm: h.err_arm.as_ref().map(|e| Box::new(replace_index_placeholder(e, name))),
+            },
+            *sp,
+        ),
+        Stmt::SimFor(f, sp) => Stmt::SimFor(
+            For {
+                label: f.label,
+                bind: f.bind,
+                bind2: f.bind2,
+                iter: replace_index_placeholder(&f.iter, name),
+                end: f.end.as_ref().map(|e| replace_index_placeholder(e, name)),
+                step: f.step.as_ref().map(|e| replace_index_placeholder(e, name)),
+                body: replace_index_placeholder_in_block(&f.body, name),
+                access_mod: f.access_mod,
+                span: f.span,
+            },
+            *sp,
+        ),
         Stmt::Ret(val, sp) => Stmt::Ret(
             val.as_ref().map(|e| replace_index_placeholder(e, name)),
             *sp,

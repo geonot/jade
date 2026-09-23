@@ -431,6 +431,7 @@ pub(super) fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
         | InstKind::Void
         | InstKind::MapInit
         | InstKind::Load(_)
+        | InstKind::AddrOf(_)
         | InstKind::FnRef(_)
         | InstKind::GlobalLoad(_) => vec![],
 

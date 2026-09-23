@@ -282,6 +282,14 @@ impl Typer {
                         span: *span,
                     });
                 }
+                if self.task_body_depth > 0 {
+                    return Err(format!(
+                        "{}: `$` has no value here: this `dispatch` body is not inside \
+                         the `loop`/`?`/`!!` form that binds `$`; bind the value to a \
+                         name outside the `dispatch` and capture that name instead",
+                        span.loc(),
+                    ));
+                }
                 Err(format!(
                     "{}: `$` has no value here: it names the result inside a `?`/`!!` \
                      handler arm, and this expression is not inside one; bind the value \

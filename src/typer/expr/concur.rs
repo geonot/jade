@@ -123,7 +123,10 @@ impl Typer {
         match expr {
             ast::Expr::DispatchBlock(name, body, span) => {
                 let outer_ids = self.in_scope_def_ids();
-                let hbody = self.lower_block_no_scope(body, &Type::Void)?;
+                self.task_body_depth += 1;
+                let lowered = self.lower_block_no_scope(body, &Type::Void);
+                self.task_body_depth -= 1;
+                let hbody = lowered?;
 
                 self.mark_task_captures(&hbody, &outer_ids, *span)?;
                 let yield_ty = self.infer_coroutine_yield_type(&hbody);

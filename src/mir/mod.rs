@@ -183,6 +183,8 @@ pub enum InstKind {
     Load(Symbol),
     Store(Symbol, ValueId),
 
+    AddrOf(Symbol),
+
     FieldGet(ValueId, Symbol),
     FieldSet(ValueId, Symbol, ValueId),
 

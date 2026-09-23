@@ -644,6 +644,22 @@ impl Typer {
                 span: s,
             }));
         }
+        let summary = match tests.len() {
+            1 => "1 test passed".to_string(),
+            n => format!("{n} tests passed"),
+        };
+        body.push(hir::Stmt::Expr(hir::Expr {
+            kind: hir::ExprKind::Builtin(
+                hir::BuiltinFn::Log,
+                vec![hir::Expr {
+                    kind: hir::ExprKind::Str(summary),
+                    ty: Type::String,
+                    span: s,
+                }],
+            ),
+            ty: Type::Void,
+            span: s,
+        }));
         hir::Fn {
             def_id: id,
             name: "main".into(),

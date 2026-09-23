@@ -106,6 +106,7 @@ fn format_inst_kind(kind: &InstKind) -> String {
         InstKind::FnRef(name) => format!("fn_ref {name}"),
         InstKind::Load(name) => format!("load {name}"),
         InstKind::Store(name, val) => format!("store {name} {val}"),
+        InstKind::AddrOf(name) => format!("addr_of {name}"),
         InstKind::GlobalLoad(name) => format!("global_load {name}"),
         InstKind::GlobalStore(name, val) => format!("global_store {name} {val}"),
 

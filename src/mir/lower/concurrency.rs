@@ -119,9 +119,10 @@ impl Lowerer {
                 if name.as_str().starts_with("__anon")
                     && let Some(&scope_val) = self.scope_stack.last()
                 {
-                    let mut refs = std::collections::HashSet::new();
+                    let mut refs = super::closures::VarRefs::default();
                     super::closures::collect_var_refs_block(body, &mut refs);
                     let mut resolved: Vec<(Symbol, Symbol)> = refs
+                        .vars
                         .into_iter()
                         .map(|(id, n)| (self.var_key(id, n), n))
                         .collect();
@@ -172,11 +173,11 @@ impl Lowerer {
             }
 
             ExprKind::GeneratorCreate(def_id, name, body, captures) => {
-                let mut refs = std::collections::HashSet::new();
+                let mut refs = super::closures::VarRefs::default();
                 super::closures::collect_var_refs_block(body, &mut refs);
                 let mut alias_of: std::collections::HashMap<Symbol, Symbol> =
                     std::collections::HashMap::new();
-                for (id, n) in refs {
+                for (id, n) in refs.vars {
                     let key = self.var_key(id, n);
                     if key != n {
                         alias_of.insert(n, key);

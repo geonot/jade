@@ -155,6 +155,15 @@ impl Lowerer {
                 self.emit(InstKind::StrictCast(v, target_ty.clone()), ty, span)
             }
             ExprKind::Ref(inner) => {
+                if let ExprKind::Var(def_id, name) = &inner.kind
+                    && Self::addressable_scalar(&inner.ty)
+                    && self.field_lookup(*def_id).is_none()
+                {
+                    let key = self.var_key(*def_id, *name);
+                    if !self.borrowed_params.contains(&key) {
+                        return self.take_address(key, inner.ty.clone(), ty, span);
+                    }
+                }
                 let v = self.lower_expr(inner);
                 self.emit(InstKind::Ref(v), ty, span)
             }

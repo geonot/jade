@@ -150,6 +150,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
         | InstKind::StringConst(_)
         | InstKind::Void
         | InstKind::Load(_)
+        | InstKind::AddrOf(_)
         | InstKind::GlobalLoad(_)
         | InstKind::FnRef(_) => {}
     }

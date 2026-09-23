@@ -236,7 +236,10 @@ pub fn run() {
                     Ok(s) if s.success() => println!("all tests passed"),
                     Ok(s) => {
                         if s.code().is_none() {
-                            eprintln!("test binary terminated by a signal ({s})");
+                            eprintln!(
+                                "test run aborted ({s}) — a failing assertion ends the \
+                                 process, so any test after the one named above did not run"
+                            );
                         }
                         std::process::exit(s.code().unwrap_or(1))
                     }

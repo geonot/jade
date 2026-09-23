@@ -16,9 +16,10 @@ impl Lowerer {
         let lambda_name = format!("lambda.{}", self.func.next_value);
 
         let param_names: HashSet<Symbol> = params.iter().map(|p| p.name).collect();
-        let mut refs = HashSet::new();
+        let mut refs = VarRefs::default();
         collect_var_refs_block(body, &mut refs);
         let mut ref_names: Vec<(Symbol, Symbol)> = refs
+            .vars
             .into_iter()
             .map(|(id, name)| (self.var_key(id, name), name))
             .collect();
@@ -79,6 +80,8 @@ impl Lowerer {
                 .insert(p.name, val);
         }
 
+        lambda_lowerer.mark_address_taken(body);
+
         let tail_idx: Option<usize> = body
             .iter()
             .enumerate()
@@ -129,13 +132,37 @@ impl Lowerer {
     }
 }
 
-pub(super) fn collect_var_refs_block(body: &[hir::Stmt], refs: &mut HashSet<(hir::DefId, Symbol)>) {
+#[derive(Default)]
+pub(super) struct VarRefs {
+    pub(super) vars: HashSet<(hir::DefId, Symbol)>,
+
+    pub(super) addr_taken: HashSet<Symbol>,
+}
+
+impl VarRefs {
+    fn insert(&mut self, r: (hir::DefId, Symbol)) {
+        self.vars.insert(r);
+    }
+
+    fn absorb(&mut self, other: VarRefs) {
+        self.vars.extend(other.vars);
+        self.addr_taken.extend(other.addr_taken);
+    }
+}
+
+pub(super) fn collect_addr_taken_block(body: &[hir::Stmt], out: &mut HashSet<Symbol>) {
+    let mut refs = VarRefs::default();
+    collect_var_refs_block(body, &mut refs);
+    out.extend(refs.addr_taken);
+}
+
+pub(super) fn collect_var_refs_block(body: &[hir::Stmt], refs: &mut VarRefs) {
     for stmt in body {
         collect_var_refs_stmt(stmt, refs);
     }
 }
 
-fn collect_var_refs_stmt(stmt: &hir::Stmt, refs: &mut HashSet<(hir::DefId, Symbol)>) {
+fn collect_var_refs_stmt(stmt: &hir::Stmt, refs: &mut VarRefs) {
     match stmt {
         hir::Stmt::Bind(b) => collect_var_refs_expr(&b.value, refs),
         hir::Stmt::Assign(target, value, _) => {
@@ -167,9 +194,14 @@ fn collect_var_refs_stmt(stmt: &hir::Stmt, refs: &mut HashSet<(hir::DefId, Symbo
         hir::Stmt::Match(match_stmt) => {
             collect_var_refs_expr(&match_stmt.subject, refs);
             for arm in &match_stmt.arms {
+                if let Some(guard) = &arm.guard {
+                    collect_var_refs_expr(guard, refs);
+                }
                 collect_var_refs_block(&arm.body, refs);
             }
         }
+        hir::Stmt::Defer(body, _) => collect_var_refs_block(body, refs),
+        hir::Stmt::GlobalStore(_, expr, _) => collect_var_refs_expr(expr, refs),
         hir::Stmt::Break(Some(expr), _)
         | hir::Stmt::ErrReturn(expr, _, _)
         | hir::Stmt::ChannelClose(expr, _)
@@ -200,7 +232,7 @@ fn collect_var_refs_stmt(stmt: &hir::Stmt, refs: &mut HashSet<(hir::DefId, Symbo
     }
 }
 
-fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut HashSet<(hir::DefId, Symbol)>) {
+fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut VarRefs) {
     match &expr.kind {
         ExprKind::Var(id, name) => {
             refs.insert((*id, *name));
@@ -209,8 +241,15 @@ fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut HashSet<(hir::DefId, Symbo
             collect_var_refs_expr(left, refs);
             collect_var_refs_expr(right, refs);
         }
+        ExprKind::Ref(inner) => {
+            if let ExprKind::Var(_, name) = &inner.kind
+                && Lowerer::addressable_scalar(&inner.ty)
+            {
+                refs.addr_taken.insert(*name);
+            }
+            collect_var_refs_expr(inner, refs);
+        }
         ExprKind::UnaryOp(_, inner)
-        | ExprKind::Ref(inner)
         | ExprKind::Deref(inner)
         | ExprKind::Cast(inner, _)
         | ExprKind::StrictCast(inner, _)
@@ -332,10 +371,14 @@ fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut HashSet<(hir::DefId, Symbo
         }
         ExprKind::Block(stmts) => collect_var_refs_block(stmts, refs),
         ExprKind::Lambda(inner_params, stmts) => {
-            let mut inner = HashSet::new();
+            let mut inner = VarRefs::default();
             collect_var_refs_block(stmts, &mut inner);
-            inner.retain(|(_, n)| !inner_params.iter().any(|p| p.name == *n));
-            refs.extend(inner);
+            inner
+                .vars
+                .retain(|(_, n)| !inner_params.iter().any(|p| p.name == *n));
+
+            inner.addr_taken.clear();
+            refs.absorb(inner);
         }
         _ => {}
     }

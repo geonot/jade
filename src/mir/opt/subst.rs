@@ -144,6 +144,7 @@ pub(crate) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
         | InstKind::StringConst(_)
         | InstKind::Void
         | InstKind::Load(_)
+        | InstKind::AddrOf(_)
         | InstKind::GlobalLoad(_)
         | InstKind::FnRef(_) => {}
     }

@@ -13,11 +13,18 @@ pub fn store_load_forwarding(func: &mut Function) -> bool {
         }
 
         let mut known: HashMap<Symbol, ValueId> = HashMap::new();
+        let mut escaped: HashSet<Symbol> = HashSet::new();
 
         for inst in &bb.insts {
             match &inst.kind {
+                InstKind::AddrOf(name) => {
+                    escaped.insert(*name);
+                    known.remove(name);
+                }
                 InstKind::Store(name, val) => {
-                    known.insert(*name, *val);
+                    if !escaped.contains(name) {
+                        known.insert(*name, *val);
+                    }
                 }
                 InstKind::Load(name) => {
                     if let Some(&val) = known.get(name) {
@@ -25,7 +32,9 @@ pub fn store_load_forwarding(func: &mut Function) -> bool {
                             replacements.insert(dest, val);
                             dead_loads.insert(dest);
                         }
-                    } else if let Some(dest) = inst.dest {
+                    } else if let Some(dest) = inst.dest
+                        && !escaped.contains(name)
+                    {
                         known.insert(*name, dest);
                     }
                 }

@@ -17,6 +17,38 @@ mod resolve;
 
 impl Typer {
     pub fn lower_program(&mut self, prog: &ast::Program) -> Result<hir::Program, String> {
+        match self.lower_program_inner(prog) {
+            Ok(p) => Ok(p),
+            Err(e) => {
+                let pending = std::mem::take(&mut self.type_errors);
+                if pending.is_empty() || e.starts_with("type checking failed:") {
+                    return Err(e);
+                }
+                let mut seen = std::collections::HashSet::new();
+                let mut all: Vec<String> = Vec::new();
+                for m in pending.into_iter().chain(std::iter::once(e)) {
+                    if seen.insert(m.clone()) {
+                        all.push(m);
+                    }
+                }
+                Err(format!("type checking failed:\n{}", all.join("\n")))
+            }
+        }
+    }
+
+    fn declaration_errors_are_fatal(&mut self) -> Result<(), String> {
+        if self.type_errors.is_empty() {
+            return Ok(());
+        }
+        let mut seen = std::collections::HashSet::new();
+        let msgs: Vec<String> = std::mem::take(&mut self.type_errors)
+            .into_iter()
+            .filter(|m| seen.insert(m.clone()))
+            .collect();
+        Err(format!("type checking failed:\n{}", msgs.join("\n")))
+    }
+
+    fn lower_program_inner(&mut self, prog: &ast::Program) -> Result<hir::Program, String> {
         if self.debug_types {
             tracing::debug!(target: "jinnc::type", "starting type inference and HIR lowering");
         }
@@ -46,12 +78,15 @@ impl Typer {
                         if prev.start != span.start || prev.file != span.file {
                             self.type_errors.push(format!(
                                 "{}: type `{}` is defined more than once (previous \
-                                 definition at {}); type names are global — a type in an \
-                                 imported module collides with a top-level type of the \
-                                 same name",
+                                 definition at {}); type names are global and \
+                                 unqualified in Jinn — a module does not scope its \
+                                 types, so two modules cannot each declare `{}`. \
+                                 Rename one of them, or move the shared declaration \
+                                 into a module both import.",
                                 span.loc(),
                                 name,
-                                prev.loc()
+                                prev.loc(),
+                                name
                             ));
                         }
                     }
@@ -530,6 +565,8 @@ impl Typer {
             });
         }
         super::caps::analyze(&cap_items, &self.std_files, &cap_ctx)?;
+
+        self.declaration_errors_are_fatal()?;
 
         let mut lowered_fn_names = std::collections::HashSet::new();
         for scc in &sccs {

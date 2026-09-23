@@ -144,6 +144,7 @@ impl Typer {
                 }
 
                 let has_placeholder = self.dollar_stack.is_empty()
+                    && self.task_body_depth == 0
                     && args.iter().any(|a| matches!(a, ast::Expr::Placeholder(_)));
                 if has_placeholder {
                     let param = ast::Param {

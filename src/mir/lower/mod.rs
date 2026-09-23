@@ -164,6 +164,8 @@ fn finish_body(
     span: Span,
     is_main: bool,
 ) {
+    lowerer.mark_address_taken(body);
+
     let tail_idx: Option<usize> = body
         .iter()
         .enumerate()

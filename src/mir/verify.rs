@@ -350,8 +350,8 @@ fn is_truthy_compatible(t: &Type) -> bool {
 fn inst_used_values(k: &InstKind) -> Vec<ValueId> {
     use InstKind::*;
     match k {
-        IntConst(_) | FloatConst(_) | BoolConst(_) | StringConst(_) | Void | Load(_) | FnRef(_)
-        | MapInit | GlobalLoad(_) => Vec::new(),
+        IntConst(_) | FloatConst(_) | BoolConst(_) | StringConst(_) | Void | Load(_)
+        | AddrOf(_) | FnRef(_) | MapInit | GlobalLoad(_) => Vec::new(),
 
         BinOp(_, a, b) | Cmp(_, a, b, _) => vec![*a, *b],
         UnaryOp(_, a) => vec![*a],
@@ -418,6 +418,7 @@ fn inst_tag(k: &InstKind) -> &'static str {
         IndirectCall(..) => "IndirectCall",
         Load(_) => "Load",
         Store(..) => "Store",
+        AddrOf(_) => "AddrOf",
         FieldGet(..) => "FieldGet",
         FieldSet(..) => "FieldSet",
         FieldStore(..) => "FieldStore",

@@ -321,6 +321,15 @@ impl<'ctx> Compiler<'ctx> {
         idx: inkwell::values::IntValue<'ctx>,
         len: inkwell::values::IntValue<'ctx>,
     ) -> Result<(), String> {
+        self.emit_index_bounds_check(idx, len, "vec index out of bounds")
+    }
+
+    pub(crate) fn emit_index_bounds_check(
+        &mut self,
+        idx: inkwell::values::IntValue<'ctx>,
+        len: inkwell::values::IntValue<'ctx>,
+        message: &str,
+    ) -> Result<(), String> {
         let fv = self.current_fn();
         let ok = b!(self
             .bld
@@ -330,7 +339,7 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_conditional_branch(ok, ok_bb, fail_bb));
 
         self.bld.position_at_end(fail_bb);
-        self.emit_trap("vec index out of bounds");
+        self.emit_trap(message);
 
         self.bld.position_at_end(ok_bb);
         Ok(())

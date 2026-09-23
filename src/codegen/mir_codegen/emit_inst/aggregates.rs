@@ -441,8 +441,15 @@ impl<'ctx> Compiler<'ctx> {
                                 i64t.const_int(arr_len, false),
                                 "wrap"
                             ));
-                            b!(self.bld.build_select(is_neg, wrapped, idx_int, "idx"))
-                                .into_int_value()
+                            let final_idx =
+                                b!(self.bld.build_select(is_neg, wrapped, idx_int, "idx"))
+                                    .into_int_value();
+                            self.emit_index_bounds_check(
+                                final_idx,
+                                i64t.const_int(arr_len, false),
+                                "array index out of bounds",
+                            )?;
+                            final_idx
                         };
                         let alloca = self.entry_alloca(arr_ty.into(), "idx.tmp");
                         b!(self.bld.build_store(alloca, base_val));
@@ -543,6 +550,11 @@ impl<'ctx> Compiler<'ctx> {
                         ));
                         let final_idx = b!(self.bld.build_select(is_neg, wrapped, idx_int, "idx"))
                             .into_int_value();
+                        self.emit_index_bounds_check(
+                            final_idx,
+                            i64t.const_int(arr_len, false),
+                            "array index out of bounds",
+                        )?;
                         let ptr = unsafe {
                             b!(self
                                 .bld

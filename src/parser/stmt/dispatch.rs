@@ -398,12 +398,18 @@ impl Parser {
             _ => {
                 if let Token::Ident(kw) = self.peek() {
                     let kw = *kw;
+                    let store_target = matches!(self.peek_at(1), Token::Ident(_));
                     match &*kw.as_str() {
-                        "destroy" => return self.parse_destroy_stmt(),
-                        "restore" => return self.parse_restore_stmt(),
-                        "save" => return self.parse_save_stmt(),
-                        "compact" => return self.parse_compact_stmt(),
-                        "join" if !matches!(self.peek_at(1), Token::LParen | Token::Dot) => {
+                        "destroy" if store_target => return self.parse_destroy_stmt(),
+                        "restore" if store_target => return self.parse_restore_stmt(),
+                        "save" if store_target => return self.parse_save_stmt(),
+                        "compact" if store_target => return self.parse_compact_stmt(),
+                        "join"
+                            if !matches!(
+                                self.peek_at(1),
+                                Token::LParen | Token::Dot | Token::Is | Token::Comma
+                            ) =>
+                        {
                             let sp = self.span();
                             self.advance();
                             let target = self.parse_expr()?;
