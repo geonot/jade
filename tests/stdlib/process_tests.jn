@@ -1,0 +1,107 @@
+use std/process
+use std/os
+
+*shell_on()
+    os.set_env("JINN_ALLOW_SHELL", "1")
+
+test 'run captures stdout and a zero exit code'
+    shell_on()
+    r is process.run("printf abc")
+    assert r.output equals "abc"
+    assert r.exit_code equals 0
+    assert r.ok()
+
+test 'run reports a non-zero exit code'
+    shell_on()
+    r is process.run("exit 3")
+    assert r.exit_code equals 3
+    assert r.ok() equals false
+    assert r.output equals ""
+
+test 'run captures more than 64 KB'
+    shell_on()
+    r is process.run("seq 1 20000")
+    assert r.exit_code equals 0
+    assert r.output.byte_count > 65536
+    assert r.output.slice(0, 2) equals "1\n"
+    lines is r.lines()
+    assert lines.length equals 20001
+    assert lines.get(19999) equals "20000"
+
+test 'capture strips the trailing newline'
+    shell_on()
+    assert process.capture("echo hello") equals "hello"
+
+test 'lines splits captured output'
+    shell_on()
+    out is process.lines("printf 'a\nb\nc\n'")
+    assert out.length equals 3
+    assert out.get(0) equals "a"
+    assert out.get(2) equals "c"
+
+test 'succeeds reflects the exit status'
+    shell_on()
+    assert process.succeeds("true")
+    assert process.succeeds("false") equals false
+
+test 'exec returns the exit status'
+    shell_on()
+    assert process.exec("exit 7") equals 7
+
+test 'run_argv executes without a shell'
+    args is vec()
+    args.push("abc")
+    r is process.run_argv("echo", args)
+    assert r.exit_code equals 0
+    assert r.output equals "abc\n"
+
+test 'run_argv reports a non-zero exit code'
+    r is process.run_argv("false", vec())
+    assert r.exit_code equals 1
+    assert r.ok() equals false
+
+test 'run_argv captures more than 64 KB'
+    args is vec()
+    args.push("1")
+    args.push("20000")
+    r is process.run_argv("seq", args)
+    assert r.exit_code equals 0
+    assert r.output.byte_count > 65536
+
+test 'spawn_lines and spawn_succeeds agree with run_argv'
+    args is vec()
+    args.push("x\ny")
+    out is process.spawn_lines("echo", args)
+    assert out.length equals 2
+    assert out.get(0) equals "x"
+    assert out.get(1) equals "y"
+    assert process.spawn_succeeds("true", vec())
+    assert process.spawn_succeeds("false", vec()) equals false
+
+test 'spawn_exec returns the exit status'
+    assert process.spawn_exec("true", vec()) equals 0
+    assert process.spawn_exec("false", vec()) equals 1
+
+test 'cmd quotes arguments that need it'
+    parts is vec()
+    parts.push("echo")
+    parts.push("a b")
+    assert process.cmd(parts) equals "echo 'a b'"
+
+test 'pipe joins commands with a pipeline'
+    shell_on()
+    cmds is vec()
+    cmds.push("printf 'a\nb\n'")
+    cmds.push("wc -l")
+    r is process.pipe(cmds)
+    assert r.exit_code equals 0
+    assert r.output.trim() equals "2"
+
+test 'with_env passes an environment variable through'
+    shell_on()
+    r is process.with_env("JINN_TEST_VAR", "42", "printenv JINN_TEST_VAR")
+    assert r.exit_code equals 0
+    assert r.output.trim() equals "42"
+
+*main
+    log 'process tests'

@@ -329,7 +329,7 @@ void jinn_store_reserve(FILE *fp, int64_t count, int64_t rec_size);
 uint64_t jinn_fnv1a(const void *data, int64_t len);
 long jinn_popen_read(const char *cmd, char *buf, long buf_size, int *exit_code);
 char *jinn_popen_read_all(const char *cmd, long *out_len, int *exit_code);
-char *jinn_spawn_capture_all(const void *vec_ptr, long *out_len, int *exit_code);
+char *jinn_spawn_capture_all(const void *elems, long n, long *out_len, int *exit_code);
 int  jinn_system(const char *cmd);
 long jinn_exec_capture(const char *prog, char *const argv[], char *buf, long buf_size, int *exit_code);
 int  jinn_exec_argv(const char *prog, char *const argv[], int *exit_code);
@@ -337,8 +337,8 @@ int  jinn_exec_argv_timeout(const char *prog, char *const argv[], int *exit_code
 long jinn_exec_argv_capture(const char *prog, char *const argv[], char *buf, long buf_size, int *exit_code);
 long jinn_exec_argv_capture_timeout(const char *prog, char *const argv[],
                                     char *buf, long buf_size, int *exit_code, long timeout_ms);
-long jinn_spawn_capture(const void *vec_ptr, char *buf, long buf_size, int *exit_code);
-int  jinn_spawn_exec(const void *vec_ptr, int *exit_code);
+long jinn_spawn_capture(const void *elems, long n, char *buf, long buf_size, int *exit_code);
+int  jinn_spawn_exec(const void *elems, long n, int *exit_code);
 
 
 JinnBloom *jinn_bloom_create(int64_t expected_items, double fp_rate);

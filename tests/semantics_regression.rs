@@ -666,3 +666,70 @@ fn filter_ternary_scalar_result_runs_clean() {
     assert!(run.status.success(), "{}", exit_desc(&run));
     assert_eq!(String::from_utf8_lossy(&run.stdout), "25\n");
 }
+
+#[test]
+fn vec_into_extern_receives_element_data_pointer() {
+    let c = compile(
+        "extern *jinn_sort_i64(data as %i64, len as i64)\n\n*main\n    a is vec(30, 10, 20, 5)\n    extern.jinn_sort_i64(%a, a.length)\n    log(a.get(0))\n    log(a.get(1))\n    log(a.get(2))\n    log(a.get(3))\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "5\n10\n20\n30",
+        "%vec into an extern must yield the element data pointer, not &slot: sorting in place \
+         through the callee is only observable when the callee writes the same buffer the \
+         vec's element accessors read ([CG-7])"
+    );
+}
+
+#[test]
+fn sort_f64_actually_sorts() {
+    let c = compile(
+        "use std/sort\n\n*main\n    a is vec(3.5, 1.25, 2.0, -1.5)\n    sort.sort_f64(a)\n    log(a.get(0) < a.get(1))\n    log(a.get(1) < a.get(2))\n    log(a.get(2) < a.get(3))\n    log(a.get(0))\n    log(a.get(3))\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "1\n1\n1\n-1.500000\n3.500000",
+        "std/sort.sort_f64 passes %arr to jinn_sort_f64; the element data pointer must reach the \
+         extern so the qsort runs on the live buffer and the writes are visible afterward"
+    );
+}
+
+#[test]
+fn heap_field_moved_out_in_tail_position_is_not_double_freed() {
+    let c = compile(
+        "extern *malloc(size as i64) returns %i8\nextern *memcpy(d as %i8, s as %i8, n as i64) returns %i8\n\ntype R\n    output as String\n\n*mk returns R\n    b is extern.malloc(4)\n    extern.memcpy(b, \"abc\", 3)\n    R(output is __string_from_raw(b, 3, 4))\n\n*take returns String\n    r is mk()\n    out is r.output\n    out\n\n*main\n    log take()\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    let run = c.run();
+    assert!(
+        run.status.success(),
+        "moving a heap-bearing field out of a struct and returning it in tail position must not \
+         let the parent's drop free the field too: the tail expression is a *returned* value, not \
+         a local read, so the escape/demotion pass must not borrow-demote it ([escape-tail]) — {}",
+        exit_desc(&run)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "abc");
+}
+
+#[test]
+fn extern_out_param_write_back_is_visible() {
+    let c = compile(
+        "extern *jinn_spawn_capture_all(elems as %i8, n as i64, out_len as %i64, exit_code as %i32) returns %i8\n\n*main\n    argv is [\"printf\", \"hello\"]\n    n as i64 is 0\n    code as i32 is 0\n    buf is extern.jinn_spawn_capture_all(%argv, argv.length, %n as %i64, %code as %i32)\n    log(n)\n    log(code)\n",
+    );
+    assert!(c.ok(), "{}", c.stderr());
+    let run = c.run();
+    assert!(run.status.success(), "{}", exit_desc(&run));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "5\n0",
+        "an address-taken binder (taken via %n) must live in memory and every later read must \
+         load from its slot, so the callee's writes through the out-parameter are observable; \
+         otherwise reads fold to the initial SSA constant ([CG-7])"
+    );
+}

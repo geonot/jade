@@ -713,6 +713,12 @@ impl<'ctx> Compiler<'ctx> {
                     if v.get_type() == self.string_type().into() {
                         return self.string_data(v).map(Some);
                     }
+                    if v.is_pointer_value()
+                        && matches!(self.value_types.get(val), Some(Type::Vec(_)))
+                    {
+                        let (data, _) = self.vec_data_and_len(v.into_pointer_value())?;
+                        return Ok(Some(data.into()));
+                    }
                     let alloca = self.entry_alloca(v.get_type(), "ref");
                     b!(self.bld.build_store(alloca, v));
                     Ok(alloca.into())

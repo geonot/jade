@@ -288,8 +288,14 @@ pub(in crate::parser) fn replace_placeholder_in_stmt(stmt: &Stmt, name: &str) ->
             *lbl,
             replace_placeholder_in_block(b, name),
             TogetherHandler {
-                ok_arm: h.ok_arm.as_ref().map(|e| Box::new(replace_placeholder(e, name))),
-                err_arm: h.err_arm.as_ref().map(|e| Box::new(replace_placeholder(e, name))),
+                ok_arm: h
+                    .ok_arm
+                    .as_ref()
+                    .map(|e| Box::new(replace_placeholder(e, name))),
+                err_arm: h
+                    .err_arm
+                    .as_ref()
+                    .map(|e| Box::new(replace_placeholder(e, name))),
             },
             *sp,
         ),
@@ -557,14 +563,22 @@ pub(in crate::parser) fn replace_index_placeholder_in_stmt(stmt: &Stmt, name: &s
             span: l.span,
         }),
         Stmt::Defer(b, sp) => Stmt::Defer(replace_index_placeholder_in_block(b, name), *sp),
-        Stmt::Transaction(b, sp) => Stmt::Transaction(replace_index_placeholder_in_block(b, name), *sp),
+        Stmt::Transaction(b, sp) => {
+            Stmt::Transaction(replace_index_placeholder_in_block(b, name), *sp)
+        }
         Stmt::SimBlock(b, sp) => Stmt::SimBlock(replace_index_placeholder_in_block(b, name), *sp),
         Stmt::Together(lbl, b, h, sp) => Stmt::Together(
             *lbl,
             replace_index_placeholder_in_block(b, name),
             TogetherHandler {
-                ok_arm: h.ok_arm.as_ref().map(|e| Box::new(replace_index_placeholder(e, name))),
-                err_arm: h.err_arm.as_ref().map(|e| Box::new(replace_index_placeholder(e, name))),
+                ok_arm: h
+                    .ok_arm
+                    .as_ref()
+                    .map(|e| Box::new(replace_index_placeholder(e, name))),
+                err_arm: h
+                    .err_arm
+                    .as_ref()
+                    .map(|e| Box::new(replace_index_placeholder(e, name))),
             },
             *sp,
         ),

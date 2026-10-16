@@ -224,7 +224,10 @@ impl<'ctx> Compiler<'ctx> {
         let len = self.string_len(s)?.into_int_value();
 
         let malloc = self.ensure_malloc();
-        let buf = b!(self.bld.build_call(malloc, &[len.into()], "sc.buf"))
+        let sc_cap = b!(self
+            .bld
+            .build_int_nsw_add(len, i64t.const_int(1, false), "sc.cap"));
+        let buf = b!(self.bld.build_call(malloc, &[sc_cap.into()], "sc.buf"))
             .try_as_basic_value()
             .basic()
             .expect("ICE: call returned void")
@@ -283,6 +286,52 @@ impl<'ctx> Compiler<'ctx> {
         self.finalize_string_sso(buf, len, true, "sc")
     }
 
+    fn grow_string_buf(
+        &mut self,
+        buf_alloca: inkwell::values::PointerValue<'ctx>,
+        cap_alloca: inkwell::values::PointerValue<'ctx>,
+        need: inkwell::values::IntValue<'ctx>,
+        prefix: &str,
+    ) -> Result<inkwell::values::PointerValue<'ctx>, String> {
+        let i64t = self.ctx.i64_type();
+        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
+        let fv = self.current_fn();
+
+        let cap = b!(self.bld.build_load(i64t, cap_alloca, "grow.cap")).into_int_value();
+        let enough = b!(self
+            .bld
+            .build_int_compare(IntPredicate::ULE, need, cap, "grow.ok"));
+        let grow_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.grow"));
+        let done_bb = self.ctx.append_basic_block(fv, &format!("{prefix}.done"));
+        b!(self.bld.build_conditional_branch(enough, done_bb, grow_bb));
+
+        self.bld.position_at_end(grow_bb);
+        let doubled = b!(self
+            .bld
+            .build_int_nsw_mul(cap, i64t.const_int(2, false), "grow.dbl"));
+        let too_small =
+            b!(self
+                .bld
+                .build_int_compare(IntPredicate::ULT, doubled, need, "grow.small"));
+        let new_cap =
+            b!(self.bld.build_select(too_small, need, doubled, "grow.nc")).into_int_value();
+        let cur = b!(self.bld.build_load(ptr_ty, buf_alloca, "grow.cur")).into_pointer_value();
+        let realloc = self.ensure_realloc();
+        let new_buf = b!(self
+            .bld
+            .build_call(realloc, &[cur.into(), new_cap.into()], "grow.buf"))
+        .try_as_basic_value()
+        .basic()
+        .expect("ICE: realloc returned void")
+        .into_pointer_value();
+        b!(self.bld.build_store(buf_alloca, new_buf));
+        b!(self.bld.build_store(cap_alloca, new_cap));
+        b!(self.bld.build_unconditional_branch(done_bb));
+
+        self.bld.position_at_end(done_bb);
+        Ok(b!(self.bld.build_load(ptr_ty, buf_alloca, "grow.v")).into_pointer_value())
+    }
+
     pub(crate) fn string_replace(
         &mut self,
         s: BasicValueEnum<'ctx>,
@@ -317,13 +366,15 @@ impl<'ctx> Compiler<'ctx> {
             "rep.cap"
         ))
         .into_int_value();
-        let buf = b!(self
-            .bld
-            .build_call(malloc, &[init_cap_min.into()], "rep.buf"))
-        .try_as_basic_value()
-        .basic()
-        .expect("ICE: call returned void")
-        .into_pointer_value();
+        let rep_cap =
+            b!(self
+                .bld
+                .build_int_nsw_add(init_cap_min, i64t.const_int(1, false), "rep.cap1"));
+        let buf = b!(self.bld.build_call(malloc, &[rep_cap.into()], "rep.buf"))
+            .try_as_basic_value()
+            .basic()
+            .expect("ICE: call returned void")
+            .into_pointer_value();
 
         let cond_bb = self.ctx.append_basic_block(fv, "rep.cond");
         let match_bb = self.ctx.append_basic_block(fv, "rep.match");
@@ -335,7 +386,7 @@ impl<'ctx> Compiler<'ctx> {
             self.entry_alloca(self.ctx.ptr_type(AddressSpace::default()).into(), "rep.ba");
         b!(self.bld.build_store(buf_alloca, buf));
         let cap_alloca = self.entry_alloca(i64t.into(), "rep.ca");
-        b!(self.bld.build_store(cap_alloca, init_cap_min));
+        b!(self.bld.build_store(cap_alloca, rep_cap));
 
         let entry_bb = self.current_bb();
         b!(self.bld.build_unconditional_branch(cond_bb));
@@ -385,29 +436,27 @@ impl<'ctx> Compiler<'ctx> {
             .build_conditional_branch(is_match, copy_new_bb, nomatch_bb));
 
         self.bld.position_at_end(copy_new_bb);
-        let cur_buf_cn = b!(self.bld.build_load(
-            self.ctx.ptr_type(AddressSpace::default()),
-            buf_alloca,
-            "rep.cb"
-        ))
-        .into_pointer_value();
+        let need_cn = b!(self.bld.build_int_add(out_len, nlen, "rep.need0"));
+        let need_cn = b!(self
+            .bld
+            .build_int_nsw_add(need_cn, i64t.const_int(1, false), "rep.need"));
+        let cur_buf_cn = self.grow_string_buf(buf_alloca, cap_alloca, need_cn, "rep.cn")?;
         let dst_cn = unsafe { b!(self.bld.build_gep(i8t, cur_buf_cn, &[out_len], "rep.dst")) };
         b!(self
             .bld
             .build_call(memcpy, &[dst_cn.into(), ndata.into(), nlen.into()], ""));
         let new_si = b!(self.bld.build_int_add(si, olen, "rep.nsi"));
         let new_out = b!(self.bld.build_int_add(out_len, nlen, "rep.no"));
-        phi_si.add_incoming(&[(&new_si, copy_new_bb)]);
-        phi_out.add_incoming(&[(&new_out, copy_new_bb)]);
+        let cn_exit = self.current_bb();
+        phi_si.add_incoming(&[(&new_si, cn_exit)]);
+        phi_out.add_incoming(&[(&new_out, cn_exit)]);
         b!(self.bld.build_unconditional_branch(cond_bb));
 
         self.bld.position_at_end(nomatch_bb);
-        let cur_buf_nm = b!(self.bld.build_load(
-            self.ctx.ptr_type(AddressSpace::default()),
-            buf_alloca,
-            "rep.cbnm"
-        ))
-        .into_pointer_value();
+        let need_nm = b!(self
+            .bld
+            .build_int_add(out_len, i64t.const_int(2, false), "rep.neednm"));
+        let cur_buf_nm = self.grow_string_buf(buf_alloca, cap_alloca, need_nm, "rep.nm")?;
         let dst_nm = unsafe { b!(self.bld.build_gep(i8t, cur_buf_nm, &[out_len], "rep.dstnm")) };
         let src_byte = unsafe { b!(self.bld.build_gep(i8t, sdata, &[si], "rep.sb")) };
         let byte = b!(self.bld.build_load(i8t, src_byte, "rep.byte"));
@@ -418,8 +467,9 @@ impl<'ctx> Compiler<'ctx> {
         let nm_out = b!(self
             .bld
             .build_int_add(out_len, i64t.const_int(1, false), "rep.nmo"));
-        phi_si.add_incoming(&[(&nm_si, nomatch_bb)]);
-        phi_out.add_incoming(&[(&nm_out, nomatch_bb)]);
+        let nm_exit = self.current_bb();
+        phi_si.add_incoming(&[(&nm_si, nm_exit)]);
+        phi_out.add_incoming(&[(&nm_out, nm_exit)]);
         b!(self.bld.build_unconditional_branch(cond_bb));
 
         self.bld.position_at_end(done_bb);
@@ -447,7 +497,11 @@ impl<'ctx> Compiler<'ctx> {
 
         let total_len = b!(self.bld.build_int_nsw_mul(slen, n, "rpt.tlen"));
         let malloc = self.ensure_malloc();
-        let buf = b!(self.bld.build_call(malloc, &[total_len.into()], "rpt.buf"))
+        let rpt_cap =
+            b!(self
+                .bld
+                .build_int_nsw_add(total_len, i64t.const_int(1, false), "rpt.cap"));
+        let buf = b!(self.bld.build_call(malloc, &[rpt_cap.into()], "rpt.buf"))
             .try_as_basic_value()
             .basic()
             .expect("ICE: call returned void")

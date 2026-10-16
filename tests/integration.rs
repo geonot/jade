@@ -827,7 +827,7 @@ fn extern_puts() {
 #[test]
 fn extern_opaque_pointer_accepts_any_raw_pointer() {
     expect(
-        "extern *jinn_spawn_exec(vec_ptr as %i8, exit_code as %i32) returns i32\n\n*main() returns i32\n    argv is [\"/bin/true\"]\n    code is 0\n    extern.jinn_spawn_exec(%argv, %code as %i32)\n    log(code)\n    0\n",
+        "extern *jinn_spawn_exec(elems as %i8, n as i64, exit_code as %i32) returns i32\n\n*main() returns i32\n    argv is [\"/bin/true\"]\n    code is 0\n    extern.jinn_spawn_exec(%argv, argv.length, %code as %i32)\n    log(code)\n    0\n",
         "0",
     );
 }

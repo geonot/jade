@@ -79,7 +79,7 @@ impl<'ctx> Compiler<'ctx> {
         let rdata = self.string_data(r)?.into_pointer_value();
 
         let fits = b!(self.bld.build_int_compare(
-            IntPredicate::ULE,
+            IntPredicate::ULT,
             total,
             i64t.const_int(23, false),
             "cat.fits"
@@ -104,7 +104,10 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(heap_bb);
         let malloc = self.ensure_malloc();
-        let buf = b!(self.bld.build_call(malloc, &[total.into()], "buf"))
+        let cap = b!(self
+            .bld
+            .build_int_nsw_add(total, i64t.const_int(1, false), "cat.cap"));
+        let buf = b!(self.bld.build_call(malloc, &[cap.into()], "buf"))
             .try_as_basic_value()
             .basic()
             .expect("ICE: call returned void");
@@ -120,7 +123,13 @@ impl<'ctx> Compiler<'ctx> {
         b!(self
             .bld
             .build_call(memcpy2, &[dst.into(), rdata.into(), rlen.into()], ""));
-        let heap_val = self.build_owned_string(buf, total, total, "cat")?;
+        let nul = unsafe {
+            b!(self
+                .bld
+                .build_gep(i8t, buf.into_pointer_value(), &[total], "cat.nul"))
+        };
+        b!(self.bld.build_store(nul, i8t.const_zero()));
+        let heap_val = self.build_owned_string(buf, total, cap, "cat")?;
         let heap_exit = self.current_bb();
         b!(self.bld.build_unconditional_branch(merge_bb));
 

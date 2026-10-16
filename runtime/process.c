@@ -15,21 +15,20 @@
 
 extern char **environ;
 
-typedef struct { void *ptr; int64_t len; int64_t cap; } jinn_vec_hdr_t;
 static const char *sso_data_proc(const jinn_sso_t *s, int64_t *out_len) {
-    if ((unsigned char)s->bytes[23] & 0x80u) {
+    if (((unsigned char)s->bytes[23] & 0x80u) == 0) {
         const char *p; int64_t l;
         memcpy(&p, s->bytes,     8);
         memcpy(&l, s->bytes + 8, 8);
         *out_len = l; return p;
     }
-    *out_len = 23 - (int64_t)(unsigned char)s->bytes[23];
+    int64_t len = (int64_t)((unsigned char)s->bytes[23] & 0x7Fu);
+    if (len > 23) len = 23;
+    *out_len = len;
     return s->bytes;
 }
-static char **jinn_vec_to_argv(const jinn_vec_hdr_t *vec) {
-    if (!vec || vec->len < 1) { errno = EINVAL; return NULL; }
-    int64_t n = vec->len;
-    const jinn_sso_t *elems = (const jinn_sso_t *)vec->ptr;
+static char **jinn_elems_to_argv(const jinn_sso_t *elems, int64_t n) {
+    if (!elems || n < 1) { errno = EINVAL; return NULL; }
     char **argv = (char **)malloc((size_t)(n + 1) * sizeof(char *));
     if (!argv) return NULL;
     for (int64_t i = 0; i < n; i++) {
@@ -176,26 +175,25 @@ char *jinn_popen_read_all(const char *cmd, long *out_len, int *exit_code) {
     *out_len = total;
     return buf;
 }
-char *jinn_spawn_capture_all(const void *vec_ptr, long *out_len, int *exit_code) {
+char *jinn_spawn_capture_all(const void *elems, long n, long *out_len, int *exit_code) {
     if (!out_len || !exit_code) {
         errno = EINVAL;
         return NULL;
     }
     *out_len = -1;
-    if (!vec_ptr) {
+    if (!elems || n < 1) {
         *exit_code = -1;
         errno = EINVAL;
         return NULL;
     }
-    const jinn_vec_hdr_t *vec = (const jinn_vec_hdr_t *)vec_ptr;
-    char **argv = jinn_vec_to_argv(vec);
+    char **argv = jinn_elems_to_argv((const jinn_sso_t *)elems, n);
     if (!argv) {
         *exit_code = -1;
         return NULL;
     }
     int pipefd[2];
     if (pipe(pipefd) < 0) {
-        free_argv_proc(argv, vec->len);
+        free_argv_proc(argv, n);
         *exit_code = -1;
         return NULL;
     }
@@ -203,7 +201,7 @@ char *jinn_spawn_capture_all(const void *vec_ptr, long *out_len, int *exit_code)
     if (pid < 0) {
         close(pipefd[0]);
         close(pipefd[1]);
-        free_argv_proc(argv, vec->len);
+        free_argv_proc(argv, n);
         *exit_code = -1;
         return NULL;
     }
@@ -219,7 +217,7 @@ char *jinn_spawn_capture_all(const void *vec_ptr, long *out_len, int *exit_code)
     char *buf = NULL;
     long total = proc_read_all_fd(pipefd[0], &buf);
     close(pipefd[0]);
-    free_argv_proc(argv, vec->len);
+    free_argv_proc(argv, n);
     if (wait_child_with_timeout(pid, exit_code, 0) != 0 || total < 0) {
         free(buf);
         *exit_code = total < 0 ? -1 : *exit_code;
@@ -337,31 +335,29 @@ long jinn_exec_capture(const char *prog, char *const argv[],
     return jinn_exec_argv_capture(prog, argv, buf, buf_size, exit_code);
 }
 
-long jinn_spawn_capture(const void *vec_ptr, char *buf, long buf_size, int *exit_code) {
-    if (!vec_ptr || !buf || buf_size <= 0 || !exit_code) {
+long jinn_spawn_capture(const void *elems, long n, char *buf, long buf_size, int *exit_code) {
+    if (!elems || n < 1 || !buf || buf_size <= 0 || !exit_code) {
         errno = EINVAL;
         if (exit_code) *exit_code = -1;
         return -1;
     }
-    const jinn_vec_hdr_t *vec = (const jinn_vec_hdr_t *)vec_ptr;
-    char **argv = jinn_vec_to_argv(vec);
+    char **argv = jinn_elems_to_argv((const jinn_sso_t *)elems, n);
     if (!argv) { *exit_code = -1; return -1; }
 
     long result = jinn_exec_argv_capture_timeout(argv[0], (char *const *)argv,
                                                   buf, buf_size, exit_code, 0);
-    free_argv_proc(argv, vec->len);
+    free_argv_proc(argv, n);
     return result;
 }
-int jinn_spawn_exec(const void *vec_ptr, int *exit_code) {
-    if (!vec_ptr || !exit_code) {
+int jinn_spawn_exec(const void *elems, long n, int *exit_code) {
+    if (!elems || n < 1 || !exit_code) {
         errno = EINVAL;
         if (exit_code) *exit_code = -1;
         return -1;
     }
-    const jinn_vec_hdr_t *vec = (const jinn_vec_hdr_t *)vec_ptr;
-    char **argv = jinn_vec_to_argv(vec);
+    char **argv = jinn_elems_to_argv((const jinn_sso_t *)elems, n);
     if (!argv) { *exit_code = -1; return -1; }
     int result = jinn_exec_argv_timeout(argv[0], (char *const *)argv, exit_code, 0);
-    free_argv_proc(argv, vec->len);
+    free_argv_proc(argv, n);
     return result;
 }

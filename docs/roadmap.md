@@ -24,7 +24,7 @@ acting on its details.
 
 ## Where the language stands
 
-**Open: ~2 blockers, ~24 majors, 40+ minors, 5+ coverage gaps** — the
+**Open: ~1 blocker, ~24 majors, 40+ minors, 5+ coverage gaps** — the
 remainder of the 2026-08-18 18-area adversarial review (ids `TYP-*`, `STO-*`,
 `STD-*`, `DIST-*`, `HIR-*`, `SYN-*`, `PAR-*`, `TDX-*`, `MIR-*`, `CG-*`,
 `PERF-*`, `DIAG-*`, `GATE-*`), which falsified the previous "0 blockers /
@@ -50,9 +50,21 @@ access), `STD-5` (dataframe sort), `SYN-6`, `MIR-1`, `TYP-5`, `TDX-3` — plus
 `tests/stdlib/*_tests.jn` suite. Fixing `DIST-1` exposed **`CG-7`** (extern
 out-parameter writes are invisible to the caller), filed below as the one
 new blocker; `SYN-4` is the other, and it was re-confirmed with a fresh
-reproduction in the same pass. The pre-review sections further down
-([162]/[164] residue, ids `O-*`, `T-*`, `E-*`, `S-*`, `X-*`, `N-*`, `P-*`)
-still stand.
+reproduction in the same pass. The [168] pass closed **`CG-7`** — the
+last accept-then-corrupt hole of the `DIST-1` family: an address-taken local
+(`%x`) now lives in memory so an extern's out-parameter writes are visible,
+`%vec` into an extern yields the element data pointer (so `std/sort.sort_f64`
+and any in-place extern mutate the live buffer), and the runtime vec-argv
+functions moved to an `(elems, n)` convention; `std/process.jn` was repointed
+and `process` returned to the stable tier with a behavioral suite
+(`tests/stdlib/process_tests.jn`). Exercising the fixed path surfaced a
+second blocker-class defect, also closed in [168]: a heap-bearing struct field
+moved out by a plain bind in *tail* position was borrowed-demoted by the
+escape pass, so the parent's `drop` freed the field again (`process.capture`
+aborted with a glibc double-free) — tail expressions of non-void functions now
+count as *returned* values, not local reads. **`SYN-4` is now the only
+remaining blocker.** The pre-review sections further down ([162]/[164]
+residue, ids `O-*`, `T-*`, `E-*`, `S-*`, `X-*`, `N-*`, `P-*`) still stand.
 
 - **Memory and ownership** — the [162] accept-then-corrupt holes are closed:
   consuming calls in condition/scrutinee/iterator position are move-tracked,
@@ -117,14 +129,22 @@ still stand.
 
 ---
 
-## Next batch ([168]) — proposed
+## Next batch ([169]) — proposed
 
-Sequenced after [167]. Every item below carries a reproduction taken on the
+Sequenced after [168]. Every item below carries a reproduction taken on the
 [167] tree, so the batch starts from measurement rather than inherited
 claims. Workstreams are ordered by what unblocks the most downstream work;
-**A** and **B** are the two live blockers and should land before the rest.
+**B** is the one live blocker and should land before the rest.
 
-### WS-A — Address-taken values and FFI out-parameters (`CG-7`, `STD-11`)
+### WS-A — Address-taken values and FFI out-parameters (`CG-7`, `STD-11`) — closed in [168]
+
+`CG-7` is closed: `%x` on a local forces the binder to memory, `%vec` into an
+extern yields the element data pointer, the runtime vec-argv functions take
+`(elems, n)`, and `std/process.jn` is repointed and back in the stable tier
+with `tests/stdlib/process_tests.jn` as its behavioral suite. The residual
+`%x`-into-extern sites in `std/` (`net`, `convert`, `os`) were audited: they
+pass an address *inward* (a read, not an out-parameter), so they were already
+correct. The original plan, kept for the record:
 
 The last accept-then-corrupt hole of the `DIST-1` family, one level lower.
 `%x` on a local lowers to `ref` of an *SSA value*; codegen spills it to a
@@ -396,11 +416,11 @@ Residue:
   ("runtime error: vec index out of bounds"), so this needs its original
   repro to confirm it is reachable from source at all; **CG-4** (M)
   `--debug` is a stub (no DWARF).
-- **CG-7** (B) *new in [167]* — **an extern out-parameter's writes are
-  invisible to the caller.** `%x` on a local lowers to `ref` of an *SSA
-  value*, which codegen materializes by spilling to a throwaway alloca;
+- **CG-7** (B) *new in [167], closed in [168]* — **an extern out-parameter's
+  writes are invisible to the caller.** `%x` on a local lowered to `ref` of an
+  *SSA value*, which codegen materialized by spilling to a throwaway alloca;
   subsequent reads of `x` still read the original SSA value, so anything the
-  callee wrote through the pointer is dropped. Reproduction (`n` stays `0`):
+  callee wrote through the pointer was dropped. Reproduction (`n` stayed `0`):
 
   ```
   n is 0
@@ -408,16 +428,16 @@ Residue:
   log n
   ```
 
-  The MIR is explicit — `v1 = int 0`, `v5 = ref v1`, `call …`, then
-  `log v1` — and the emitted IR folds both reads to the constant `0` after
-  passing the alloca to an opaque call. This is the same class as `DIST-1`
-  (a value with no def-site slot spilled to a temp nothing reads back), one
-  level lower: `Ref` of a local must force that binder to memory and make
-  every later read load from that slot. Blast radius in `std/` is narrow —
-  `process.jn`'s `exit_code` and `out_len` are the only true out-parameters;
-  the other `%x` uses pass an address inward — but it silently produces wrong
-  answers for any FFI binding written the obvious way, and it is why
-  `STD-11`'s fix does not work yet.
+  [168] forced every address-taken binder to memory during MIR lowering
+  (`ExprKind::Ref` of a `Var` materializes its slot and marks it
+  address-taken; every later read loads from the slot), so the callee's writes
+  are observable. The same pass made `%vec` into an extern yield the element
+  data pointer rather than `&slot` — which is why `std/sort.sort_f64` and any
+  in-place extern now mutate the live buffer — and moved the runtime vec-argv
+  functions to an `(elems, n)` convention; `std/process.jn` was repointed and
+  `process` returned to the stable tier. The residual `%x`-into-extern sites in
+  `std/` (`net`, `convert`, `os`) were audited and pass an address *inward* (a
+  read), so they were already correct.
 - **CG-8** (M) *new in [167]* — `$` does not survive crossing into a
   `dispatch` body. `dollar_stack` is empty inside the task, so
   `typer/expr/access.rs` reinterprets `work($)` as a placeholder-lambda; the
@@ -441,12 +461,12 @@ Residue:
 - **TDX-4..TDX-6, TDX-13** (M) silent test failure off-tty, `jinn bind`
   emits zero externs from zlib.h, tree-sitter fails 15/15 snippets, `.jni`
   reuse breaks multi-module compiles. **STD-10, STD-12, STD-15** (M) bangle
-  404s every route, fmt+os ICE, five error dialects across std. **STD-11**
-  changed shape in [167]: the 64 KB cap is gone (`jinn_popen_read_all` /
-  `jinn_spawn_capture_all` grow a buffer to EOF), but `process.run` now
-  returns an *empty* string because it reads the length through an extern
-  out-parameter — see `CG-7`. `process` is demoted to provisional until that
-  lands.
+  404s every route, fmt+os ICE, five error dialects across std. ~~STD-11~~
+  closed in [168]: with `CG-7` fixed, `process.run` reads its length through
+  the extern out-parameter correctly — the 64 KB cap was already gone in
+  [167] (`jinn_popen_read_all` / `jinn_spawn_capture_all` grow a buffer to
+  EOF), and `process` is back in the stable tier, pinned by
+  `tests/stdlib/process_tests.jn`.
 
 ### Performance and benchmark honesty (M)
 

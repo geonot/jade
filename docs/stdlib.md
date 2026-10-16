@@ -97,7 +97,7 @@ more** — `--emit-hir` does not even run codegen, so anything past the frontend
 Alpha-stable is not a guarantee that every function returns the right answer,
 and not yet a guarantee of API stability across versions.
 
-## Alpha-stable modules (47)
+## Alpha-stable modules (48)
 
 | Domain | Modules |
 | --- | --- |
@@ -106,7 +106,7 @@ and not yet a guarantee of API stability across versions.
 | Text | `strings`, `regex`, `glob`, `codec`, `hex`, `uuid` |
 | Data formats | `json`, `csv`, `toml`, `dataframe` |
 | Crypto | `crypto`, `aes`, `argon`, `blake`, `sha`, `tls` |
-| I/O and OS | `io`, `fs`, `path`, `os`, `args`, `signal`, `terminal`, `logging` |
+| I/O and OS | `io`, `fs`, `path`, `os`, `args`, `signal`, `terminal`, `logging`, `process` |
 | Networking | `net`, `http`, `url` |
 | Time | `time`, `date` |
 | Concurrency / systems | `event` |
@@ -121,10 +121,10 @@ so they carry **no stability promise** until they gain behavioral tests:
 | --- | --- |
 | `raft` | Aspirational. Its inertness was rooted in DIST-1 (mutation through a free-function parameter never reached the caller), closed in [167] — single-node election now converges follower → candidate → leader, pinned in `tests/stdlib/raft_tests.jn`. Multi-node replication, log matching, and commit advancement remain unexercised (roadmap DIST-2/STD-7). |
 | `bangle` | Routes 404 in the only end-to-end probe run against it (roadmap STD-10). |
-| `process` | `run`/`run_argv` return an empty string: [167] removed their 64 KB truncation, but the replacement reads its length through an extern out-parameter, and those writes are invisible to the caller (roadmap CG-7). |
 
 (`dataframe` and the crypto stack left this list in [167]: dataframe's sort
-defect was fixed and both gained behavioral suites in `tests/stdlib/`.)
+defect was fixed and both gained behavioral suites in `tests/stdlib/`. `process`
+left it in [168]: `CG-7` was fixed and it gained `tests/stdlib/process_tests.jn`.)
 
 ## Experimental modules
 

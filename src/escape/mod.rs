@@ -77,7 +77,11 @@ pub fn analyze_fn(f: &hir::Fn) -> EscapeInfo {
         info: &mut info,
         in_lambda: 0,
     };
-    walker.walk_block(&f.body);
+    if matches!(f.ret, crate::types::Type::Void) {
+        walker.walk_block(&f.body);
+    } else {
+        walker.walk_block_tail(&f.body);
+    }
     info
 }
 
@@ -433,6 +437,52 @@ impl<'a> EscapeWalk<'a> {
     fn walk_block(&mut self, block: &hir::Block) {
         for s in block {
             self.walk_stmt(s);
+        }
+    }
+
+    fn walk_block_tail(&mut self, block: &hir::Block) {
+        let tail = block.iter().rposition(|s| {
+            !matches!(
+                s,
+                Stmt::Drop(..)
+                    | Stmt::Ret(..)
+                    | Stmt::Break(..)
+                    | Stmt::Continue(..)
+                    | Stmt::ErrReturn(..)
+            )
+        });
+        for (i, s) in block.iter().enumerate() {
+            if Some(i) == tail {
+                self.walk_stmt_tail(s);
+            } else {
+                self.walk_stmt(s);
+            }
+        }
+    }
+
+    fn walk_stmt_tail(&mut self, stmt: &Stmt) {
+        use Stmt::*;
+        match stmt {
+            Expr(e) => self.walk_expr_consumer(e, BindContext::Returned),
+            If(i) => {
+                self.walk_expr_consumer(&i.cond, BindContext::LocalRead);
+                self.walk_block_tail(&i.then);
+                for (c, blk) in &i.elifs {
+                    self.walk_expr_consumer(c, BindContext::LocalRead);
+                    self.walk_block_tail(blk);
+                }
+                if let Some(blk) = &i.els {
+                    self.walk_block_tail(blk);
+                }
+            }
+            Match(m) => {
+                self.walk_expr_consumer(&m.subject, BindContext::LocalRead);
+                for arm in &m.arms {
+                    self.walk_block_tail(&arm.body);
+                }
+            }
+            SimBlock(b, _) | Transaction(b, _) => self.walk_block_tail(b),
+            other => self.walk_stmt(other),
         }
     }
 

@@ -896,9 +896,9 @@ impl Typer {
         } else if let Some(err) = self.unknown_method_error(&obj_ty, method, span) {
             self.type_errors.push(err);
 
-            let _ = self
-                .infer_ctx
-                .unify_at(&ret_ty, &Type::I64, span, "unknown method placeholder");
+            let _ =
+                self.infer_ctx
+                    .unify_at(&ret_ty, &Type::I64, span, "unknown method placeholder");
         }
         Ok(hir::Expr {
             kind: hir::ExprKind::DeferredMethod(Box::new(hobj), method.into(), hargs),

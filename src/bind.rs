@@ -174,15 +174,7 @@ fn strip_macro_tokens(s: &str) -> String {
         let bare = t.trim_matches('*');
         matches!(
             bare,
-            "void"
-                | "char"
-                | "short"
-                | "int"
-                | "long"
-                | "float"
-                | "double"
-                | "signed"
-                | "unsigned"
+            "void" | "char" | "short" | "int" | "long" | "float" | "double" | "signed" | "unsigned"
         ) || bare.ends_with("_t")
     });
     if !has_primitive {

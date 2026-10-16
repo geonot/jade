@@ -6,7 +6,7 @@ use super::b;
 
 impl<'ctx> Compiler<'ctx> {
     pub(crate) fn compile_str_literal(&mut self, s: &str) -> Result<BasicValueEnum<'ctx>, String> {
-        if s.len() <= 23 {
+        if s.len() < 23 {
             let st = self.string_type();
             let i8t = self.ctx.i8_type();
             let i64t = self.ctx.i64_type();
@@ -244,11 +244,12 @@ impl<'ctx> Compiler<'ctx> {
         prefix: &str,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
+        let i8t = self.ctx.i8_type();
         let st = self.string_type();
         let fv = self.current_fn();
 
         let fits = b!(self.bld.build_int_compare(
-            IntPredicate::ULE,
+            IntPredicate::ULT,
             len,
             i64t.const_int(23, false),
             &format!("{prefix}.fits")
@@ -272,13 +273,17 @@ impl<'ctx> Compiler<'ctx> {
         let (sso_val, sso_exit) = self.build_sso_result(sso_out, len, merge_bb, prefix)?;
 
         self.bld.position_at_end(heap_bb);
+        let cap =
+            b!(self
+                .bld
+                .build_int_nsw_add(len, i64t.const_int(1, false), &format!("{prefix}.cap")));
         let heap_buf = if owns_buffer {
             src
         } else {
             let malloc = self.ensure_malloc();
             let buf = b!(self
                 .bld
-                .build_call(malloc, &[len.into()], &format!("{prefix}.buf")))
+                .build_call(malloc, &[cap.into()], &format!("{prefix}.buf")))
             .try_as_basic_value()
             .basic()
             .expect("ICE: call returned void")
@@ -288,7 +293,13 @@ impl<'ctx> Compiler<'ctx> {
                 .build_call(memcpy, &[buf.into(), src.into(), len.into()], ""));
             buf
         };
-        let heap_val = self.build_owned_string(heap_buf, len, len, &format!("{prefix}.hv"))?;
+        let nul = unsafe {
+            b!(self
+                .bld
+                .build_gep(i8t, heap_buf, &[len], &format!("{prefix}.nul")))
+        };
+        b!(self.bld.build_store(nul, i8t.const_zero()));
+        let heap_val = self.build_owned_string(heap_buf, len, cap, &format!("{prefix}.hv"))?;
         let heap_exit = self.current_bb();
         b!(self.bld.build_unconditional_branch(merge_bb));
 
