@@ -108,7 +108,7 @@ impl Typer {
                 if let ast::Expr::Ident(ctor_name, _) = callee.as_ref() {
                     let is_struct = self.generic_types.contains_key(ctor_name)
                         || self.structs.contains_key(ctor_name);
-                    let is_variant = self.variant_tags.contains_key(ctor_name);
+                    let is_variant = self.is_variant_name(*ctor_name);
                     let is_value = self.find_var(&ctor_name.as_str()).is_some()
                         || self.fns.contains_key(ctor_name)
                         || self.generic_fns.contains_key(ctor_name)

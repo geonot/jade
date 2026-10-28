@@ -282,3 +282,11 @@ fn never_resolved_bind_still_warns() {
         c.stderr()
     );
 }
+
+#[test]
+fn user_generic_enum_variant_shadows_prelude_option() {
+    assert_clean_run(
+        "enum Opt of T\n    Some(T)\n    Nothing\n\n*show(o as Opt of string)\n    match o\n        Some(v) ? log(v)\n        Nothing ? log('none')\n\n*main\n    show(Some('hi'))\n    x is Some('yo')\n    show(x)\n    y as Option of i64 is Some(3)\n    log(y.unwrap_or(0))\n",
+        "hi\nyo\n3\n",
+    );
+}

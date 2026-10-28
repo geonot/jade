@@ -17,6 +17,11 @@ mod resolve;
 
 impl Typer {
     pub fn lower_program(&mut self, prog: &ast::Program) -> Result<hir::Program, String> {
+        self.lower_program_collect(prog)
+            .map_err(|e| Self::humanize_diagnostic(&e))
+    }
+
+    fn lower_program_collect(&mut self, prog: &ast::Program) -> Result<hir::Program, String> {
         match self.lower_program_inner(prog) {
             Ok(p) => Ok(p),
             Err(e) => {

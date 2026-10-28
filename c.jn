@@ -1,0 +1,3 @@
+*main
+    x as int is Some("hi")
+    log x

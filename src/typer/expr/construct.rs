@@ -28,7 +28,7 @@ impl Typer {
                     let callee = ast::Expr::Ident(*name, *span);
                     return self.lower_call_expected(&callee, &args, *span, expected);
                 }
-                if self.variant_tags.contains_key(name)
+                if self.is_variant_name(*name)
                     && let Some(r) = self.try_lower_variant_with_expected(
                         &name.as_str(),
                         inits,
@@ -68,6 +68,14 @@ impl Typer {
 }
 
 impl Typer {
+    pub(crate) fn is_variant_name(&self, name: Symbol) -> bool {
+        self.variant_tags.contains_key(&name)
+            || self
+                .generic_enums
+                .values()
+                .any(|ge| ge.variants.iter().any(|v| v.name == name))
+    }
+
     pub(crate) fn try_lower_variant_with_expected(
         &mut self,
         name: &str,

@@ -1,0 +1,4 @@
+*main
+    x is 3
+    y is x == 3
+    log y
