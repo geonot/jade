@@ -105,6 +105,49 @@ impl Typer {
                     }
                 }
 
+                if let ast::Expr::QualifiedIdent(enum_name, variant, vspan) = callee.as_ref()
+                    && (self.enums.contains_key(enum_name)
+                        || self.generic_enums.contains_key(enum_name))
+                {
+                    let inits: Vec<ast::FieldInit> = args
+                        .iter()
+                        .map(|a| ast::FieldInit {
+                            name: None,
+                            value: a.clone(),
+                        })
+                        .collect();
+                    let target = match expected.map(|t| self.infer_ctx.resolve(t)) {
+                        Some(t @ Type::Struct(n, _)) if n == *enum_name => t,
+                        _ if self.enums.contains_key(enum_name) => Type::Enum(*enum_name),
+                        _ => {
+                            let r =
+                                self.lower_struct_or_variant(&variant.as_str(), &inits, *span)?;
+                            if let Some(exp) = expected {
+                                self.unify_call_result(exp, &r.ty, *span, "call result");
+                            }
+                            return Ok(r);
+                        }
+                    };
+                    let Some(r) = self.try_lower_variant_with_expected(
+                        &variant.as_str(),
+                        &inits,
+                        *span,
+                        Some(&target),
+                    )?
+                    else {
+                        return Err(format!(
+                            "{}: '{}' has no variant '{}'",
+                            vspan.loc(),
+                            enum_name,
+                            variant
+                        ));
+                    };
+                    if let Some(exp) = expected {
+                        self.unify_call_result(exp, &r.ty, *span, "call result");
+                    }
+                    return Ok(r);
+                }
+
                 if let ast::Expr::Ident(ctor_name, _) = callee.as_ref() {
                     let is_struct = self.generic_types.contains_key(ctor_name)
                         || self.structs.contains_key(ctor_name);

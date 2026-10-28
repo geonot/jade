@@ -440,3 +440,15 @@ fn contextual_keywords_are_usable_as_identifiers() {
         );
     }
 }
+
+#[test]
+fn qualified_variant_constructor_call() {
+    accepts_and_prints(
+        "enum Shape\n    Circle(i64)\n    Square(i64)\n    Dot\n\nenum Maybe of T\n    Just(T)\n    Nothing\n\n*area(s as Shape) returns i64\n    match s\n        Circle(r) ? r * r * 3\n        Square(w) ? w * w\n        Dot ? 0\n\n*main\n    a is Shape:Circle(3)\n    b is Shape:Square(4)\n    c is Shape:Dot\n    log(area(a) + area(b) + area(c))\n    log(area(Shape:Circle(1)))\n    o is Maybe:Just('heap-string-past-sso-length')\n    match o\n        Just(v) ? log(v)\n        Nothing ? log('none')\n    p as Maybe of i64 is Maybe:Just(7)\n    match p\n        Just(v) ? log(v + 1)\n        Nothing ? log(0)\n",
+        "43\n3\nheap-string-past-sso-length\n8",
+    );
+    rejects(
+        "enum Shape\n    Circle(i64)\n\n*main\n    a is Shape:Square(3)\n    log(1)\n",
+        &["'Shape' has no variant 'Square'"],
+    );
+}

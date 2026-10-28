@@ -1,4 +1,5 @@
 # Changelog
+- **[188]** (2026-10-28 23:24) [178] SYN-9: contextual keywords (stop/atomic/strict/global/alias/nop/store/send/select/build/test join the soft set) usable as identifiers; contextual vs reserved words declared in docs/jinn.ebnf; pinned
 - **[187]** (2026-10-28 23:16) [177] SYN-4: module-scoped type/variant identity — qualify_colliding_types gives colliding names per-file identity; ambiguous reference names both sites; types::user_type_name/humanize_diagnostic shared by typer and codegen (fixes Box__G_i64 in log output); Decl::span; pins in module_resolution.rs
 - **[185]** (2026-10-28 22:36) [176] 10-8: retired MIR-2, MIR-6, LK-4 after re-running original repros; pinned in crash_safety.rs (expect_capped helper); roadmap updated
 - **[183]** (2026-10-28 22:32) [175] 10-6: user generic enum variants shadow prelude Option/Result (latest declaration wins, expected-type resolution for generic variants); mangled mono names demangled to Base<args> in all typer diagnostics
