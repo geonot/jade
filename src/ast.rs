@@ -69,6 +69,32 @@ pub enum Decl {
     TopStmt(Stmt),
 }
 
+impl Decl {
+    pub fn span(&self) -> Span {
+        match self {
+            Decl::Fn(f) => f.span,
+            Decl::Type(t) => t.span,
+            Decl::Enum(e) => e.span,
+            Decl::Use(u) => u.span,
+            Decl::Extern(e) => e.span,
+            Decl::ErrDef(e) => e.span,
+            Decl::Actor(a) => a.span,
+            Decl::Store(s) => s.span,
+            Decl::Trait(t) => t.span,
+            Decl::Impl(i) => i.span,
+            Decl::Supervisor(s) => s.span,
+            Decl::Migration(m) => m.span,
+            Decl::View(v) => v.span,
+            Decl::Test(t) => t.span,
+            Decl::Const(_, _, s)
+            | Decl::Global(_, _, s)
+            | Decl::TypeAlias(_, _, s)
+            | Decl::Newtype(_, _, s) => *s,
+            Decl::TopStmt(st) => st.span(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinOp {
     Add,

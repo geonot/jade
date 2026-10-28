@@ -205,6 +205,7 @@ impl<'ctx> Compiler<'ctx> {
             val
         };
 
+        let name = crate::types::user_type_name(name);
         if fields.is_empty() {
             let hdr = if newline {
                 format!("{name} {{}}\n")

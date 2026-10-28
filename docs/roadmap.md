@@ -62,8 +62,8 @@ second blocker-class defect, also closed in [168]: a heap-bearing struct field
 moved out by a plain bind in *tail* position was borrowed-demoted by the
 escape pass, so the parent's `drop` freed the field again (`process.capture`
 aborted with a glibc double-free) — tail expressions of non-void functions now
-count as *returned* values, not local reads. **`SYN-4` is now the only
-remaining blocker.** The pre-review sections further down ([162]/[164]
+count as *returned* values, not local reads. **`SYN-4` was the last
+remaining blocker; it closed in [177].** The pre-review sections further down ([162]/[164]
 residue, ids `O-*`, `T-*`, `E-*`, `S-*`, `X-*`, `N-*`, `P-*`) still stand.
 
 - **Memory and ownership** — the [162] accept-then-corrupt holes are closed:
@@ -351,15 +351,14 @@ Residue:
 - ~~PAR-1~~ closed in [166]: the `vec`/`vector` builtin now always wins (the
   same class as `to_string`/`log`), and *defining* a function with either
   name is a compile error naming the reservation.
-- **SYN-4** (B) the global type namespace merges same-named types across
-  modules, last-loaded wins. **Confirmed 2026-08-18** and worse than filed:
-  with `alpha.jn` and `beta.jn` each declaring a different `type Point`,
-  beta's declaration replaces alpha's and alpha's *own* constructor is then
-  checked against beta's fields — the compile fails with
-  "`alpha.jn:5:5`: constructor `Point` is missing required field(s) `name`,
-  `tag`", blaming a file that declares neither. Types are global and
-  unqualified by design (`stdlib.md`), so the fix is a module-qualified
-  interning key plus a collision diagnostic, not per-module namespaces.
+- ~~SYN-4~~ closed in [177]: after module resolution,
+  `resolve::qualify_colliding_types` gives every type, enum, and variant
+  name declared by more than one file a per-file identity (the declaring
+  file's own references, signatures, patterns, and annotations are
+  rewritten), and display/diagnostics strip the qualifier
+  (`types::user_type_name`, `humanize_diagnostic` spell it `alpha.Point`). A
+  reference from a module that declares none of the colliding names is an
+  "ambiguous" error naming both sites. Pinned in `tests/module_resolution.rs`.
 - ~~SYN-6~~ closed in [167]: a `match` arm whose pattern is a bare
   identifier that already names a variable in scope (and is not a variant tag
   or constant) is now a compile error — "pattern `y` always matches — it

@@ -47,10 +47,11 @@ impl Typer {
                     span,
                 };
 
+                let shown = crate::types::user_type_name(&type_name.as_str());
                 let mut result = mk_str(if fields.is_empty() {
-                    format!("{type_name} {{")
+                    format!("{shown} {{")
                 } else {
-                    format!("{type_name} {{ ")
+                    format!("{shown} {{ ")
                 });
 
                 for (i, (fname, fty)) in fields.iter().enumerate() {

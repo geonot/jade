@@ -43,6 +43,18 @@ pub(crate) fn resolve_modules(
     std_files: &mut HashSet<Symbol>,
     resolved_files: &mut Vec<PathBuf>,
 ) -> Result<(), String> {
+    resolve_modules_rec(prog, base_dir, loaded, packages, std_files, resolved_files)?;
+    crate::resolve::qualify_colliding_types(prog)
+}
+
+fn resolve_modules_rec(
+    prog: &mut Program,
+    base_dir: &std::path::Path,
+    loaded: &mut HashSet<Symbol>,
+    packages: &HashMap<Symbol, PathBuf>,
+    std_files: &mut HashSet<Symbol>,
+    resolved_files: &mut Vec<PathBuf>,
+) -> Result<(), String> {
     let uses: Vec<(Vec<Symbol>, Option<Vec<Symbol>>)> = prog
         .decls
         .iter()
@@ -160,7 +172,7 @@ pub(crate) fn resolve_modules(
             .map_err(|e| format!("{}: {e}", candidate.display()))?;
 
         let own_decl_count = mod_prog.decls.len();
-        resolve_modules(
+        resolve_modules_rec(
             &mut mod_prog,
             candidate.parent().unwrap_or(base_dir),
             loaded,

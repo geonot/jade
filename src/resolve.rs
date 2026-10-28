@@ -1,6 +1,7 @@
 use crate::ast::{self, Decl, Expr, Pat, Stmt};
 use crate::intern::Symbol;
-use std::collections::HashMap;
+use crate::types::Type;
+use std::collections::{HashMap, HashSet};
 
 pub fn flatten_module(decls: Vec<Decl>, module: &str) -> Vec<Decl> {
     let mut rename_map: HashMap<Symbol, Symbol> = HashMap::new();
@@ -18,92 +19,328 @@ pub fn flatten_module(decls: Vec<Decl>, module: &str) -> Vec<Decl> {
             _ => {}
         }
     }
-
-    let mut r = Renamer::new(&rename_map);
+    let (types, ambiguous) = (HashMap::new(), HashSet::new());
+    let mut r = Renamer::new(&rename_map, &types, &ambiguous);
     decls
         .into_iter()
-        .map(|d| match d {
-            Decl::Fn(mut f) => {
-                if let Some(new) = rename_map.get(&f.name) {
-                    f.name = *new;
-                }
-                let pnames: Vec<Symbol> = f.params.iter().map(|p| p.name).collect();
-                r.in_fn_scope(&pnames, |r| {
-                    r.rewrite_block(&mut f.body);
-                    for p in &mut f.params {
-                        if let Some(ref mut def) = p.default {
-                            r.rewrite_expr(def);
-                        }
-                    }
-                });
-                Decl::Fn(f)
-            }
-            Decl::Const(name, mut expr, span) => {
-                let new_name = rename_map.get(&name).copied().unwrap_or(name);
-                r.rewrite_expr(&mut expr);
-                Decl::Const(new_name, expr, span)
-            }
-            Decl::Global(name, mut expr, span) => {
-                r.rewrite_expr(&mut expr);
-                Decl::Global(name, expr, span)
-            }
-            Decl::Type(mut td) => {
-                for fld in &mut td.fields {
-                    if let Some(ref mut def) = fld.default {
-                        r.rewrite_expr(def);
+        .map(|mut d| {
+            match &mut d {
+                Decl::Fn(f) => {
+                    if let Some(new) = rename_map.get(&f.name) {
+                        f.name = *new;
                     }
                 }
-                for m in &mut td.methods {
-                    let pnames: Vec<Symbol> = m.params.iter().map(|p| p.name).collect();
-                    r.in_fn_scope(&pnames, |r| r.rewrite_block(&mut m.body));
-                }
-                Decl::Type(td)
-            }
-            Decl::Impl(mut ib) => {
-                for m in &mut ib.methods {
-                    let pnames: Vec<Symbol> = m.params.iter().map(|p| p.name).collect();
-                    r.in_fn_scope(&pnames, |r| r.rewrite_block(&mut m.body));
-                }
-                Decl::Impl(ib)
-            }
-            Decl::Actor(mut ad) => {
-                for fld in &mut ad.fields {
-                    if let Some(ref mut def) = fld.default {
-                        r.rewrite_expr(def);
+                Decl::Const(name, _, _) => {
+                    if let Some(new) = rename_map.get(name) {
+                        *name = *new;
                     }
                 }
-                for h in &mut ad.handlers {
-                    let pnames: Vec<Symbol> = h.params.iter().map(|p| p.name).collect();
-                    r.in_fn_scope(&pnames, |r| {
-                        if let Some(ref mut e) = h.loop_sleep_ms {
-                            r.rewrite_expr(e);
-                        }
-                        r.rewrite_block(&mut h.body);
-                    });
-                }
-                Decl::Actor(ad)
+                _ => {}
             }
-            Decl::Test(mut tb) => {
-                r.in_fn_scope(&[], |r| r.rewrite_block(&mut tb.body));
-                Decl::Test(tb)
-            }
-            other => other,
+            r.rewrite_decl(&mut d);
+            d
         })
         .collect()
 }
 
+pub fn qualify_colliding_types(prog: &mut ast::Program) -> Result<(), String> {
+    let mut sites: HashMap<Symbol, Vec<(Option<Symbol>, ast::Span)>> = HashMap::new();
+    let mut order: Vec<Symbol> = Vec::new();
+    let mut note = |name: Symbol, file: Option<Symbol>, span: ast::Span| {
+        let v = sites.entry(name).or_insert_with(|| {
+            order.push(name);
+            Vec::new()
+        });
+        if !v.iter().any(|(f, _)| *f == file) {
+            v.push((file, span));
+        }
+    };
+    for d in &prog.decls {
+        match d {
+            Decl::Type(td) => note(td.name, td.span.file, td.span),
+            Decl::Enum(ed) => {
+                note(ed.name, ed.span.file, ed.span);
+                for v in &ed.variants {
+                    note(v.name, ed.span.file, v.span);
+                }
+            }
+            _ => {}
+        }
+    }
+    let colliding: Vec<Symbol> = order.into_iter().filter(|n| sites[n].len() > 1).collect();
+    if colliding.is_empty() {
+        return Ok(());
+    }
+    let mut tags: HashMap<Option<Symbol>, String> = HashMap::new();
+    let mut used: HashSet<String> = HashSet::new();
+    let mut maps: HashMap<Option<Symbol>, HashMap<Symbol, Symbol>> = HashMap::new();
+    for name in &colliding {
+        for (file, _) in &sites[name] {
+            let tag = tags
+                .entry(*file)
+                .or_insert_with(|| {
+                    let stem: String = file
+                        .map(|f| {
+                            std::path::Path::new(&*f.as_str())
+                                .file_stem()
+                                .map(|s| s.to_string_lossy().into_owned())
+                                .unwrap_or_default()
+                        })
+                        .unwrap_or_default()
+                        .chars()
+                        .filter(|c| c.is_ascii_alphanumeric())
+                        .collect();
+                    let stem = if stem.is_empty() {
+                        "m".to_string()
+                    } else {
+                        stem
+                    };
+                    let mut tag = stem.clone();
+                    let mut k = 2;
+                    while !used.insert(tag.clone()) {
+                        tag = format!("{stem}{k}");
+                        k += 1;
+                    }
+                    tag
+                })
+                .clone();
+            maps.entry(*file)
+                .or_default()
+                .insert(*name, Symbol::intern(&format!("{name}__M_{tag}")));
+        }
+    }
+    let ambiguous: HashSet<Symbol> = colliding.iter().copied().collect();
+    let (renames, empty) = (HashMap::new(), HashMap::new());
+    for d in &mut prog.decls {
+        let span = d.span();
+        let types = maps.get(&span.file).unwrap_or(&empty);
+        let mut r = Renamer::new(&renames, types, &ambiguous);
+        r.rewrite_decl(d);
+        if let Some(name) = r.hits.first() {
+            let decls: Vec<String> = sites[name].iter().map(|(_, s)| s.loc()).collect();
+            return Err(format!(
+                "{}: `{}` is ambiguous — it is declared by more than one module ({}) and \
+                 this module declares none of them; each module sees its own declaration, \
+                 so use the value through its module's functions or rename one declaration",
+                span.loc(),
+                name,
+                decls.join(", ")
+            ));
+        }
+    }
+    Ok(())
+}
+
 struct Renamer<'a> {
     renames: &'a HashMap<Symbol, Symbol>,
+    types: &'a HashMap<Symbol, Symbol>,
+    ambiguous: &'a HashSet<Symbol>,
+    hits: Vec<Symbol>,
     scopes: Vec<Vec<Symbol>>,
     shadowed: HashMap<Symbol, u32>,
 }
 
 impl<'a> Renamer<'a> {
-    fn new(renames: &'a HashMap<Symbol, Symbol>) -> Self {
+    fn new(
+        renames: &'a HashMap<Symbol, Symbol>,
+        types: &'a HashMap<Symbol, Symbol>,
+        ambiguous: &'a HashSet<Symbol>,
+    ) -> Self {
         Renamer {
             renames,
+            types,
+            ambiguous,
+            hits: Vec::new(),
             scopes: Vec::new(),
             shadowed: HashMap::new(),
+        }
+    }
+
+    fn nominal(&mut self, n: &mut Symbol) {
+        if let Some(new) = self.types.get(n) {
+            *n = *new;
+        } else if self.ambiguous.contains(n) {
+            self.hits.push(*n);
+        }
+    }
+
+    fn value_name(&mut self, n: &mut Symbol) {
+        if self.shadowed.contains_key(n) {
+            return;
+        }
+        if let Some(new) = self.renames.get(n) {
+            *n = *new;
+        } else {
+            self.nominal(n);
+        }
+    }
+
+    fn rewrite_type(&mut self, t: &mut Type) {
+        match t {
+            Type::Struct(n, args) => {
+                self.nominal(n);
+                for a in args {
+                    self.rewrite_type(a);
+                }
+            }
+            Type::Enum(n) => self.nominal(n),
+            Type::Alias(_, i)
+            | Type::Newtype(_, i)
+            | Type::Array(i, _)
+            | Type::Vec(i)
+            | Type::Ptr(i)
+            | Type::Coroutine(i)
+            | Type::Channel(i)
+            | Type::Generator(i)
+            | Type::View(i)
+            | Type::Frozen(i) => self.rewrite_type(i),
+            Type::Map(k, v) => {
+                self.rewrite_type(k);
+                self.rewrite_type(v);
+            }
+            Type::Tuple(ts) => {
+                for t in ts {
+                    self.rewrite_type(t);
+                }
+            }
+            Type::Fn(ps, r) => {
+                for p in ps {
+                    self.rewrite_type(p);
+                }
+                self.rewrite_type(r);
+            }
+            _ => {}
+        }
+    }
+
+    fn rewrite_params(&mut self, params: &mut [ast::Param]) {
+        for p in params {
+            if let Some(t) = &mut p.ty {
+                self.rewrite_type(t);
+            }
+        }
+    }
+
+    fn rewrite_fn(&mut self, f: &mut ast::Fn) {
+        self.rewrite_params(&mut f.params);
+        if let Some(t) = &mut f.ret {
+            self.rewrite_type(t);
+        }
+        for t in &mut f.error_types {
+            self.rewrite_type(t);
+        }
+        let pnames: Vec<Symbol> = f.params.iter().map(|p| p.name).collect();
+        self.in_fn_scope(&pnames, |r| {
+            r.rewrite_block(&mut f.body);
+            for p in &mut f.params {
+                if let Some(def) = &mut p.default {
+                    r.rewrite_expr(def);
+                }
+            }
+        });
+    }
+
+    fn rewrite_fields(&mut self, fields: &mut [ast::Field]) {
+        for fld in fields {
+            if let Some(t) = &mut fld.ty {
+                self.rewrite_type(t);
+            }
+            if let Some(def) = &mut fld.default {
+                self.rewrite_expr(def);
+            }
+        }
+    }
+
+    fn rewrite_decl(&mut self, d: &mut Decl) {
+        match d {
+            Decl::Fn(f) => self.rewrite_fn(f),
+            Decl::Const(_, e, _) | Decl::Global(_, e, _) => self.rewrite_expr(e),
+            Decl::Type(td) => {
+                self.nominal(&mut td.name);
+                self.rewrite_fields(&mut td.fields);
+                for m in &mut td.methods {
+                    self.rewrite_fn(m);
+                }
+            }
+            Decl::Enum(ed) => {
+                self.nominal(&mut ed.name);
+                for v in &mut ed.variants {
+                    self.nominal(&mut v.name);
+                    for f in &mut v.fields {
+                        self.rewrite_type(&mut f.ty);
+                    }
+                }
+            }
+            Decl::ErrDef(ed) => {
+                for v in &mut ed.variants {
+                    for t in &mut v.fields {
+                        self.rewrite_type(t);
+                    }
+                }
+            }
+            Decl::Impl(ib) => {
+                self.nominal(&mut ib.type_name);
+                for t in &mut ib.trait_type_args {
+                    self.rewrite_type(t);
+                }
+                for (_, t) in &mut ib.assoc_type_bindings {
+                    self.rewrite_type(t);
+                }
+                for m in &mut ib.methods {
+                    self.rewrite_fn(m);
+                }
+            }
+            Decl::Actor(ad) => {
+                self.rewrite_fields(&mut ad.fields);
+                for h in &mut ad.handlers {
+                    self.rewrite_params(&mut h.params);
+                    let pnames: Vec<Symbol> = h.params.iter().map(|p| p.name).collect();
+                    self.in_fn_scope(&pnames, |r| {
+                        if let Some(e) = &mut h.loop_sleep_ms {
+                            r.rewrite_expr(e);
+                        }
+                        r.rewrite_block(&mut h.body);
+                    });
+                }
+            }
+            Decl::Trait(td) => {
+                for m in &mut td.methods {
+                    self.rewrite_params(&mut m.params);
+                    if let Some(t) = &mut m.ret {
+                        self.rewrite_type(t);
+                    }
+                    for t in &mut m.error_types {
+                        self.rewrite_type(t);
+                    }
+                    if let Some(body) = &mut m.default_body {
+                        let pnames: Vec<Symbol> = m.params.iter().map(|p| p.name).collect();
+                        self.in_fn_scope(&pnames, |r| r.rewrite_block(body));
+                    }
+                }
+            }
+            Decl::Extern(ef) => {
+                for (_, t) in &mut ef.params {
+                    self.rewrite_type(t);
+                }
+                self.rewrite_type(&mut ef.ret);
+            }
+            Decl::Store(sd) => {
+                for f in &mut sd.fields {
+                    if let Some(t) = &mut f.ty {
+                        self.rewrite_type(t);
+                    }
+                    if let Some(def) = &mut f.default {
+                        self.rewrite_expr(def);
+                    }
+                }
+                for m in &mut sd.methods {
+                    self.rewrite_fn(m);
+                }
+            }
+            Decl::TypeAlias(_, t, _) | Decl::Newtype(_, t, _) => self.rewrite_type(t),
+            Decl::Test(tb) => self.in_fn_scope(&[], |r| r.rewrite_block(&mut tb.body)),
+            Decl::TopStmt(st) => self.in_fn_scope(&[], |r| r.rewrite_stmt(st)),
+            Decl::Use(_) | Decl::Supervisor(_) | Decl::Migration(_) | Decl::View(_) => {}
         }
     }
 
@@ -133,12 +370,14 @@ impl<'a> Renamer<'a> {
 
     fn rewrite_pat(&mut self, pat: &mut Pat) {
         match pat {
-            Pat::Ident(s, _) => {
-                if let Some(new) = self.lookup(*s) {
-                    *s = new;
+            Pat::Ident(s, _) => self.value_name(s),
+            Pat::Ctor(name, ps, _) => {
+                self.nominal(name);
+                for p in ps {
+                    self.rewrite_pat(p);
                 }
             }
-            Pat::Ctor(_, ps, _) | Pat::Or(ps, _) | Pat::Tuple(ps, _) | Pat::Array(ps, _) => {
+            Pat::Or(ps, _) | Pat::Tuple(ps, _) | Pat::Array(ps, _) => {
                 for p in ps {
                     self.rewrite_pat(p);
                 }
@@ -174,6 +413,9 @@ impl<'a> Renamer<'a> {
     fn rewrite_stmt(&mut self, stmt: &mut Stmt) {
         match stmt {
             Stmt::Bind(b) => {
+                if let Some(t) = &mut b.ty {
+                    self.rewrite_type(t);
+                }
                 self.rewrite_expr(&mut b.value);
                 self.shadow(b.name);
             }
@@ -316,11 +558,7 @@ impl<'a> Renamer<'a> {
 
     fn rewrite_expr(&mut self, expr: &mut Expr) {
         match expr {
-            Expr::Ident(name, _) => {
-                if let Some(new) = self.lookup(*name) {
-                    *name = new;
-                }
-            }
+            Expr::Ident(name, _) => self.value_name(name),
             Expr::Call(callee, args, _) => {
                 self.rewrite_expr(callee);
                 for a in args {
@@ -360,13 +598,15 @@ impl<'a> Renamer<'a> {
                     self.rewrite_expr(err);
                 }
             }
-            Expr::As(e, _, _)
-            | Expr::Ref(e, _)
+            Expr::As(e, t, _) | Expr::StrictCast(e, t, _) => {
+                self.rewrite_type(t);
+                self.rewrite_expr(e);
+            }
+            Expr::Ref(e, _)
             | Expr::Deref(e, _)
             | Expr::Freeze(e, _)
             | Expr::Yield(e, _)
             | Expr::Grad(e, _)
-            | Expr::StrictCast(e, _, _)
             | Expr::Spread(e, _) => {
                 self.rewrite_expr(e);
             }
@@ -389,11 +629,13 @@ impl<'a> Renamer<'a> {
                     *expr = Expr::Call(Box::new(Expr::Ident(renamed, *span)), args, *span);
                     return;
                 }
+                self.nominal(name);
                 for f in fields {
                     self.rewrite_expr(&mut f.value);
                 }
             }
-            Expr::Builder(_, fields, _) => {
+            Expr::Builder(name, fields, _) => {
+                self.nominal(name);
                 for f in fields {
                     self.rewrite_expr(&mut f.value);
                 }
@@ -407,7 +649,11 @@ impl<'a> Renamer<'a> {
                 }
             }
             Expr::Block(block, _) => self.rewrite_block(block),
-            Expr::Lambda(params, _, body, _) => {
+            Expr::Lambda(params, ret, body, _) => {
+                self.rewrite_params(params);
+                if let Some(t) = ret {
+                    self.rewrite_type(t);
+                }
                 self.push_scope();
                 for p in params.iter() {
                     self.shadow(p.name);
@@ -440,7 +686,12 @@ impl<'a> Renamer<'a> {
                 self.rewrite_expr(b);
             }
             Expr::ChannelRecv(e, _) => self.rewrite_expr(e),
-            Expr::ChannelCreate(_, e, _) => self.rewrite_expr(e),
+            Expr::ChannelCreate(t, e, _) => {
+                if let Some(t) = t {
+                    self.rewrite_type(t);
+                }
+                self.rewrite_expr(e);
+            }
             Expr::Select(arms, default, _) => {
                 for arm in arms {
                     self.rewrite_expr(&mut arm.chan);
@@ -522,8 +773,11 @@ impl<'a> Renamer<'a> {
             | Expr::Embed(_, _)
             | Expr::Unreachable(_)
             | Expr::StoreAll(_, _)
-            | Expr::StoreDistinct(_, _, _)
-            | Expr::QualifiedIdent(_, _, _) => {}
+            | Expr::StoreDistinct(_, _, _) => {}
+            Expr::QualifiedIdent(a, b, _) => {
+                self.nominal(a);
+                self.nominal(b);
+            }
         }
     }
 }

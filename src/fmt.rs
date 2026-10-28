@@ -112,37 +112,13 @@ impl CommentSink {
     }
 }
 
-fn decl_span(d: &Decl) -> crate::ast::Span {
-    match d {
-        Decl::Fn(f) => f.span,
-        Decl::Type(t) => t.span,
-        Decl::Enum(e) => e.span,
-        Decl::Use(u) => u.span,
-        Decl::Extern(e) => e.span,
-        Decl::ErrDef(e) => e.span,
-        Decl::Actor(a) => a.span,
-        Decl::Store(s) => s.span,
-        Decl::Trait(t) => t.span,
-        Decl::Impl(i) => i.span,
-        Decl::Supervisor(s) => s.span,
-        Decl::Migration(m) => m.span,
-        Decl::View(v) => v.span,
-        Decl::Test(t) => t.span,
-        Decl::Const(_, _, s)
-        | Decl::Global(_, _, s)
-        | Decl::TypeAlias(_, _, s)
-        | Decl::Newtype(_, _, s) => *s,
-        Decl::TopStmt(st) => st.span(),
-    }
-}
-
 fn format_program(prog: &Program, sink: &mut CommentSink) -> String {
     let mut out = String::new();
     for (i, decl) in prog.decls.iter().enumerate() {
         if i > 0 {
             out.push('\n');
         }
-        sink.flush_before(&mut out, decl_span(decl).start, 0);
+        sink.flush_before(&mut out, decl.span().start, 0);
         format_decl(&mut out, decl, 0, sink);
         out.push('\n');
     }

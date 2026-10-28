@@ -310,3 +310,87 @@ impl Scheme {
         !self.quantified.is_empty()
     }
 }
+
+pub fn demangle_mono(name: &str) -> String {
+    let Some((base, enc)) = name.split_once("__G_") else {
+        return name.to_string();
+    };
+    let mut args = vec![String::new()];
+    let mut chars = enc.chars();
+    while let Some(c) = chars.next() {
+        let cur = args.last_mut().unwrap();
+        match c {
+            'U' => match chars.next() {
+                Some('U') => cur.push('U'),
+                Some('X') => cur.push('_'),
+                Some('S') => cur.push(' '),
+                Some(o) => {
+                    cur.push('U');
+                    cur.push(o);
+                }
+                None => cur.push('U'),
+            },
+            '_' => args.push(String::new()),
+            c => cur.push(c),
+        }
+    }
+    let args: Vec<String> = args.iter().map(|a| humanize_mono(a)).collect();
+    format!("{base}<{}>", args.join(", "))
+}
+
+pub fn user_type_name(name: &str) -> String {
+    strip_module_tags(&humanize_mono(name), false)
+}
+
+pub fn humanize_diagnostic(msg: &str) -> String {
+    strip_module_tags(&humanize_mono(msg), true)
+}
+
+fn strip_module_tags(msg: &str, qualify: bool) -> String {
+    let mut out = String::with_capacity(msg.len());
+    let mut rest = msg;
+    while let Some(pos) = rest.find("__M_") {
+        let start = rest[..pos]
+            .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .map_or(0, |i| i + 1);
+        let tail = &rest[pos + 4..];
+        let len = tail
+            .find(|c: char| !c.is_ascii_alphanumeric())
+            .unwrap_or(tail.len());
+        out.push_str(&rest[..start]);
+        if qualify {
+            out.push_str(&tail[..len]);
+            out.push('.');
+        }
+        out.push_str(&rest[start..pos]);
+        rest = &tail[len..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn humanize_mono(msg: &str) -> String {
+    if !msg.contains("__G_") {
+        return msg.to_string();
+    }
+    let mut out = String::with_capacity(msg.len());
+    let mut rest = msg;
+    while let Some(pos) = rest.find("__G_") {
+        let start = rest[..pos]
+            .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .map_or(0, |i| i + 1);
+        let tail = &rest[pos + 4..];
+        let len = tail
+            .find(|c: char| c.is_whitespace() || matches!(c, '`' | '\'' | '"'))
+            .unwrap_or(tail.len());
+        let mut end = pos + 4 + len;
+        while end > pos + 4 && matches!(rest.as_bytes()[end - 1], b'.' | b',' | b':' | b';') {
+            end -= 1;
+        }
+        out.push_str(&rest[..start]);
+        out.push_str(&demangle_mono(&rest[start..end]));
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}

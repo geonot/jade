@@ -24,6 +24,7 @@ fn compile_stderr(src: &str) -> String {
 
 const INTERNAL_MARKERS: &[&str] = &[
     "__G_",
+    "__M_",
     "__poly_",
     "TypeVar(",
     "Symbol(",

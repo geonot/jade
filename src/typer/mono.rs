@@ -307,59 +307,6 @@ impl Typer {
         out
     }
 
-    pub(crate) fn demangle_mono(name: &str) -> String {
-        let Some((base, enc)) = name.split_once("__G_") else {
-            return name.to_string();
-        };
-        let mut args = vec![String::new()];
-        let mut chars = enc.chars();
-        while let Some(c) = chars.next() {
-            let cur = args.last_mut().unwrap();
-            match c {
-                'U' => match chars.next() {
-                    Some('U') => cur.push('U'),
-                    Some('X') => cur.push('_'),
-                    Some('S') => cur.push(' '),
-                    Some(o) => {
-                        cur.push('U');
-                        cur.push(o);
-                    }
-                    None => cur.push('U'),
-                },
-                '_' => args.push(String::new()),
-                c => cur.push(c),
-            }
-        }
-        let args: Vec<String> = args.iter().map(|a| Self::humanize_diagnostic(a)).collect();
-        format!("{base}<{}>", args.join(", "))
-    }
-
-    pub(crate) fn humanize_diagnostic(msg: &str) -> String {
-        if !msg.contains("__G_") {
-            return msg.to_string();
-        }
-        let mut out = String::with_capacity(msg.len());
-        let mut rest = msg;
-        while let Some(pos) = rest.find("__G_") {
-            let start = rest[..pos]
-                .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
-                .map_or(0, |i| i + 1);
-            let tail = &rest[pos + 4..];
-            let len = tail
-                .find(|c: char| c.is_whitespace() || matches!(c, '`' | '\'' | '"'))
-                .unwrap_or(tail.len());
-            let mut end = pos + 4 + len;
-            while end > pos + 4 && matches!(rest.as_bytes()[end - 1], b'.' | b',' | b':' | b';') {
-                end -= 1;
-            }
-            out.push_str(&rest[..start]);
-            out.push_str(&Self::demangle_mono(&rest[start..end]));
-            rest = &rest[end..];
-        }
-        out.push_str(rest);
-        out
-    }
-
     pub(crate) fn effective_type_params(&self, f: &ast::Fn) -> Vec<Symbol> {
         if !f.type_params.is_empty() {
             return f.type_params.clone();

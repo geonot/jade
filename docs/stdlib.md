@@ -22,8 +22,13 @@ use strings
 Two conventions:
 
 - **Functions are called qualified** by module name: `convert.parse_int(…)`.
-- **Types are global and unqualified**: a `TcpStream` from `net` is written
-  `TcpStream`, not `net.TcpStream`.
+- **Types are unqualified**: a `TcpStream` from `net` is written
+  `TcpStream`, not `net.TcpStream`. Type and variant identity is still
+  per-module: when two modules each declare `Point`, each module's code sees
+  its own `Point`, values flow between modules only through their functions,
+  diagnostics spell the types `alpha.Point` / `beta.Point`, and naming
+  `Point` from a module that declares neither is an "ambiguous" error that
+  cites both declaration sites.
 
 ## Stability tiers
 
