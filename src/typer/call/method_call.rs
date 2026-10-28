@@ -433,7 +433,7 @@ impl Typer {
 
         if let Type::Map(ref key_ty, ref val_ty) = obj_ty {
             let expected_arg_tys: Vec<Option<&Type>> = match method {
-                "set" => vec![Some(key_ty.as_ref()), Some(val_ty.as_ref())],
+                "set" | "get_or" => vec![Some(key_ty.as_ref()), Some(val_ty.as_ref())],
                 "get" | "has" | "remove" | "contains" => vec![Some(key_ty.as_ref())],
                 _ => vec![],
             };

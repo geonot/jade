@@ -1,6 +1,20 @@
 # Changelog
 - **[172]** (2026-10-28 21:10) [171] one value formatter: Vec interpolation no longer ICEs (recursive vec_to_string), derived struct display matches log (P { x: 3 }), nested structs derive display; pin in crash_safety
 - **[170]** (2026-10-28 21:02) [170] PERF-10: for-loop counters lowered to SSA; MIR interval analysis (src/mir/range.rs) elides overflow checks on range-proven + - * and unary -; signed negation now traps on overflow; matrix_mul 2.92->1.51s, spectral_norm 4.52->2.02s; 7 new pins; roadmap/CHANGELOG
+- **[172]** (2026-10-28) MAP-GET — `Map.get` no longer invents values.
+
+- **`m.get(k)` traps** with `map key not found` when `k` is absent (it used to
+  return a zero value or a zeroed struct). `m[k]` is the same operation.
+- **`m.get_or(k, default)`** is the total form. `std/args.jn` is ported
+  (`flags.get_or(name, 0)`, `multi.get_or(name, vec())`).
+- **Double free fixed.** `get` returned a shallow load of a heap value, and
+  MIR then dropped it, so `s is m.get(k)` in a loop freed the map's string.
+  `get` now clones the value unless the binding is a demoted borrow, the same
+  as `Vec.get`.
+- Pins: `map_get_missing_key_traps` and
+  `map_get_or_is_total_and_heap_values_are_owned` in `tests/crash_safety.rs`,
+  plus `get_or` in the method-surface registry test.
+
 - **[170]** (2026-10-28) PERF-10 — overflow checks elided where ranges prove safety.
 
 - **For-loop counters are SSA.** Ranged, counted, and element-index

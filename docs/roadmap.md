@@ -230,11 +230,9 @@ user functions marked `nobuiltin` (a user `*sqrt` was folded as libm
 
 Still open from the same review:
 
-- **MAP-GET** `m.get(k)` on a missing key silently yields the zero value.
-  The frequency-count idiom (`m.set(w, m.get(w) + 1)`) depends on it across
-  std and apps, so the fix is a pair, not a flip: add a total
-  `get_or(k, default)`, port the counting sites, then make the bare `get`
-  trap with `map key not found`.
+- **LEAK-TEMP** A fresh owned value used only as a method receiver
+  (`"x".repeat(n).len()`, `xs.get(0).len()`, `m.get(k).len()`) is never
+  dropped, so it leaks once per evaluation. Bound forms are fine.
 - **TEST-CLI** `jinn test FILE` is rejected; only project-mode `jinn test`
   and `jinnc FILE --test` work.
 

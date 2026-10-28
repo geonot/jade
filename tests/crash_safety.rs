@@ -520,3 +520,19 @@ fn interpolation_and_log_share_one_formatter() {
         "P { x: 3, s: hi }\nP { x: 3, s: hi }\n[1, 2]\n[P { x: 3, s: hi }]\n[P { x: 3, s: hi }]\n[[1, 2], [3]]\nE {}",
     );
 }
+
+#[test]
+fn map_get_missing_key_traps() {
+    expect_trap(
+        "*main\n    m is map()\n    m.set('a', 1)\n    log(m.get('a'))\n    log(m.get('b'))\n",
+        "map key not found",
+    );
+}
+
+#[test]
+fn map_get_or_is_total_and_heap_values_are_owned() {
+    expect(
+        "*main\n    c is map()\n    for w in ['a', 'b', 'a']\n        c.set(w, c.get_or(w, 0) + 1)\n    log(c.get('a'))\n    log(c.get_or('z', 7))\n    m is map()\n    m.set('k', 'x'.repeat(60))\n    for i in 0 to 3\n        s is m.get('k')\n        log(s.len())\n    log(m.get_or('q', 'y'.repeat(40)).len())\n    log(m.get('k').len())\n",
+        "2\n7\n60\n60\n60\n40\n60",
+    );
+}

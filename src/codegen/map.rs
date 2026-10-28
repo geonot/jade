@@ -1,4 +1,3 @@
-use inkwell::types::BasicTypeEnum;
 use inkwell::values::BasicValueEnum;
 use inkwell::{AddressSpace, IntPredicate};
 
@@ -6,18 +5,6 @@ use super::Compiler;
 use super::b;
 
 impl<'ctx> Compiler<'ctx> {
-    fn zero_of(&self, ty: BasicTypeEnum<'ctx>) -> BasicValueEnum<'ctx> {
-        match ty {
-            BasicTypeEnum::IntType(t) => t.const_zero().into(),
-            BasicTypeEnum::FloatType(t) => t.const_zero().into(),
-            BasicTypeEnum::PointerType(t) => t.const_null().into(),
-            BasicTypeEnum::StructType(t) => t.const_zero().into(),
-            BasicTypeEnum::ArrayType(t) => t.const_zero().into(),
-            BasicTypeEnum::VectorType(t) => t.const_zero().into(),
-            BasicTypeEnum::ScalableVectorType(t) => t.const_zero().into(),
-        }
-    }
-
     pub(crate) fn compile_map_new(&mut self) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let header_ty = self.vec_header_type();
@@ -296,10 +283,13 @@ impl<'ctx> Compiler<'ctx> {
         &mut self,
         header_ptr: inkwell::values::PointerValue<'ctx>,
         key_val: BasicValueEnum<'ctx>,
-        val_ty: BasicTypeEnum<'ctx>,
+        val_ty: &crate::types::Type,
+        borrow: bool,
+        default: Option<BasicValueEnum<'ctx>>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
+        let lty = self.llvm_ty(val_ty);
         let fv = self.current_fn();
         let hash = self.fnv_hash_string(key_val)?;
 
@@ -314,16 +304,28 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_gep(i8t, entry_ptr, &[i64t.const_int(32, false)], "mg.vp"))
         };
-        let found_val = b!(self.bld.build_load(val_ty, val_ptr, "mg.fv"));
+        let raw = b!(self.bld.build_load(lty, val_ptr, "mg.fv"));
+        let found_val = if borrow {
+            raw
+        } else {
+            self.clone_value(raw, val_ty)?
+        };
+        let found_end = self.bld.get_insert_block().unwrap();
         b!(self.bld.build_unconditional_branch(merge_bb));
 
         self.bld.position_at_end(nf_bb);
+        let Some(d) = default else {
+            self.emit_trap("map key not found");
+            self.bld.position_at_end(merge_bb);
+            return Ok(found_val);
+        };
+        let missing = self.clone_value(d, val_ty)?;
+        let nf_end = self.bld.get_insert_block().unwrap();
         b!(self.bld.build_unconditional_branch(merge_bb));
 
         self.bld.position_at_end(merge_bb);
-        let phi = b!(self.bld.build_phi(val_ty, "mg.v"));
-        let missing = self.zero_of(val_ty);
-        phi.add_incoming(&[(&found_val, found_bb), (&missing, nf_bb)]);
+        let phi = b!(self.bld.build_phi(lty, "mg.v"));
+        phi.add_incoming(&[(&found_val, found_end), (&missing, nf_end)]);
         Ok(phi.as_basic_value())
     }
 

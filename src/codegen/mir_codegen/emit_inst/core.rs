@@ -622,10 +622,25 @@ impl<'ctx> Compiler<'ctx> {
                                 MapMethod::Get => {
                                     if !args.is_empty() {
                                         let k = self.val(args[0]);
-                                        let vt = self.llvm_ty(&val_ty);
-                                        return Ok(Some((self.map_get_val(header_ptr, k, vt))?));
+                                        return Ok(Some(
+                                            self.map_get_val(header_ptr, k, &val_ty, borrow, None)?,
+                                        ));
                                     }
                                     return Err("map.get() requires a key".into());
+                                }
+                                MapMethod::GetOr => {
+                                    if args.len() >= 2 {
+                                        let k = self.val(args[0]);
+                                        let d = self.val(args[1]);
+                                        return Ok(Some(self.map_get_val(
+                                            header_ptr,
+                                            k,
+                                            &val_ty,
+                                            false,
+                                            Some(d),
+                                        )?));
+                                    }
+                                    return Err("map.get_or() requires a key and a default".into());
                                 }
                                 MapMethod::Has | MapMethod::Contains => {
                                     if !args.is_empty() {

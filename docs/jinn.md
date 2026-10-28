@@ -847,7 +847,13 @@ m is map()
 m.set('key', 42)
 log(m.get('key'))    # 42
 log(m.has('key'))    # true
+log(m.get_or('nope', 0))    # 0
 ```
+
+`m.get(k)` and `m[k]` trap with `map key not found` when `k` is absent; they
+never invent a value. `m.get_or(k, default)` is the total form, and the
+counting idiom is `m.set(w, m.get_or(w, 0) + 1)`. The value returned by
+`get`/`get_or` is an owned copy; mutating it does not change the map.
 
 Map keys are strings: `Map of V` in an annotation is shorthand for
 `Map<string, V>`, and a non-string key type — `Map<i64, string>` — is a

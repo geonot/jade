@@ -117,6 +117,7 @@ impl VecMethod {
 pub enum MapMethod {
     Set,
     Get,
+    GetOr,
     Has,
     Contains,
     Remove,
@@ -132,6 +133,7 @@ impl MapMethod {
         Some(match name {
             "set" => Self::Set,
             "get" => Self::Get,
+            "get_or" => Self::GetOr,
             "has" => Self::Has,
             "contains" => Self::Contains,
             "remove" => Self::Remove,
@@ -147,7 +149,7 @@ impl MapMethod {
     pub fn ret_ty(self, key_ty: &Type, val_ty: &Type) -> Type {
         match self {
             Self::Set | Self::Remove | Self::Clear => Type::Void,
-            Self::Get => val_ty.clone(),
+            Self::Get | Self::GetOr => val_ty.clone(),
             Self::Has | Self::Contains => Type::Bool,
             Self::Len | Self::Count => Type::I64,
             Self::Keys => Type::Vec(Box::new(key_ty.clone())),

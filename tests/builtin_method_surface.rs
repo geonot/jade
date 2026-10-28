@@ -123,7 +123,8 @@ fn registry_names_round_trip() {
     assert!(VecMethod::from_name("nope").is_none());
 
     for name in [
-        "set", "get", "has", "contains", "remove", "clear", "len", "count", "keys", "values",
+        "set", "get", "get_or", "has", "contains", "remove", "clear", "len", "count", "keys",
+        "values",
     ] {
         assert!(
             MapMethod::from_name(name).is_some(),

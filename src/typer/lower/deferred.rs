@@ -86,7 +86,7 @@ impl Typer {
                     let key = key_ty.as_ref().clone();
                     let val = val_ty.as_ref().clone();
                     match &*dm.method.as_str() {
-                        "set" => {
+                        "set" | "get_or" => {
                             if let Some(k) = dm.arg_tys.first() {
                                 let _ = self.infer_ctx.unify_at(&key, k, dm.span, "map.set key");
                             }
