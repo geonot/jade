@@ -1,4 +1,5 @@
 # Changelog
+- **[172]** (2026-10-28 21:10) [171] one value formatter: Vec interpolation no longer ICEs (recursive vec_to_string), derived struct display matches log (P { x: 3 }), nested structs derive display; pin in crash_safety
 - **[170]** (2026-10-28 21:02) [170] PERF-10: for-loop counters lowered to SSA; MIR interval analysis (src/mir/range.rs) elides overflow checks on range-proven + - * and unary -; signed negation now traps on overflow; matrix_mul 2.92->1.51s, spectral_norm 4.52->2.02s; 7 new pins; roadmap/CHANGELOG
 - **[170]** (2026-10-28) PERF-10 — overflow checks elided where ranges prove safety.
 
