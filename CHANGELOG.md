@@ -14,6 +14,12 @@
 - **Signed negation traps.** `-x` on `i64::MIN` (and the narrower signed
   types) used to wrap silently. It now raises `integer overflow`, matching
   `+ - *`.
+- **One value formatter.** `"{xs}"` on a Vec used to crash the compiler
+  (`emit_to_string` fell through to `int_to_string`). Vec interpolation now
+  formats recursively, and derived struct display matches `log`
+  (`P { x: 3, s: hi }`, `E {}`; it used to be `P(x: 3, ...)`). Structs nested in
+  fields and in Vec elements get derived display too. Any other
+  non-formattable type is a codegen error instead of a panic.
 - Pins: four in `tests/crash_safety.rs` (negation trap, loop overflow still
   traps, exactness of proven arithmetic, unsigned underflow inside a loop) and
   three in `tests/mir_bounds_elision.rs` (no `with.overflow` in bounded index

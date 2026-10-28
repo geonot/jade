@@ -15,6 +15,18 @@ impl Typer {
             }
         }
 
+        let mut work: Vec<Symbol> = needs_display.iter().copied().collect();
+        while let Some(name) = work.pop() {
+            for (_, fty) in self.structs.get(&name).cloned().unwrap_or_default() {
+                let mut nested = std::collections::HashSet::new();
+                Self::structs_in_type(&fty, &mut nested);
+                for n in nested {
+                    if needs_display.insert(n) {
+                        work.push(n);
+                    }
+                }
+            }
+        }
         needs_display.retain(|name| !self.fns.contains_key(&format!("{name}_display")));
 
         for type_name in &needs_display {
@@ -35,7 +47,11 @@ impl Typer {
                     span,
                 };
 
-                let mut result = mk_str(format!("{type_name}("));
+                let mut result = mk_str(if fields.is_empty() {
+                    format!("{type_name} {{")
+                } else {
+                    format!("{type_name} {{ ")
+                });
 
                 for (i, (fname, fty)) in fields.iter().enumerate() {
                     let label = if i == 0 {
@@ -66,7 +82,10 @@ impl Typer {
                     result = concat(result, to_string);
                 }
 
-                result = concat(result, mk_str(")".into()));
+                result = concat(
+                    result,
+                    mk_str(if fields.is_empty() { "}" } else { " }" }.into()),
+                );
                 let body = vec![hir::Stmt::Expr(result)];
 
                 let hir_fn = hir::Fn {
@@ -157,17 +176,13 @@ impl Typer {
         match &expr.kind {
             hir::ExprKind::Builtin(hir::BuiltinFn::Log, args) => {
                 for a in args {
-                    if let Type::Struct(name, _) = &a.ty {
-                        needs.insert(*name);
-                    }
+                    Self::structs_in_type(&a.ty, needs);
                     Self::collect_display_usage_expr(a, needs);
                 }
             }
             hir::ExprKind::Builtin(hir::BuiltinFn::ToString, args) => {
                 for a in args {
-                    if let Type::Struct(name, _) = &a.ty {
-                        needs.insert(*name);
-                    }
+                    Self::structs_in_type(&a.ty, needs);
                     Self::collect_display_usage_expr(a, needs);
                 }
             }
@@ -220,6 +235,19 @@ impl Typer {
                     Self::collect_display_usage(b, needs);
                 }
             }
+            _ => {}
+        }
+    }
+
+    fn structs_in_type(ty: &Type, needs: &mut std::collections::HashSet<Symbol>) {
+        match ty {
+            Type::Struct(name, args) => {
+                needs.insert(*name);
+                for a in args {
+                    Self::structs_in_type(a, needs);
+                }
+            }
+            Type::Vec(e) | Type::Array(e, _) => Self::structs_in_type(e, needs),
             _ => {}
         }
     }

@@ -512,3 +512,11 @@ fn unsigned_loop_index_underflow_still_traps() {
         "integer overflow",
     );
 }
+
+#[test]
+fn interpolation_and_log_share_one_formatter() {
+    expect(
+        "type P\n    x\n    s\ntype E\n*main\n    p is P(3, 'hi')\n    log(p)\n    log('{p}')\n    xs is [1, 2]\n    log('{xs}')\n    ys is [p]\n    log(ys)\n    log('{ys}')\n    vs is [[1, 2], [3]]\n    log('{vs}')\n    e is E()\n    log('{e}')\n",
+        "P { x: 3, s: hi }\nP { x: 3, s: hi }\n[1, 2]\n[P { x: 3, s: hi }]\n[P { x: 3, s: hi }]\n[[1, 2], [3]]\nE {}",
+    );
+}

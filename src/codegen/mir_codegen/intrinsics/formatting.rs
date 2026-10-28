@@ -158,8 +158,75 @@ impl<'ctx> Compiler<'ctx> {
                     self.int_to_string(val, false)
                 }
             }
-            _ => self.int_to_string(val, false),
+            Type::Vec(elem) => self.vec_to_string(val, elem),
+            _ if val.is_int_value() => self.int_to_string(val, false),
+            _ => Err(format!("cannot format a value of type {ty} as a string")),
         }
+    }
+
+    fn vec_to_string(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+        elem_ty: &Type,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        let i64t = self.ctx.i64_type();
+        let st = self.string_type();
+        let (data, len) = self.vec_data_and_len(val.into_pointer_value())?;
+        let lty = self.llvm_ty(elem_ty);
+        let acc = self.entry_alloca(st.into(), "vts.acc");
+        let open = self.compile_str_literal("[")?;
+        b!(self.bld.build_store(acc, open));
+        let idx = self.entry_alloca(i64t.into(), "vts.idx");
+        b!(self.bld.build_store(idx, i64t.const_zero()));
+        let fv = self.current_fn();
+        let cond_bb = self.ctx.append_basic_block(fv, "vts.cond");
+        let body_bb = self.ctx.append_basic_block(fv, "vts.body");
+        let done_bb = self.ctx.append_basic_block(fv, "vts.done");
+        b!(self.bld.build_unconditional_branch(cond_bb));
+
+        self.bld.position_at_end(cond_bb);
+        let i = b!(self.bld.build_load(i64t, idx, "vts.i")).into_int_value();
+        let more = b!(self
+            .bld
+            .build_int_compare(inkwell::IntPredicate::SLT, i, len, "vts.more"));
+        b!(self.bld.build_conditional_branch(more, body_bb, done_bb));
+
+        self.bld.position_at_end(body_bb);
+        let gep = unsafe { b!(self.bld.build_gep(lty, data, &[i], "vts.gep")) };
+        let elem = b!(self.bld.build_load(lty, gep, "vts.elem"));
+        let piece = self.emit_to_string(elem, elem_ty)?;
+        let first = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::EQ,
+            i,
+            i64t.const_zero(),
+            "vts.first"
+        ));
+        let sep_empty = self.compile_str_literal("")?;
+        let sep_comma = self.compile_str_literal(", ")?;
+        let sep = b!(self
+            .bld
+            .build_select(first, sep_empty, sep_comma, "vts.sep"));
+        let cur = b!(self.bld.build_load(st, acc, "vts.cur"));
+        let with_sep = self.string_concat(cur, sep)?;
+        self.drop_string(cur)?;
+        let next = self.string_concat(with_sep, piece)?;
+        self.drop_string(with_sep)?;
+        if !matches!(elem_ty, Type::String) {
+            self.drop_string(piece)?;
+        }
+        b!(self.bld.build_store(acc, next));
+        let i1 = b!(self
+            .bld
+            .build_int_nsw_add(i, i64t.const_int(1, false), "vts.next"));
+        b!(self.bld.build_store(idx, i1));
+        b!(self.bld.build_unconditional_branch(cond_bb));
+
+        self.bld.position_at_end(done_bb);
+        let cur = b!(self.bld.build_load(st, acc, "vts.cur"));
+        let close = self.compile_str_literal("]")?;
+        let out = self.string_concat(cur, close)?;
+        self.drop_string(cur)?;
+        Ok(out)
     }
 
     pub(in crate::codegen) fn emit_fmt_bin(
