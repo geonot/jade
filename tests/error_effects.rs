@@ -119,7 +119,7 @@ fn err_raise_early_return_still_works() {
 fn option_predicates_and_unwrap() {
     expect(
         "*main()\n    a is Some(5)\n    log(a.is_some())\n    log(a.is_none())\n    log(a.unwrap())\n    log(a.unwrap_or(99))\n    n is Nothing\n    log(n.unwrap_or(42))\n",
-        "1\n0\n5\n5\n42",
+        "true\nfalse\n5\n5\n42",
     );
 }
 
@@ -143,7 +143,7 @@ fn option_map_short_circuits_on_nothing() {
 fn result_predicates_and_unwrap() {
     expect(
         "*ok(x as i64) returns Result of i64, i64\n    Ok(x)\n\n*er(x as i64) returns Result of i64, i64\n    Err(x)\n\n*main()\n    a is ok(5)\n    log(a.is_ok())\n    log(a.is_err())\n    log(a.unwrap())\n    log(a.unwrap_or(99))\n    e is er(8)\n    log(e.is_err())\n    log(e.unwrap_or(77))\n",
-        "1\n0\n5\n5\n1\n77",
+        "true\nfalse\n5\n5\ntrue\n77",
     );
 }
 
@@ -159,7 +159,7 @@ fn result_map_map_err_and_then() {
 fn result_ok_and_err_projections() {
     expect(
         "*ok(x as i64) returns Result of i64, i64\n    Ok(x)\n\n*er(x as i64) returns Result of i64, i64\n    Err(x)\n\n*main()\n    log(ok(5).ok().unwrap())\n    log(er(8).err().unwrap())\n    log(ok(5).err().is_none())\n    log(er(8).ok().is_none())\n",
-        "5\n8\n1\n1",
+        "5\n8\ntrue\ntrue",
     );
 }
 

@@ -37,7 +37,7 @@ fn stdlib_behavior_suites_pass() {
         let bin = tmp.path().join("t.bin");
         let name = src.file_stem().unwrap().to_string_lossy().to_string();
         let c = Command::new(jinnc())
-            .arg(&src)
+            .arg(src)
             .arg("--test")
             .arg("-o")
             .arg(&bin)

@@ -332,18 +332,34 @@ fn float_zero_over_zero_is_nan() {
 }
 
 #[test]
-fn unsigned_subtraction_wraps() {
-    expect(
+fn unsigned_subtraction_underflow_traps() {
+    expect_trap(
         "*main\n    a is 0 as u8\n    b is 1 as u8\n    log(a - b)\n",
-        "255",
+        "integer overflow",
     );
 }
 
 #[test]
-fn signed_addition_wraps_twos_complement() {
-    expect(
+fn signed_addition_overflow_traps() {
+    expect_trap(
         "*main\n    a is 9223372036854775807\n    b is 1\n    log(a + b)\n",
-        "-9223372036854775808",
+        "integer overflow",
+    );
+}
+
+#[test]
+fn signed_multiplication_overflow_traps() {
+    expect_trap(
+        "*main\n    a is 4611686018427387904\n    log(a * 2)\n",
+        "integer overflow",
+    );
+}
+
+#[test]
+fn wrapping_builtins_wrap_explicitly() {
+    expect(
+        "*main\n    a is 9223372036854775807\n    log(wrapping_add(a, 1))\n    b is 0 as u8\n    log(wrapping_sub(b, 1 as u8))\n",
+        "-9223372036854775808\n255",
     );
 }
 
@@ -382,4 +398,85 @@ fn string_char_at_oob_is_checked() {
 #[test]
 fn oversized_shift_is_defined() {
     expect_trap("*main\n    a is 1\n    b is 70\n    log(a << b)\n", "shift");
+}
+
+#[test]
+fn trap_preserves_buffered_piped_stdout() {
+    let (dir, out) = compile(
+        "*main\n    log('before')\n    v is vec()\n    v.push(1)\n    v.pop()\n    v.pop()\n",
+    );
+    let output = Command::new(&out)
+        .current_dir(dir.path())
+        .output()
+        .expect("run");
+    assert!(aborted(&output.status));
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "before");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("runtime error: pop from an empty vec")
+    );
+}
+
+#[test]
+fn unsigned_addition_overflow_traps() {
+    expect_trap(
+        "*main\n    b as u8 is 250\n    c as u8 is 10\n    log(b + c)\n",
+        "integer overflow",
+    );
+}
+
+#[test]
+fn channel_for_and_loop_iterate_until_closed() {
+    expect(
+        "*main\n    ch is channel of i64(8)\n    send ch, 1\n    send ch, 2\n    close ch\n    for v in ch\n        log(v)\n    d is channel of String\n    together\n        dispatch\n            for i in 0 to 3\n                send d, 'item number {i} with a heap-sized payload'\n            close d\n        dispatch\n            n is 0\n            loop d\n                n += $.length\n            log(n)\n",
+        "1\n2\n117",
+    );
+}
+
+#[test]
+fn log_formats_floats_bools_and_structs_canonically() {
+    expect(
+        "type P\n    x\n    y\n*main\n    log(0.1 + 0.2)\n    log(2.0)\n    f as f32 is 6.28\n    log(f)\n    log(1 < 2)\n    log(P(3, 4))\n    log(7.to_string() + true.to_string())\n",
+        "0.30000000000000004\n2\n6.28\ntrue\nP { x: 3, y: 4 }\n7true",
+    );
+}
+
+#[test]
+fn user_function_named_like_libm_is_not_folded_as_builtin() {
+    let src = "*sqrt(x as f64) returns f64\n    g is x\n    i is 0\n    while i < 30\n        g is (g + x / g) / 2.0\n        i is i + 1\n    g\n\n*main\n    log(sqrt(2.0))\n";
+    for opt in ["0", "3"] {
+        let dir = tempfile::tempdir().unwrap();
+        let jinn = dir.path().join("t.jn");
+        let out = dir.path().join("t");
+        std::fs::write(&jinn, src).unwrap();
+        let c = Command::new(jinnc())
+            .arg(&jinn)
+            .arg("--opt")
+            .arg(opt)
+            .arg("-o")
+            .arg(&out)
+            .output()
+            .unwrap();
+        assert!(c.status.success());
+        let r = Command::new(&out).output().unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&r.stdout).trim(),
+            "1.414213562373095",
+            "--opt {opt}"
+        );
+    }
+}
+
+#[test]
+fn single_equals_gets_a_guided_diagnostic() {
+    let dir = tempfile::tempdir().unwrap();
+    let jinn = dir.path().join("t.jn");
+    std::fs::write(&jinn, "*main\n    x is 5\n    if x == 5\n        log(1)\n").unwrap();
+    let c = Command::new(jinnc())
+        .arg(&jinn)
+        .arg("-o")
+        .arg(dir.path().join("t"))
+        .output()
+        .unwrap();
+    assert!(!c.status.success());
+    assert!(String::from_utf8_lossy(&c.stderr).contains("equals"));
 }

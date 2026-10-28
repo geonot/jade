@@ -524,6 +524,10 @@ impl<'ctx> Compiler<'ctx> {
             let ft = self.mk_fn_type(&ret, &lp, false);
             let fv = self.module.add_function(&sym_name, ft, None);
             self.tag_fn(fv);
+            fv.add_attribute(
+                inkwell::attributes::AttributeLoc::Function,
+                self.attr("nobuiltin"),
+            );
             self.apply_fn_attrs(fv, &func.attrs);
             self.fns.insert(func.name, (fv, ptys, ret));
         }
@@ -563,6 +567,7 @@ impl<'ctx> Compiler<'ctx> {
         self.pending_phis.clear();
         self.var_allocs.clear();
         self.value_types.clear();
+        self.chan_iter_slots.clear();
         self.self_allocs.clear();
         self.by_ref_values.clear();
         self.local_struct_values.clear();

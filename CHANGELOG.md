@@ -1,4 +1,57 @@
 # Changelog
+- **[169]** (2026-10-28) semantic hardening from the post-hiatus review — integer overflow traps, channel iteration, one trap path, canonical value formatting, and a libm-folding miscompile.
+
+Full suite is 2397, green; fmt/clippy clean. New pins in `tests/crash_safety.rs`.
+
+- **Integer overflow traps.** Fixed-width `+`, `-`, `*` lower through
+  `llvm.{s,u}{add,sub,mul}.with.overflow` and trap with
+  `runtime error: integer overflow` in every build mode; before this,
+  `i64::MAX + 1` printed `i64::MIN` and `250 as u8 + 10` printed `4`.
+  Comptime folding uses checked arithmetic, so a constant that would
+  overflow is left to the runtime check instead of being wrapped at
+  compile time. Wrapping is spelled at the call site with the existing
+  `wrapping_add/sub/mul` builtins. Code that wrapped on purpose was ported:
+  `std/random` (xoshiro/splitmix), the `std/bit` mask idiom
+  `(1 << 63) - 1`, five apps' hashes and PRNGs, and the `matrix_mul`/`nbody`
+  benchmarks (matching their Rust baselines). Porting also surfaced a real
+  latent wrap in lattice_crypto's poly MAC (`(acc mod P) * k1` exceeds
+  i64), now explicit. Cost, old→new on one pass: collatz 0.66→1.15 s,
+  matrix_mul 1.40→2.63 s, fibonacci 1.00→1.16 s, nbody 2.53→2.71 s,
+  math_compute 1.24→1.34 s, sieve/gcd unchanged. Range-based check
+  elision is filed as `PERF-10`.
+- **Channel iteration.** `for v in ch` and `loop ch` (`$`) receive until
+  the channel is closed and drained. They lower to a recv loop over a
+  per-channel entry slot, the binder is owned, and String payloads inside
+  `together`/`dispatch` run leak-free.
+- **One trap path.** `jinn_trap` (runtime, `noreturn`/`cold`) flushes
+  stdout, prints `runtime error: <msg>`, rolls back an open store
+  transaction, and aborts. Every codegen trap routes through it. Piped
+  stdout written before a trap used to be lost, and `Vec.pop` on an empty
+  vec was a bare `llvm.trap` with no message; it now says
+  `pop from an empty vec`.
+- **Canonical formatting.** `log`/`print`/`eprint` format floats with the
+  same shortest round-trip formatter as interpolation (`7` instead of
+  `7.000000`; `0.30000000000000004`), with a new `jinn_f32_format` so an
+  `f32` prints `6.28` rather than its widened `6.28000020980835`. Booleans
+  print `true`/`false` instead of `1`/`0`, and struct output drops the
+  stack address (`P { x: 3, y: 4 }`). About 120 test expectations and 15
+  program snapshots changed; every diff was checked to be pure formatting.
+  Numbers and bools now have `.to_string()`.
+- **`nobuiltin` on user functions.** A user `*sqrt(x as f64)` was
+  recognized by LLVM as libm `sqrt` and constant-folded at `--opt 3`, so
+  O0 printed `1.414213562373095` (the user's Newton iteration) and O3
+  printed `1.4142135623730951`. The old `%f` output hid this; the new
+  formatter exposed it in `snippets/101-200/s117.jn`. Every Jinn-defined
+  function now carries `nobuiltin`.
+- **LK-1.** String `+` drops fresh-temp operands (nested concat,
+  `to_string`, `fmt_*`), so chained concat and interpolation no longer leak
+  the intermediate. RSS is flat over 10⁶ iterations.
+- **Diagnostics.** A stray `=` or `==` now names the fix
+  (`compare with equals`, `bind with is`) instead of
+  `unexpected character: '='`.
+- Deferred with precise notes in the roadmap: `MAP-GET` (missing-key zero
+  default) and `LK-4` (container insertion aliases String arguments).
+
 - **[168]** (2026-09-22) WS-A closes `CG-7` — the last accept-then-corrupt hole of the `DIST-1` family: `%x` on a local now forces the binder to memory, so an extern's writes through the pointer are visible to the caller (`process.run`'s `out_len`/`exit_code` read back); `%vec` into an extern yields the element data pointer, not `&slot`, so `std/sort.sort_f64` and any in-place extern operate on the live buffer; the runtime vec-argv fns move to an `(elems, n)` convention and `std/process.jn` is repointed and returned to the stable tier with a behavioral suite (`tests/stdlib/process_tests.jn`, 15 tests: exit codes, a >64 KB capture, `run_argv`). Exercising the fixed path surfaced a second blocker-class defect fixed here: a heap-bearing struct field moved out by a plain bind in *tail* position was borrowed-demoted by the escape pass, so the parent's `drop` freed the field a second time (`process.capture` aborted with a glibc double-free); tail expressions of non-void functions now count as *returned* values, not local reads. Full suite is 2389, green; fmt/clippy clean; new pins in `tests/semantics_regression.rs`.
 
 - **[167]** (2026-08-18) alpha review blockers close out — the last seven review blockers land (`DIST-1` dead spill temp, `DIST-5r` cross-process store, `STD-5` dataframe sort, `SYN-6`, `MIR-1`, `TYP-5`, `TDX-3`) plus `MIR-5`/`PAR-2`/`PAR-3`/`PERF-2` and the std tier demotion; fixing `DIST-1` makes raft's election converge and exposes one new blocker (`CG-7`, extern out-parameters)

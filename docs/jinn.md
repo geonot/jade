@@ -296,6 +296,26 @@ a & b    a | b    a ^ b    # bitwise and / or / xor
 a << b   a >> b            # shifts
 ```
 
+Fixed-width integer `+`, `-`, and `*` are checked in every build mode: a
+result that does not fit the operand type traps with
+`runtime error: integer overflow` (exit status 134), as do division by zero,
+`INT_MIN / -1`, and a shift count at or above the bit width. Wrapping is
+opt-in and named at the call site — `wrapping_add`, `wrapping_sub`,
+`wrapping_mul` — for hashes, PRNGs, and bit masks; `saturating_*` clamps and
+`checked_*` returns `(value, overflowed)`.
+
+<!-- doctest:prelude
+h is 14695981039346656037 as u64
+-->
+```jinn
+h is wrapping_mul(h, 1099511628211 as u64)
+```
+
+Numbers and booleans format the same way everywhere — `log`, `print`,
+interpolation, and `.to_string()`: floats print the shortest text that
+reads back to the same value (`0.1 + 0.2` prints `0.30000000000000004`,
+`2.0` prints `2`), booleans print `true`/`false`.
+
 ### Casting
 
 <!-- doctest:prelude
@@ -1075,6 +1095,19 @@ ch is channel of i64(16)    # buffered, capacity 16
 send ch, 42
 v is receive ch
 close ch
+```
+
+`for v in ch` and `loop ch` (with `$`) receive until the channel is closed
+and drained:
+
+<!-- doctest:prelude
+ch is channel of i64(4)
+send ch, 1
+close ch
+-->
+```jinn
+for v in ch
+    log(v)
 ```
 
 ### Select

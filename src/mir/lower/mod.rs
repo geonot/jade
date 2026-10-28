@@ -573,6 +573,22 @@ impl Lowerer {
         }
     }
 
+    pub(super) fn is_fresh_string_temp(e: &hir::Expr) -> bool {
+        matches!(e.ty, Type::String)
+            && match &e.kind {
+                ExprKind::BinOp(_, ast::BinOp::Add, _) => true,
+                ExprKind::Builtin(f, _) => matches!(
+                    f,
+                    hir::BuiltinFn::ToString
+                        | hir::BuiltinFn::FmtFloat
+                        | hir::BuiltinFn::FmtHex
+                        | hir::BuiltinFn::FmtOct
+                        | hir::BuiltinFn::FmtBin
+                ),
+                _ => false,
+            }
+    }
+
     fn needs_auto_clone(expr: &hir::Expr) -> bool {
         if expr.ty.is_trivially_droppable() || !expr.ty.is_value_clonable() {
             return false;

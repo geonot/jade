@@ -173,32 +173,32 @@ fn exp_large() {
 
 #[test]
 fn cmp_gt() {
-    expect("*main()\n    log(10 > 5)\n", "1");
+    expect("*main()\n    log(10 > 5)\n", "true");
 }
 
 #[test]
 fn cmp_lt_false() {
-    expect("*main()\n    log(3 < 1)\n", "0");
+    expect("*main()\n    log(3 < 1)\n", "false");
 }
 
 #[test]
 fn cmp_ge_equal() {
-    expect("*main()\n    log(5 >= 5)\n", "1");
+    expect("*main()\n    log(5 >= 5)\n", "true");
 }
 
 #[test]
 fn cmp_le_false() {
-    expect("*main()\n    log(4 <= 3)\n", "0");
+    expect("*main()\n    log(4 <= 3)\n", "false");
 }
 
 #[test]
 fn cmp_equals() {
-    expect("*main()\n    log(7 equals 7)\n", "1");
+    expect("*main()\n    log(7 equals 7)\n", "true");
 }
 
 #[test]
 fn cmp_isnt() {
-    expect("*main()\n    log(7 neq 8)\n", "1");
+    expect("*main()\n    log(7 neq 8)\n", "true");
 }
 
 #[test]
@@ -355,7 +355,7 @@ fn bitwise_ops() {
 
 #[test]
 fn cast_int_to_float() {
-    expect("*main()\n    x is 42 as f64\n    log(x)\n", "42.000000");
+    expect("*main()\n    x is 42 as f64\n    log(x)\n", "42");
 }
 
 #[test]
@@ -1205,7 +1205,7 @@ fn for_in_array_sum() {
 fn equals_returns_one_not_neg_one() {
     expect(
         "*main()\n    x is 5\n    y is 5\n    z is x equals y\n    log(z)\n",
-        "1",
+        "true",
     );
 }
 
@@ -1213,7 +1213,7 @@ fn equals_returns_one_not_neg_one() {
 fn isnt_returns_one_not_neg_one() {
     expect(
         "*main()\n    x is 5\n    y is 6\n    z is x neq y\n    log(z)\n",
-        "1",
+        "true",
     );
 }
 
@@ -1221,7 +1221,7 @@ fn isnt_returns_one_not_neg_one() {
 fn equals_false_returns_zero() {
     expect(
         "*main()\n    x is 5\n    y is 6\n    z is x equals y\n    log(z)\n",
-        "0",
+        "false",
     );
 }
 
@@ -1409,7 +1409,7 @@ fn generic_fn_different_types() {
 fn comparison_lt_gt_combined() {
     expect(
         "*main()\n    a is 5\n    log(a < 10)\n    log(a > 3)\n    log(a <= 5)\n    log(a >= 5)\n",
-        "1\n1\n1\n1",
+        "true\ntrue\ntrue\ntrue",
     );
 }
 
@@ -1585,7 +1585,7 @@ fn recursive_enum_dynamic_list() {
 fn enum_mixed_int_float_fields() {
     expect(
         "enum Value\n    IntVal(i32)\n    FloatVal(f64)\n    Pair(i32, f64)\n\n*extract(v as Value) returns f64\n    match v\n        IntVal(i) ? i as f64\n        FloatVal(f) ? f\n        Pair(i, f) ? (i as f64) + f\n\n*main() returns i32\n    a is IntVal(42)\n    b is FloatVal(3.14)\n    c is Pair(10, 2.5)\n    log(extract(a))\n    log(extract(c))\n    0\n",
-        "42.000000\n12.500000",
+        "42\n12.5",
     );
 }
 
@@ -2001,7 +2001,7 @@ fn operator_overload_mul() {
 fn operator_overload_lt() {
     expect(
         "type Score\n    val as i64\n\ntrait Ord\n    *less(other as Score) returns bool\n\nimpl Ord for Score\n    *less(other as Score) returns bool\n        self.val < other.val\n\n*main() returns i32\n    a is Score(val is 5)\n    b is Score(val is 10)\n    log(a < b)\n    log(b < a)\n    0\n",
-        "1\n0",
+        "true\nfalse",
     );
 }
 
@@ -2009,7 +2009,7 @@ fn operator_overload_lt() {
 fn operator_overload_gt() {
     expect(
         "type Score\n    val as i64\n\ntrait Ord\n    *greater(other as Score) returns bool\n\nimpl Ord for Score\n    *greater(other as Score) returns bool\n        self.val > other.val\n\n*main() returns i32\n    a is Score(val is 5)\n    b is Score(val is 10)\n    log(b > a)\n    log(a > b)\n    0\n",
-        "1\n0",
+        "true\nfalse",
     );
 }
 
@@ -2017,7 +2017,7 @@ fn operator_overload_gt() {
 fn operator_overload_le_ge() {
     expect(
         "type Val\n    n as i64\n\ntrait Cmp\n    *less_eq(other as Val) returns bool\n    *greater_eq(other as Val) returns bool\n\nimpl Cmp for Val\n    *less_eq(other as Val) returns bool\n        self.n <= other.n\n    *greater_eq(other as Val) returns bool\n        self.n >= other.n\n\n*main() returns i32\n    a is Val(n is 5)\n    b is Val(n is 5)\n    c is Val(n is 10)\n    log(a <= b)\n    log(a >= b)\n    log(a <= c)\n    log(c >= a)\n    0\n",
-        "1\n1\n1\n1",
+        "true\ntrue\ntrue\ntrue",
     );
 }
 
@@ -2091,7 +2091,7 @@ fn drop_vec_basic() {
 fn drop_does_not_affect_scalars() {
     expect(
         "*main()\n    x is 42\n    y is 3.14\n    z is true\n    log(x)\n    log(y)\n    log(z)\n",
-        "42\n3.140000\n1",
+        "42\n3.14\ntrue",
     );
 }
 
@@ -2147,7 +2147,7 @@ fn unlikely_builtin() {
 fn inplace_match_reconstruct_enum() {
     expect(
         "enum Shape\n    Circle(f64)\n    Square(f64)\n\n*double_shape(s as Shape) returns Shape\n    match s\n        Circle(r) ? Circle(r * 2.0)\n        Square(side) ? Square(side * 2.0)\n\n*main()\n    c is double_shape(Circle(5.0))\n    match c\n        Circle(r) ? log(r)\n        Square(_) ? log(0.0)\n",
-        "10.000000",
+        "10",
     );
 }
 
@@ -2163,7 +2163,7 @@ fn inplace_match_transform_variant() {
 fn tail_reuse_enum_transform() {
     expect(
         "enum Shape\n    Circle(f64)\n    Square(f64)\n\n*scale(s as Shape, factor as f64) returns Shape\n    match s\n        Circle(r) ? Circle(r * factor)\n        Square(side) ? Square(side * factor)\n\n*main()\n    c is scale(Circle(3.0), 2.0)\n    match c\n        Circle(r) ? log(r)\n        Square(_) ? log(0.0)\n",
-        "6.000000",
+        "6",
     );
 }
 
@@ -2450,7 +2450,7 @@ fn store_group_sum() {
 fn store_group_avg() {
     expect_store(
         "store sales @simple\n    city as String\n    amt as i64\n\n*main\n    insert sales 'nyc', 10\n    insert sales 'nyc', 30\n    insert sales 'la', 20\n    g is sales.group(city).avg(amt)\n    log g.length\n    total is 0.0\n    for row in g\n        total is total + row[1]\n    log total\n",
-        "2\n40.000000",
+        "2\n40",
     );
 }
 
@@ -2530,7 +2530,7 @@ fn kv_set_get() {
 fn kv_has() {
     expect_store(
         "store cache @kv\n\n*main\n    cache.set('k', 10)\n    h is cache.has('k')\n    log h\n    m is cache.has('missing')\n    log m\n",
-        "1\n0",
+        "true\nfalse",
     );
 }
 
@@ -2546,7 +2546,7 @@ fn kv_count() {
 fn kv_del() {
     expect_store(
         "store cache @kv\n\n*main\n    cache.set('x', 99)\n    cache.del('x')\n    h is cache.has('x')\n    log h\n    n is cache.count()\n    log n\n",
-        "0\n0",
+        "false\n0",
     );
 }
 
@@ -2594,7 +2594,7 @@ fn kv_get_missing_unwrap_or() {
 fn kv_f64_value_schema() {
     expect_store(
         "store prices @kv\n    key as String\n    val as f64\n\n*main\n    prices.set('eth', 3.5)\n    v is prices.get('eth').unwrap_or(0.0)\n    log v\n    m is prices.get('btc').unwrap_or(-1.0)\n    log m\n",
-        "3.500000\n-1.000000",
+        "3.5\n-1",
     );
 }
 
@@ -2642,7 +2642,7 @@ fn vec_insert_count() {
 fn vec_nearest_basic() {
     expect_store(
         "store vecs @vector(3)\n\n*main\n    vecs.insert([1.0, 0.0, 0.0])\n    vecs.insert([0.0, 1.0, 0.0])\n    vecs.insert([0.0, 0.0, 1.0])\n    k is vecs.nearest([1.0, 0.0, 0.0], 1)\n    log k.length\n    log k[0][0]\n    log k[0][1]\n",
-        "1\n0\n0.000000",
+        "1\n0\n0",
     );
 }
 
@@ -2826,7 +2826,7 @@ fn store_first_match() {
 fn store_exists_found() {
     expect_store(
         "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    e is exists users where name equals 'Bob'\n    log e\n",
-        "1",
+        "true",
     );
 }
 
@@ -2834,7 +2834,7 @@ fn store_exists_found() {
 fn store_exists_not_found() {
     expect_store(
         "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    e is exists users where name equals 'Zara'\n    log e\n",
-        "0",
+        "false",
     );
 }
 
@@ -2898,7 +2898,7 @@ fn store_save_basic() {
 fn store_agg_sum_float() {
     expect_store(
         "store meas\n    val as f64\n\n*main\n    insert meas 1.5\n    insert meas 2.5\n    insert meas 3.0\n    s is meas.sum(val)\n    log s\n",
-        "7.000000",
+        "7",
     );
 }
 
@@ -2906,7 +2906,7 @@ fn store_agg_sum_float() {
 fn store_agg_min_max_float() {
     expect_store(
         "store meas\n    val as f64\n\n*main\n    insert meas 3.14\n    insert meas 1.41\n    insert meas 2.72\n    lo is meas.min(val)\n    hi is meas.max(val)\n    log lo\n    log hi\n",
-        "1.410000\n3.140000",
+        "1.41\n3.14",
     );
 }
 
@@ -2914,7 +2914,7 @@ fn store_agg_min_max_float() {
 fn store_agg_avg_int() {
     expect_store(
         "store scores\n    val as i64\n\n*main\n    insert scores 10\n    insert scores 20\n    insert scores 30\n    a is scores.avg(val)\n    log a\n",
-        "20.000000",
+        "20",
     );
 }
 
@@ -2922,7 +2922,7 @@ fn store_agg_avg_int() {
 fn store_exists_after_delete() {
     expect_store(
         "store users\n    name as String\n    age as i64\n\n*main\n    insert users 'Alice', 30\n    insert users 'Bob', 25\n    delete users where name equals 'Bob'\n    e is exists users where name equals 'Bob'\n    log e\n",
-        "0",
+        "false",
     );
 }
 
@@ -4283,7 +4283,7 @@ fn query_group_min_max() {
 fn query_group_int_key_float_avg() {
     expect_store(
         "store m @simple\n    bucket as i64\n    v as f64\n\n*main\n    insert m 1, 2.0\n    insert m 1, 4.0\n    rows is m query\n        group bucket\n        select bucket, avg(v)\n    for row in rows\n        log row[1]\n",
-        "3.000000",
+        "3",
     );
 }
 

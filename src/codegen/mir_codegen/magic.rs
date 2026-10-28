@@ -321,6 +321,50 @@ impl<'ctx> Compiler<'ctx> {
             return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
         }
 
+        if (name == "__chan_iter_next" || name == "__chan_iter_value")
+            && let Some(&ch_val) = args.first()
+        {
+            let elem_ty = match self.value_types.get(&ch_val) {
+                Some(Type::Channel(t)) => (**t).clone(),
+                _ => return Err(format!("{name} on a non-channel value")),
+            };
+            let elem_llvm = self.llvm_ty(&elem_ty);
+            let slot = match self.chan_iter_slots.get(&ch_val) {
+                Some(p) => *p,
+                None => {
+                    let p = self.entry_alloca(elem_llvm, "chan.iter.slot");
+                    self.chan_iter_slots.insert(ch_val, p);
+                    p
+                }
+            };
+            if name == "__chan_iter_value" {
+                return Ok(Some(b!(self.bld.build_load(
+                    elem_llvm,
+                    slot,
+                    "chan.iter.val"
+                ))));
+            }
+            let recv = self
+                .module
+                .get_function("jinn_chan_recv")
+                .ok_or("jinn_chan_recv not declared")?;
+            let ch_ptr = self.val(ch_val).into_pointer_value();
+            let rc = b!(self
+                .bld
+                .build_call(recv, &[ch_ptr.into(), slot.into()], "chan.iter.rc"))
+            .try_as_basic_value()
+            .basic()
+            .ok_or("jinn_chan_recv returned void")?
+            .into_int_value();
+            let got = b!(self.bld.build_int_compare(
+                inkwell::IntPredicate::NE,
+                rc,
+                rc.get_type().const_int(0, false),
+                "chan.iter.got"
+            ));
+            return Ok(Some(got.into()));
+        }
+
         if name == "__chan_close"
             && let Some(&ch_val) = args.first()
         {

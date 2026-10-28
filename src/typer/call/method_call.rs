@@ -555,6 +555,23 @@ impl Typer {
             });
         }
 
+        let numeric_var = matches!(&obj_ty, Type::TypeVar(v) if matches!(
+            self.infer_ctx.constraint(*v),
+            crate::typer::unify::TypeConstraint::Numeric
+                | crate::typer::unify::TypeConstraint::Integer
+                | crate::typer::unify::TypeConstraint::Float
+        ));
+        if method == "to_string"
+            && args.is_empty()
+            && (obj_ty.is_num() || obj_ty == Type::Bool || numeric_var)
+        {
+            return Ok(hir::Expr {
+                kind: hir::ExprKind::Builtin(hir::BuiltinFn::ToString, vec![hobj]),
+                ty: Type::String,
+                span,
+            });
+        }
+
         if matches!(
             obj_ty,
             Type::I8

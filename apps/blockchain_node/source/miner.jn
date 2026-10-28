@@ -13,9 +13,9 @@ use models/block
     acc
 
 *mix(prev_hash as i64, merkle as i64, nonce as i64) returns i64
-    h is prev_hash ^ (merkle * 2654435761)
-    h is h ^ (nonce * 1099511628211)
-    h is h * 1315423911
+    h is prev_hash ^ wrapping_mul(merkle, 2654435761)
+    h is h ^ wrapping_mul(nonce, 1099511628211)
+    h is wrapping_mul(h, 1315423911)
     if h < 0
         h is -h
     h % 1000000007

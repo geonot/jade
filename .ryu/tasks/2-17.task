@@ -1,11 +1,13 @@
 title: Implement store crash-consistency tests
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-10T03:53:53'
-result: ''
+updated_at: '2026-10-28T08:50:00'
+result: 'Superseded: crash consistency covered by tests/durable_crash.rs, store_recovery.rs,
+  store_transactions.rs (WAL TXN framing + undo images, [166]). Residue lives in roadmap
+  S-*/STO-*.'
 description: 'Store crash-consistency tests (review P1-14). Current state: GOOD baseline
   already exists — tests/wal_crash.rs has 3 tests (wal_basic_durability_and_replay,
   wal_group_commit_durability, wal_survives_kill_9) and tests/wal_property.rs (225

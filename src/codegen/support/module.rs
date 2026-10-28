@@ -47,6 +47,7 @@ impl<'ctx> Compiler<'ctx> {
             pending_phis: Vec::new(),
             var_allocs: std::collections::HashMap::new(),
             value_types: std::collections::HashMap::new(),
+            chan_iter_slots: std::collections::HashMap::new(),
             select_data_bufs: std::collections::HashMap::new(),
             self_allocs: std::collections::HashMap::new(),
             self_alloc_types: std::collections::HashMap::new(),

@@ -5,7 +5,7 @@
         for j in 0 to n
             sum is 0
             for k in 0 to n
-                sum is sum + (i * n + k) * (k * n + j) + (total xor k)
-            total is total + sum
+                sum is wrapping_add(sum, wrapping_add((i * n + k) * (k * n + j), total xor k))
+            total is wrapping_add(total, sum)
     log(total)
     0

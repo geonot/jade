@@ -1,19 +1,12 @@
 title: Expand store query language
 status: pending
 atomic: true
-priority: medium
+priority: low
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-10T03:53:53'
+updated_at: '2026-10-28T08:52:18'
 result: ''
-description: 'Expand store query language (review 12_safety/stores). Current state:
-  QueryClause supports Where/Limit/Sort/Take/Skip/Set/Delete (src/ast.rs:532); parsed
-  in src/parser (test at parser/tests.rs:621: `Users query / where age >= 18 / limit
-  10`). Missing per review: aggregations (count/sum/avg/min/max as query clauses),
-  group-by, joins across stores, projections (select subset of fields), and parameterized/compile-time-checked
-  query composition. Deliverable: pick the alpha subset (suggest: aggregations + projections;
-  defer joins), extend AST QueryClause + parser + typer (compile-time field/type checking
-  against store schema is the differentiator) + codegen. Definition of done: conformance
-  tests in tests/ pinning each new clause incl. negative tests for unknown-field at
-  compile time; jinn.ebnf updated (jinn.ebnf currently has NO query production — fix
-  that drift too, see P1-13).'
+description: 'Deferred. Store aggregates/grouping have landed since this was filed
+  (see the jinn.md ''Grouping and aggregates'' section). Re-scope against current
+  jinn.md before starting. Fix the store engine''s on-disk limits (STO-8r: the 248-byte
+  string cap) before expanding the query surface.'

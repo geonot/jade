@@ -71,6 +71,48 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
+    pub(crate) fn checked_arith(
+        &mut self,
+        op: crate::mir::BinOp,
+        l: inkwell::values::IntValue<'ctx>,
+        r: inkwell::values::IntValue<'ctx>,
+        signed: bool,
+    ) -> Result<inkwell::values::IntValue<'ctx>, String> {
+        let kind = match op {
+            crate::mir::BinOp::Add => "add",
+            crate::mir::BinOp::Sub => "sub",
+            _ => "mul",
+        };
+        let it = l.get_type();
+        let intr = format!(
+            "llvm.{}{kind}.with.overflow.i{}",
+            if signed { 's' } else { 'u' },
+            it.get_bit_width()
+        );
+        let f = self.module.get_function(&intr).unwrap_or_else(|| {
+            let st = self
+                .ctx
+                .struct_type(&[it.into(), self.ctx.bool_type().into()], false);
+            self.module
+                .add_function(&intr, st.fn_type(&[it.into(), it.into()], false), None)
+        });
+        let pair = b!(self.bld.build_call(f, &[l.into(), r.into()], kind))
+            .try_as_basic_value()
+            .basic()
+            .expect("ICE: overflow intrinsic returned void")
+            .into_struct_value();
+        let val = b!(self.bld.build_extract_value(pair, 0, "ov.val")).into_int_value();
+        let ovf = b!(self.bld.build_extract_value(pair, 1, "ov.flag")).into_int_value();
+        let fv = self.current_fn();
+        let trap_bb = self.ctx.append_basic_block(fv, "ov.trap");
+        let ok_bb = self.ctx.append_basic_block(fv, "ov.ok");
+        b!(self.bld.build_conditional_branch(ovf, trap_bb, ok_bb));
+        self.bld.position_at_end(trap_bb);
+        self.emit_trap("integer overflow");
+        self.bld.position_at_end(ok_bb);
+        Ok(val)
+    }
+
     pub(crate) fn checked_shift_count(
         &mut self,
         count: inkwell::values::IntValue<'ctx>,
@@ -93,7 +135,7 @@ impl<'ctx> Compiler<'ctx> {
     pub(crate) fn emit_trap(&mut self, msg: &str) {
         let trap_fn = self
             .module
-            .get_function("__jinn_trap")
+            .get_function("jinn_trap")
             .unwrap_or_else(|| self.build_trap_fn());
         let msg_str = self
             .bld
@@ -106,66 +148,25 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     fn build_trap_fn(&mut self) -> inkwell::values::FunctionValue<'ctx> {
-        let i32t = self.ctx.i32_type();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let ft = self.ctx.void_type().fn_type(&[ptr_ty.into()], false);
         let f = self
             .module
-            .add_function("__jinn_trap", ft, Some(Linkage::Internal));
-        let entry = self.ctx.append_basic_block(f, "entry");
-        let saved_bb = self.bld.get_insert_block();
-        self.bld.position_at_end(entry);
-        let fprintf_fn = self.module.get_function("fprintf").unwrap_or_else(|| {
-            let ft2 = i32t.fn_type(&[ptr_ty.into(), ptr_ty.into()], true);
-            self.module
-                .add_function("fprintf", ft2, Some(Linkage::External))
-        });
-        let stderr_g = self.module.get_global("stderr").unwrap_or_else(|| {
-            let g = self.module.add_global(ptr_ty, None, "stderr");
-            g.set_linkage(Linkage::External);
-            g
-        });
-        let stderr_val = self
-            .bld
-            .build_load(ptr_ty, stderr_g.as_pointer_value(), "se")
-            .expect("load stderr");
-        let fmt = self
-            .bld
-            .build_global_string_ptr("runtime error: %s\n", "trap.fmt")
-            .expect("fmt string");
-        let msg_param = f.get_nth_param(0).expect("ICE: missing param");
-        self.bld
-            .build_call(
-                fprintf_fn,
-                &[
-                    stderr_val.into(),
-                    fmt.as_pointer_value().into(),
-                    msg_param.into(),
-                ],
-                "",
-            )
-            .expect("call fprintf");
-        let txn_rb_fn = self
-            .module
-            .get_function("jinn_txn_rollback")
-            .unwrap_or_else(|| {
-                let ftr = self.ctx.void_type().fn_type(&[], false);
-                self.module
-                    .add_function("jinn_txn_rollback", ftr, Some(Linkage::External))
-            });
-        self.bld
-            .build_call(txn_rb_fn, &[], "")
-            .expect("call txn rollback");
-        let abort_fn = self.module.get_function("abort").unwrap_or_else(|| {
-            let ft3 = self.ctx.void_type().fn_type(&[], false);
-            self.module
-                .add_function("abort", ft3, Some(Linkage::External))
-        });
-        self.bld.build_call(abort_fn, &[], "").expect("call abort");
-        self.bld.build_unreachable().expect("unreachable");
-        if let Some(bb) = saved_bb {
-            self.bld.position_at_end(bb);
-        }
+            .add_function("jinn_trap", ft, Some(Linkage::External));
+        f.add_attribute(
+            inkwell::attributes::AttributeLoc::Function,
+            self.ctx.create_enum_attribute(
+                inkwell::attributes::Attribute::get_named_enum_kind_id("noreturn"),
+                0,
+            ),
+        );
+        f.add_attribute(
+            inkwell::attributes::AttributeLoc::Function,
+            self.ctx.create_enum_attribute(
+                inkwell::attributes::Attribute::get_named_enum_kind_id("cold"),
+                0,
+            ),
+        );
         f
     }
 }

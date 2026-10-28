@@ -1,5 +1,5 @@
 *hash(key as i64, n as i64) returns i64
-    h is key * 2654435761
+    h is wrapping_mul(key, 2654435761)
     if h < 0
         h is -h
     h % n

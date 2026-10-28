@@ -159,9 +159,7 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_conditional_branch(is_nonzero, ok_bb, fail_bb));
         self.bld.position_at_end(fail_bb);
-        let trap = self.get_or_declare_trap();
-        b!(self.bld.build_call(trap, &[], ""));
-        b!(self.bld.build_unreachable());
+        self.emit_trap("pop from an empty vec");
         self.bld.position_at_end(ok_bb);
 
         let new_len = b!(self
@@ -390,14 +388,6 @@ impl<'ctx> Compiler<'ctx> {
             false,
         );
         self.module.add_function(name, ft, Some(Linkage::External))
-    }
-
-    pub(in crate::codegen) fn get_or_declare_trap(&self) -> inkwell::values::FunctionValue<'ctx> {
-        if let Some(f) = self.module.get_function("llvm.trap") {
-            return f;
-        }
-        let ft = self.ctx.void_type().fn_type(&[], false);
-        self.module.add_function("llvm.trap", ft, None)
     }
 
     pub(in crate::codegen) fn vec_data_and_len(

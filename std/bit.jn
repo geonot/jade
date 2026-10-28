@@ -4,27 +4,27 @@
     shift is n mod 64
     if shift equals 0
         return val
-    (val << shift) | ((val >> (64 - shift)) & ((1 << shift) - 1))
+    (val << shift) | ((val >> (64 - shift)) & wrapping_sub(1 << shift, 1))
 
 *rotate_right(val as i64, n as i64) returns i64
     shift is n mod 64
     if shift equals 0
         return val
-    ((val >> shift) & ((1 << (64 - shift)) - 1)) | (val << (64 - shift))
+    ((val >> shift) & wrapping_sub(1 << (64 - shift), 1)) | (val << (64 - shift))
 
 *rotate_left_32(val as i64, n as i64) returns i64
     v is val & 4294967295
     shift is n mod 32
     if shift equals 0
         return v
-    ((v << shift) | ((v >> (32 - shift)) & ((1 << shift) - 1))) & 4294967295
+    ((v << shift) | ((v >> (32 - shift)) & wrapping_sub(1 << shift, 1))) & 4294967295
 
 *rotate_right_32(val as i64, n as i64) returns i64
     v is val & 4294967295
     shift is n mod 32
     if shift equals 0
         return v
-    (((v >> shift) & ((1 << (32 - shift)) - 1)) | (v << (32 - shift))) & 4294967295
+    (((v >> shift) & wrapping_sub(1 << (32 - shift), 1)) | (v << (32 - shift))) & 4294967295
 
 
 *popcount(val as i64) returns i64
@@ -98,11 +98,11 @@
 
 
 *extract(val as i64, start as i64, width as i64) returns i64
-    (val >> start) & ((1 << width) - 1)
+    (val >> start) & wrapping_sub(1 << width, 1)
 
 *insert(val as i64, start as i64, width as i64, field_val as i64) returns i64
-    mask is ((1 << width) - 1) << start
-    (val & (0 - 1 - mask)) | ((field_val & ((1 << width) - 1)) << start)
+    mask is wrapping_sub(1 << width, 1) << start
+    (val & (0 - 1 - mask)) | ((field_val & wrapping_sub(1 << width, 1)) << start)
 
 
 *byte_swap_32(val as i64) returns i64
@@ -155,11 +155,11 @@
 *mask(n as i64) returns i64
     if n >= 64
         return -1
-    (1 << n) - 1
+    wrapping_sub(1 << n, 1)
 
 *range_mask(lo as i64, hi as i64) returns i64
     width is hi - lo + 1
-    ((1 << width) - 1) << lo
+    wrapping_sub(1 << width, 1) << lo
 
 
 *sign_extend(val as i64, bits as i64) returns i64
@@ -167,4 +167,4 @@
     (val << shift) >> shift
 
 *zero_extend(val as i64, bits as i64) returns i64
-    val & ((1 << bits) - 1)
+    val & wrapping_sub(1 << bits, 1)

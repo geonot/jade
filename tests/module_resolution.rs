@@ -60,7 +60,7 @@ fn sibling_with_colliding_type_is_ignored() {
         "colliding sibling type leaked in: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(run(dir.path()), "1.500000");
+    assert_eq!(run(dir.path()), "1.5");
 }
 
 #[test]

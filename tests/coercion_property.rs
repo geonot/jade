@@ -48,7 +48,7 @@ fn assert_stable(src: &str, expected: &str) {
 }
 
 fn fmt_f64(v: f64) -> String {
-    format!("{v:.6}")
+    format!("{v}")
 }
 
 proptest! {

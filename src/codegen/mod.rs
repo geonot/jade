@@ -145,6 +145,8 @@ pub struct Compiler<'ctx> {
 
     pub(crate) value_types: std::collections::HashMap<mir::ValueId, Type>,
 
+    pub(crate) chan_iter_slots: std::collections::HashMap<mir::ValueId, PointerValue<'ctx>>,
+
     pub(crate) select_data_bufs: std::collections::HashMap<mir::ValueId, Vec<PointerValue<'ctx>>>,
 
     pub(crate) self_allocs: std::collections::HashMap<mir::ValueId, PointerValue<'ctx>>,

@@ -94,7 +94,7 @@ fn expect_runtime_fail(name: &str) {
 fn alpha_audit_core_semantics() {
     expect_fixture(
         "core_semantics.jn",
-        "37\n255\n64\n1024\n2.500000\nalpha-audit\n10\n720",
+        "37\n255\n64\n1024\n2.5\nalpha-audit\n10\n720",
     );
 }
 
@@ -402,7 +402,7 @@ fn alpha_audit_keyword_method_names_after_dot() {
         ".send() program failed; stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "1\n");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "true\n");
 
     let dir = tempfile::tempdir().unwrap();
     let jinn = dir.path().join("test.jn");

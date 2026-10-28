@@ -11,6 +11,23 @@ int64_t jinn_f64_format(double v, char *buf) {
     int n = snprintf(buf, 32, "%.17g", v);
     return n < 0 ? 0 : (n >= 32 ? 31 : n);
 }
+int64_t jinn_f32_format(double v, char *buf) {
+    float f = (float)v;
+    for (int prec = 6; prec <= 9; prec++) {
+        int n = snprintf(buf, 32, "%.*g", prec, (double)f);
+        if (n < 0 || n >= 32) break;
+        if (strtof(buf, NULL) == f) return n;
+    }
+    int n = snprintf(buf, 32, "%.9g", (double)f);
+    return n < 0 ? 0 : (n >= 32 ? 31 : n);
+}
+void jinn_trap(const char *msg) {
+    fflush(stdout);
+    fprintf(stderr, "runtime error: %s\n", msg);
+    jinn_txn_rollback();
+    fflush(NULL);
+    abort();
+}
 void *jinn_xmalloc(size_t size) {
     void *p = malloc(size);
     if (!p && size > 0) {

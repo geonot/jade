@@ -16,7 +16,7 @@ type RNG
     s3
 
     *next_u64
-        result is __rotl(self.s1 * 5, 7) * 9
+        result is wrapping_mul(__rotl(wrapping_mul(self.s1, 5), 7), 9)
         t is self.s1 << 17
         self.s2 is self.s2 ^ self.s0
         self.s3 is self.s3 ^ self.s1
@@ -103,13 +103,13 @@ type RNG
 
 *seed(n) returns RNG
     z is n
-    z is (z ^ (z >> 30)) * -4658895280553007687
+    z is wrapping_mul(z ^ (z >> 30), -4658895280553007687)
     s0 is z
-    z is (z ^ (z >> 27)) * -7723592293110705685
+    z is wrapping_mul(z ^ (z >> 27), -7723592293110705685)
     s1 is z
     z is z ^ (z >> 31)
     s2 is z
-    z is (z * -4658895280553007687) ^ (z >> 30)
+    z is wrapping_mul(z, -4658895280553007687) ^ (z >> 30)
     s3 is z
     RNG(s0, s1, s2, s3)
 

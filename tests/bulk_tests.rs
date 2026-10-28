@@ -263,144 +263,141 @@ fn b_mod_zero_num() {
 
 #[test]
 fn b_f64_add() {
-    expect("*main()\n    log(1.5 + 2.5)\n", "4.000000");
+    expect("*main()\n    log(1.5 + 2.5)\n", "4");
 }
 #[test]
 fn b_f64_mul() {
-    expect("*main()\n    log(3.0 * 2.0)\n", "6.000000");
+    expect("*main()\n    log(3.0 * 2.0)\n", "6");
 }
 #[test]
 fn b_f64_div() {
-    expect("*main()\n    log(10.0 / 4.0)\n", "2.500000");
+    expect("*main()\n    log(10.0 / 4.0)\n", "2.5");
 }
 #[test]
 fn b_f64_sub() {
-    expect("*main()\n    log(5.5 - 2.25)\n", "3.250000");
+    expect("*main()\n    log(5.5 - 2.25)\n", "3.25");
 }
 #[test]
 fn b_f64_var() {
-    expect(
-        "*main()\n    x is 1.5\n    y is 2.5\n    log(x + y)\n",
-        "4.000000",
-    );
+    expect("*main()\n    x is 1.5\n    y is 2.5\n    log(x + y)\n", "4");
 }
 #[test]
 fn b_f64_neg() {
-    expect("*main()\n    log(-3.5 + 10.0)\n", "6.500000");
+    expect("*main()\n    log(-3.5 + 10.0)\n", "6.5");
 }
 
 #[test]
 fn b_bool_true() {
-    expect("*main()\n    log(true)\n", "1");
+    expect("*main()\n    log(true)\n", "true");
 }
 #[test]
 fn b_bool_false() {
-    expect("*main()\n    log(false)\n", "0");
+    expect("*main()\n    log(false)\n", "false");
 }
 #[test]
 fn b_and_tt() {
-    expect("*main()\n    log(true and true)\n", "1");
+    expect("*main()\n    log(true and true)\n", "true");
 }
 #[test]
 fn b_and_tf() {
-    expect("*main()\n    log(true and false)\n", "0");
+    expect("*main()\n    log(true and false)\n", "false");
 }
 #[test]
 fn b_and_ff() {
-    expect("*main()\n    log(false and false)\n", "0");
+    expect("*main()\n    log(false and false)\n", "false");
 }
 #[test]
 fn b_or_tf() {
-    expect("*main()\n    log(true or false)\n", "1");
+    expect("*main()\n    log(true or false)\n", "true");
 }
 #[test]
 fn b_or_ft() {
-    expect("*main()\n    log(false or true)\n", "1");
+    expect("*main()\n    log(false or true)\n", "true");
 }
 #[test]
 fn b_or_ff() {
-    expect("*main()\n    log(false or false)\n", "0");
+    expect("*main()\n    log(false or false)\n", "false");
 }
 #[test]
 fn b_not_true() {
-    expect("*main()\n    log(not true)\n", "0");
+    expect("*main()\n    log(not true)\n", "false");
 }
 #[test]
 fn b_not_false() {
-    expect("*main()\n    log(not false)\n", "1");
+    expect("*main()\n    log(not false)\n", "true");
 }
 #[test]
 fn b_and_or_chain() {
-    expect("*main()\n    log(true and true or false)\n", "1");
+    expect("*main()\n    log(true and true or false)\n", "true");
 }
 #[test]
 fn b_not_and() {
-    expect("*main()\n    log(not false and true)\n", "1");
+    expect("*main()\n    log(not false and true)\n", "true");
 }
 
 #[test]
 fn b_eq_true() {
-    expect("*main()\n    log(5 equals 5)\n", "1");
+    expect("*main()\n    log(5 equals 5)\n", "true");
 }
 #[test]
 fn b_eq_false() {
-    expect("*main()\n    log(5 equals 6)\n", "0");
+    expect("*main()\n    log(5 equals 6)\n", "false");
 }
 #[test]
 fn b_ne_true() {
-    expect("*main()\n    log(5 neq 6)\n", "1");
+    expect("*main()\n    log(5 neq 6)\n", "true");
 }
 #[test]
 fn b_ne_false() {
-    expect("*main()\n    log(5 neq 5)\n", "0");
+    expect("*main()\n    log(5 neq 5)\n", "false");
 }
 #[test]
 fn b_lt_true() {
-    expect("*main()\n    log(3 < 5)\n", "1");
+    expect("*main()\n    log(3 < 5)\n", "true");
 }
 #[test]
 fn b_lt_false() {
-    expect("*main()\n    log(5 < 3)\n", "0");
+    expect("*main()\n    log(5 < 3)\n", "false");
 }
 #[test]
 fn b_gt_true() {
-    expect("*main()\n    log(5 > 3)\n", "1");
+    expect("*main()\n    log(5 > 3)\n", "true");
 }
 #[test]
 fn b_gt_false() {
-    expect("*main()\n    log(3 > 5)\n", "0");
+    expect("*main()\n    log(3 > 5)\n", "false");
 }
 #[test]
 fn b_le_eq() {
-    expect("*main()\n    log(3 <= 3)\n", "1");
+    expect("*main()\n    log(3 <= 3)\n", "true");
 }
 #[test]
 fn b_le_less() {
-    expect("*main()\n    log(2 <= 3)\n", "1");
+    expect("*main()\n    log(2 <= 3)\n", "true");
 }
 #[test]
 fn b_le_greater() {
-    expect("*main()\n    log(4 <= 3)\n", "0");
+    expect("*main()\n    log(4 <= 3)\n", "false");
 }
 #[test]
 fn b_ge_eq() {
-    expect("*main()\n    log(3 >= 3)\n", "1");
+    expect("*main()\n    log(3 >= 3)\n", "true");
 }
 #[test]
 fn b_ge_greater() {
-    expect("*main()\n    log(4 >= 3)\n", "1");
+    expect("*main()\n    log(4 >= 3)\n", "true");
 }
 #[test]
 fn b_ge_less() {
-    expect("*main()\n    log(2 >= 3)\n", "0");
+    expect("*main()\n    log(2 >= 3)\n", "false");
 }
 #[test]
 fn b_equals_kw() {
-    expect("*main()\n    log(7 equals 7)\n", "1");
+    expect("*main()\n    log(7 equals 7)\n", "true");
 }
 #[test]
 fn b_isnt_kw() {
-    expect("*main()\n    log(7 neq 8)\n", "1");
+    expect("*main()\n    log(7 neq 8)\n", "true");
 }
 
 #[test]
@@ -1022,7 +1019,7 @@ fn b_cast_to_i32() {
 }
 #[test]
 fn b_cast_to_f64() {
-    expect("*main()\n    x is 5 as f64\n    log(x)\n", "5.000000");
+    expect("*main()\n    x is 5 as f64\n    log(x)\n", "5");
 }
 #[test]
 fn b_cast_f64_int() {
@@ -2266,37 +2263,46 @@ fn b_aug_chain() {
 
 #[test]
 fn b_str_contains_yes() {
-    expect("*main()\n    log('hello world'.contains('world'))\n", "1");
+    expect(
+        "*main()\n    log('hello world'.contains('world'))\n",
+        "true",
+    );
 }
 #[test]
 fn b_str_contains_no() {
-    expect("*main()\n    log('hello world'.contains('xyz'))\n", "0");
+    expect("*main()\n    log('hello world'.contains('xyz'))\n", "false");
 }
 #[test]
 fn b_str_contains_empty() {
-    expect("*main()\n    log('hello'.contains(''))\n", "1");
+    expect("*main()\n    log('hello'.contains(''))\n", "true");
 }
 #[test]
 fn b_str_starts_with_yes() {
     expect(
         "*main()\n    log('hello world'.starts_with('hello'))\n",
-        "1",
+        "true",
     );
 }
 #[test]
 fn b_str_starts_with_no() {
     expect(
         "*main()\n    log('hello world'.starts_with('world'))\n",
-        "0",
+        "false",
     );
 }
 #[test]
 fn b_str_ends_with_yes() {
-    expect("*main()\n    log('hello world'.ends_with('world'))\n", "1");
+    expect(
+        "*main()\n    log('hello world'.ends_with('world'))\n",
+        "true",
+    );
 }
 #[test]
 fn b_str_ends_with_no() {
-    expect("*main()\n    log('hello world'.ends_with('hello'))\n", "0");
+    expect(
+        "*main()\n    log('hello world'.ends_with('hello'))\n",
+        "false",
+    );
 }
 #[test]
 fn b_str_char_at() {
@@ -3042,7 +3048,7 @@ fn b_map_set_get() {
 fn b_map_has() {
     expect(
         "*main()\n    m is map()\n    m.set('x', 42)\n    log(m.has('x'))\n    log(m.has('y'))\n",
-        "1\n0",
+        "true\nfalse",
     );
 }
 
@@ -3050,7 +3056,7 @@ fn b_map_has() {
 fn b_map_remove() {
     expect(
         "*main()\n    m is map()\n    m.set('a', 10)\n    m.set('b', 20)\n    m.remove('a')\n    log(m.has('a'))\n    log(m.get('b'))\n    log(m.len())\n",
-        "0\n20\n1",
+        "false\n20\n1",
     );
 }
 
@@ -3168,34 +3174,34 @@ fn b_str_split_no_delim() {
 
 #[test]
 fn b_str_eq_same() {
-    expect("*main()\n    log('hello' equals 'hello')\n", "1");
+    expect("*main()\n    log('hello' equals 'hello')\n", "true");
 }
 
 #[test]
 fn b_str_eq_diff() {
-    expect("*main()\n    log('hello' equals 'world')\n", "0");
+    expect("*main()\n    log('hello' equals 'world')\n", "false");
 }
 
 #[test]
 fn b_str_ne_same() {
-    expect("*main()\n    log('hello' neq 'hello')\n", "0");
+    expect("*main()\n    log('hello' neq 'hello')\n", "false");
 }
 
 #[test]
 fn b_str_ne_diff() {
-    expect("*main()\n    log('hello' neq 'world')\n", "1");
+    expect("*main()\n    log('hello' neq 'world')\n", "true");
 }
 
 #[test]
 fn b_str_eq_empty() {
-    expect("*main()\n    log('' equals '')\n", "1");
+    expect("*main()\n    log('' equals '')\n", "true");
 }
 
 #[test]
 fn b_str_eq_var() {
     expect(
         "*main()\n    a is 'test'\n    b is 'test'\n    log(a equals b)\n",
-        "1",
+        "true",
     );
 }
 
@@ -3275,7 +3281,7 @@ fn b_or_pat_second() {
 fn b_struct_eq_true() {
     expect(
         "type Point\n    x as i64\n    y as i64\n\ntrait Eq\n    *equal(other as Point) returns bool\n\nimpl Eq for Point\n    *equal(other as Point) returns bool\n        self.x equals other.x and self.y equals other.y\n\n*main()\n    a is Point(x is 1, y is 2)\n    b is Point(x is 1, y is 2)\n    log(a equals b)\n",
-        "1",
+        "true",
     );
 }
 
@@ -3283,7 +3289,7 @@ fn b_struct_eq_true() {
 fn b_struct_eq_false() {
     expect(
         "type Point\n    x as i64\n    y as i64\n\ntrait Eq\n    *equal(other as Point) returns bool\n\nimpl Eq for Point\n    *equal(other as Point) returns bool\n        self.x equals other.x and self.y equals other.y\n\n*main()\n    a is Point(x is 1, y is 2)\n    b is Point(x is 3, y is 4)\n    log(a equals b)\n",
-        "0",
+        "false",
     );
 }
 
@@ -3291,7 +3297,7 @@ fn b_struct_eq_false() {
 fn b_struct_neq() {
     expect(
         "type Point\n    x as i64\n    y as i64\n\ntrait Eq\n    *equal(other as Point) returns bool\n\nimpl Eq for Point\n    *equal(other as Point) returns bool\n        self.x equals other.x and self.y equals other.y\n\n*main()\n    a is Point(x is 1, y is 2)\n    b is Point(x is 3, y is 4)\n    log(a neq b)\n",
-        "1",
+        "true",
     );
 }
 
@@ -3762,7 +3768,7 @@ fn b_actor_receive_outside_handler() {
 fn b_actor_f64_state_and_handler() {
     expect(
         "extern *usleep(us as i32) returns i32\n\nactor Accum\n    total as f64\n    @add n as f64\n        total is total + n\n    @show\n        log(total)\n\n*main()\n    a is spawn Accum\n    a.add(1.5)\n    a.add(2.5)\n    a.add(3.0)\n    extern.usleep(200000)\n    a.show()\n    extern.usleep(100000)\n    0\n",
-        "7.000000",
+        "7",
     );
 }
 
@@ -3866,7 +3872,7 @@ fn b_channel_send_recv_interleaved() {
 fn b_channel_f64_values() {
     expect(
         "*main()\n    ch is channel of f64(16)\n    send ch, 1.5\n    send ch, 2.5\n    a is receive ch\n    b is receive ch\n    log(a + b)\n",
-        "4.000000",
+        "4",
     );
 }
 
@@ -4274,7 +4280,7 @@ fn b_std_math_lcm() {
 fn b_std_math_constants() {
     expect(
         "use std/math\n\n*main()\n    log(math.PI > 3.14)\n    log(math.PI < 3.15)\n    log(math.E > 2.71)\n    log(math.E < 2.72)\n    log(math.TAU > 6.28)\n    log(math.TAU < 6.29)\n",
-        "1\n1\n1\n1\n1\n1",
+        "true\ntrue\ntrue\ntrue\ntrue\ntrue",
     );
 }
 
@@ -4282,7 +4288,7 @@ fn b_std_math_constants() {
 fn b_std_math_degrees_radians() {
     expect(
         "use std/math\n\n*main()\n    d is math.degrees(math.PI)\n    log(d > 179.9)\n    log(d < 180.1)\n    r is math.radians(180.0)\n    log(r > 3.14)\n    log(r < 3.15)\n",
-        "1\n1\n1\n1",
+        "true\ntrue\ntrue\ntrue",
     );
 }
 
@@ -4290,7 +4296,7 @@ fn b_std_math_degrees_radians() {
 fn b_std_math_hypot() {
     expect(
         "use std/math\n\n*main()\n    h is math.hypot(3.0, 4.0)\n    log(h > 4.99)\n    log(h < 5.01)\n",
-        "1\n1",
+        "true\ntrue",
     );
 }
 
@@ -4298,7 +4304,7 @@ fn b_std_math_hypot() {
 fn b_std_math_lerp() {
     expect(
         "use std/math\n\n*main()\n    v is math.lerp(0.0, 10.0, 0.5)\n    log(v > 4.99)\n    log(v < 5.01)\n",
-        "1\n1",
+        "true\ntrue",
     );
 }
 
@@ -4394,7 +4400,7 @@ fn b_std_path_ext() {
 fn b_std_time_monotonic() {
     expect(
         "use std/time\n\n*main()\n    t is time.monotonic()\n    log(t > 0.0)\n",
-        "1",
+        "true",
     );
 }
 
@@ -4402,7 +4408,7 @@ fn b_std_time_monotonic() {
 fn b_std_time_elapsed() {
     expect(
         "use std/time\n\n*main()\n    t is time.monotonic()\n    time.sleep_ms(10)\n    e is time.elapsed(t)\n    log(e > 0.0)\n",
-        "1",
+        "true",
     );
 }
 
@@ -4410,7 +4416,7 @@ fn b_std_time_elapsed() {
 fn b_std_os_pid() {
     expect(
         "use std/os\n\n*main()\n    p is os.pid()\n    log(p > 0)\n",
-        "1",
+        "true",
     );
 }
 
@@ -4418,7 +4424,7 @@ fn b_std_os_pid() {
 fn b_std_os_cwd() {
     expect(
         "use std/os\n\n*main()\n    c is os.cwd()\n    log(c.length > 0)\n",
-        "1",
+        "true",
     );
 }
 
@@ -4552,7 +4558,7 @@ fn b_comptime_int_nested() {
 fn b_comptime_float_fold() {
     expect(
         "*main()\n    x is 1.0 + 2.5\n    log(x > 3.4)\n    log(x < 3.6)\n",
-        "1\n1",
+        "true\ntrue",
     );
 }
 
@@ -4560,7 +4566,7 @@ fn b_comptime_float_fold() {
 fn b_comptime_bool_fold() {
     expect(
         "*main()\n    log(true and false)\n    log(true or false)\n    log(not true)\n",
-        "0\n1\n0",
+        "false\ntrue\nfalse",
     );
 }
 
@@ -4573,7 +4579,7 @@ fn b_comptime_string_concat() {
 fn b_comptime_comparison_fold() {
     expect(
         "*main()\n    log(5 > 3)\n    log(2 > 7)\n    log(4 equals 4)\n",
-        "1\n0\n1",
+        "true\nfalse\ntrue",
     );
 }
 
@@ -5044,7 +5050,7 @@ fn b_hm_identity_int_and_string() {
 fn b_hm_identity_bool_and_int() {
     expect(
         "*id(x)\n    x\n\n*main() returns i32\n    log(id(true))\n    log(id(7))\n    0\n",
-        "1\n7",
+        "true\n7",
     );
 }
 
@@ -5148,7 +5154,7 @@ fn b_hm_identity_called_once() {
 fn b_hm_mutual_recursion_untyped() {
     expect(
         "*is_even(n)\n    if n equals 0\n        return true\n    is_odd(n - 1)\n\n*is_odd(n)\n    if n equals 0\n        return false\n    is_even(n - 1)\n\n*main() returns i32\n    log(is_even(10))\n    log(is_odd(7))\n    0\n",
-        "1\n1",
+        "true\ntrue",
     );
 }
 
@@ -5204,7 +5210,7 @@ fn b_strict_integer_literal_defaults() {
 fn b_strict_float_literal_defaults() {
     expect(
         "*main() returns i32\n    x is 3.14\n    log(x)\n    0\n",
-        "3.140000",
+        "3.14",
     );
 }
 
@@ -5408,7 +5414,7 @@ fn b_if_let_err_fallthrough() {
 fn b_p41_identity_polymorphism() {
     expect(
         "*identity(x)\n    x\n\n*main()\n    log(identity(42))\n    log(identity(true))\n",
-        "42\n1",
+        "42\ntrue",
     );
 }
 
@@ -5462,7 +5468,7 @@ fn b_p41_numeric_constraint_add() {
 
 #[test]
 fn b_p41_numeric_constraint_float() {
-    expect("*main()\n    x is 3.14\n    log(x)\n", "3.140000");
+    expect("*main()\n    x is 3.14\n    log(x)\n", "3.14");
 }
 
 #[test]
@@ -6206,7 +6212,7 @@ fn b_width_propagation_return() {
 fn b_f32_struct_field_store_load() {
     expect(
         "type Sensor\n    reading as f32\n    count as u16\n\n*main()\n    s is Sensor(reading is 3.14, count is 100)\n    log(s.reading)\n    log(s.count)\n",
-        "3.140000\n100",
+        "3.14\n100",
     );
 }
 
@@ -6214,7 +6220,7 @@ fn b_f32_struct_field_store_load() {
 fn b_f32_function_roundtrip() {
     expect(
         "*compute(x as f32) returns f32\n    x * 2.0\n\n*main()\n    log(compute(3.14))\n",
-        "6.280000",
+        "6.28",
     );
 }
 
@@ -6222,7 +6228,7 @@ fn b_f32_function_roundtrip() {
 fn b_string_param_inferred_from_contains() {
     expect(
         "*check(s)\n    s.contains('world')\n\n*main()\n    log(check('hello world'))\n",
-        "1",
+        "true",
     );
 }
 
@@ -6230,7 +6236,7 @@ fn b_string_param_inferred_from_contains() {
 fn b_string_param_inferred_from_starts_with() {
     expect(
         "*check(s)\n    s.starts_with('he')\n\n*main()\n    log(check('hello'))\n",
-        "1",
+        "true",
     );
 }
 
@@ -6238,7 +6244,7 @@ fn b_string_param_inferred_from_starts_with() {
 fn b_string_param_inferred_from_ends_with() {
     expect(
         "*check(s)\n    s.ends_with('lo')\n\n*main()\n    log(check('hello'))\n",
-        "1",
+        "true",
     );
 }
 
@@ -6435,7 +6441,7 @@ fn b_struct_mono_int_and_string() {
 fn b_struct_mono_int_string_float() {
     expect(
         "type Pair\n    first\n    second\n\n*main()\n    p1 is Pair(1, 2)\n    p2 is Pair(\"hi\", \"there\")\n    p3 is Pair(3.14, 2.71)\n    log(p1.first)\n    log(p2.first)\n    log(p3.first)\n",
-        "1\nhi\n3.140000",
+        "1\nhi\n3.14",
     );
 }
 
@@ -6492,7 +6498,7 @@ fn b_shebang_with_args() {
 fn b_toml_round_trip() {
     expect(
         "use toml\n\n*main()\n    src is '[settings]\\ncount = 42\\nenabled = true'\n    t is toml.parse(src)\n    s is toml.stringify(t)\n    log(s.contains('count'))\n    log(s.contains('42'))\n",
-        "1\n1",
+        "true\ntrue",
     );
 }
 
@@ -6516,7 +6522,7 @@ fn b_binary_big_endian_roundtrip() {
 fn b_binary_endian_difference() {
     expect(
         "use binary\n\n*main()\n    buf is binary.new(64)\n    buf.write_i16(0x0102)\n    buf.seek(0)\n    le is buf.read_i16()\n    buf.seek(0)\n    be is buf.read_i16_be()\n    log(le equals be)\n",
-        "0",
+        "false",
     );
 }
 
@@ -6877,7 +6883,7 @@ fn bare_bang_signature_with_implicit_unit_exit_compiles() {
 fn numeric_method_return_types_infer_on_inferred_float_locals() {
     expect(
         "*main()\n    x is 2.0\n    r is x.sqrt()\n    log(r)\n    log(x.min(3.0))\n    log(x.is_finite())\n    log(x.to_int())\n",
-        "1.414214\n2.000000\n1\n2",
+        "1.4142135623730951\n2\ntrue\n2",
     );
 }
 

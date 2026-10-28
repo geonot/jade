@@ -144,7 +144,7 @@ fn take_is_usable_as_a_function_name() {
 fn string_ordering_is_byte_lexicographic() {
     expect_out(
         "*main\n    log('a' < 'b')\n    log('a' < 'a')\n    log('b' < 'a')\n    log('ab' < 'b')\n    0\n",
-        "1\n0\n0\n1",
+        "true\nfalse\nfalse\ntrue",
     );
 }
 

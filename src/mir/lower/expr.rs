@@ -54,7 +54,15 @@ impl Lowerer {
                     }
                     _ => {
                         let mir_op = super::lower_binop(op);
-                        self.emit(InstKind::BinOp(mir_op, l, r), ty, span)
+                        let out = self.emit(InstKind::BinOp(mir_op, l, r), ty.clone(), span);
+                        if matches!(op, ast::BinOp::Add) && matches!(ty, Type::String) {
+                            for (v, e) in [(l, &**lhs), (r, &**rhs)] {
+                                if Self::is_fresh_string_temp(e) {
+                                    self.emit_void(InstKind::Drop(v, Type::String), span);
+                                }
+                            }
+                        }
+                        out
                     }
                 }
             }

@@ -220,7 +220,7 @@ fn rollback_in_one_task_preserves_other_tasks_commits_to_the_same_store() {
 fn kv_writes_inside_an_aborted_transaction_roll_back() {
     expect(
         "err OpErr\n    Boom\n\nstore cache @kv\n\n*doomed() returns Result of i64, OpErr\n    transaction\n        cache.set('a', 1)\n        cache.incr('a')\n        cache.set('b', 9)\n        err Boom\n    Ok(0)\n\n*main\n    cache.set('a', 5)\n    match doomed()\n        Ok(v) ? log(v)\n        Err(e) ? log(0 - 1)\n    log(cache.get('a').unwrap_or(0 - 99))\n    log(cache.has('b'))\n    log(cache.count())\n",
-        "-1\n5\n0\n1",
+        "-1\n5\nfalse\n1",
     );
 }
 

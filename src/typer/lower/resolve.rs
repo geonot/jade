@@ -130,6 +130,16 @@ impl Typer {
                     }
                 }
             }
+            ty if method == "to_string"
+                && (ty.is_num() || *ty == Type::Bool)
+                && matches!(&expr.kind, hir::ExprKind::DeferredMethod(_, _, a) if a.is_empty()) =>
+            {
+                if let hir::ExprKind::DeferredMethod(recv, _, _) =
+                    std::mem::replace(&mut expr.kind, hir::ExprKind::Void)
+                {
+                    expr.kind = hir::ExprKind::Builtin(hir::BuiltinFn::ToString, vec![*recv]);
+                }
+            }
             Type::Coroutine(_) if method == "next" => {
                 if let hir::ExprKind::DeferredMethod(recv, _, _) =
                     std::mem::replace(&mut expr.kind, hir::ExprKind::Void)

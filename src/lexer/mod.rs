@@ -526,6 +526,14 @@ impl<'s> Lexer<'s> {
             }
             b'*' => Token::Star,
             _ => {
+                if ch == b'=' {
+                    let msg = if self.src.get(self.pos + 1) == Some(&b'=') {
+                        "unexpected '==': compare with `equals`"
+                    } else {
+                        "unexpected '=': bind with `is`, compare with `equals`"
+                    };
+                    return self.err(msg);
+                }
                 if ch < 0x80 {
                     return self.err(&format!("unexpected character: '{}'", ch as char));
                 }

@@ -413,7 +413,7 @@ fn float_neq_is_ieee_unordered() {
     assert!(run.status.success(), "{}", exit_desc(&run));
     assert_eq!(
         String::from_utf8_lossy(&run.stdout).trim(),
-        "1\n0\n0",
+        "true\nfalse\nfalse",
         "NaN neq NaN must be true (UNE), NaN equals NaN false (OEQ)"
     );
 }
@@ -426,7 +426,10 @@ fn int_literals_coerce_against_float_calls_on_either_side_and_negated() {
     assert!(c.ok(), "must compile: {}", c.stderr());
     let run = c.run();
     assert!(run.status.success(), "{}", exit_desc(&run));
-    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "1\n1\n1");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "true\ntrue\ntrue"
+    );
 }
 
 #[test]
@@ -694,7 +697,7 @@ fn sort_f64_actually_sorts() {
     assert!(run.status.success(), "{}", exit_desc(&run));
     assert_eq!(
         String::from_utf8_lossy(&run.stdout).trim(),
-        "1\n1\n1\n-1.500000\n3.500000",
+        "true\ntrue\ntrue\n-1.5\n3.5",
         "std/sort.sort_f64 passes %arr to jinn_sort_f64; the element data pointer must reach the \
          extern so the qsort runs on the live buffer and the writes are visible afterward"
     );

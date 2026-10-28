@@ -107,9 +107,9 @@ impl<'ctx> Compiler<'ctx> {
                 }
             }
             let res = match op {
-                mir::BinOp::Add => b!(self.bld.build_int_add(li, ri, "add")),
-                mir::BinOp::Sub => b!(self.bld.build_int_sub(li, ri, "sub")),
-                mir::BinOp::Mul => b!(self.bld.build_int_mul(li, ri, "mul")),
+                mir::BinOp::Add | mir::BinOp::Sub | mir::BinOp::Mul => {
+                    self.checked_arith(op, li, ri, !result_ty.is_unsigned())?
+                }
                 mir::BinOp::Div => self
                     .checked_divmod(li, ri, result_ty.is_signed(), true)?
                     .into_int_value(),

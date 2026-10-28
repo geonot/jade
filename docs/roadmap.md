@@ -216,6 +216,28 @@ server), sleeps and IO parks are not cancellation points, and the
 synchronous actor-call protocol does not exist. This is the largest design
 surface of the six and should not be started until A and B are closed.
 
+### Landed in [169] — semantic hardening
+
+Closed: channel iteration (`for v in ch` / `loop ch` were rejected), one
+trap path (`jinn_trap`: flush stdout, message, txn rollback, abort — piped
+output before a trap is no longer lost, and an empty `pop` names itself),
+integer overflow traps in every mode with `wrapping_*` as the explicit
+opt-out, the canonical formatter for `log`/`print`/`eprint` (shortest
+round-trip floats, `f32` included; `true`/`false`; no stack address in
+struct output), scalar `.to_string()`, a guided diagnostic for `=`/`==`,
+user functions marked `nobuiltin` (a user `*sqrt` was folded as libm
+`sqrt` at `--opt 3`, so O0 and O3 disagreed), and `LK-1`.
+
+Still open from the same review:
+
+- **MAP-GET** `m.get(k)` on a missing key silently yields the zero value.
+  The frequency-count idiom (`m.set(w, m.get(w) + 1)`) depends on it across
+  std and apps, so the fix is a pair, not a flip: add a total
+  `get_or(k, default)`, port the counting sites, then make the bare `get`
+  trap with `map key not found`.
+- **TEST-CLI** `jinn test FILE` is rejected; only project-mode `jinn test`
+  and `jinnc FILE --test` work.
+
 ### Verify-and-retire (cheap, do first)
 
 Two ids look closed as side effects of [167] and need only their original
@@ -481,6 +503,15 @@ Residue:
 - **PERF-3/4/STO-7** WAL recovery is O(n²) with no clean-exit checkpoint;
   point queries re-read the whole table; WAL grows unboundedly under churn.
 
+- **PERF-10** overflow-checked `+ - *` (landed in [169]) cost, measured
+  old→new on one pass: collatz 0.66→1.15 s (`imul`+`jo` replaces the
+  `lea` form of `3*n+1`), matrix_mul 1.40→2.63 s (checked multiplies in
+  the inner loop block vectorization), fibonacci 1.00→1.16 s, nbody
+  2.53→2.71 s, math_compute 1.24→1.34 s; sieve and gcd unchanged. Recover it
+  with MIR range facts LLVM cannot derive (loop-bounded induction
+  variables, `for i in 0 to n` indices, values masked or reduced by `mod`),
+  emitting the unchecked op where the range proves no overflow.
+
 ### Diagnostics (M)
 
 - ~~DIAG-2~~ closed in [166]: `-<literal>` constant-folds at lowering with
@@ -492,15 +523,22 @@ Residue:
 
 ### Leak-class residue from [165] (m)
 
-- **LK-1** chained-concat intermediates (`a + b + c`) leak the heap
-  intermediate; the rebind case is closed.
+- ~~LK-1~~ closed in [169]: a String `+` whose operand is a fresh temp
+  (a nested concat, `to_string`, or a `fmt_*` builtin) drops that operand
+  after the concat, so interpolation and chained concat run at flat RSS.
 - **LK-2** heap-struct values on early-exit paths can still leak: the
   struct-init owning extension was reverted (struct SSA forks on field
   mutation made "drop the init value" unsound; the audit suite caught it).
 - **LK-3** `continue`-path scope leaks in some shapes: the edge-escape drop
   sweep's cycle guard skips in-loop blocks.
 - **LK-4** map overwrite leaks the superseded value and the new key's
-  buffer (MAP-1 class); heap-key maps leak key buffers on drop.
+  buffer (MAP-1 class); heap-key maps leak key buffers on drop. Root cause
+  re-confirmed in [169]: MIR hands String arguments to `map.set`/`vec.push`
+  with neither a clone nor a consume of the source binder, so `m.set(k, k)`
+  stores two aliases of `k`'s buffer and `map_set_val`'s overwrite path
+  cannot free the superseded value without risking a double free. The fix
+  is an ownership change (container insertion consumes or clones its heap
+  arguments), not a codegen patch.
 - **LK-5** channels held by actors at stop, and unreceived channel-handle
   messages, release nothing — bounded leak, never a use-after-free.
 

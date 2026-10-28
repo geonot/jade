@@ -151,6 +151,31 @@ impl Lowerer {
                     );
                     self.emit_void_typed(InstKind::Store(f.bind, next), f.bind_ty.clone(), f.span);
                     self.set_terminator(Terminator::Goto(cond_bb));
+                } else if matches!(f.iter.ty, Type::Channel(_)) {
+                    self.set_terminator(Terminator::Goto(cond_bb));
+
+                    self.switch_to(cond_bb);
+                    let got = self.emit(
+                        InstKind::Call("__chan_iter_next".into(), vec![iter_val]),
+                        Type::Bool,
+                        f.span,
+                    );
+                    self.set_terminator(Terminator::Branch(got, body_bb, exit_bb));
+
+                    self.loop_stack.push((cond_bb, exit_bb));
+                    self.switch_to(body_bb);
+                    self.seal_block(body_bb);
+                    let val = self.emit(
+                        InstKind::Call("__chan_iter_value".into(), vec![iter_val]),
+                        f.bind_ty.clone(),
+                        f.span,
+                    );
+                    self.write_var(f.bind, self.current_block, val);
+                    self.lower_block_stmts(&f.body);
+                    if !self.current_block_has_terminator() {
+                        self.set_terminator(Terminator::Goto(cond_bb));
+                    }
+                    self.loop_stack.pop();
                 } else if matches!(f.iter.ty, Type::Coroutine(_) | Type::Generator(_)) {
                     self.set_terminator(Terminator::Goto(cond_bb));
 

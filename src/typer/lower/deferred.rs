@@ -21,6 +21,18 @@ impl Typer {
         let deferred = std::mem::take(&mut self.deferred_methods);
         for dm in &deferred {
             let recv_ty = self.infer_ctx.shallow_resolve(&dm.receiver_ty);
+            if dm.method == "to_string"
+                && dm.arg_tys.is_empty()
+                && (recv_ty.is_num() || recv_ty == Type::Bool)
+            {
+                let _ = self.infer_ctx.unify_at(
+                    &dm.ret_ty,
+                    &Type::String,
+                    dm.span,
+                    "deferred to_string return",
+                );
+                continue;
+            }
             let recv_ty = match &recv_ty {
                 Type::Struct(n, args)
                     if !args.is_empty()

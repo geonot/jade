@@ -323,6 +323,7 @@ extern jinn_sched_t g_sched;
 extern _Thread_local jinn_worker_t *tl_worker;
 void jinn_install_crash_handlers(void);
 void jinn_install_worker_sigaltstack(void);
+void jinn_trap(const char *msg) __attribute__((noreturn, cold));
 void *jinn_xmalloc(size_t size);
 void jinn_store_truncation_warn(int64_t original_len, int64_t max_len);
 void jinn_store_reserve(FILE *fp, int64_t count, int64_t rec_size);
@@ -529,6 +530,7 @@ void         jinn_store_wunlock(const char *path);
 int64_t      jinn_store_read_count_checked(FILE *fp, int64_t rec_size,
                                            const char *path);
 int64_t      jinn_f64_format(double v, char *buf);
+int64_t      jinn_f32_format(double v, char *buf);
 #define JINN_WAL_OP_TXN_BEGIN  0xF0
 #define JINN_WAL_OP_TXN_COMMIT 0xF1
 void jinn_writer_unlock(int lock_fd);

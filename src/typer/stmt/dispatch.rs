@@ -1070,6 +1070,7 @@ impl Typer {
                             Type::Ptr(et) => *et.clone(),
                             Type::Vec(et) => *et.clone(),
                             Type::View(et) => *et.clone(),
+                            Type::Channel(et) => *et.clone(),
                             Type::String => Type::I64,
                             _ => {
                                 let iter_ty = iter.ty.clone();
@@ -1094,7 +1095,9 @@ impl Typer {
                 let outer_ids = self.in_scope_def_ids();
                 self.push_scope();
 
-                let is_collection_for = !(end.is_some() || iter_is_int);
+                let is_chan_for =
+                    matches!(self.infer_ctx.shallow_resolve(&iter.ty), Type::Channel(_));
+                let is_collection_for = !(end.is_some() || iter_is_int || is_chan_for);
                 let binder_ownership = if is_collection_for {
                     Ownership::Borrowed
                 } else {
@@ -1109,7 +1112,7 @@ impl Typer {
                         scheme: None,
                     },
                 );
-                if !is_collection_for {
+                if !is_collection_for && !is_chan_for {
                     self.loop_counter_vars.insert(bind_id);
                 }
 

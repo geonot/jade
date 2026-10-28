@@ -381,9 +381,9 @@ pub(super) fn fold_binop(l: &Expr, op: BinOp, r: &Expr, ty: Type, span: Span) ->
 
 pub(super) fn fold_int_op(a: i64, op: BinOp, b: i64) -> Option<ExprKind> {
     match op {
-        BinOp::Add => Some(ExprKind::Int(a.wrapping_add(b))),
-        BinOp::Sub => Some(ExprKind::Int(a.wrapping_sub(b))),
-        BinOp::Mul => Some(ExprKind::Int(a.wrapping_mul(b))),
+        BinOp::Add => a.checked_add(b).map(ExprKind::Int),
+        BinOp::Sub => a.checked_sub(b).map(ExprKind::Int),
+        BinOp::Mul => a.checked_mul(b).map(ExprKind::Int),
         BinOp::Div if b != 0 && !(a == i64::MIN && b == -1) => Some(ExprKind::Int(a / b)),
         BinOp::Mod if b != 0 && !(a == i64::MIN && b == -1) => Some(ExprKind::Int(a % b)),
         BinOp::Shl if (0..64).contains(&b) => Some(ExprKind::Int(a.wrapping_shl(b as u32))),

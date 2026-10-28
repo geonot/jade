@@ -5,7 +5,7 @@ extern *jinn_time_now_ns() returns i64
 *lcg_next(state as i64) returns i64
     a is 6364136223846793005
     c is 1442695040888963407
-    state * a + c
+    wrapping_add(wrapping_mul(state, a), c)
 
 *count_spaces_synthetic(n as i64, seed as i64) returns i64
     count is 0
@@ -59,7 +59,7 @@ extern *jinn_time_now_ns() returns i64
         ch is state % 128
         if ch < 0
             ch is 0 - ch
-        hash is hash * 33 + ch
+        hash is wrapping_add(wrapping_mul(hash, 33), ch)
         i is i + 1
     hash
 

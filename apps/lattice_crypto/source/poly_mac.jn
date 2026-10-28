@@ -5,5 +5,5 @@
 *tag(k1 as i64, k2 as i64, msg as Vec of i64) returns i64
     acc is 0
     loop(0, $ < msg.len(), $ + 1)
-        acc is ((acc + msg.get($)) mod P() * k1) mod P()
+        acc is wrapping_mul((acc + msg.get($)) mod P(), k1) mod P()
     (acc + k2) mod P()

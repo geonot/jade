@@ -1,11 +1,12 @@
 title: Implement jinn fmt code formatter
-status: pending
+status: complete
 atomic: true
 priority: medium
 blocked_by: []
 created_at: '2026-06-04T05:31:38'
-updated_at: '2026-06-10T03:53:53'
-result: ''
+updated_at: '2026-10-28T08:49:59'
+result: 'Superseded: src/fmt.rs shipped (1262 LOC), corpus-gated by tests/fmt_nondestructive.rs;
+  remaining fmt/lint idiom work tracked in docs/design/fmt-and-lint.md.'
 description: 'jinn fmt code formatter (review P2-12 adjacent). Current state: ALREADY
   SHIPPED — src/fmt.rs (632 LOC), `jinnc fmt FILE` works (smoke-tested: rewrites `log(
   1+2 )` -> `log 1 + 2`). Remaining gaps: (1) no formatter conformance test suite

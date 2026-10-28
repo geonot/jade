@@ -48,23 +48,9 @@ impl<'ctx> Compiler<'ctx> {
         let printf = crate::codegen::fn_or_die(&self.module, "printf");
         let fmt = self.fmt_for_ty(ty);
         let fs = b!(self.bld.build_global_string_ptr(fmt, "fmt"));
-        if matches!(ty, Type::String) {
-            let len = self.string_len(val)?.into_int_value();
-            let len_i32 = b!(self
-                .bld
-                .build_int_truncate(len, self.ctx.i32_type(), "slen32"));
-            let data = self.string_data(val)?;
-            b!(self.bld.build_call(
-                printf,
-                &[fs.as_pointer_value().into(), len_i32.into(), data.into()],
-                "log"
-            ));
-        } else {
-            let print_val = self.printf_vararg_val(val, ty)?;
-            b!(self
-                .bld
-                .build_call(printf, &[fs.as_pointer_value().into(), print_val], "log"));
-        }
+        let mut args = vec![fs.as_pointer_value().into()];
+        args.extend(self.printf_args(val, ty)?);
+        b!(self.bld.build_call(printf, &args, "log"));
         Ok(val)
     }
 
@@ -96,30 +82,9 @@ impl<'ctx> Compiler<'ctx> {
             .build_load(ptr_ty, stderr_g.as_pointer_value(), "stderr.v"));
         let fmt = self.fmt_for_ty(ty);
         let fs = b!(self.bld.build_global_string_ptr(fmt, "efmt"));
-        if matches!(ty, Type::String) {
-            let len = self.string_len(val)?.into_int_value();
-            let len_i32 = b!(self
-                .bld
-                .build_int_truncate(len, self.ctx.i32_type(), "slen32"));
-            let data = self.string_data(val)?;
-            b!(self.bld.build_call(
-                fprintf,
-                &[
-                    stderr_val.into(),
-                    fs.as_pointer_value().into(),
-                    len_i32.into(),
-                    data.into()
-                ],
-                "eprint"
-            ));
-        } else {
-            let print_val = self.printf_vararg_val(val, ty)?;
-            b!(self.bld.build_call(
-                fprintf,
-                &[stderr_val.into(), fs.as_pointer_value().into(), print_val],
-                "eprint"
-            ));
-        }
+        let mut args = vec![stderr_val.into(), fs.as_pointer_value().into()];
+        args.extend(self.printf_args(val, ty)?);
+        b!(self.bld.build_call(fprintf, &args, "eprint"));
         Ok(val)
     }
 
@@ -141,23 +106,9 @@ impl<'ctx> Compiler<'ctx> {
         let printf = crate::codegen::fn_or_die(&self.module, "printf");
         let fmt = self.fmt_for_ty_no_newline(ty);
         let fs = b!(self.bld.build_global_string_ptr(fmt, "fmt.print"));
-        if matches!(ty, Type::String) {
-            let len = self.string_len(val)?.into_int_value();
-            let len_i32 = b!(self
-                .bld
-                .build_int_truncate(len, self.ctx.i32_type(), "slen32"));
-            let data = self.string_data(val)?;
-            b!(self.bld.build_call(
-                printf,
-                &[fs.as_pointer_value().into(), len_i32.into(), data.into()],
-                "print"
-            ));
-        } else {
-            let print_val = self.printf_vararg_val(val, ty)?;
-            b!(self
-                .bld
-                .build_call(printf, &[fs.as_pointer_value().into(), print_val], "print"));
-        }
+        let mut args = vec![fs.as_pointer_value().into()];
+        args.extend(self.printf_args(val, ty)?);
+        b!(self.bld.build_call(printf, &args, "print"));
         Ok(val)
     }
 
@@ -246,39 +197,31 @@ impl<'ctx> Compiler<'ctx> {
             .unwrap_or_default();
 
         let lty = self.llvm_ty(ty);
-        let (addr, struct_val): (BasicValueEnum<'ctx>, BasicValueEnum<'ctx>) =
-            if val.is_pointer_value() {
-                let loaded = b!(self
-                    .bld
-                    .build_load(lty, val.into_pointer_value(), "log.load"));
-                (val, loaded)
-            } else {
-                let tmp = self.entry_alloca(lty, "log.tmp");
-                b!(self.bld.build_store(tmp, val));
-                (tmp.into(), val)
-            };
+        let struct_val = if val.is_pointer_value() {
+            b!(self
+                .bld
+                .build_load(lty, val.into_pointer_value(), "log.load"))
+        } else {
+            val
+        };
 
         if fields.is_empty() {
             let hdr = if newline {
-                format!("{name} @ %p {{}}\n\0")
+                format!("{name} {{}}\n")
             } else {
-                format!("{name} @ %p {{}}\0")
+                format!("{name} {{}}")
             };
             let hf = b!(self.bld.build_global_string_ptr(&hdr, "log.hdr"));
-            b!(self.bld.build_call(
-                printf,
-                &[hf.as_pointer_value().into(), addr.into()],
-                "log.hdrc"
-            ));
+            b!(self
+                .bld
+                .build_call(printf, &[hf.as_pointer_value().into()], "log.hdrc"));
             return Ok(());
         }
-        let hdr = format!("{name} @ %p {{ \0");
+        let hdr = format!("{name} {{ ");
         let hf = b!(self.bld.build_global_string_ptr(&hdr, "log.hdr"));
-        b!(self.bld.build_call(
-            printf,
-            &[hf.as_pointer_value().into(), addr.into()],
-            "log.hdrc"
-        ));
+        b!(self
+            .bld
+            .build_call(printf, &[hf.as_pointer_value().into()], "log.hdrc"));
 
         let sv = struct_val.into_struct_value();
         for (i, (fname, fty)) in fields.iter().enumerate() {
@@ -300,6 +243,63 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_call(printf, &[cf.as_pointer_value().into()], "log.clc"));
         Ok(())
+    }
+
+    fn printf_args(
+        &mut self,
+        val: BasicValueEnum<'ctx>,
+        ty: &Type,
+    ) -> Result<Vec<BasicMetadataValueEnum<'ctx>>, String> {
+        let i32t = self.ctx.i32_type();
+        let (len, data): (inkwell::values::IntValue<'ctx>, BasicValueEnum<'ctx>) = match ty {
+            Type::String => {
+                let len = self.string_len(val)?.into_int_value();
+                (len, self.string_data(val)?)
+            }
+            Type::Bool => {
+                let cond = self.to_bool(val);
+                let t = b!(self.bld.build_global_string_ptr("true", "fmt.true"));
+                let f = b!(self.bld.build_global_string_ptr("false", "fmt.false"));
+                let data = b!(self.bld.build_select(
+                    cond,
+                    t.as_pointer_value(),
+                    f.as_pointer_value(),
+                    "fmt.bstr"
+                ));
+                let len = b!(self.bld.build_select(
+                    cond,
+                    i32t.const_int(4, false),
+                    i32t.const_int(5, false),
+                    "fmt.blen"
+                ))
+                .into_int_value();
+                return Ok(vec![len.into(), data.into()]);
+            }
+            Type::F64 | Type::F32 => {
+                let fv = val.into_float_value();
+                let f64t = self.ctx.f64_type();
+                let wide = if fv.get_type() == f64t {
+                    fv
+                } else {
+                    b!(self.bld.build_float_ext(fv, f64t, "fpext"))
+                };
+                let i8t = self.ctx.i8_type();
+                let fmt_fn = self.float_formatter(fv.get_type() == f64t);
+                let buf_ty = i8t.array_type(32);
+                let buf = self.entry_alloca(buf_ty.into(), "fmt.fbuf");
+                let len = b!(self
+                    .bld
+                    .build_call(fmt_fn, &[wide.into(), buf.into()], "fmt.flen"))
+                .try_as_basic_value()
+                .basic()
+                .expect("ICE: call returned void")
+                .into_int_value();
+                (len, buf.into())
+            }
+            _ => return Ok(vec![self.printf_vararg_val(val, ty)?]),
+        };
+        let len_i32 = b!(self.bld.build_int_truncate(len, i32t, "slen32"));
+        Ok(vec![len_i32.into(), data.into()])
     }
 
     pub(crate) fn printf_vararg_val(
@@ -347,9 +347,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::I32 | Type::I16 | Type::I8 => "%d\n",
             Type::U64 => "%lu\n",
             Type::U32 | Type::U16 | Type::U8 => "%u\n",
-            Type::F64 | Type::F32 => "%f\n",
-            Type::Bool => "%d\n",
-            Type::String => "%.*s\n",
+            Type::F64 | Type::F32 | Type::Bool | Type::String => "%.*s\n",
             _ => "%ld\n",
         }
     }
@@ -360,9 +358,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::I32 | Type::I16 | Type::I8 => "%d",
             Type::U64 => "%lu",
             Type::U32 | Type::U16 | Type::U8 => "%u",
-            Type::F64 | Type::F32 => "%f",
-            Type::Bool => "%d",
-            Type::String => "%.*s",
+            Type::F64 | Type::F32 | Type::Bool | Type::String => "%.*s",
             _ => "%ld",
         }
     }
@@ -416,6 +412,23 @@ impl<'ctx> Compiler<'ctx> {
         self.finalize_string_sso(buf, len, false, "ts.i")
     }
 
+    fn float_formatter(&mut self, double: bool) -> inkwell::values::FunctionValue<'ctx> {
+        let name = if double {
+            "jinn_f64_format"
+        } else {
+            "jinn_f32_format"
+        };
+        self.module.get_function(name).unwrap_or_else(|| {
+            let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
+            let ft = self
+                .ctx
+                .i64_type()
+                .fn_type(&[self.ctx.f64_type().into(), ptr_ty.into()], false);
+            self.module
+                .add_function(name, ft, Some(inkwell::module::Linkage::External))
+        })
+    }
+
     pub(crate) fn float_to_string(
         &mut self,
         val: BasicValueEnum<'ctx>,
@@ -428,16 +441,7 @@ impl<'ctx> Compiler<'ctx> {
         };
         let i64t = self.ctx.i64_type();
         let i8t = self.ctx.i8_type();
-        let ptr_ty = self.ctx.ptr_type(inkwell::AddressSpace::default());
-        if self.module.get_function("jinn_f64_format").is_none() {
-            let ft = i64t.fn_type(&[self.ctx.f64_type().into(), ptr_ty.into()], false);
-            self.module.add_function(
-                "jinn_f64_format",
-                ft,
-                Some(inkwell::module::Linkage::External),
-            );
-        }
-        let fmt_fn = crate::codegen::fn_or_die(&self.module, "jinn_f64_format");
+        let fmt_fn = self.float_formatter(fv.get_type() != self.ctx.f32_type());
         let buf_arr_ty = i8t.array_type(32);
         let buf_arr = self.entry_alloca(buf_arr_ty.into(), "ts.fbuf");
         let zero = i64t.const_int(0, false);

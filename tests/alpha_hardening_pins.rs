@@ -151,7 +151,7 @@ fn small_int_log_extends_correctly() {
 fn nested_field_access_resolves_leaf_type() {
     accepts_and_prints(
         "type P\n    a as i8\n    b as f64\n\ntype Q2\n    x as i64\n    p as P\n\n*main\n    q is Q2(x is 3, p is P(a is 5 as i8, b is 2.5))\n    log(q.p.a)\n    log(q.p.b)\n    t is q.p\n    log(t.b)\n",
-        "5\n2.500000\n2.500000",
+        "5\n2.5\n2.5",
     );
 }
 
@@ -338,7 +338,10 @@ fn float_to_string_round_trips_beyond_six_digits() {
 
 #[test]
 fn comptime_does_not_fold_unsigned_arithmetic_with_signed_semantics() {
-    accepts_and_prints("*main\n    x as u64 is 0 - 1\n    log(x > 100)\n", "1");
+    accepts_and_prints(
+        "*main\n    x as u64 is 9223372036854775807 + 9223372036854775807\n    log(x > 100)\n",
+        "true",
+    );
 }
 
 #[test]

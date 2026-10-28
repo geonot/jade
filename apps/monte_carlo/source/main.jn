@@ -4,7 +4,7 @@ extern *jinn_time_now_ns() returns i64
 *lcg_next(state as i64) returns i64
     a is 6364136223846793005
     c is 1442695040888963407
-    state * a + c
+    wrapping_add(wrapping_mul(state, a), c)
 
 *rand_val(state as i64) returns i64
     v is state
