@@ -1,4 +1,5 @@
 # Changelog
+- **[185]** (2026-10-28 22:36) [176] 10-8: retired MIR-2, MIR-6, LK-4 after re-running original repros; pinned in crash_safety.rs (expect_capped helper); roadmap updated
 - **[183]** (2026-10-28 22:32) [175] 10-6: user generic enum variants shadow prelude Option/Result (latest declaration wins, expected-type resolution for generic variants); mangled mono names demangled to Base<args> in all typer diagnostics
 - **[181]** (2026-10-28 22:18) [174] 10-7: builtin method-name tables (element-read, mutating, fresh-result, container-read) unified in src/builtin_methods.rs
 - **[179]** (2026-10-28 22:14) [173] LEAK-TEMP: drop fresh unbound owned temps after their sole reader (method receivers/args, log/eprint, cmp/concat operands) via drop_if_fresh; INSERTING_METHODS moved to builtin_methods.rs; fix double frees in keys/values, collect, find; 2 pins
