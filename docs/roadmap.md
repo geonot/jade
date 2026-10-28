@@ -503,14 +503,23 @@ Residue:
 - **PERF-3/4/STO-7** WAL recovery is O(n²) with no clean-exit checkpoint;
   point queries re-read the whole table; WAL grows unboundedly under churn.
 
-- **PERF-10** overflow-checked `+ - *` (landed in [169]) cost, measured
-  old→new on one pass: collatz 0.66→1.15 s (`imul`+`jo` replaces the
-  `lea` form of `3*n+1`), matrix_mul 1.40→2.63 s (checked multiplies in
-  the inner loop block vectorization), fibonacci 1.00→1.16 s, nbody
-  2.53→2.71 s, math_compute 1.24→1.34 s; sieve and gcd unchanged. Recover it
-  with MIR range facts LLVM cannot derive (loop-bounded induction
-  variables, `for i in 0 to n` indices, values masked or reduced by `mod`),
-  emitting the unchecked op where the range proves no overflow.
+- **PERF-10** (closed in [170]) the cost of overflow-checked `+ - *` was
+  recovered by elision based on range facts. For-loop counters (ranged, counted,
+  and element-index) now lower to SSA phis instead of memory slots, and
+  `src/mir/range.rs` runs an interval analysis over SSA. It uses
+  dominator-scoped branch facts and phi widening, plus transfer rules for
+  `+ - * / mod & | xor >>`, casts, and `len`. Any `+ - *` or unary `-` whose
+  exact result is proven to fit its type is emitted as `nsw`/`nuw` instead of
+  `*.with.overflow`. Measured as best of 3 on one core, [169]→[170]:
+  matrix_mul 2.92→1.51 s (the inner loop vectorizes again), spectral_norm
+  4.52→2.02 s; fibonacci, nbody, math_compute, sieve, gcd and tight_loop are
+  neutral. Collatz is unchanged in code: its remaining checks guard genuinely
+  unbounded `3*n+1` and step counts. Its ±15% timing swing is a code-alignment
+  artifact (the inner loop is identical, shifted 16 bytes onto a 32-byte
+  boundary that triggers the Skylake JCC-erratum penalty).
+  Residue (m): unary `-` on signed ints is now checked as well
+  (`-i64::MIN` traps). A possible follow-up is
+  `-x86-align-branch=fused+jcc+jmp` for Skylake-class `--cpu` targets.
 
 ### Diagnostics (M)
 

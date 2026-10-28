@@ -14,6 +14,7 @@ impl<'ctx> Compiler<'ctx> {
         lhs: mir::ValueId,
         rhs: mir::ValueId,
         result_ty: &Type,
+        dest: Option<mir::ValueId>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         if let Some(Type::Struct(name, _)) = self.value_types.get(&lhs) {
             let method = match op {
@@ -107,6 +108,11 @@ impl<'ctx> Compiler<'ctx> {
                 }
             }
             let res = match op {
+                mir::BinOp::Add | mir::BinOp::Sub | mir::BinOp::Mul
+                    if dest.is_some_and(|d| self.overflow_safe.contains(&d)) =>
+                {
+                    self.proven_arith(op, li, ri, !result_ty.is_unsigned())?
+                }
                 mir::BinOp::Add | mir::BinOp::Sub | mir::BinOp::Mul => {
                     self.checked_arith(op, li, ri, !result_ty.is_unsigned())?
                 }
@@ -160,6 +166,7 @@ impl<'ctx> Compiler<'ctx> {
         op: mir::UnaryOp,
         val: mir::ValueId,
         result_ty: &Type,
+        dest: Option<mir::ValueId>,
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let v = self.val(val);
         match op {
@@ -167,8 +174,15 @@ impl<'ctx> Compiler<'ctx> {
                 if result_ty.is_float() {
                     Ok(b!(self.bld.build_float_neg(v.into_float_value(), "fneg")).into())
                 } else {
-                    let zero = v.into_int_value().get_type().const_int(0, false);
-                    Ok(b!(self.bld.build_int_sub(zero, v.into_int_value(), "neg")).into())
+                    let iv = v.into_int_value();
+                    let zero = iv.get_type().const_int(0, false);
+                    if result_ty.is_signed()
+                        && !dest.is_some_and(|d| self.overflow_safe.contains(&d))
+                    {
+                        Ok(self.checked_arith(mir::BinOp::Sub, zero, iv, true)?.into())
+                    } else {
+                        Ok(b!(self.bld.build_int_sub(zero, iv, "neg")).into())
+                    }
                 }
             }
             mir::UnaryOp::Not => Ok(b!(self.bld.build_not(v.into_int_value(), "not")).into()),

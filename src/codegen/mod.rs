@@ -171,6 +171,8 @@ pub struct Compiler<'ctx> {
 
     pub(crate) current_drop_meta: mir::DropMeta,
 
+    pub(crate) overflow_safe: std::collections::HashSet<mir::ValueId>,
+
     pub(crate) current_reuse_slots: std::collections::HashMap<u32, PointerValue<'ctx>>,
 
     pub(crate) current_reuse_alloca_slots: std::collections::HashMap<u32, PointerValue<'ctx>>,

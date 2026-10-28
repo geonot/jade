@@ -60,6 +60,7 @@ impl<'ctx> Compiler<'ctx> {
             global_init_fn: None,
             vec_growth_floor_by_value: std::collections::HashMap::new(),
             current_drop_meta: mir::DropMeta::default(),
+            overflow_safe: std::collections::HashSet::new(),
             current_reuse_slots: std::collections::HashMap::new(),
             current_reuse_alloca_slots: std::collections::HashMap::new(),
             current_alloc_dest: None,

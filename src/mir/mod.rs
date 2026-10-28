@@ -1,6 +1,7 @@
 pub mod lower;
 pub mod opt;
 pub mod printer;
+pub mod range;
 pub mod verify;
 
 use std::collections::{HashMap, HashSet};

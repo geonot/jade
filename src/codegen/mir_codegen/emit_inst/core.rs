@@ -25,8 +25,10 @@ impl<'ctx> Compiler<'ctx> {
                 mir::InstKind::StringConst(s) => self.emit_string_const(s),
                 mir::InstKind::Void => Ok(self.ctx.i8_type().const_int(0, false).into()),
 
-                mir::InstKind::BinOp(op, lhs, rhs) => self.emit_binop(*op, *lhs, *rhs, &inst.ty),
-                mir::InstKind::UnaryOp(op, val) => self.emit_unary(*op, *val, &inst.ty),
+                mir::InstKind::BinOp(op, lhs, rhs) => {
+                    self.emit_binop(*op, *lhs, *rhs, &inst.ty, inst.dest)
+                }
+                mir::InstKind::UnaryOp(op, val) => self.emit_unary(*op, *val, &inst.ty, inst.dest),
                 mir::InstKind::Cmp(op, lhs, rhs, operand_ty) => {
                     self.emit_cmp(*op, *lhs, *rhs, operand_ty)
                 }

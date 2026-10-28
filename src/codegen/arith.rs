@@ -71,6 +71,24 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
+    pub(crate) fn proven_arith(
+        &mut self,
+        op: crate::mir::BinOp,
+        l: inkwell::values::IntValue<'ctx>,
+        r: inkwell::values::IntValue<'ctx>,
+        signed: bool,
+    ) -> Result<inkwell::values::IntValue<'ctx>, String> {
+        use crate::mir::BinOp::{Add, Sub};
+        Ok(match (op, signed) {
+            (Add, true) => b!(self.bld.build_int_nsw_add(l, r, "add")),
+            (Add, false) => b!(self.bld.build_int_nuw_add(l, r, "add")),
+            (Sub, true) => b!(self.bld.build_int_nsw_sub(l, r, "sub")),
+            (Sub, false) => b!(self.bld.build_int_nuw_sub(l, r, "sub")),
+            (_, true) => b!(self.bld.build_int_nsw_mul(l, r, "mul")),
+            (_, false) => b!(self.bld.build_int_nuw_mul(l, r, "mul")),
+        })
+    }
+
     pub(crate) fn checked_arith(
         &mut self,
         op: crate::mir::BinOp,

@@ -1,4 +1,23 @@
 # Changelog
+- **[170]** (2026-10-28) PERF-10 — overflow checks elided where ranges prove safety.
+
+- **For-loop counters are SSA.** Ranged, counted, and element-index
+  `for`/`sim for` loops lower through one helper (`lower_counted_for`) to phi
+  nodes instead of `store`/`load` slots. This deletes about 265 lines of
+  duplicated per-shape lowering.
+- **Range-proven arithmetic.** `src/mir/range.rs` is a new interval analysis
+  over SSA: dominator-scoped `Cmp`/`Branch` facts, phi widening, and transfer
+  rules for arithmetic, `mod`, masks, shifts, casts and `len`. A proven
+  `+ - *` or `-x` is emitted with `nsw`/`nuw`; everything else keeps its trap.
+  matrix_mul 2.92→1.51 s, spectral_norm 4.52→2.02 s.
+- **Signed negation traps.** `-x` on `i64::MIN` (and the narrower signed
+  types) used to wrap silently. It now raises `integer overflow`, matching
+  `+ - *`.
+- Pins: four in `tests/crash_safety.rs` (negation trap, loop overflow still
+  traps, exactness of proven arithmetic, unsigned underflow inside a loop) and
+  three in `tests/mir_bounds_elision.rs` (no `with.overflow` in bounded index
+  math, checks kept on unconstrained parameters, counters as SSA).
+
 - **[169]** (2026-10-28) semantic hardening from the post-hiatus review — integer overflow traps, channel iteration, one trap path, canonical value formatting, and a libm-folding miscompile.
 
 Full suite is 2397, green; fmt/clippy clean. New pins in `tests/crash_safety.rs`.

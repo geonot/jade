@@ -480,3 +480,35 @@ fn single_equals_gets_a_guided_diagnostic() {
     assert!(!c.status.success());
     assert!(String::from_utf8_lossy(&c.stderr).contains("equals"));
 }
+
+#[test]
+fn signed_negation_overflow_traps() {
+    expect_trap(
+        "*main\n    a is -9223372036854775807\n    b is a - 1\n    log(-b)\n",
+        "integer overflow",
+    );
+}
+
+#[test]
+fn overflow_in_bounded_loop_still_traps() {
+    expect_trap(
+        "*f(n)\n    t is 0\n    for i in 0 to n\n        t is t + i * 3074457345618258602\n    t\n*main\n    log(f(3))\n    log(f(4))\n",
+        "integer overflow",
+    );
+}
+
+#[test]
+fn range_proven_loop_arithmetic_is_exact() {
+    expect(
+        "*sq(n)\n    total is 0\n    for i in 0 to n\n        total is total + i * i\n    total\n*main\n    log(sq(1000))\n    for i in 0 to 3\n        log(i * 4611686018427387903)\n    for i in 0 to 10 by 4\n        log(i - 10)\n    xs is [5, 6]\n    for x, k in xs\n        log(k * 10 + x)\n",
+        "332833500\n0\n4611686018427387903\n9223372036854775806\n-10\n-6\n-2\n5\n16",
+    );
+}
+
+#[test]
+fn unsigned_loop_index_underflow_still_traps() {
+    expect_trap(
+        "*main\n    for i in 0 to 3\n        a as u8 is 1\n        b as u8 is 2\n        log(a - b)\n",
+        "integer overflow",
+    );
+}

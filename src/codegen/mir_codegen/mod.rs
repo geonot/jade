@@ -573,6 +573,7 @@ impl<'ctx> Compiler<'ctx> {
         self.local_struct_values.clear();
         self.vec_growth_floor_by_value = Self::compute_vec_growth_floors(func);
         self.current_drop_meta = func.drops.clone();
+        self.overflow_safe = mir::range::proven_no_overflow(func);
         self.current_reuse_slots.clear();
         self.current_reuse_alloca_slots.clear();
         self.current_alloc_dest = None;
