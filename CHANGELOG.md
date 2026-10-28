@@ -1,4 +1,5 @@
 # Changelog
+- **[170]** (2026-10-28 21:02) [170] PERF-10: for-loop counters lowered to SSA; MIR interval analysis (src/mir/range.rs) elides overflow checks on range-proven + - * and unary -; signed negation now traps on overflow; matrix_mul 2.92->1.51s, spectral_norm 4.52->2.02s; 7 new pins; roadmap/CHANGELOG
 - **[170]** (2026-10-28) PERF-10 — overflow checks elided where ranges prove safety.
 
 - **For-loop counters are SSA.** Ranged, counted, and element-index
