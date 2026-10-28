@@ -537,9 +537,7 @@ fn map_get_or_is_total_and_heap_values_are_owned() {
     );
 }
 
-#[test]
-fn unbound_owned_temporaries_are_dropped() {
-    let src = "*main\n    xs is vec()\n    xs.push('x'.repeat(500))\n    m is map()\n    m.set('k', 'x'.repeat(500))\n    n is 0\n    for i in 0 to 100000\n        n is n + 'x'.repeat(500).len() + xs.get(0).len() + m.get('k').len()\n        n is n + m.get_or('q', 'z'.repeat(300)).len()\n        if xs.get(0) equals 'y'\n            n is n + 1\n        eprint('')\n    log(n)\n    log(m.keys().len() + xs.collect().len())\n";
+fn expect_capped(src: &str, expected: &str) {
     let (dir, out) = compile(src);
     let output = Command::new("sh")
         .arg("-c")
@@ -552,12 +550,39 @@ fn unbound_owned_temporaries_are_dropped() {
         .expect("sh failed to start");
     assert!(
         output.status.success(),
-        "temporaries leaked past the 80 MB cap: {:?}",
+        "leaked past the 80 MB cap: {:?}",
         output.status
     );
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout).trim(),
-        "180000000\n2"
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), expected);
+}
+
+#[test]
+fn unbound_owned_temporaries_are_dropped() {
+    let src = "*main\n    xs is vec()\n    xs.push('x'.repeat(500))\n    m is map()\n    m.set('k', 'x'.repeat(500))\n    n is 0\n    for i in 0 to 100000\n        n is n + 'x'.repeat(500).len() + xs.get(0).len() + m.get('k').len()\n        n is n + m.get_or('q', 'z'.repeat(300)).len()\n        if xs.get(0) equals 'y'\n            n is n + 1\n        eprint('')\n    log(n)\n    log(m.keys().len() + xs.collect().len())\n";
+    expect_capped(src, "180000000\n2");
+}
+
+#[test]
+fn map_overwrite_and_heap_key_maps_free_superseded_buffers() {
+    expect_capped(
+        "*main\n    m is map()\n    for i in 0 to 2000000\n        k is 'key' + to_string(i % 10)\n        m.set(k, 'value-' + to_string(i))\n        m.set(k, k)\n    log(m.len())\n    total is 0\n    for i in 0 to 400000\n        h is map()\n        for j in 0 to 10\n            k is 'key' + to_string(j)\n            h.set(k, k)\n        total is total + h.len()\n    log(total)\n",
+        "10\n4000000",
+    );
+}
+
+#[test]
+fn fixed_array_index_is_bounds_checked() {
+    expect_trap(
+        "type P\n    a as i64\n    b as i64\n\n*main\n    fs is fields_of(P)\n    n is 7\n    log(fs[n])\n",
+        "array index out of bounds",
+    );
+}
+
+#[test]
+fn comprehension_binder_shadows_outer_name() {
+    expect(
+        "*f(i as i64)\n    log([i * 2 for i in 0 to 3])\n    log(i)\n\n*main\n    i is 100\n    log([i * 2 for i in 0 to 4])\n    log(i)\n    f(9)\n    for k in 0 to 2\n        log([k + j for j in 0 to 2])\n        log([k for k in 5 to 7])\n        log(k)\n",
+        "[0, 2, 4, 6]\n100\n[0, 2, 4]\n9\n[0, 1]\n[5, 6]\n0\n[1, 2]\n[5, 6]\n1",
     );
 }
 

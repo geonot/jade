@@ -233,14 +233,10 @@ Still open from the same review:
 - **TEST-CLI** `jinn test FILE` is rejected; only project-mode `jinn test`
   and `jinnc FILE --test` work.
 
-### Verify-and-retire (cheap, do first)
+### Verify-and-retire
 
-Two ids look closed as side effects of [167] and need only their original
-reproductions re-run before retirement: **`MIR-2`** (comprehension-binder
-shadowing — three plausible shapes now compile and produce correct values,
-apparently via `MIR-1`'s `DefId` keying) and **`MIR-6`** (the user-facing
-bracket-list path is a `Vec` and does trap on an out-of-range index, so the
-unchecked LLVM-array path may not be reachable from source at all).
+Closed in [176]: `MIR-2`, `MIR-6`, and `LK-4` were re-run against their
+original reproductions and retired, each pinned in `tests/crash_safety.rs`.
 
 ---
 
@@ -417,21 +413,18 @@ Residue:
   `dispatch` bodies, and generators look the outer value up by its aliased
   storage key while the parameter keeps the plain source name (pinned in
   `tests/closure_captures.rs`).
-- **MIR-2** (M) comprehension-binder shadowing ICEd three ways — *appears
-  closed as a side effect of `MIR-1`'s `DefId` keying*: an outer `i` shadowed
-  by `[i * 2 for i in 0 to 4]`, the same over a parameter, and a
-  comprehension inside a `for` all now compile and produce the right values.
-  Re-run the review's original three repros before retiring the id. ~~MIR-4~~
+- ~~MIR-2~~ closed in [176] (comprehension binders shadow an outer local,
+  a parameter, and an enclosing `for` binder correctly — a side effect of
+  `MIR-1`'s `DefId` keying; pinned by `comprehension_binder_shadows_outer_name`). ~~MIR-4~~
   closed in [166] (duplicate unguarded literal arms are a typed
   "duplicate match arm" error, the dense-switch path dedupes literal case
   values as a backstop, and non-int/bool literal matches take the
   comparison-chain path); ~~MIR-5~~ closed in [167] (a non-literal tuple index is a typed error
   naming the reason — element types differ per position — and a literal index
-  past the end reports the arity); **MIR-6**
-  (M) the LLVM-array indexing path emits no upper bounds check — note the
-  user-facing bracket-list path is a `Vec` and *does* trap
-  ("runtime error: vec index out of bounds"), so this needs its original
-  repro to confirm it is reachable from source at all; **CG-4** (M)
+  past the end reports the arity); ~~MIR-6~~ closed in [176] (the only
+  source-reachable fixed array, `fields_of`, traps "array index out of
+  bounds"; bracket lists are `Vec`s and trap too; pinned by
+  `fixed_array_index_is_bounds_checked`); **CG-4** (M)
   `--debug` is a stub (no DWARF).
 - **CG-7** (B) *new in [167], closed in [168]* — **an extern out-parameter's
   writes are invisible to the caller.** `%x` on a local lowered to `ref` of an
@@ -535,14 +528,11 @@ Residue:
   mutation made "drop the init value" unsound; the audit suite caught it).
 - **LK-3** `continue`-path scope leaks in some shapes: the edge-escape drop
   sweep's cycle guard skips in-loop blocks.
-- **LK-4** map overwrite leaks the superseded value and the new key's
-  buffer (MAP-1 class); heap-key maps leak key buffers on drop. Root cause
-  re-confirmed in [169]: MIR hands String arguments to `map.set`/`vec.push`
-  with neither a clone nor a consume of the source binder, so `m.set(k, k)`
-  stores two aliases of `k`'s buffer and `map_set_val`'s overwrite path
-  cannot free the superseded value without risking a double free. The fix
-  is an ownership change (container insertion consumes or clones its heap
-  arguments), not a codegen patch.
+- ~~LK-4~~ closed in [176]: container insertion now owns its heap
+  arguments (clone-unless-consumed, [172]–[173]), so map overwrite frees the
+  superseded value and heap-key maps free their key buffers; a 2M-overwrite
+  loop and 400k short-lived heap-key maps run under an 80 MB cap (pinned by
+  `map_overwrite_and_heap_key_maps_free_superseded_buffers`).
 - **LK-5** channels held by actors at stop, and unreceived channel-handle
   messages, release nothing — bounded leak, never a use-after-free.
 
