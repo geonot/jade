@@ -1,4 +1,5 @@
 # Changelog
+- **[177]** (2026-10-28 21:28) [172] MAP-GET: Map.get traps on missing key (map key not found), new total get_or(k, default); fix get double free (clone unless borrow, like Vec.get); port std/args; docs/jinn.md Maps; 2 pins + registry; LEAK-TEMP filed (10-9)
 - **[172]** (2026-10-28 21:10) [171] one value formatter: Vec interpolation no longer ICEs (recursive vec_to_string), derived struct display matches log (P { x: 3 }), nested structs derive display; pin in crash_safety
 - **[170]** (2026-10-28 21:02) [170] PERF-10: for-loop counters lowered to SSA; MIR interval analysis (src/mir/range.rs) elides overflow checks on range-proven + - * and unary -; signed negation now traps on overflow; matrix_mul 2.92->1.51s, spectral_norm 4.52->2.02s; 7 new pins; roadmap/CHANGELOG
 - **[172]** (2026-10-28) MAP-GET — `Map.get` no longer invents values.
