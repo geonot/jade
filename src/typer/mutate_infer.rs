@@ -3,37 +3,6 @@ use std::collections::{HashMap, HashSet};
 use crate::ast::{self, Expr, Stmt};
 use crate::intern::Symbol;
 
-const BUILTIN_MUTATING_METHODS: &[&str] = &[
-    "push",
-    "push_back",
-    "push_front",
-    "pop",
-    "pop_back",
-    "pop_front",
-    "insert",
-    "remove",
-    "delete",
-    "set",
-    "put",
-    "add",
-    "clear",
-    "append",
-    "extend",
-    "sort",
-    "sort_by",
-    "reverse",
-    "enqueue",
-    "dequeue",
-    "truncate",
-    "swap",
-    "fill",
-    "retain",
-];
-
-pub(in crate::typer) fn is_builtin_mutating_method(name: &str) -> bool {
-    BUILTIN_MUTATING_METHODS.contains(&name)
-}
-
 type AliasMap = HashMap<Symbol, HashSet<usize>>;
 
 use super::consume_infer::ScanCtx;
@@ -340,7 +309,7 @@ impl crate::typer::Typer {
                     None => {
                         let builtin_recv =
                             matches!(&**recv, Expr::Ident(n, _) if ctx.builtins.contains(n));
-                        if is_builtin_mutating_method(&name.as_str())
+                        if crate::builtin_methods::is_mutating_method(&name.as_str())
                             || (!builtin_recv && self.any_user_method_mutates(*name, 0))
                         {
                             Self::mark_mutated_place(recv, alias, ctx, mutated);

@@ -17,6 +17,93 @@ pub const INSERTING_METHODS: &[&str] = &[
     "push_all",
 ];
 
+pub const ELEMENT_READ_METHODS: &[&str] = &[
+    "get", "first", "last", "at", "front", "back", "peek", "peek_min", "peek_max", "top",
+];
+
+pub fn is_element_read_method(name: &str) -> bool {
+    ELEMENT_READ_METHODS.contains(&name)
+}
+
+pub fn is_container_read_method(expr: &crate::hir::Expr) -> bool {
+    let name = match &expr.kind {
+        crate::hir::ExprKind::VecMethod(r, n, _) | crate::hir::ExprKind::MapMethod(r, n, _)
+            if matches!(
+                r.kind,
+                crate::hir::ExprKind::Var(..)
+                    | crate::hir::ExprKind::Field(..)
+                    | crate::hir::ExprKind::Index(..)
+            ) =>
+        {
+            n.as_str()
+        }
+        _ => return false,
+    };
+    is_element_read_method(&name)
+}
+
+pub const MUTATING_METHODS: &[&str] = &[
+    "push",
+    "push_back",
+    "push_front",
+    "pop",
+    "pop_back",
+    "pop_front",
+    "insert",
+    "remove",
+    "delete",
+    "set",
+    "put",
+    "add",
+    "clear",
+    "append",
+    "extend",
+    "sort",
+    "sort_by",
+    "reverse",
+    "enqueue",
+    "dequeue",
+    "truncate",
+    "swap",
+    "fill",
+    "retain",
+];
+
+pub fn is_mutating_method(name: &str) -> bool {
+    MUTATING_METHODS.contains(&name)
+}
+
+pub const FRESH_RESULT_METHODS: &[&str] = &[
+    "slice",
+    "trim",
+    "trim_left",
+    "trim_right",
+    "replace",
+    "to_upper",
+    "to_lower",
+    "repeat",
+    "__clone",
+    "join",
+    "split",
+    "lines",
+    "map",
+    "filter",
+    "take",
+    "skip",
+    "reverse",
+    "sort",
+    "chain",
+    "zip",
+    "enumerate",
+    "flatten",
+    "collect",
+    "keys",
+    "values",
+    "pop",
+    "shift",
+    "remove",
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VecMethod {
     Push,

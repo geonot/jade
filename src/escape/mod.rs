@@ -96,7 +96,7 @@ fn demote_block(block: &mut hir::Block, info: &EscapeInfo, count: &mut usize) {
     for stmt in block.iter_mut() {
         if let Stmt::Bind(b) = stmt {
             let value_shape_ok = matches!(b.value.kind, ExprKind::Field(..) | ExprKind::Index(..))
-                || is_container_read_method(&b.value);
+                || crate::builtin_methods::is_container_read_method(&b.value);
             let qualifies = b.access_mod.is_none()
                 && b.ownership == hir::Ownership::Owned
                 && info.tier(b.def_id) == Tier::T1
@@ -117,24 +117,6 @@ fn demote_block(block: &mut hir::Block, info: &EscapeInfo, count: &mut usize) {
             _ => true,
         });
     }
-}
-
-fn is_container_read_method(expr: &hir::Expr) -> bool {
-    let name = match &expr.kind {
-        ExprKind::VecMethod(r, n, _) | ExprKind::MapMethod(r, n, _)
-            if matches!(
-                r.kind,
-                ExprKind::Var(..) | ExprKind::Field(..) | ExprKind::Index(..)
-            ) =>
-        {
-            n.as_str()
-        }
-        _ => return false,
-    };
-    matches!(
-        &*name,
-        "get" | "first" | "last" | "front" | "back" | "peek" | "peek_min" | "peek_max" | "top"
-    )
 }
 
 fn recurse_demote_stmt(stmt: &mut Stmt, info: &EscapeInfo, count: &mut usize) {

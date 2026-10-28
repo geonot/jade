@@ -232,10 +232,7 @@ impl Typer {
         }
         match &expr.kind {
             hir::ExprKind::VecMethod(_, name, _) | hir::ExprKind::MapMethod(_, name, _) => {
-                matches!(
-                    name.as_str().as_ref(),
-                    "get" | "peek" | "front" | "back" | "first" | "last"
-                )
+                crate::builtin_methods::is_element_read_method(&name.as_str())
             }
             _ => false,
         }
@@ -453,10 +450,9 @@ impl Typer {
                 }
                 let is_element_read = match &value.kind {
                     hir::ExprKind::VecMethod(_, mname, _)
-                    | hir::ExprKind::MapMethod(_, mname, _) => matches!(
-                        mname.as_str().as_ref(),
-                        "get" | "peek" | "front" | "back" | "first" | "last"
-                    ),
+                    | hir::ExprKind::MapMethod(_, mname, _) => {
+                        crate::builtin_methods::is_element_read_method(&mname.as_str())
+                    }
                     hir::ExprKind::Index(..) => true,
                     _ => false,
                 };

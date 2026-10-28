@@ -284,37 +284,6 @@ pub(super) fn verify_function(func: &mir::Function) -> Vec<String> {
 
 pub(super) use super::ConsumingMap;
 
-const FRESH_CONTAINER_METHODS: &[&str] = &[
-    "slice",
-    "trim",
-    "trim_left",
-    "trim_right",
-    "replace",
-    "to_upper",
-    "to_lower",
-    "repeat",
-    "__clone",
-    "join",
-    "split",
-    "lines",
-    "map",
-    "filter",
-    "take",
-    "skip",
-    "reverse",
-    "sort",
-    "chain",
-    "zip",
-    "enumerate",
-    "flatten",
-    "collect",
-    "keys",
-    "values",
-    "pop",
-    "shift",
-    "remove",
-];
-
 fn owning_allocs(
     func: &mir::Function,
     consuming: &ConsumingMap,
@@ -346,7 +315,8 @@ fn owning_allocs(
                 InstKind::MethodCall(_, name, _, borrow)
                     if !*borrow
                         && matches!(inst.ty, Type::String | Type::Vec(_) | Type::Map(_, _))
-                        && FRESH_CONTAINER_METHODS.contains(&&*name.as_str()) =>
+                        && crate::builtin_methods::FRESH_RESULT_METHODS
+                            .contains(&&*name.as_str()) =>
                 {
                     owning.insert(dest, inst.ty.clone());
                 }

@@ -905,11 +905,9 @@ impl Typer {
 
     fn is_container_element_read(&mut self, e: &hir::Expr) -> bool {
         match &e.kind {
-            hir::ExprKind::VecMethod(_, m, _) => matches!(
-                m.as_str().as_ref(),
-                "get" | "first" | "last" | "at" | "front" | "back" | "peek"
-            ),
-            hir::ExprKind::MapMethod(_, m, _) => matches!(m.as_str().as_ref(), "get"),
+            hir::ExprKind::VecMethod(_, m, _) | hir::ExprKind::MapMethod(_, m, _) => {
+                crate::builtin_methods::is_element_read_method(&m.as_str())
+            }
             hir::ExprKind::Field(x, _, _) => self.is_container_element_read(x),
             hir::ExprKind::Index(base, _) => matches!(
                 self.infer_ctx.shallow_resolve(&base.ty),
@@ -1111,7 +1109,7 @@ impl Typer {
             | hir::ExprKind::MapMethod(recv, meth, args) => {
                 let m_owned = meth.as_str();
                 let m: &str = m_owned.as_ref();
-                let is_mutating = crate::typer::mutate_infer::is_builtin_mutating_method(m);
+                let is_mutating = crate::builtin_methods::is_mutating_method(m);
                 if is_mutating {
                     if self.is_container_element_read(recv) {
                         return Err(format!(

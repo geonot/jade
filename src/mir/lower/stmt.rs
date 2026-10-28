@@ -28,7 +28,7 @@ impl Lowerer {
                         {
                             self.lower_expr(&b.value)
                         } else if matches!(b.ownership, hir::Ownership::Borrowed)
-                            && is_container_read_method(&b.value)
+                            && crate::builtin_methods::is_container_read_method(&b.value)
                         {
                             let v = self.lower_expr(&b.value);
                             self.mark_method_call_borrow(v);
@@ -217,22 +217,4 @@ impl Lowerer {
             }
         }
     }
-}
-
-pub(crate) fn is_container_read_method(expr: &hir::Expr) -> bool {
-    let name = match &expr.kind {
-        ExprKind::VecMethod(r, n, _) | ExprKind::MapMethod(r, n, _)
-            if matches!(
-                r.kind,
-                ExprKind::Var(..) | ExprKind::Field(..) | ExprKind::Index(..)
-            ) =>
-        {
-            n.as_str()
-        }
-        _ => return false,
-    };
-    matches!(
-        &*name,
-        "get" | "first" | "last" | "front" | "back" | "peek" | "peek_min" | "peek_max" | "top"
-    )
 }

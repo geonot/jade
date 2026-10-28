@@ -74,7 +74,7 @@ impl Typer {
         match self.infer_ctx.shallow_resolve(&root_ty) {
             Type::Frozen(_) => self.reject_frozen_receiver_write(obj_ty, method, hobj, span),
             Type::View(_) => {
-                let mutates = crate::typer::mutate_infer::is_builtin_mutating_method(method)
+                let mutates = crate::builtin_methods::is_mutating_method(method)
                     || self.method_writes_receiver(obj_ty, method);
                 if mutates {
                     return Err(format!(
@@ -126,7 +126,7 @@ impl Typer {
         let recv_name = crate::typer::place::place_of_expr(hobj)
             .map(|p| p.render())
             .unwrap_or_else(|| "this value".to_string());
-        if crate::typer::mutate_infer::is_builtin_mutating_method(method) {
+        if crate::builtin_methods::is_mutating_method(method) {
             return Err(format!(
                 "{}: `{}` is frozen: `{}` mutates its receiver, and a frozen value can \
                  never be written; mutate before the `freeze`, or rebuild a new value \
