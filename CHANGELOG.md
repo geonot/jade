@@ -1,4 +1,5 @@
 # Changelog
+- **[181]** (2026-10-28 22:18) [174] 10-7: builtin method-name tables (element-read, mutating, fresh-result, container-read) unified in src/builtin_methods.rs
 - **[179]** (2026-10-28 22:14) [173] LEAK-TEMP: drop fresh unbound owned temps after their sole reader (method receivers/args, log/eprint, cmp/concat operands) via drop_if_fresh; INSERTING_METHODS moved to builtin_methods.rs; fix double frees in keys/values, collect, find; 2 pins
 - **[177]** (2026-10-28 21:28) [172] MAP-GET: Map.get traps on missing key (map key not found), new total get_or(k, default); fix get double free (clone unless borrow, like Vec.get); port std/args; docs/jinn.md Maps; 2 pins + registry; LEAK-TEMP filed (10-9)
 - **[172]** (2026-10-28 21:10) [171] one value formatter: Vec interpolation no longer ICEs (recursive vec_to_string), derived struct display matches log (P { x: 3 }), nested structs derive display; pin in crash_safety
