@@ -536,3 +536,35 @@ fn map_get_or_is_total_and_heap_values_are_owned() {
         "2\n7\n60\n60\n60\n40\n60",
     );
 }
+
+#[test]
+fn unbound_owned_temporaries_are_dropped() {
+    let src = "*main\n    xs is vec()\n    xs.push('x'.repeat(500))\n    m is map()\n    m.set('k', 'x'.repeat(500))\n    n is 0\n    for i in 0 to 100000\n        n is n + 'x'.repeat(500).len() + xs.get(0).len() + m.get('k').len()\n        n is n + m.get_or('q', 'z'.repeat(300)).len()\n        if xs.get(0) equals 'y'\n            n is n + 1\n        eprint('')\n    log(n)\n    log(m.keys().len() + xs.collect().len())\n";
+    let (dir, out) = compile(src);
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "ulimit -v 80000; exec {} 2>/dev/null",
+            out.display()
+        ))
+        .current_dir(dir.path())
+        .output()
+        .expect("sh failed to start");
+    assert!(
+        output.status.success(),
+        "temporaries leaked past the 80 MB cap: {:?}",
+        output.status
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "180000000\n2"
+    );
+}
+
+#[test]
+fn collection_reads_return_owned_copies() {
+    expect(
+        "*main\n    m is map()\n    m.set('k'.repeat(40), 'v'.repeat(40))\n    ks is m.keys()\n    vs is m.values()\n    log(ks.len() + vs.len())\n    xs is vec()\n    xs.push('x'.repeat(60))\n    ys is xs.collect()\n    ys.push('z')\n    log(ys.len())\n    log(xs.len())\n    for i in 0 to 2\n        s is xs.find(|t| t.len() > 0)\n        log(s.len())\n    log(xs.get(0).len())\n",
+        "2\n2\n1\n60\n60\n60",
+    );
+}

@@ -45,7 +45,11 @@ impl Lowerer {
                             .next()
                             .unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
 
-                        self.emit(InstKind::Log(v), arg_ty, span)
+                        let out = self.emit(InstKind::Log(v), arg_ty, span);
+                        if let Some(a) = args.first() {
+                            self.drop_if_fresh(v, a, span);
+                        }
+                        out
                     }
                     BuiltinFn::Eprint => {
                         let arg_ty = args.first().map(|a| a.ty.clone()).unwrap_or(Type::I64);
@@ -54,7 +58,11 @@ impl Lowerer {
                             .next()
                             .unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
 
-                        self.emit(InstKind::Eprint(v), arg_ty, span)
+                        let out = self.emit(InstKind::Eprint(v), arg_ty, span);
+                        if let Some(a) = args.first() {
+                            self.drop_if_fresh(v, a, span);
+                        }
+                        out
                     }
                     BuiltinFn::Print => {
                         let name = Symbol::intern("__builtin_Print");

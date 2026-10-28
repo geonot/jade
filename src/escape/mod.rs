@@ -121,7 +121,14 @@ fn demote_block(block: &mut hir::Block, info: &EscapeInfo, count: &mut usize) {
 
 fn is_container_read_method(expr: &hir::Expr) -> bool {
     let name = match &expr.kind {
-        ExprKind::VecMethod(_, n, _) | ExprKind::MapMethod(_, n, _) => n.as_str(),
+        ExprKind::VecMethod(r, n, _) | ExprKind::MapMethod(r, n, _)
+            if matches!(
+                r.kind,
+                ExprKind::Var(..) | ExprKind::Field(..) | ExprKind::Index(..)
+            ) =>
+        {
+            n.as_str()
+        }
         _ => return false,
     };
     matches!(

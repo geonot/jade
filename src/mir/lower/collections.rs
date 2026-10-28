@@ -19,7 +19,23 @@ impl Lowerer {
                 }
                 let obj_val = self.lower_expr(obj);
                 let vals: Vec<_> = args.iter().map(|a| self.lower_expr(a)).collect();
-                self.emit(InstKind::MethodCall(obj_val, *name, vals, false), ty, span)
+                let out = self.emit(
+                    InstKind::MethodCall(obj_val, *name, vals.clone(), false),
+                    ty.clone(),
+                    span,
+                );
+                if matches!(expr.kind, ExprKind::DeferredMethod(..)) {
+                    return out;
+                }
+                if !matches!(ty, Type::View(_)) {
+                    self.drop_if_fresh(obj_val, obj, span);
+                }
+                if !crate::builtin_methods::INSERTING_METHODS.contains(&&*name.as_str()) {
+                    for (v, a) in vals.into_iter().zip(args) {
+                        self.drop_if_fresh(v, a, span);
+                    }
+                }
+                out
             }
             ExprKind::VecNew(elems) => {
                 let vals: Vec<ValueId> = elems.iter().map(|e| self.lower_expr(e)).collect();

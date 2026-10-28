@@ -2,6 +2,26 @@
 - **[177]** (2026-10-28 21:28) [172] MAP-GET: Map.get traps on missing key (map key not found), new total get_or(k, default); fix get double free (clone unless borrow, like Vec.get); port std/args; docs/jinn.md Maps; 2 pins + registry; LEAK-TEMP filed (10-9)
 - **[172]** (2026-10-28 21:10) [171] one value formatter: Vec interpolation no longer ICEs (recursive vec_to_string), derived struct display matches log (P { x: 3 }), nested structs derive display; pin in crash_safety
 - **[170]** (2026-10-28 21:02) [170] PERF-10: for-loop counters lowered to SSA; MIR interval analysis (src/mir/range.rs) elides overflow checks on range-proven + - * and unary -; signed negation now traps on overflow; matrix_mul 2.92->1.51s, spectral_norm 4.52->2.02s; 7 new pins; roadmap/CHANGELOG
+- **[173]** (2026-10-28) LEAK-TEMP — unbound temporaries are dropped, and collection reads return owned values.
+
+- **Temporaries are freed.** A fresh owned String/Vec/Map that is only read
+  used to leak on every evaluation: a builtin-method receiver or non-inserted
+  argument (`"x".repeat(n).len()`, `xs.get(0).len()`, `m.get(k).len()`), a
+  `log`/`eprint` argument, or a comparison or concatenation operand. The leak
+  was about 100 MB per 200k iterations. MIR lowering now drops such a temp
+  immediately after its sole reader (`drop_if_fresh`). One rule replaces the
+  old string-`+`-only special case. Results that alias their receiver (views)
+  and inserted arguments (`push`/`set`/... — the single `INSERTING_METHODS`
+  table, now in `builtin_methods.rs` and shared with the drop verifier) are
+  never dropped.
+- **Three more double frees fixed.** All three returned a shallow load that
+  MIR then dropped: `m.keys()`/`m.values()` aliased the map's strings,
+  `xs.collect()` returned the receiver itself (mutating the result
+  segfaulted), and `xs.find(f)` aliased the element. All three now copy.
+- Pins: `unbound_owned_temporaries_are_dropped` (runs under an 80 MB
+  `ulimit -v`; the old compiler exceeds it) and
+  `collection_reads_return_owned_copies` in `tests/crash_safety.rs`.
+
 - **[172]** (2026-10-28) MAP-GET — `Map.get` no longer invents values.
 
 - **`m.get(k)` traps** with `map key not found` when `k` is absent (it used to

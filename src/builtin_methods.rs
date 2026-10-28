@@ -1,5 +1,22 @@
 use crate::types::Type;
 
+pub const INSERTING_METHODS: &[&str] = &[
+    "push",
+    "push_back",
+    "push_front",
+    "insert",
+    "append",
+    "add",
+    "put",
+    "set",
+    "enqueue",
+    "send",
+    "extend",
+    "concat",
+    "merge",
+    "push_all",
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VecMethod {
     Push,

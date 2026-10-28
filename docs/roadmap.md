@@ -230,9 +230,6 @@ user functions marked `nobuiltin` (a user `*sqrt` was folded as libm
 
 Still open from the same review:
 
-- **LEAK-TEMP** A fresh owned value used only as a method receiver
-  (`"x".repeat(n).len()`, `xs.get(0).len()`, `m.get(k).len()`) is never
-  dropped, so it leaks once per evaluation. Bound forms are fine.
 - **TEST-CLI** `jinn test FILE` is rejected; only project-mode `jinn test`
   and `jinnc FILE --test` work.
 

@@ -274,6 +274,7 @@ impl<'ctx> Compiler<'ctx> {
             .bld
             .build_conditional_branch(pred_bool, found_bb, cont_bb));
         self.bld.position_at_end(found_bb);
+        let elem = self.owned_elem_copy(elem, elem_ty)?;
         b!(self.bld.build_store(result_ptr, elem));
         b!(self.bld.build_unconditional_branch(done_bb));
         self.bld.position_at_end(cont_bb);

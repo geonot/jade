@@ -305,7 +305,7 @@ impl<'ctx> Compiler<'ctx> {
                 .build_gep(i8t, entry_ptr, &[i64t.const_int(32, false)], "mg.vp"))
         };
         let raw = b!(self.bld.build_load(lty, val_ptr, "mg.fv"));
-        let found_val = if borrow {
+        let found_val = if borrow || !val_ty.is_value_clonable() {
             raw
         } else {
             self.clone_value(raw, val_ty)?
@@ -319,7 +319,11 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(merge_bb);
             return Ok(found_val);
         };
-        let missing = self.clone_value(d, val_ty)?;
+        let missing = if val_ty.is_value_clonable() {
+            self.clone_value(d, val_ty)?
+        } else {
+            d
+        };
         let nf_end = self.bld.get_insert_block().unwrap();
         b!(self.bld.build_unconditional_branch(merge_bb));
 
@@ -510,6 +514,7 @@ impl<'ctx> Compiler<'ctx> {
                 .build_gep(i8t, entry_ptr, &[i64t.const_int(field_off, false)], "mk.fp"))
         };
         let elem = b!(self.bld.build_load(lty, field_ptr, "mk.elem"));
+        let elem = self.owned_elem_copy(elem, elem_ty)?;
         self.vec_push_raw(out_hdr, elem, lty, elem_size)?;
         b!(self.bld.build_unconditional_branch(next_bb));
 

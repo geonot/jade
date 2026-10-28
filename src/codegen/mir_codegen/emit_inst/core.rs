@@ -370,7 +370,10 @@ impl<'ctx> Compiler<'ctx> {
                                     }
                                     return Err("get() requires an index".into());
                                 }
-                                VecMethod::Collect => return Ok(Some(recv_val)),
+                                VecMethod::Collect => {
+                                    let vt = Type::Vec(Box::new(elem_ty.clone()));
+                                    return Ok(Some(self.clone_value(recv_val, &vt)?));
+                                }
                                 VecMethod::Set => {
                                     if args.len() >= 2 {
                                         let idx = self.val(args[0]).into_int_value();

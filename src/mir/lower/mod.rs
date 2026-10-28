@@ -573,20 +573,32 @@ impl Lowerer {
         }
     }
 
-    pub(super) fn is_fresh_string_temp(e: &hir::Expr) -> bool {
-        matches!(e.ty, Type::String)
-            && match &e.kind {
-                ExprKind::BinOp(_, ast::BinOp::Add, _) => true,
-                ExprKind::Builtin(f, _) => matches!(
-                    f,
-                    hir::BuiltinFn::ToString
-                        | hir::BuiltinFn::FmtFloat
-                        | hir::BuiltinFn::FmtHex
-                        | hir::BuiltinFn::FmtOct
-                        | hir::BuiltinFn::FmtBin
-                ),
-                _ => false,
+    pub(super) fn is_fresh_temp(e: &hir::Expr) -> bool {
+        if !matches!(e.ty, Type::String | Type::Vec(_) | Type::Map(_, _)) {
+            return false;
+        }
+        match &e.kind {
+            ExprKind::BinOp(_, ast::BinOp::Add, _) => matches!(e.ty, Type::String),
+            ExprKind::Builtin(f, _) => matches!(
+                f,
+                hir::BuiltinFn::ToString
+                    | hir::BuiltinFn::FmtFloat
+                    | hir::BuiltinFn::FmtHex
+                    | hir::BuiltinFn::FmtOct
+                    | hir::BuiltinFn::FmtBin
+            ),
+            ExprKind::Call(..) | ExprKind::Method(..) => true,
+            ExprKind::StringMethod(..) | ExprKind::VecMethod(..) | ExprKind::MapMethod(..) => {
+                e.ty.is_value_clonable()
             }
+            _ => false,
+        }
+    }
+
+    pub(super) fn drop_if_fresh(&mut self, v: ValueId, e: &hir::Expr, span: crate::ast::Span) {
+        if Self::is_fresh_temp(e) {
+            self.emit_void(InstKind::Drop(v, e.ty.clone()), span);
+        }
     }
 
     fn needs_auto_clone(expr: &hir::Expr) -> bool {

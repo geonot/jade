@@ -30,41 +30,29 @@ impl Lowerer {
                 let l = self.lower_expr(lhs);
                 let r = self.lower_expr(rhs);
                 let operand_ty = lhs.ty.clone();
-                match op {
-                    ast::BinOp::Eq => {
-                        self.emit(InstKind::Cmp(CmpOp::Eq, l, r, operand_ty.clone()), ty, span)
-                    }
-                    ast::BinOp::Ne => {
-                        self.emit(InstKind::Cmp(CmpOp::Ne, l, r, operand_ty.clone()), ty, span)
-                    }
-                    ast::BinOp::Lt => {
-                        self.emit(InstKind::Cmp(CmpOp::Lt, l, r, operand_ty.clone()), ty, span)
-                    }
-                    ast::BinOp::Gt => {
-                        self.emit(InstKind::Cmp(CmpOp::Gt, l, r, operand_ty.clone()), ty, span)
-                    }
-                    ast::BinOp::Le => {
-                        self.emit(InstKind::Cmp(CmpOp::Le, l, r, operand_ty.clone()), ty, span)
-                    }
-                    ast::BinOp::Ge => {
-                        self.emit(InstKind::Cmp(CmpOp::Ge, l, r, operand_ty), ty, span)
-                    }
+                let cmp = match op {
+                    ast::BinOp::Eq => Some(CmpOp::Eq),
+                    ast::BinOp::Ne => Some(CmpOp::Ne),
+                    ast::BinOp::Lt => Some(CmpOp::Lt),
+                    ast::BinOp::Gt => Some(CmpOp::Gt),
+                    ast::BinOp::Le => Some(CmpOp::Le),
+                    ast::BinOp::Ge => Some(CmpOp::Ge),
                     ast::BinOp::And | ast::BinOp::Or => {
                         unreachable!("short-circuit binop lowered by expr_control")
                     }
-                    _ => {
-                        let mir_op = super::lower_binop(op);
-                        let out = self.emit(InstKind::BinOp(mir_op, l, r), ty.clone(), span);
-                        if matches!(op, ast::BinOp::Add) && matches!(ty, Type::String) {
-                            for (v, e) in [(l, &**lhs), (r, &**rhs)] {
-                                if Self::is_fresh_string_temp(e) {
-                                    self.emit_void(InstKind::Drop(v, Type::String), span);
-                                }
-                            }
-                        }
-                        out
-                    }
+                    _ => None,
+                };
+                let kind = match cmp {
+                    Some(c) => InstKind::Cmp(c, l, r, operand_ty),
+                    None => InstKind::BinOp(super::lower_binop(op), l, r),
+                };
+                let reads_operands = cmp.is_some() || matches!(ty, Type::String);
+                let out = self.emit(kind, ty, span);
+                if reads_operands {
+                    self.drop_if_fresh(l, lhs, span);
+                    self.drop_if_fresh(r, rhs, span);
                 }
+                out
             }
             ExprKind::UnaryOp(op, inner) => {
                 let v = self.lower_expr(inner);

@@ -284,23 +284,6 @@ pub(super) fn verify_function(func: &mir::Function) -> Vec<String> {
 
 pub(super) use super::ConsumingMap;
 
-const INSERTING_METHODS: &[&str] = &[
-    "push",
-    "push_back",
-    "push_front",
-    "insert",
-    "append",
-    "add",
-    "put",
-    "set",
-    "enqueue",
-    "send",
-    "extend",
-    "concat",
-    "merge",
-    "push_all",
-];
-
 const FRESH_CONTAINER_METHODS: &[&str] = &[
     "slice",
     "trim",
@@ -437,7 +420,7 @@ fn strict_transfers(kind: &InstKind, consuming: &ConsumingMap) -> Vec<ValueId> {
             }
             None => {
                 let m = name.as_str();
-                if INSERTING_METHODS.contains(&m.as_str()) {
+                if crate::builtin_methods::INSERTING_METHODS.contains(&m.as_str()) {
                     args.clone()
                 } else {
                     vec![]
