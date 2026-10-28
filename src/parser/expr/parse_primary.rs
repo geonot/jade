@@ -229,7 +229,7 @@ impl Parser {
                 } else {
                     &Token::Eof
                 };
-                if matches!(next, Token::LParen) {
+                if !matches!(next, Token::Ident(_)) {
                     self.advance();
                     Ok(Expr::Ident("build".into(), sp))
                 } else {
@@ -251,9 +251,22 @@ impl Parser {
                 }
             }
 
+            Token::Send | Token::Select | Token::Test if self.keyword_used_as_ident() => {
+                let name = Self::soft_keyword_ident(self.peek())
+                    .expect("contextual keyword is a soft keyword");
+                self.advance();
+                Ok(Expr::Ident(name.into(), sp))
+            }
             Token::From
             | Token::To
             | Token::By
+            | Token::Stop
+            | Token::Atomic
+            | Token::Strict
+            | Token::Global
+            | Token::Alias
+            | Token::Nop
+            | Token::Store
             | Token::AtKw
             | Token::Default
             | Token::End

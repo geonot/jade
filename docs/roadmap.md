@@ -378,8 +378,9 @@ Residue:
   ~~PAR-3~~ closed in [167]: `save`/`destroy`/`restore`/`compact` are
   documented in `jinn.md` ("Store lifecycle statements") with a compiled
   example. **SYN-8** (M) the EBNF is wrong on
-  ≥7 constructs; **SYN-9** (M) contextual keywords reserve identifiers
-  inconsistently; **SYN-10** (M) no sort-by-key for Vec-of-struct;
+  ≥7 constructs; ~~SYN-9~~ closed in [178] (the contextual word set is
+  declared in `docs/jinn.ebnf` and every member works as a function, variable,
+  and call name; pinned by `contextual_keywords_are_usable_as_identifiers`); **SYN-10** (M) no sort-by-key for Vec-of-struct;
   **SYN-11** (M) unknown-method errors carry no location and type as i64 —
   *half closed in [167]*: an unknown method on a struct or a concrete scalar
   is now a real error (`unknown method \`frobnicate\``) instead of silently

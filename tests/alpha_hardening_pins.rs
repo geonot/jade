@@ -424,3 +424,19 @@ fn a_function_local_use_is_rejected_with_placement_guidance() {
         &["only allowed at the top level"],
     );
 }
+
+#[test]
+fn contextual_keywords_are_usable_as_identifiers() {
+    for kw in [
+        "insert", "set", "delete", "view", "send", "close", "select", "query", "build", "from",
+        "to", "by", "at", "default", "stop", "atomic", "strict", "global", "alias", "nop", "test",
+        "store",
+    ] {
+        accepts_and_prints(
+            &format!(
+                "*{kw}(x as i64) returns i64\n    x + 1\n\n*main\n    log({kw}(1))\n    {kw} is 2\n    log({kw})\n"
+            ),
+            "2\n2",
+        );
+    }
+}

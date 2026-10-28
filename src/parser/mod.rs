@@ -335,6 +335,13 @@ impl Parser {
             Token::End => "end",
 
             Token::Test => "test",
+            Token::Stop => "stop",
+            Token::Atomic => "atomic",
+            Token::Strict => "strict",
+            Token::Global => "global",
+            Token::Alias => "alias",
+            Token::Nop => "nop",
+            Token::Store => "store",
 
             Token::Equals => "equals",
             Token::Neq => "neq",

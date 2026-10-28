@@ -165,6 +165,27 @@ impl Parser {
             && matches!(self.tok[self.pos + 1].token, Token::Is)
     }
 
+    pub(in crate::parser) fn keyword_used_as_ident(&self) -> bool {
+        let next = self.tok.get(self.pos + 1).map(|t| &t.token);
+        match self.peek() {
+            Token::Send => matches!(
+                next,
+                Some(
+                    Token::LParen
+                        | Token::RParen
+                        | Token::Comma
+                        | Token::Newline
+                        | Token::Dot
+                        | Token::Is
+                )
+            ),
+            Token::Select => !matches!(next, Some(Token::Newline)),
+            Token::Build => !matches!(next, Some(Token::Ident(_))),
+            Token::Test => true,
+            _ => false,
+        }
+    }
+
     pub(in crate::parser) fn is_ident_like(&self, tok: &Token) -> bool {
         matches!(tok, Token::Ident(_)) || Self::soft_keyword_ident(tok).is_some()
     }

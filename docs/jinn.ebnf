@@ -246,7 +246,25 @@ bool          = "true" | "false" .
 
 (* ===== terminals ===== *)
 
-identifier    = letter { letter | digit | "_" } .
+identifier    = ( letter { letter | digit | "_" } ) - reserved_word
+              | contextual_word .
+contextual_word = "set" | "build" | "from" | "to" | "by" | "at" | "insert"
+              | "query" | "delete" | "view" | "select" | "send" | "close"
+              | "log" | "default" | "end" | "test" | "stop" | "atomic"
+              | "strict" | "global" | "alias" | "nop" | "store" .
+              (* contextual words keep their keyword meaning only in the
+                 position that introduces their construct: a statement or
+                 declaration head, `send x, ...`, `select` before NEWLINE,
+                 `build Name`; everywhere else they are plain identifiers *)
+reserved_word = "is" | "if" | "elif" | "else" | "while" | "for" | "in"
+              | "loop" | "break" | "continue" | "return" | "match" | "when"
+              | "type" | "enum" | "err" | "pub" | "use" | "as" | "of"
+              | "extern" | "do" | "unless" | "until" | "returns" | "and"
+              | "or" | "not" | "xor" | "true" | "false" | "none" | "actor"
+              | "spawn" | "receive" | "trait" | "impl" | "dispatch" | "yield"
+              | "channel" | "together" | "transaction" | "migration"
+              | "supervisor" | "sim" | "defer" | "grad" | "einsum" | "asm"
+              | "embed" | "assert" | "syscall" | "freeze" | "unreachable" .
 letter        = "A".."Z" | "a".."z" | "_" .
 digit         = "0".."9" .
 string_char   = ? any UTF-8 codepoint except the closing quote ?
