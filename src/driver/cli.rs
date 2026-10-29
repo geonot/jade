@@ -177,9 +177,13 @@ pub(super) enum Cmd {
         args: Vec<String>,
     },
 
-    Test,
+    Test {
+        file: Option<PathBuf>,
+    },
 
-    Check,
+    Check {
+        file: Option<PathBuf>,
+    },
 
     Fmt {
         files: Vec<PathBuf>,

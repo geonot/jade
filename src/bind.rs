@@ -6,10 +6,17 @@ pub fn bind_header(path: &Path) -> Result<String, String> {
     let src =
         fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
 
-    let mut seen: Vec<String> = Vec::new();
-    let expanded = inline_local_includes(&src, path, &mut seen, 0);
-    let cleaned = strip_extern_linkage(&strip_preprocessor(&strip_comments(&src)));
-    let cleaned_expanded = strip_extern_linkage(&strip_preprocessor(&strip_comments(&expanded)));
+    let (cleaned, cleaned_expanded) = match preprocess(path) {
+        Some(pair) => pair,
+        None => {
+            let mut seen: Vec<String> = Vec::new();
+            let expanded = inline_local_includes(&src, path, &mut seen, 0);
+            (
+                strip_extern_linkage(&strip_preprocessor(&strip_comments(&src))),
+                strip_extern_linkage(&strip_preprocessor(&strip_comments(&expanded))),
+            )
+        }
+    };
     let mut out = String::new();
     out.push_str(&format!(
         "# Auto-generated Jinn bindings from {}\n\
@@ -26,8 +33,15 @@ pub fn bind_header(path: &Path) -> Result<String, String> {
         }
     }
 
+    let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
     for decl in decls {
         match decl {
+            CDecl::Function(_) | CDecl::Struct(_)
+                if !emitted.insert(match &decl {
+                    CDecl::Function(f) => format!("fn {}", f.name),
+                    CDecl::Struct(n) => format!("struct {n}"),
+                    CDecl::Typedef(..) => unreachable!(),
+                }) => {}
             CDecl::Function(mut f) => {
                 f.ret = resolve_alias(&f.ret, &aliases, 0);
                 for p in &mut f.params {
@@ -44,6 +58,99 @@ pub fn bind_header(path: &Path) -> Result<String, String> {
     }
 
     Ok(out)
+}
+
+fn preprocess(path: &Path) -> Option<(String, String)> {
+    let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let out = std::process::Command::new(cc)
+        .args(["-E", "-x", "c", "-I"])
+        .arg(dir)
+        .arg(path)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let target = fs::canonicalize(path).ok()?;
+    let mut own = String::new();
+    let mut all = String::new();
+    let mut in_target = true;
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("# ") {
+            if let Some(file) = rest.split('"').nth(1) {
+                in_target = fs::canonicalize(file)
+                    .is_ok_and(|f| f == target || f.components().any(|c| c.as_os_str() == "bits"));
+            }
+            continue;
+        }
+        if line.starts_with('#') {
+            continue;
+        }
+        if in_target {
+            own.push_str(line);
+            own.push('\n');
+        }
+        all.push_str(line);
+        all.push('\n');
+    }
+    Some((
+        strip_extern_linkage(&strip_gnu_extensions(&own)),
+        strip_extern_linkage(&strip_gnu_extensions(&all)),
+    ))
+}
+
+fn strip_gnu_extensions(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut rest = src;
+    while let Some(pos) = rest.find("__") {
+        let (head, tail) = rest.split_at(pos);
+        out.push_str(head);
+        let word_len = tail
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .unwrap_or(tail.len());
+        let word = &tail[..word_len];
+        let after = &tail[word_len..];
+        match word {
+            "__attribute__" | "__asm__" | "__asm" | "__declspec" => {
+                let trimmed = after.trim_start();
+                if trimmed.starts_with('(') {
+                    let mut depth = 0usize;
+                    let mut end = trimmed.len();
+                    for (i, c) in trimmed.char_indices() {
+                        match c {
+                            '(' => depth += 1,
+                            ')' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    end = i + 1;
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    rest = &trimmed[end..];
+                } else {
+                    rest = after;
+                }
+            }
+            "__extension__"
+            | "__restrict"
+            | "__restrict__"
+            | "__inline"
+            | "__inline__"
+            | "__extern_always_inline"
+            | "__extern_inline" => rest = after,
+            _ => {
+                out.push_str(word);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn inline_local_includes(src: &str, path: &Path, seen: &mut Vec<String>, depth: u32) -> String {
@@ -301,37 +408,44 @@ fn parse_declarations(src: &str) -> Vec<CDecl> {
 fn join_declarations(src: &str) -> String {
     let mut out = String::new();
     let mut current = String::new();
-    let mut brace_depth: u32 = 0;
-
-    for line in src.lines() {
-        let trimmed = line.trim();
-        for ch in trimmed.chars() {
-            match ch {
-                '{' => brace_depth += 1,
-                '}' => brace_depth = brace_depth.saturating_sub(1),
-                _ => {}
-            }
-        }
-
-        if brace_depth > 0 {
-            continue;
-        }
-
-        if !current.is_empty() {
-            current.push(' ');
-        }
-        current.push_str(trimmed);
-
-        if trimmed.ends_with(';') || trimmed.ends_with('}') {
-            out.push_str(&current);
+    let mut depth: u32 = 0;
+    let mut defines_fn = false;
+    let flush = |current: &mut String, out: &mut String| {
+        let decl = current.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !decl.is_empty() {
+            out.push_str(&decl);
             out.push('\n');
-            current.clear();
+        }
+        current.clear();
+    };
+    for ch in src.chars() {
+        match ch {
+            '{' => {
+                if depth == 0 {
+                    defines_fn = current.trim_end().ends_with(')');
+                    current.push('{');
+                }
+                depth += 1;
+            }
+            '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    current.push('}');
+                    if defines_fn {
+                        current.clear();
+                    }
+                }
+            }
+            _ if depth > 0 => {}
+            ';' => {
+                current.push(';');
+                flush(&mut current, &mut out);
+            }
+            '\n' => current.push(' '),
+            c => current.push(c),
         }
     }
-    if !current.is_empty() {
-        out.push_str(&current);
-        out.push('\n');
-    }
+    flush(&mut current, &mut out);
     out
 }
 
@@ -358,6 +472,14 @@ fn try_parse_typedef(line: &str) -> Option<(String, CType)> {
         .trim()
         .strip_suffix(';')?
         .trim();
+    if let Some(name) = line
+        .split_once("(*")
+        .and_then(|(_, r)| r.split(')').next())
+        .map(str::trim)
+        .filter(|n| is_jinn_ident(n))
+    {
+        return Some((name.to_string(), CType::Ptr(Box::new(CType::Void))));
+    }
     if line.contains('(') || line.contains(',') {
         return None;
     }
@@ -443,18 +565,8 @@ fn parse_c_type(s: &str) -> CType {
 
     let mut ty = match base {
         "void" => CType::Void,
-        "char" | "signed char" => CType::Char,
-        "unsigned char" => CType::UChar,
-        "short" | "signed short" | "short int" | "signed short int" => CType::Short,
-        "unsigned short" | "unsigned short int" => CType::UShort,
-        "int" | "signed" | "signed int" => CType::Int,
-        "unsigned" | "unsigned int" => CType::UInt,
-        "long" | "signed long" | "long int" | "signed long int" => CType::Long,
-        "unsigned long" | "unsigned long int" => CType::ULong,
-        "long long" | "signed long long" | "long long int" => CType::LongLong,
-        "unsigned long long" | "unsigned long long int" => CType::ULongLong,
         "float" => CType::Float,
-        "double" => CType::Double,
+        "double" | "long double" => CType::Double,
         "size_t" | "ssize_t" => CType::SizeT,
         "int8_t" | "__int8_t" => CType::Int8,
         "int16_t" | "__int16_t" => CType::Int16,
@@ -464,7 +576,9 @@ fn parse_c_type(s: &str) -> CType {
         "uint16_t" | "__uint16_t" => CType::UInt16,
         "uint32_t" | "__uint32_t" => CType::UInt32,
         "uint64_t" | "__uint64_t" => CType::UInt64,
-        other => CType::Named(other.to_string()),
+        other => {
+            primitive_from_specifiers(other).unwrap_or_else(|| CType::Named(other.to_string()))
+        }
     };
 
     for _ in 0..ptr_count {
@@ -472,6 +586,36 @@ fn parse_c_type(s: &str) -> CType {
     }
 
     ty
+}
+
+fn primitive_from_specifiers(base: &str) -> Option<CType> {
+    let (mut unsigned, mut char_, mut short, mut longs, mut any) = (false, false, false, 0, false);
+    for w in base.split_whitespace() {
+        match w {
+            "unsigned" => unsigned = true,
+            "signed" | "int" => {}
+            "char" => char_ = true,
+            "short" => short = true,
+            "long" => longs += 1,
+            _ => return None,
+        }
+        any = true;
+    }
+    if !any {
+        return None;
+    }
+    Some(match (unsigned, char_, short, longs) {
+        (false, true, _, _) => CType::Char,
+        (true, true, _, _) => CType::UChar,
+        (false, _, true, _) => CType::Short,
+        (true, _, true, _) => CType::UShort,
+        (false, _, _, 0) => CType::Int,
+        (true, _, _, 0) => CType::UInt,
+        (false, _, _, 1) => CType::Long,
+        (true, _, _, 1) => CType::ULong,
+        (false, _, _, _) => CType::LongLong,
+        (true, _, _, _) => CType::ULongLong,
+    })
 }
 
 fn parse_params(s: &str) -> Vec<CParam> {
@@ -516,6 +660,18 @@ fn parse_single_param(s: &str) -> Option<CParam> {
         return None;
     }
 
+    if let Some((_, rest)) = s.split_once("(*") {
+        let name = rest.split(')').next().unwrap_or("").trim();
+        return Some(CParam {
+            name: sanitize_name(name),
+            ty: CType::Ptr(Box::new(CType::Void)),
+        });
+    }
+    if let Some((decl, _)) = s.split_once('[') {
+        let mut p = parse_single_param(decl)?;
+        p.ty = CType::Ptr(Box::new(p.ty));
+        return Some(p);
+    }
     let s_clean = s.replace("const ", "").replace(" const", "");
     let s_use = s_clean.trim();
 
@@ -620,11 +776,12 @@ fn emit_extern(f: &CFn) -> String {
     if !is_jinn_ident(&f.name) {
         return format!("# skipped `{}`: not a usable Jinn identifier\n", f.name);
     }
-    let by_value_named = |ty: &CType| matches!(ty, CType::Named(_));
-    if by_value_named(&f.ret) || f.params.iter().any(|p| by_value_named(&p.ty)) {
+    if let Some(CType::Named(n)) = std::iter::once(&f.ret)
+        .chain(f.params.iter().map(|p| &p.ty))
+        .find(|t| matches!(t, CType::Named(_)))
+    {
         return format!(
-            "# skipped `{}`: it passes or returns a named C type by value, which has \
-             no Jinn spelling\n",
+            "# skipped `{}`: it passes or returns `{n}` by value, which has no Jinn spelling\n",
             f.name
         );
     }

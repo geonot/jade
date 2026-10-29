@@ -73,7 +73,7 @@ impl Lowerer {
                             .into_iter()
                             .next()
                             .unwrap_or_else(|| self.emit(InstKind::Void, Type::Void, span));
-                        self.emit(InstKind::Assert(v, "assertion failed".into()), ty, span)
+                        self.emit(InstKind::Assert(v, format!("at {}", span.loc())), ty, span)
                     }
                     BuiltinFn::FloatMethod(method) => {
                         let m = method.as_str();

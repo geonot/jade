@@ -223,6 +223,14 @@ fn resolve_modules_rec(
     Ok(())
 }
 
+pub(in crate::driver) fn entry_or_project(file: Option<PathBuf>) -> PathBuf {
+    match file {
+        Some(f) if f.exists() => f,
+        Some(f) => die(&format!("file not found: {}", f.display())),
+        None => find_project_entry(),
+    }
+}
+
 pub(in crate::driver) fn find_project_entry() -> PathBuf {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let project_jinn = cwd.join("project.jn");

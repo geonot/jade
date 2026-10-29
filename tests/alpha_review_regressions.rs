@@ -255,12 +255,31 @@ fn a_dependency_url_may_not_escape_the_package_cache() {
 #[test]
 fn jinn_bind_emits_parseable_jinn_for_real_headers() {
     let headers = [
-        "/usr/include/errno.h",
-        "/usr/include/string.h",
-        "/usr/include/stdlib.h",
+        ("/usr/include/errno.h", &[][..]),
+        (
+            "/usr/include/string.h",
+            &["extern *memcpy(", "extern *strlen("][..],
+        ),
+        (
+            "/usr/include/stdlib.h",
+            &["extern *malloc(", "extern *qsort("][..],
+        ),
+        (
+            "/usr/include/stdio.h",
+            &["extern *fopen(", "extern *printf("][..],
+        ),
+        ("/usr/include/math.h", &["extern *sin(", "extern *pow("][..]),
+        (
+            "/usr/include/zlib.h",
+            &[
+                "extern *crc32(",
+                "extern *compressBound(",
+                "extern *deflate(",
+            ][..],
+        ),
     ];
     let mut checked = 0;
-    for h in headers {
+    for (h, required) in headers {
         if !std::path::Path::new(h).exists() {
             continue;
         }
@@ -275,6 +294,9 @@ fn jinn_bind_emits_parseable_jinn_for_real_headers() {
             !src.contains("//"),
             "{h}: bind emitted C-style comments, which Jinn does not accept"
         );
+        for want in required {
+            assert!(src.contains(want), "{h}: bind output lacks `{want}`");
+        }
         src.push_str("\n*main\n    0\n");
         let dir = tempfile::tempdir().unwrap();
         let jn = dir.path().join("bound.jn");

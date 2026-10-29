@@ -26,7 +26,7 @@ use cmd_pkg::{cmd_fetch, cmd_package, cmd_publish, cmd_update};
 use pipeline::compile_and_link;
 use project::ProjectConfig;
 pub(crate) use sources::resolve_modules;
-use sources::{find_project_entry, load_packages};
+use sources::{entry_or_project, find_project_entry, load_packages};
 
 fn init_tracing(cli: &Cli) {
     use tracing_subscriber::EnvFilter;
@@ -151,15 +151,7 @@ pub fn run() {
                 force,
             } => cmd_publish(push, remote, force),
             Cmd::Run { file, args } => {
-                let entry = match file {
-                    Some(f) => {
-                        if !f.exists() {
-                            die(&format!("file not found: {}", f.display()));
-                        }
-                        f
-                    }
-                    None => find_project_entry(),
-                };
+                let entry = entry_or_project(file);
 
                 let src_bytes = fs::read(&entry).unwrap_or_default();
                 let compiler_fp: (u64, u64) = std::env::current_exe()
@@ -215,11 +207,13 @@ pub fn run() {
                     Err(e) => die(&format!("run failed: {e}")),
                 }
             }
-            Cmd::Test => {
-                let entry = find_project_entry();
+            Cmd::Test { file } => {
+                let entry = entry_or_project(file);
+                let test_bin =
+                    std::env::temp_dir().join(format!("jinn_test_{}", std::process::id()));
                 compile_and_link(
                     &entry,
-                    &PathBuf::from("./.jinn_test_tmp"),
+                    &test_bin,
                     0,
                     false,
                     true,
@@ -230,8 +224,8 @@ pub fn run() {
                     cli.features.as_deref(),
                     cli.standalone,
                 );
-                let status = Command::new("./.jinn_test_tmp").status();
-                let _ = fs::remove_file("./.jinn_test_tmp");
+                let status = Command::new(&test_bin).status();
+                let _ = fs::remove_file(&test_bin);
                 match status {
                     Ok(s) if s.success() => println!("all tests passed"),
                     Ok(s) => {
@@ -246,8 +240,8 @@ pub fn run() {
                     Err(e) => die(&format!("test failed: {e}")),
                 }
             }
-            Cmd::Check => {
-                let entry = find_project_entry();
+            Cmd::Check { file } => {
+                let entry = entry_or_project(file);
                 let src = fs::read_to_string(&entry)
                     .unwrap_or_else(|e| die(&format!("cannot read {}: {e}", entry.display())));
                 let tokens = Lexer::new(&src)
