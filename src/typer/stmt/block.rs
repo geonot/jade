@@ -65,6 +65,20 @@ impl Typer {
                             _ => self.ok_inner_ty_pub(result_enum),
                         };
                         let he = self.lower_expr_expected(e, Some(&ok_inner))?;
+                        let want = self.infer_ctx.shallow_resolve(&ok_inner);
+                        let got = self.infer_ctx.shallow_resolve(&he.ty);
+                        let exempt = matches!(want, Type::Void) || (want.is_num() && got.is_num());
+                        if !exempt
+                            && let Err(err) =
+                                self.infer_ctx
+                                    .unify_at(&ok_inner, &he.ty, he.span, "success value")
+                        {
+                            return Err(format!(
+                                "{}: the success value of this fallible function has the wrong \
+                                 type: {err}",
+                                he.span.loc()
+                            ));
+                        }
                         if matches!(self.infer_ctx.shallow_resolve(&ok_inner), Type::Void) {
                             let het = self.infer_ctx.shallow_resolve(&he.ty);
                             let voidish = matches!(het, Type::Void)
@@ -96,12 +110,14 @@ impl Typer {
                         },
                         None => self.auto_wrap_ok(he, result_enum),
                     };
+                    self.check_deferred_return(&he)?;
                     let stmt = hir::Stmt::Expr(he);
                     self.record_take_moves_in_stmt(&stmt)?;
                     stmts.push(stmt);
                     continue;
                 }
                 let he = self.lower_expr_expected(e, Some(expected))?;
+                self.check_deferred_return(&he)?;
                 let stmt = hir::Stmt::Expr(he);
                 self.record_take_moves_in_stmt(&stmt)?;
                 stmts.push(stmt);

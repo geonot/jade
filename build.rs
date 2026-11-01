@@ -18,6 +18,7 @@ fn main() {
     }
     rt_build
         .file("runtime/coro.c")
+        .file("runtime/cleanup.c")
         .file("runtime/deque.c")
         .file("runtime/sched.c")
         .file("runtime/channel.c")
@@ -28,6 +29,7 @@ fn main() {
         .file("runtime/timer.c")
         .file("runtime/vec.c")
         .file("runtime/wal.c")
+        .file("runtime/txn_journal.c")
         .file("runtime/index.c")
         .file("runtime/version.c")
         .file("runtime/migrate.c")

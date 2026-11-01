@@ -24,14 +24,22 @@ each `jinnc`-produced binary as `libjinn_rt.a` (always) plus optional
   [jinn_rt.h](jinn_rt.h) (e.g. `JinnKV`, `JinnIndex`, `jinn_chan_t`).
 - Cross-module helpers (FNV-1a, sorts, bit-cast) live in
   [util.c](util.c) — never re-implement them.
-- The intended contract: no `stderr` from hot paths, and `abort()` only for
-  fatal allocator failures (see `jinn_xmalloc`). The store/WAL layer
-  currently exceeds it — schema mismatch, WAL sync failure, transaction OOM,
-  the transaction snapshot cap, and sidecar transaction-snapshot OOM
-  `abort()`; bad WAL magic and unopenable/uncreatable store data files
-  `exit(2)`; and the kv/index/column/fts mutators are void functions that
-  report IO errors to `stderr` and continue. Roadmap `P-5` tracks aligning
-  code and contract.
+- Persistence failures are fail-stop. Store, WAL and sidecar writes, flushes,
+  syncs, reopen and replacement operations must succeed before acknowledgement.
+  An I/O error, corrupt recovery evidence, schema mismatch, snapshot limit or
+  allocation failure emits a diagnostic and terminates; no failed handle is
+  returned to user code for continued mutation. Constraint errors remain ordinary
+  `StoreError` values where the language exposes a fallible operation.
+- Transactions serialize writers and durably journal complete participant undo
+  images before mutation. Commit syncs participants and WAL decisions before
+  retiring the journal; rollback durably restores all images before retirement.
+  Recovery validates every complete journal record before restoring any file.
+  Preserve a rejected journal for diagnosis, rather than deleting evidence.
+- The bounded native persistence contract, exit-outcome table, filesystem scope,
+  snapshot costs and migration limits are specified in `docs/jinn.md`. It assumes
+  exclusive process access to ordinary, unaliased files directly in the initialized
+  working directory and functioning Linux filesystem durability primitives; it is
+  not a hostile-filesystem sandbox or a portable database format.
 
 ## Build flags
 
@@ -75,7 +83,10 @@ corresponding `src/codegen/` file.
 | `vec.c` | SSO string ABI + slice helpers + deque ABI | `src/codegen/strings.rs`, `src/codegen/vec.rs` |
 | `vector.c` | Vector / nearest-neighbour store extension | `src/codegen/mir_codegen/store_ext.rs` |
 | `version.c` | Versioned record store extension | `src/codegen/mir_codegen/store_ext.rs` |
-| `wal.c` | Write-ahead log + group commit + replay; transactions bracket their frames with `TXN_BEGIN` (payload: pre-transaction data-file snapshot, the undo image) and `TXN_COMMIT`, and replay drops everything after an unmatched begin | `src/codegen/mir_codegen/store.rs` |
+| `cleanup.c` | Reached cleanup frames, typed owning cells and cancellation shielding | `src/mir/lower/cleanup.rs`, `src/codegen/mir_codegen/helpers/cleanup.rs` |
+| `durable.c` | Checked persistence I/O, atomic replacement and process-local writer serialization | `src/codegen/stores/runtime.rs` |
+| `txn_journal.c` | Directory process exclusion, durable multi-participant undo journal and recovery | `runtime/wal.c` |
+| `wal.c` | Write-ahead log, transaction snapshots and replay; directory journal recovery precedes managed WAL replay | `src/codegen/mir_codegen/store.rs` |
 
 ## Adding a new runtime function
 

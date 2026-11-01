@@ -168,24 +168,50 @@ pub fn run() {
                         (size, mtime)
                     })
                     .unwrap_or((0, 0));
+                let tree = entry
+                    .canonicalize()
+                    .ok()
+                    .and_then(|c| c.parent().map(std::path::Path::to_path_buf))
+                    .and_then(|d| {
+                        crate::source_manifest::SourceManifest::scan(
+                            &d,
+                            crate::source_manifest::PACKAGE_FILE_LIMIT,
+                        )
+                        .ok()
+                    });
                 let hash = {
-                    use std::hash::{Hash, Hasher};
-                    let mut h = std::collections::hash_map::DefaultHasher::new();
-                    src_bytes.hash(&mut h);
-                    env!("CARGO_PKG_VERSION").hash(&mut h);
-                    compiler_fp.hash(&mut h);
-                    for (path, bytes) in collect_sibling_sources(&entry) {
-                        path.hash(&mut h);
-                        bytes.hash(&mut h);
+                    let mut h = blake3::Hasher::new_derive_key("jinn:run-cache:v2");
+                    h.update(&tree.as_ref().map(|t| t.digest()).unwrap_or_default());
+                    let canon = entry.canonicalize().unwrap_or_else(|_| entry.clone());
+                    let fields = [
+                        canon.to_string_lossy().into_owned(),
+                        env!("CARGO_PKG_VERSION").to_string(),
+                        format!("{}:{}", compiler_fp.0, compiler_fp.1),
+                        cli.target.clone().unwrap_or_default(),
+                        cli.cpu.clone().unwrap_or_default(),
+                        cli.features.clone().unwrap_or_default(),
+                        cli.standalone.to_string(),
+                    ];
+                    for f in fields
+                        .iter()
+                        .map(String::as_bytes)
+                        .chain([src_bytes.as_slice()])
+                    {
+                        h.update(&(f.len() as u64).to_le_bytes());
+                        h.update(f);
                     }
-                    h.finish()
+                    crate::source_manifest::hex(&h.finalize().as_bytes()[..16])
                 };
                 let cache_dir = dirs_cache();
                 let _ = fs::create_dir_all(&cache_dir);
-                let cached_bin = cache_dir.join(format!("jinn_run_{:016x}", hash));
-                let deps_path = cache_dir.join(format!("jinn_run_{:016x}.deps", hash));
+                let cached_bin = cache_dir.join(format!("jinn_run_{hash}"));
+                let deps_path = cache_dir.join(format!("jinn_run_{hash}.deps"));
                 let no_cache = std::env::var("JINN_NO_RUN_CACHE").is_ok_and(|v| v == "1");
-                if no_cache || !cached_bin.exists() || !run_deps_manifest_valid(&deps_path) {
+                if no_cache
+                    || tree.is_none()
+                    || !cached_bin.exists()
+                    || !run_deps_manifest_valid(&deps_path)
+                {
                     let deps = compile_and_link(
                         &entry,
                         &cached_bin,
@@ -317,20 +343,12 @@ pub fn run() {
                             Ok(formatted) => {
                                 if write {
                                     if formatted != src {
-                                        if let Err(e) = crate::fmt::format_source(&formatted) {
-                                            eprintln!(
-                                                "refusing to write {}: the formatted output no \
-                                                 longer parses ({e}); this is a formatter bug — \
-                                                 the file is unchanged",
-                                                path.display()
-                                            );
-                                            failed = true;
-                                        } else {
-                                            fs::write(path, &formatted).unwrap_or_else(|e| {
+                                        match fs::write(path, &formatted) {
+                                            Ok(()) => println!("formatted {}", path.display()),
+                                            Err(e) => {
                                                 eprintln!("cannot write {}: {e}", path.display());
                                                 failed = true;
-                                            });
-                                            println!("formatted {}", path.display());
+                                            }
                                         }
                                     }
                                 } else {
@@ -791,71 +809,21 @@ fn resolve_project_input(input: PathBuf) -> PathBuf {
     ));
 }
 
-fn collect_sibling_sources(entry: &std::path::Path) -> Vec<(String, Vec<u8>)> {
-    let root = match entry.parent() {
-        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
-        _ => PathBuf::from("."),
-    };
-    let mut out: Vec<(String, Vec<u8>)> = Vec::new();
-    let mut stack = vec![root];
-    let mut visited = 0usize;
-    while let Some(dir) = stack.pop() {
-        if visited > 4096 {
-            break;
-        }
-        let Ok(rd) = fs::read_dir(&dir) else { continue };
-        for ent in rd.flatten() {
-            let path = ent.path();
-            let name = ent.file_name();
-            let name = name.to_string_lossy();
-            if name.starts_with('.') || name == "target" || name == "node_modules" {
-                continue;
-            }
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.extension().and_then(|e| e.to_str()) == Some("jn") {
-                visited += 1;
-                if let Ok(bytes) = fs::read(&path) {
-                    out.push((path.display().to_string(), bytes));
-                }
-            }
-        }
-    }
-    out.sort_by(|a, b| a.0.cmp(&b.0));
-    out
-}
-
-fn run_dep_hash(bytes: &[u8]) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut h);
-    h.finish()
-}
-
 fn write_run_deps_manifest(path: &std::path::Path, deps: &[PathBuf]) {
-    let mut out = String::new();
-    for d in deps {
-        if let Ok(bytes) = fs::read(d) {
-            out.push_str(&format!("{:016x}\t{}\n", run_dep_hash(&bytes), d.display()));
+    let manifest = crate::source_manifest::SourceManifest::of_files(std::path::Path::new(""), deps);
+    match manifest {
+        Ok(m) => {
+            let _ = fs::write(path, m.to_text());
+        }
+        Err(_) => {
+            let _ = fs::remove_file(path);
         }
     }
-    let _ = fs::write(path, out);
 }
 
 fn run_deps_manifest_valid(path: &std::path::Path) -> bool {
-    let Ok(text) = fs::read_to_string(path) else {
-        return false;
-    };
-    for line in text.lines() {
-        let Some((h, p)) = line.split_once('\t') else {
-            return false;
-        };
-        let Ok(bytes) = fs::read(p) else {
-            return false;
-        };
-        if format!("{:016x}", run_dep_hash(&bytes)) != h {
-            return false;
-        }
-    }
-    true
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|t| crate::source_manifest::SourceManifest::from_text(&t))
+        .is_some_and(|m| m.is_current())
 }

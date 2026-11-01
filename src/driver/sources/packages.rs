@@ -51,7 +51,8 @@ pub(in crate::driver) fn load_packages_with_ids(
 fn build_pkg_id_map(path_map: &HashMap<Symbol, PathBuf>) -> HashMap<Symbol, PkgId> {
     let mut ids = HashMap::new();
     for (&name, path) in path_map {
-        let src = crate::driver::sources::dag::source_bytes_for(path);
+        let src = crate::driver::sources::dag::package_sources_digest(path)
+            .unwrap_or_else(|e| die(&format!("package '{name}': {e}")));
         let hash = compute_semantic_hash(
             name,
             ScopePath::root(),
@@ -86,5 +87,6 @@ fn build_pkg_id_map(path_map: &HashMap<Symbol, PathBuf>) -> HashMap<Symbol, PkgI
         });
         ids.insert(name, pkg_id);
     }
+    crate::pkgid::check_mangle_prefixes(ids.values().copied()).unwrap_or_else(|e| die(&e));
     ids
 }

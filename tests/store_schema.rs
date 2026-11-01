@@ -125,6 +125,32 @@ fn migration_add_default_populates_existing_rows() {
 }
 
 #[test]
+fn migration_literal_defaults_preserve_extreme_integer_values() {
+    for (ty, value) in [
+        ("i64", "-9223372036854775808"),
+        ("u64", "18446744073709551615"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let original = "store items @simple\n    name as String\n\n*main\n    insert items 'widget'\n    log count items\n";
+        let bin1 = compile_in(dir.path(), "v1", original);
+        assert!(run(dir.path(), &bin1).status.success());
+        let migrated = format!(
+            "store items @simple\n    name as String\n    boundary as {ty}\n\nmigration 'add_boundary' version 1\n    up\n        alter items\n            add boundary as {ty} default {value}\n\n*main\n    match items where name equals 'widget'\n        Ok(row) ? log(row.boundary)\n        Err(error) ? log('missing')\n"
+        );
+        let bin2 = compile_in(dir.path(), "v2", &migrated);
+        for _ in 0..2 {
+            let output = run(dir.path(), &bin2);
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), value);
+        }
+    }
+}
+
+#[test]
 fn interrupted_migration_fingerprint_refuses_to_auto_adopt() {
     let dir = tempfile::tempdir().unwrap();
     let src = "store items @simple\n    name as String\n\n*main\n    insert items 'a'\n    log count items\n";

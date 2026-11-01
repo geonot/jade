@@ -89,12 +89,12 @@ pub(super) fn compile_and_link(
         .map(|s| Symbol::intern(&s.to_string_lossy()))
         .unwrap_or_else(|| Symbol::intern("main"));
     let root_pkg_id = {
-        let mut all_sources: Vec<u8> = src.as_bytes().to_vec();
-        for path in resolved_files.iter().skip(1) {
-            if let Ok(extra) = std::fs::read(path) {
-                all_sources.extend_from_slice(&extra);
-            }
-        }
+        let all_sources = crate::source_manifest::SourceManifest::of_files(
+            input_canon.parent().unwrap_or(std::path::Path::new("/")),
+            &resolved_files,
+        )
+        .unwrap_or_else(|e| die(&e.to_string()))
+        .digest();
         let hash = compute_semantic_hash(
             pkg_name,
             ScopePath::root(),
@@ -135,11 +135,9 @@ pub(super) fn compile_and_link(
                 Vec::new()
             }
         };
-        match flatten_workspace(pkg_name, base_dir, &root_deps, &packages) {
+        match flatten_workspace(root_pkg_id, base_dir, &root_deps, &packages) {
             Ok(dag) => resolve_scoped_pkg_ids(&dag),
-
-            Err(e) if e.starts_with("multi-version coexistence of") => die(&e),
-            Err(_) => Default::default(),
+            Err(e) => die(&e),
         }
     };
     typer.set_scoped_use_map(scoped_use_map);

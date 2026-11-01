@@ -8,6 +8,18 @@ impl Lowerer {
     pub(super) fn write_var(&mut self, name: Symbol, block: BlockId, val: ValueId) {
         let ty = self.value_type(val);
         self.var_types.insert(name, ty.clone());
+        if let Some(&cell_name) = self.cleanup_cells.get(&name) {
+            let span = self.value_span(val);
+            let cell = self.read_var(cell_name, block, Type::Ptr(Box::new(ty)), span);
+            let prev = self.current_block;
+            self.current_block = block;
+            self.emit_void(
+                InstKind::Call("__cleanup_cell_set".into(), vec![cell, val]),
+                span,
+            );
+            self.current_block = prev;
+            return;
+        }
         if self.addr_taken.contains(&name) {
             let span = self.value_span(val);
             let prev = self.current_block;
@@ -25,6 +37,14 @@ impl Lowerer {
         ty: Type,
         span: Span,
     ) -> ValueId {
+        if let Some(&cell_name) = self.cleanup_cells.get(&name) {
+            let cell = self.read_var(cell_name, block, Type::Ptr(Box::new(ty.clone())), span);
+            let prev = self.current_block;
+            self.current_block = block;
+            let value = self.emit(InstKind::Deref(cell), ty, span);
+            self.current_block = prev;
+            return value;
+        }
         if self.addr_taken.contains(&name) {
             let prev = self.current_block;
             self.current_block = block;

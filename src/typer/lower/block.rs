@@ -154,7 +154,9 @@ impl Typer {
             stmts.push(tail);
             self.emit_scope_drops_excluding(stmts, &tail_moves);
         } else {
-            self.emit_scope_drops(stmts);
+            let mut tail_moves = std::collections::HashSet::new();
+            Self::collect_return_block_owners(stmts, &mut tail_moves);
+            self.emit_scope_drops_excluding(stmts, &tail_moves);
         }
     }
 
@@ -452,33 +454,19 @@ impl Typer {
                     self.collect_consumed_in_expr(a, out);
                 }
             }
+            hir::ExprKind::ChannelSend(channel, value) => {
+                Self::collect_moved_var_ids(value, out);
+                self.collect_consumed_in_expr(channel, out);
+                self.collect_consumed_in_expr(value, out);
+            }
             hir::ExprKind::IndirectCall(callee, args) => {
                 self.collect_consumed_in_expr(callee, out);
                 for a in args {
                     self.collect_consumed_in_expr(a, out);
                 }
             }
-            hir::ExprKind::Lambda(params, body) => {
-                let mut ids: std::collections::HashSet<crate::hir::DefId> =
-                    std::collections::HashSet::new();
-                for st in body {
-                    Self::collect_hir_var_ids_stmt_inner(st, &mut ids, true);
-                }
-                for p in params {
-                    ids.remove(&p.def_id);
-                }
-                for id in ids {
-                    let Some(ty) = self.find_var_by_id(id).map(|info| info.ty.clone()) else {
-                        continue;
-                    };
-                    let was_strict = self.infer_ctx.is_strict();
-                    self.infer_ctx.set_strict(false);
-                    let resolved = self.infer_ctx.resolve(&ty);
-                    self.infer_ctx.set_strict(was_strict);
-                    if self.type_is_aggregate(&resolved) {
-                        out.insert(id);
-                    }
-                }
+            hir::ExprKind::Lambda(_, _, moved) | hir::ExprKind::CoroutineCreate(_, _, moved) => {
+                out.extend(moved.iter().copied())
             }
             hir::ExprKind::Pipe(e, _, name, rest) => {
                 if let Some(access) = self.fn_param_access.get(name).cloned() {
@@ -653,8 +641,9 @@ impl Typer {
         body: &[hir::Stmt],
         outer_ids: &std::collections::HashSet<crate::hir::DefId>,
         at: crate::ast::Span,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<crate::hir::DefId>, String> {
         self.reject_view_captures(body, outer_ids, at)?;
+        let mut moved = Vec::new();
         for (id, name) in self.collect_aggregate_captures(body, outer_ids) {
             let in_together_outer = self
                 .together_outer_ids
@@ -680,8 +669,9 @@ impl Typer {
                 continue;
             }
             self.mark_var_moved_checked(id, name, crate::typer::MoveReason::TaskCapture(at), at)?;
+            moved.push(id);
         }
-        Ok(())
+        Ok(moved)
     }
 
     pub(in crate::typer) fn mark_closure_captures(
@@ -689,7 +679,7 @@ impl Typer {
         body: &[hir::Stmt],
         outer_ids: &std::collections::HashSet<crate::hir::DefId>,
         at: crate::ast::Span,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<crate::hir::DefId>, String> {
         self.reject_view_captures(body, outer_ids, at)?;
         let mut used: std::collections::HashSet<crate::hir::DefId> =
             std::collections::HashSet::new();
@@ -709,6 +699,7 @@ impl Typer {
             .map(|(n, info)| (info.def_id, *n, info.ty.clone(), info.ownership))
             .collect();
         candidates.sort_by_key(|(id, _, _, _)| id.0);
+        let mut moved = Vec::new();
         for (id, name, ty, ownership) in candidates {
             let was_strict = self.infer_ctx.is_strict();
             self.infer_ctx.set_strict(false);
@@ -741,9 +732,10 @@ impl Typer {
                     crate::typer::MoveReason::ClosureCapture(at),
                     at,
                 )?;
+                moved.push(id);
             }
         }
-        Ok(())
+        Ok(moved)
     }
 
     pub(in crate::typer) fn reject_view_captures(
@@ -780,6 +772,109 @@ impl Typer {
             }
         }
         Ok(())
+    }
+
+    pub(in crate::typer) fn check_deferred_return(
+        &mut self,
+        expr: &hir::Expr,
+    ) -> Result<(), String> {
+        if self.defer_read_vars.is_empty()
+            || self
+                .infer_ctx
+                .shallow_resolve(&expr.ty)
+                .is_trivially_droppable()
+        {
+            return Ok(());
+        }
+        let mut ids = std::collections::HashSet::new();
+        Self::collect_return_owners(expr, &mut ids);
+        for id in ids {
+            if let Some(span) = self.defer_read_vars.get(&id).copied()
+                && let Some(info) = self.find_var_by_id(id)
+            {
+                let ty = self.infer_ctx.resolve(&info.ty.clone());
+                if !ty.is_trivially_droppable() {
+                    return Err(format!(
+                        "{}: cannot return an owner read by the `defer` registered at {}; return an explicit copy instead",
+                        expr.span.loc(),
+                        span.loc(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_return_owners(
+        expr: &hir::Expr,
+        out: &mut std::collections::HashSet<crate::hir::DefId>,
+    ) {
+        match &expr.kind {
+            hir::ExprKind::Var(id, _) => {
+                out.insert(*id);
+            }
+            hir::ExprKind::Struct(_, fields) | hir::ExprKind::VariantCtor(_, _, _, fields) => {
+                for field in fields {
+                    Self::collect_return_owners(&field.value, out);
+                }
+            }
+            hir::ExprKind::Tuple(values) | hir::ExprKind::Array(values) => {
+                for value in values {
+                    Self::collect_return_owners(value, out);
+                }
+            }
+            hir::ExprKind::Coerce(value, _)
+            | hir::ExprKind::Field(value, _, _)
+            | hir::ExprKind::Index(value, _)
+            | hir::ExprKind::EnumUnwrap(value, _, _) => Self::collect_return_owners(value, out),
+            hir::ExprKind::Ternary(_, then, els) => {
+                Self::collect_return_owners(then, out);
+                Self::collect_return_owners(els, out);
+            }
+            hir::ExprKind::IfExpr(branch) => {
+                Self::collect_return_block_owners(&branch.then, out);
+                for (_, body) in &branch.elifs {
+                    Self::collect_return_block_owners(body, out);
+                }
+                if let Some(body) = &branch.els {
+                    Self::collect_return_block_owners(body, out);
+                }
+            }
+            hir::ExprKind::Block(body) => Self::collect_return_block_owners(body, out),
+            _ => {}
+        }
+    }
+
+    fn collect_return_block_owners(
+        body: &[hir::Stmt],
+        out: &mut std::collections::HashSet<crate::hir::DefId>,
+    ) {
+        if let Some(tail) = body
+            .iter()
+            .rev()
+            .find(|s| !matches!(s, hir::Stmt::Drop(..)))
+        {
+            match tail {
+                hir::Stmt::Expr(value) | hir::Stmt::Ret(Some(value), _, _) => {
+                    Self::collect_return_owners(value, out);
+                }
+                hir::Stmt::If(branch) => {
+                    Self::collect_return_block_owners(&branch.then, out);
+                    for (_, body) in &branch.elifs {
+                        Self::collect_return_block_owners(body, out);
+                    }
+                    if let Some(body) = &branch.els {
+                        Self::collect_return_block_owners(body, out);
+                    }
+                }
+                hir::Stmt::Match(branch) => {
+                    for arm in &branch.arms {
+                        Self::collect_return_block_owners(&arm.body, out);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     pub(in crate::typer) fn record_take_moves_in_stmt(
@@ -822,6 +917,7 @@ impl Typer {
                 self.clear_all_moved_for(b.def_id);
             }
             hir::Stmt::Ret(Some(e), _, span) => {
+                self.check_deferred_return(e)?;
                 let inner = Self::peel_move_wrappers(e);
                 if let hir::ExprKind::Ref(pointee) = &inner.kind
                     && let hir::ExprKind::Var(id, name) = &Self::peel_move_wrappers(pointee).kind
@@ -893,6 +989,18 @@ impl Typer {
                 for st in block {
                     Self::collect_hir_var_ids_stmt(st, &mut ids);
                 }
+                loop {
+                    let count = ids.len();
+                    self.expand_payload_bind_links(&mut ids);
+                    let roots: Vec<_> = ids
+                        .iter()
+                        .filter_map(|id| self.view_roots.get(id).map(|p| p.root))
+                        .collect();
+                    ids.extend(roots);
+                    if count == ids.len() {
+                        break;
+                    }
+                }
                 for id in ids {
                     self.defer_read_vars.entry(id).or_insert(*span);
                 }
@@ -949,7 +1057,7 @@ impl Typer {
                     slot: i,
                     place,
                     consuming: matches!(access.get(i), Some(Some(crate::ast::AccessMod::Take))),
-                    clonable: resolved.is_value_clonable(),
+                    clonable: self.is_value_clonable(&resolved),
                 });
             }
         }
@@ -1829,7 +1937,7 @@ impl Typer {
                     Self::collect_hir_var_ids_stmt(s, out);
                 }
             }
-            hir::ExprKind::Lambda(_, body) => {
+            hir::ExprKind::Lambda(_, body, _) => {
                 for s in body {
                     Self::collect_hir_var_ids_stmt(s, out);
                 }
@@ -2033,7 +2141,7 @@ impl Typer {
             }
             Type::Enum(name) => {
                 if !visiting.insert(*name) {
-                    return false;
+                    return true;
                 }
                 let result = if let Some(variants) = self.enums.get(name) {
                     variants.iter().any(|(_vname, ftys)| {

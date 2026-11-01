@@ -3,39 +3,40 @@ use super::Lowerer;
 use crate::hir::{self, ExprKind};
 use crate::intern::Symbol;
 use crate::types::Type;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 impl Lowerer {
     pub(super) fn lower_expr_closure(&mut self, expr: &hir::Expr) -> ValueId {
-        let ExprKind::Lambda(params, body) = &expr.kind else {
+        let ExprKind::Lambda(params, body, moved) = &expr.kind else {
             unreachable!("lower_expr_closure called for non-lambda expression")
         };
 
         let span = expr.span;
         let ty = expr.ty.clone();
-        let lambda_name = format!("lambda.{}", self.func.next_value);
+        let lambda_name = format!("lambda.{}.{}", self.func.name, self.func.next_value);
 
-        let param_names: HashSet<Symbol> = params.iter().map(|p| p.name).collect();
+        let param_ids: HashSet<_> = params.iter().map(|p| p.def_id).collect();
         let mut refs = VarRefs::default();
         collect_var_refs_block(body, &mut refs);
-        let mut ref_names: Vec<(Symbol, Symbol)> = refs
-            .vars
-            .into_iter()
-            .map(|(id, name)| (self.var_key(id, name), name))
-            .collect();
-        ref_names.sort_by_key(|(key, name)| (name.as_str().to_string(), *key == *name));
-        ref_names.dedup_by_key(|(_, name)| *name);
+        let mut ref_names: Vec<_> = refs.vars.into_iter().collect();
+        ref_names.sort_by_key(|(id, _)| id.0);
 
-        let mut capture_info: Vec<(Symbol, ValueId, Type)> = Vec::new();
-        for (key, name) in &ref_names {
-            if !param_names.contains(name)
-                && let Some(cap_ty) = self.var_types.get(key).cloned()
+        let mut capture_info = Vec::new();
+        for (id, name) in &ref_names {
+            let key = self.var_key(*id, *name);
+            if !param_ids.contains(id)
+                && let Some(cap_ty) = self.var_types.get(&key).cloned()
             {
-                let val = self.read_var(*key, self.current_block, cap_ty.clone(), span);
-                capture_info.push((*name, val, cap_ty));
+                let val = self.read_var(key, self.current_block, cap_ty.clone(), span);
+                let val = if !moved.contains(id) && !cap_ty.is_trivially_droppable() {
+                    self.emit(InstKind::Clone(val, cap_ty.clone()), cap_ty.clone(), span)
+                } else {
+                    val
+                };
+                capture_info.push((*id, *name, val, cap_ty));
             }
         }
-        let capture_vals: Vec<ValueId> = capture_info.iter().map(|(_, v, _)| *v).collect();
+        let capture_vals: Vec<ValueId> = capture_info.iter().map(|(_, _, v, _)| *v).collect();
 
         let ret_ty = if let Type::Fn(_, ret) = &ty {
             *ret.clone()
@@ -44,17 +45,19 @@ impl Lowerer {
         };
 
         let mut lambda_lowerer = Lowerer::new(&lambda_name, crate::hir::DefId(0), span);
-        lambda_lowerer.func.ret_ty = ret_ty;
+        lambda_lowerer.func.ret_ty = ret_ty.clone();
 
-        for (cap_name, _, cap_ty) in &capture_info {
+        for (id, cap_name, _, cap_ty) in &capture_info {
             let val = lambda_lowerer.new_value();
             lambda_lowerer.func.params.push(Param {
                 value: val,
                 name: *cap_name,
                 ty: cap_ty.clone(),
                 by_ref: false,
+                owned: false,
             });
             lambda_lowerer.var_types.insert(*cap_name, cap_ty.clone());
+            lambda_lowerer.cleanup_param_ids.insert(*cap_name, *id);
             let entry = lambda_lowerer.func.entry;
             lambda_lowerer
                 .current_def
@@ -70,8 +73,14 @@ impl Lowerer {
                 name: p.name,
                 ty: p.ty.clone(),
                 by_ref: false,
+                owned: matches!(p.ownership, hir::Ownership::Owned)
+                    && !matches!(p.access_mod, Some(crate::ast::AccessMod::Copy)),
             });
             lambda_lowerer.var_types.insert(p.name, p.ty.clone());
+            lambda_lowerer.cleanup_param_ids.insert(p.name, p.def_id);
+            if matches!(p.ownership, hir::Ownership::Owned) {
+                lambda_lowerer.cleanup_owned_params.insert(p.def_id);
+            }
             let entry = lambda_lowerer.func.entry;
             lambda_lowerer
                 .current_def
@@ -80,46 +89,24 @@ impl Lowerer {
                 .insert(p.name, val);
         }
 
-        lambda_lowerer.mark_address_taken(body);
-
-        let tail_idx: Option<usize> = body
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(_, s)| {
-                !matches!(
-                    s,
-                    hir::Stmt::Drop(..)
-                        | hir::Stmt::Ret(..)
-                        | hir::Stmt::Break(..)
-                        | hir::Stmt::Continue(..)
-                        | hir::Stmt::ErrReturn(..)
-                )
-            })
-            .map(|(i, _)| i);
-        let mut last = lambda_lowerer.emit(InstKind::Void, Type::Void, span);
-        for (idx, stmt) in body.iter().enumerate() {
-            let v = if Some(idx) == tail_idx {
-                if let hir::Stmt::Expr(e) = stmt {
-                    lambda_lowerer.lower_expr_owned(e)
-                } else {
-                    lambda_lowerer.lower_stmt(stmt)
-                }
-            } else {
-                lambda_lowerer.lower_stmt(stmt)
-            };
-            if !matches!(stmt, hir::Stmt::Drop(..)) {
-                last = v;
+        for p in params {
+            if matches!(p.access_mod, Some(crate::ast::AccessMod::Copy))
+                && !p.ty.is_trivially_droppable()
+                && p.ty.is_value_clonable()
+            {
+                let value = lambda_lowerer.read_var(
+                    p.name,
+                    lambda_lowerer.func.entry,
+                    p.ty.clone(),
+                    p.span,
+                );
+                let value =
+                    lambda_lowerer.emit(InstKind::Clone(value, p.ty.clone()), p.ty.clone(), p.span);
+                lambda_lowerer.write_var(p.name, lambda_lowerer.func.entry, value);
             }
         }
-        if !lambda_lowerer.current_block_has_terminator() {
-            let ret = if matches!(lambda_lowerer.func.ret_ty, Type::Void) {
-                None
-            } else {
-                Some(last)
-            };
-            lambda_lowerer.set_terminator(Terminator::Return(ret));
-        }
+
+        super::finish_body(&mut lambda_lowerer, body, &ret_ty, span, false);
 
         self.lambda_fns.push(lambda_lowerer.func);
         self.lambda_fns.append(&mut lambda_lowerer.lambda_fns);
@@ -137,6 +124,9 @@ pub(super) struct VarRefs {
     pub(super) vars: HashSet<(hir::DefId, Symbol)>,
 
     pub(super) addr_taken: HashSet<Symbol>,
+    pub(super) deferred_vars: HashSet<hir::DefId>,
+    pub(super) borrow_sources: HashMap<hir::DefId, HashSet<hir::DefId>>,
+    pub(super) has_defer: bool,
 }
 
 impl VarRefs {
@@ -147,6 +137,11 @@ impl VarRefs {
     fn absorb(&mut self, other: VarRefs) {
         self.vars.extend(other.vars);
         self.addr_taken.extend(other.addr_taken);
+        self.deferred_vars.extend(other.deferred_vars);
+        for (id, sources) in other.borrow_sources {
+            self.borrow_sources.entry(id).or_default().extend(sources);
+        }
+        self.has_defer |= other.has_defer;
     }
 }
 
@@ -164,7 +159,17 @@ pub(super) fn collect_var_refs_block(body: &[hir::Stmt], refs: &mut VarRefs) {
 
 fn collect_var_refs_stmt(stmt: &hir::Stmt, refs: &mut VarRefs) {
     match stmt {
-        hir::Stmt::Bind(b) => collect_var_refs_expr(&b.value, refs),
+        hir::Stmt::Bind(b) => {
+            let mut inner = VarRefs::default();
+            collect_var_refs_expr(&b.value, &mut inner);
+            if b.ownership.is_borrow() || matches!(b.ty, Type::View(_)) {
+                refs.borrow_sources
+                    .entry(b.def_id)
+                    .or_default()
+                    .extend(inner.vars.iter().map(|(id, _)| *id));
+            }
+            refs.absorb(inner);
+        }
         hir::Stmt::Assign(target, value, _) => {
             collect_var_refs_expr(target, refs);
             collect_var_refs_expr(value, refs);
@@ -185,22 +190,49 @@ fn collect_var_refs_stmt(stmt: &hir::Stmt, refs: &mut VarRefs) {
             collect_var_refs_expr(&while_stmt.cond, refs);
             collect_var_refs_block(&while_stmt.body, refs);
         }
-        hir::Stmt::For(for_stmt) => {
-            collect_var_refs_expr(&for_stmt.iter, refs);
+        hir::Stmt::For(for_stmt) | hir::Stmt::SimFor(for_stmt, _) => {
+            let mut inner = VarRefs::default();
+            collect_var_refs_expr(&for_stmt.iter, &mut inner);
+            for id in [Some(for_stmt.bind_id), for_stmt.bind2_id]
+                .into_iter()
+                .flatten()
+            {
+                refs.borrow_sources
+                    .entry(id)
+                    .or_default()
+                    .extend(inner.vars.iter().map(|(source, _)| *source));
+            }
+            refs.absorb(inner);
+            if let Some(end) = &for_stmt.end {
+                collect_var_refs_expr(end, refs);
+            }
+            if let Some(step) = &for_stmt.step {
+                collect_var_refs_expr(step, refs);
+            }
             collect_var_refs_block(&for_stmt.body, refs);
         }
         hir::Stmt::Loop(loop_stmt) => collect_var_refs_block(&loop_stmt.body, refs),
         hir::Stmt::Ret(Some(expr), _, _) => collect_var_refs_expr(expr, refs),
         hir::Stmt::Match(match_stmt) => {
-            collect_var_refs_expr(&match_stmt.subject, refs);
+            let mut inner = VarRefs::default();
+            collect_var_refs_expr(&match_stmt.subject, &mut inner);
             for arm in &match_stmt.arms {
+                collect_pattern_sources(&arm.pat, &inner, refs);
                 if let Some(guard) = &arm.guard {
                     collect_var_refs_expr(guard, refs);
                 }
                 collect_var_refs_block(&arm.body, refs);
             }
+            refs.absorb(inner);
         }
-        hir::Stmt::Defer(body, _) => collect_var_refs_block(body, refs),
+        hir::Stmt::Defer(body, _) => {
+            let mut inner = VarRefs::default();
+            collect_var_refs_block(body, &mut inner);
+            refs.deferred_vars
+                .extend(inner.vars.iter().map(|(id, _)| *id));
+            refs.has_defer = true;
+            refs.absorb(inner);
+        }
         hir::Stmt::GlobalStore(_, expr, _) => collect_var_refs_expr(expr, refs),
         hir::Stmt::Break(Some(expr), _)
         | hir::Stmt::ErrReturn(expr, _, _)
@@ -209,26 +241,67 @@ fn collect_var_refs_stmt(stmt: &hir::Stmt, refs: &mut VarRefs) {
         | hir::Stmt::Join(expr, _) => collect_var_refs_expr(expr, refs),
         hir::Stmt::ScopeCancel(_, _) => {}
         hir::Stmt::TupleBind(_, expr, _) => collect_var_refs_expr(expr, refs),
-        hir::Stmt::SimFor(sim_for, _) => {
-            collect_var_refs_expr(&sim_for.iter, refs);
-            collect_var_refs_block(&sim_for.body, refs);
-        }
-        hir::Stmt::SimBlock(body, _)
-        | hir::Stmt::Transaction(body, _)
-        | hir::Stmt::Together(_, body, _, _, _) => {
+        hir::Stmt::SimBlock(body, _) | hir::Stmt::Transaction(body, _) => {
             collect_var_refs_block(body, refs);
+        }
+        hir::Stmt::Together(_, body, _, handler, _) => {
+            collect_var_refs_block(body, refs);
+            if let Some(handler) = handler {
+                if let Some(body) = &handler.ok_arm {
+                    collect_var_refs_block(body, refs);
+                }
+                if let Some(body) = &handler.err_arm {
+                    collect_var_refs_block(body, refs);
+                }
+            }
         }
         hir::Stmt::StoreInsert(_, exprs, _) => {
             for expr in exprs {
                 collect_var_refs_expr(expr, refs);
             }
         }
-        hir::Stmt::StoreSet(_, updates, _, _) => {
+        hir::Stmt::StoreSet(_, updates, filter, _) => {
             for (_, expr) in updates {
+                collect_var_refs_expr(expr, refs);
+            }
+            collect_filter_refs(filter, refs);
+        }
+        hir::Stmt::StoreDelete(_, filter, _)
+        | hir::Stmt::StoreDestroy(_, filter, _)
+        | hir::Stmt::StoreRestore(_, filter, _) => collect_filter_refs(filter, refs),
+        hir::Stmt::Asm(asm) => {
+            for (_, expr) in &asm.inputs {
                 collect_var_refs_expr(expr, refs);
             }
         }
         _ => {}
+    }
+}
+
+fn collect_pattern_sources(pat: &hir::Pat, sources: &VarRefs, refs: &mut VarRefs) {
+    match pat {
+        hir::Pat::Bind(id, _, _, _) => {
+            refs.borrow_sources
+                .entry(*id)
+                .or_default()
+                .extend(sources.vars.iter().map(|(id, _)| *id));
+        }
+        hir::Pat::Ctor(_, _, pats, _)
+        | hir::Pat::Or(pats, _)
+        | hir::Pat::Tuple(pats, _)
+        | hir::Pat::Array(pats, _) => {
+            for pat in pats {
+                collect_pattern_sources(pat, sources, refs);
+            }
+        }
+        hir::Pat::Wild(_) | hir::Pat::Lit(_) | hir::Pat::Range(..) => {}
+    }
+}
+
+fn collect_filter_refs(filter: &hir::StoreFilter, refs: &mut VarRefs) {
+    collect_var_refs_expr(&filter.value, refs);
+    for (_, cond) in &filter.extra {
+        collect_var_refs_expr(&cond.value, refs);
     }
 }
 
@@ -287,6 +360,10 @@ fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut VarRefs) {
         ExprKind::IfExpr(if_expr) => {
             collect_var_refs_expr(&if_expr.cond, refs);
             collect_var_refs_block(&if_expr.then, refs);
+            for (cond, body) in &if_expr.elifs {
+                collect_var_refs_expr(cond, refs);
+                collect_var_refs_block(body, refs);
+            }
             if let Some(else_body) = &if_expr.els {
                 collect_var_refs_block(else_body, refs);
             }
@@ -332,6 +409,9 @@ fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut VarRefs) {
             collect_var_refs_expr(value, refs);
         }
         ExprKind::ChannelRecv(inner)
+        | ExprKind::GeneratorNext(inner)
+        | ExprKind::EnumUnwrap(inner, _, _)
+        | ExprKind::EnumIs(inner, _)
         | ExprKind::CoroutineNext(inner)
         | ExprKind::Yield(inner)
         | ExprKind::AsFormat(inner, _)
@@ -353,7 +433,15 @@ fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut VarRefs) {
                 collect_var_refs_expr(cond, refs);
             }
         }
-        ExprKind::CoroutineCreate(_, stmts) => collect_var_refs_block(stmts, refs),
+        ExprKind::CoroutineCreate(_, stmts, _) | ExprKind::GeneratorCreate(_, _, stmts, _) => {
+            let mut inner = VarRefs::default();
+            collect_var_refs_block(stmts, &mut inner);
+            inner.addr_taken.clear();
+            inner.deferred_vars.clear();
+            inner.borrow_sources.clear();
+            inner.has_defer = false;
+            refs.absorb(inner);
+        }
         ExprKind::AtomicCas(ptr, expected, replacement) => {
             collect_var_refs_expr(ptr, refs);
             collect_var_refs_expr(expected, refs);
@@ -364,20 +452,48 @@ fn collect_var_refs_expr(expr: &hir::Expr, refs: &mut VarRefs) {
                 collect_var_refs_expr(arg, refs);
             }
         }
-        ExprKind::Builder(_, fields) => {
+        ExprKind::Spawn(_, fields) | ExprKind::Builder(_, fields) => {
             for (_, expr) in fields {
                 collect_var_refs_expr(expr, refs);
             }
         }
+        ExprKind::StoreQuery(_, filter)
+        | ExprKind::StoreAllWhere(_, filter)
+        | ExprKind::StoreFirst(_, filter)
+        | ExprKind::StoreExists(_, filter)
+        | ExprKind::ViewCount(_, filter)
+        | ExprKind::ViewAll(_, filter) => collect_filter_refs(filter, refs),
+        ExprKind::StoreQueryGroup(_, _, _, Some(filter)) => collect_filter_refs(filter, refs),
+        ExprKind::StoreGet(_, expr)
+        | ExprKind::StoreVersionCount(_, expr)
+        | ExprKind::StoreHistory(_, expr)
+        | ExprKind::KvGet(_, expr)
+        | ExprKind::KvHas(_, expr)
+        | ExprKind::KvDel(_, expr)
+        | ExprKind::VecInsert(_, expr)
+        | ExprKind::BloomTest(_, _, expr)
+        | ExprKind::FtsSearch(_, _, expr)
+        | ExprKind::GraphFrom(_, expr)
+        | ExprKind::GraphTo(_, expr) => collect_var_refs_expr(expr, refs),
+        ExprKind::StoreAtVersion(_, first, second)
+        | ExprKind::KvSet(_, first, second)
+        | ExprKind::KvIncr(_, first, second)
+        | ExprKind::VecNearest(_, first, second) => {
+            collect_var_refs_expr(first, refs);
+            collect_var_refs_expr(second, refs);
+        }
         ExprKind::Block(stmts) => collect_var_refs_block(stmts, refs),
-        ExprKind::Lambda(inner_params, stmts) => {
+        ExprKind::Lambda(inner_params, stmts, _) => {
             let mut inner = VarRefs::default();
             collect_var_refs_block(stmts, &mut inner);
             inner
                 .vars
-                .retain(|(_, n)| !inner_params.iter().any(|p| p.name == *n));
+                .retain(|(id, _)| !inner_params.iter().any(|p| p.def_id == *id));
 
+            inner.borrow_sources.clear();
             inner.addr_taken.clear();
+            inner.deferred_vars.clear();
+            inner.has_defer = false;
             refs.absorb(inner);
         }
         _ => {}

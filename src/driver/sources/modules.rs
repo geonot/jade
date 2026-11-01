@@ -139,23 +139,6 @@ fn resolve_modules_rec(
             return Err(format!("module not found: {key}"));
         };
 
-        let jni_path = candidate.with_extension("jni");
-        if jni_path.exists()
-            && interface_reuse_enabled()
-            && let Ok(iface) = crate::interface::InterfaceFile::read_from(&jni_path)
-        {
-            resolved_files.push(jni_path.clone());
-            let importable: Vec<Decl> = iface
-                .to_decls()
-                .into_iter()
-                .filter(|d| should_import_decl(d, &imports))
-                .collect();
-            for pd in flatten_module(importable, &name.as_str()) {
-                prog.decls.push(pd);
-            }
-            continue;
-        }
-
         resolved_files.push(candidate.clone());
         let src = fs::read_to_string(&candidate)
             .map_err(|e| format!("cannot read {}: {e}", candidate.display()))?;
@@ -259,6 +242,3 @@ pub(in crate::driver) fn find_project_entry() -> PathBuf {
     );
 }
 
-fn interface_reuse_enabled() -> bool {
-    std::env::var("JINN_USE_INTERFACE_FILES").as_deref() == Ok("1")
-}

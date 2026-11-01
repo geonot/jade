@@ -50,20 +50,9 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<(), String> {
         let i32t = self.ctx.i32_type();
         let mut resolved = Vec::new();
-        let mut max_payload = 0usize;
+        let mut max_payload = 0u64;
         for (vname, ftys, tag) in variants {
-            let mut payload_bytes: usize = 0;
-            for t in ftys {
-                let size = if Self::is_recursive_field(t, name)
-                    || matches!(t, Type::Param(_) | Type::TypeVar(_))
-                {
-                    8
-                } else {
-                    self.type_size_of(t) as usize
-                };
-                payload_bytes += (size + 7) & !7;
-            }
-            max_payload = max_payload.max(payload_bytes);
+            max_payload = max_payload.max(self.variant_layout(name, ftys).size);
             self.variant_tags
                 .insert(vname.clone().into(), (name.into(), *tag));
             resolved.push((vname.clone(), ftys.clone()));
@@ -81,7 +70,9 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         let payload_words = max_payload.div_ceil(8);
-        let payload_ty = self.ctx.i64_type().array_type(payload_words as u32);
+        let payload_words = u32::try_from(payload_words)
+            .map_err(|_| format!("native enum payload exceeds layout limit: {name}"))?;
+        let payload_ty = self.ctx.i64_type().array_type(payload_words);
         st.set_body(&[i32t.into(), payload_ty.into()], false);
         self.enums.insert(name.into(), resolved);
         Ok(())

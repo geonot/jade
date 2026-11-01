@@ -3,6 +3,7 @@ use crate::ast;
 use crate::hir::{self, ExprKind};
 use crate::types::Type;
 
+mod cleanup;
 mod closures;
 mod collections;
 mod concurrency;
@@ -103,8 +104,14 @@ fn lower_function(f: &hir::Fn) -> Vec<Function> {
             name: p.name,
             ty: p.ty.clone(),
             by_ref,
+            owned: matches!(p.ownership, hir::Ownership::Owned)
+                && !matches!(p.access_mod, Some(crate::ast::AccessMod::Copy)),
         });
         lowerer.var_types.insert(p.name, p.ty.clone());
+        lowerer.cleanup_param_ids.insert(p.name, p.def_id);
+        if matches!(p.ownership, hir::Ownership::Owned) {
+            lowerer.cleanup_owned_params.insert(p.def_id);
+        }
         if by_ref {
             lowerer.borrowed_params.insert(p.name);
         }
@@ -164,7 +171,26 @@ fn finish_body(
     span: Span,
     is_main: bool,
 ) {
+    lowerer.prepare_cleanup(body);
     lowerer.mark_address_taken(body);
+
+    let params = lowerer.func.params.clone();
+    for param in params {
+        let id = lowerer.cleanup_param_ids.get(&param.name).copied();
+        if let Some(id) = id {
+            let value = lowerer
+                .current_def
+                .get(&lowerer.func.entry)
+                .and_then(|defs| defs.get(&param.name))
+                .copied()
+                .unwrap_or(param.value);
+            let owns = lowerer.cleanup_owned_params.contains(&id);
+            lowerer.bind_cleanup_cell(id, param.name, value, param.ty, owns, span);
+        }
+    }
+
+    lowerer.cancellation_enabled = true;
+    lowerer.lower_cancel_checkpoint(span, false);
 
     let tail_idx: Option<usize> = body
         .iter()
@@ -274,6 +300,7 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
         name: self_name,
         ty: state_ptr_ty.clone(),
         by_ref: false,
+        owned: false,
     });
     let entry = lowerer.func.entry;
     lowerer.var_types.insert(self_name, state_ptr_ty.clone());
@@ -295,8 +322,13 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
             name: p.name,
             ty: p.ty.clone(),
             by_ref: false,
+            owned: matches!(p.ownership, hir::Ownership::Owned),
         });
         lowerer.var_types.insert(p.name, p.ty.clone());
+        lowerer.cleanup_param_ids.insert(p.name, p.def_id);
+        if matches!(p.ownership, hir::Ownership::Owned) {
+            lowerer.cleanup_owned_params.insert(p.def_id);
+        }
         lowerer
             .current_def
             .entry(entry)
@@ -340,6 +372,7 @@ fn actor_state_lowerer(actor: &hir::ActorDef, fn_name: &str) -> Lowerer {
         name: self_name,
         ty: state_ptr_ty,
         by_ref: false,
+        owned: false,
     });
     let entry = lowerer.func.entry;
     let self_ty = lowerer.func.params.last().unwrap().ty.clone();
@@ -456,7 +489,7 @@ fn lower_unaryop(op: &ast::UnaryOp) -> UnaryOp {
 
 impl Lowerer {
     pub(super) fn lower_expr(&mut self, expr: &hir::Expr) -> ValueId {
-        match &expr.kind {
+        let value = match &expr.kind {
             ExprKind::BinOp(_, ast::BinOp::And | ast::BinOp::Or, _)
             | ExprKind::Block(..)
             | ExprKind::IfExpr(..)
@@ -493,6 +526,7 @@ impl Lowerer {
             | ExprKind::EnumUnwrap(..)
             | ExprKind::EnumIs(..)
             | ExprKind::GlobalLoad(..)
+            | ExprKind::SizeOf(..)
             | ExprKind::Unreachable => self.lower_expr_value(expr),
             ExprKind::Lambda(..) => self.lower_expr_closure(expr),
             ExprKind::StringMethod(..)
@@ -557,12 +591,31 @@ impl Lowerer {
             | ExprKind::Syscall(..)
             | ExprKind::Grad(..)
             | ExprKind::Einsum(..) => self.lower_expr_intrinsics(expr),
+        };
+        if matches!(
+            expr.kind,
+            ExprKind::Call(..)
+                | ExprKind::IndirectCall(..)
+                | ExprKind::Method(..)
+                | ExprKind::Pipe(..)
+                | ExprKind::ChannelSend(..)
+                | ExprKind::ChannelRecv(..)
+                | ExprKind::Select(..)
+                | ExprKind::CoroutineNext(..)
+                | ExprKind::GeneratorNext(..)
+                | ExprKind::Yield(..)
+                | ExprKind::IterNext(..)
+        ) {
+            self.lower_cancel_checkpoint(expr.span, false);
         }
+        value
     }
 
     pub(super) fn lower_expr_owned(&mut self, expr: &hir::Expr) -> ValueId {
         let v = self.lower_expr(expr);
-        if Self::needs_auto_clone(expr) {
+        if Self::needs_auto_clone(expr)
+            || (matches!(expr.ty, Type::Struct(..)) && matches!(self.value_type(v), Type::Row(_)))
+        {
             self.emit(
                 InstKind::Clone(v, expr.ty.clone()),
                 expr.ty.clone(),

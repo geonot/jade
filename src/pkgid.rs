@@ -10,7 +10,7 @@ pub struct ScopePath(u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PkgId(u32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Visibility {
     #[default]
     Public,
@@ -27,11 +27,13 @@ pub struct PackageRecord {
     pub visibility: Visibility,
 }
 
+type PkgKey = (Symbol, ScopePath, String, [u8; 32], Visibility);
+
 struct Tables {
     scope_segments: Vec<Vec<Symbol>>,
     scope_lookup: HashMap<Vec<Symbol>, ScopePath>,
     pkgs: Vec<PackageRecord>,
-    pkg_lookup: HashMap<(Symbol, ScopePath, String), PkgId>,
+    pkg_lookup: HashMap<PkgKey, PkgId>,
 }
 
 impl Tables {
@@ -127,7 +129,13 @@ impl PkgId {
     pub fn intern(record: PackageRecord) -> Self {
         TABLES.with(|t| {
             let mut t = t.borrow_mut();
-            let key = (record.name, record.owner_scope, record.version.to_string());
+            let key = (
+                record.name,
+                record.owner_scope,
+                record.version.to_string(),
+                record.semantic_hash,
+                record.visibility,
+            );
             if let Some(id) = t.pkg_lookup.get(&key) {
                 return *id;
             }
@@ -178,12 +186,7 @@ impl PkgId {
     }
 
     pub fn mangle_prefix(self) -> String {
-        let r = self.record();
-        let h: String = r.semantic_hash[..4]
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        h
+        crate::source_manifest::hex(&self.record().semantic_hash[..MANGLE_PREFIX_BYTES])
     }
 }
 
@@ -192,6 +195,24 @@ impl std::fmt::Display for PkgId {
         let r = self.record();
         write!(f, "{}@{}", self.fully_qualified(), r.version)
     }
+}
+
+pub const MANGLE_PREFIX_BYTES: usize = 16;
+
+pub fn check_mangle_prefixes(ids: impl IntoIterator<Item = PkgId>) -> Result<(), String> {
+    let mut seen: HashMap<String, PkgId> = HashMap::new();
+    for id in ids {
+        if let Some(&other) = seen.get(&id.mangle_prefix())
+            && other != id
+        {
+            return Err(format!(
+                "package symbol prefix collision between {other} and {id}; \
+                 the two packages cannot be linked into one program"
+            ));
+        }
+        seen.insert(id.mangle_prefix(), id);
+    }
+    Ok(())
 }
 
 pub type ScopedUseMap = HashMap<(PkgId, Symbol), PkgId>;
@@ -328,10 +349,10 @@ pub fn compute_semantic_hash(
     name: Symbol,
     scope: ScopePath,
     version: &SemVer,
-    source_bytes: &[u8],
+    sources: &[u8; 32],
     dep_hashes: &[[u8; 32]],
 ) -> [u8; 32] {
-    let mut h = Hasher::new_derive_key("jinn:pkgid:semantic_hash:v1");
+    let mut h = Hasher::new_derive_key("jinn:pkgid:semantic_hash:v2");
     h.update(name.as_str().as_bytes());
     h.update(&[0u8]);
     let scope_str = scope.render();
@@ -340,9 +361,7 @@ pub fn compute_semantic_hash(
     let ver_str = version.to_string();
     h.update(ver_str.as_bytes());
     h.update(&[0u8]);
-    let src_len = (source_bytes.len() as u64).to_le_bytes();
-    h.update(&src_len);
-    h.update(source_bytes);
+    h.update(sources);
     let dep_count = (dep_hashes.len() as u64).to_le_bytes();
     h.update(&dep_count);
     for dh in dep_hashes {
@@ -450,7 +469,57 @@ mod tests {
             ],
             visibility: Visibility::Public,
         });
-        assert_eq!(p.mangle_prefix(), "abcdef01");
+        assert_eq!(p.mangle_prefix(), format!("abcdef01{}", "0".repeat(24)));
+    }
+
+    #[test]
+    fn interner_distinguishes_hash_and_visibility() {
+        let rec = |h: u8, v| PackageRecord {
+            name: sym("dup"),
+            owner_scope: ScopePath::root(),
+            version: ver(1),
+            semantic_hash: [h; 32],
+            visibility: v,
+        };
+        let a = PkgId::intern(rec(1, Visibility::Public));
+        let b = PkgId::intern(rec(2, Visibility::Public));
+        let c = PkgId::intern(rec(1, Visibility::Internal));
+        assert_ne!(a, b);
+        assert_ne!(a, c);
+        assert_eq!(b.record().semantic_hash, [2; 32]);
+        assert_eq!(c.visibility(), Visibility::Internal);
+        assert_eq!(a, PkgId::intern(rec(1, Visibility::Public)));
+    }
+
+    #[test]
+    fn mangle_prefix_collision_is_rejected() {
+        let mk = |n: &str, tail: u8| {
+            let mut h = [0x5a; 32];
+            h[31] = tail;
+            PkgId::intern(PackageRecord {
+                name: sym(n),
+                owner_scope: ScopePath::root(),
+                version: ver(1),
+                semantic_hash: h,
+                visibility: Visibility::Public,
+            })
+        };
+        let a = mk("left", 1);
+        let b = mk("right", 2);
+        assert_eq!(a.mangle_prefix(), b.mangle_prefix());
+        let err = check_mangle_prefixes([a, a, b]).unwrap_err();
+        assert!(err.contains("left") && err.contains("right"), "{err}");
+        assert!(check_mangle_prefixes([a, a]).is_ok());
+    }
+
+    fn compute_semantic_hash(
+        name: Symbol,
+        scope: ScopePath,
+        version: &SemVer,
+        src: &[u8],
+        deps: &[[u8; 32]],
+    ) -> [u8; 32] {
+        super::compute_semantic_hash(name, scope, version, blake3::hash(src).as_bytes(), deps)
     }
 
     #[test]

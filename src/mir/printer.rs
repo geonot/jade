@@ -87,6 +87,7 @@ pub fn print_function(func: &Function) -> String {
 fn format_inst_kind(kind: &InstKind) -> String {
     match kind {
         InstKind::IntConst(n) => format!("int {n}"),
+        InstKind::SizeOf(t) => format!("size_of {t:?}"),
         InstKind::FloatConst(f) => format!("float {f}"),
         InstKind::BoolConst(b) => format!("bool {b}"),
         InstKind::StringConst(s) => format!("str {s:?}"),

@@ -6,7 +6,7 @@ impl<'ctx> Compiler<'ctx> {
         elem: BasicValueEnum<'ctx>,
         elem_ty: &Type,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        if !elem_ty.is_trivially_droppable() && elem_ty.is_value_clonable() {
+        if !elem_ty.is_trivially_droppable() && self.is_value_clonable(elem_ty) {
             self.clone_value(elem, elem_ty)
         } else {
             Ok(elem)

@@ -55,7 +55,7 @@ impl<'ctx> Compiler<'ctx> {
             assign_vals.push((field_pos, fname, val));
         }
 
-        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
+        let fseek_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fseek");
 
         let count = self.store_read_count(fp, rec_size, store_name)?;
         let buf = self.store_load_records(fp, count, rec_size)?;
@@ -249,7 +249,7 @@ impl<'ctx> Compiler<'ctx> {
             ],
             ""
         ));
-        let fwrite_fn = crate::codegen::fn_or_die(&self.module, "fwrite");
+        let fwrite_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fwrite");
         b!(self.bld.build_call(
             fwrite_fn,
             &[
@@ -264,7 +264,7 @@ impl<'ctx> Compiler<'ctx> {
         let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[buf.into()], ""));
 
-        let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
+        let fflush_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fflush");
         b!(self.bld.build_call(fflush_fn, &[fp.into()], ""));
 
         self.store_unlock(store_name, fp)?;

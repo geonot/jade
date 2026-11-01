@@ -27,8 +27,11 @@ impl<'ctx> Compiler<'ctx> {
                 .module
                 .get_struct_type(&name.as_str())
                 .map(|s| s.into())
-                .unwrap_or_else(|| self.ctx.i64_type().into()),
-            Type::Array(et, n) => self.llvm_ty(et).array_type(*n as u32).into(),
+                .unwrap_or_else(|| panic!("unresolved nominal layout: {name}")),
+            Type::Array(et, n) => self
+                .llvm_ty(et)
+                .array_type(u32::try_from(*n).expect("array exceeds native layout limit"))
+                .into(),
             Type::Vec(_) | Type::Map(_, _) => self.ctx.ptr_type(AddressSpace::default()).into(),
             Type::Tuple(tys) => self
                 .ctx
@@ -54,7 +57,7 @@ impl<'ctx> Compiler<'ctx> {
                 self.module
                     .get_struct_type(&sname)
                     .map(|s| s.into())
-                    .unwrap_or_else(|| self.ctx.i64_type().into())
+                    .unwrap_or_else(|| panic!("unresolved store row layout: {name}"))
             }
             Type::View(_) => self.view_type().into(),
             Type::Frozen(inner) => self.llvm_ty(inner),
@@ -87,160 +90,28 @@ impl<'ctx> Compiler<'ctx> {
             .struct_type(&[ptr.into(), self.ctx.i64_type().into()], false)
     }
 
+    pub(crate) fn layout(&self) -> &inkwell::targets::TargetData {
+        self.target_data
+            .as_ref()
+            .expect("target layout not initialized")
+    }
+
     pub(crate) fn type_store_size(&self, ty: BasicTypeEnum<'ctx>) -> u64 {
-        match ty {
-            BasicTypeEnum::IntType(it) => it.get_bit_width().div_ceil(8) as u64,
-            BasicTypeEnum::FloatType(ft) => {
-                if ft == self.ctx.f32_type() {
-                    4
-                } else {
-                    8
-                }
-            }
-            BasicTypeEnum::PointerType(_) => 8,
-            BasicTypeEnum::StructType(st) => {
-                let fields = st.get_field_types();
-                let mut offset = 0u64;
-                let mut max_align = 1u64;
-                for f in &fields {
-                    let fs = self.type_store_size(*f);
-                    let fa = self.type_abi_align(*f);
-                    offset = (offset + fa - 1) & !(fa - 1);
-                    offset += fs;
-                    max_align = max_align.max(fa);
-                }
-                (offset + max_align - 1) & !(max_align - 1)
-            }
-            BasicTypeEnum::ArrayType(at) => {
-                if at.is_empty() {
-                    return 0;
-                }
-                let elem: BasicTypeEnum = at.get_element_type();
-                self.type_store_size(elem) * at.len() as u64
-            }
-            _ => 8,
-        }
+        assert!(ty.is_sized(), "unsized native layout: {ty}");
+        self.layout().get_abi_size(&ty)
     }
 
     pub(crate) fn type_size_of(&self, ty: &Type) -> u64 {
-        match ty {
-            Type::I8 | Type::U8 | Type::Bool | Type::Void => 1,
-            Type::I16 | Type::U16 => 2,
-            Type::I32 | Type::U32 | Type::F32 => 4,
-            Type::I64 | Type::U64 | Type::F64 => 8,
-            Type::String => self.type_store_size(self.string_type().into()),
-            Type::Ptr(_)
-            | Type::ActorRef(_)
-            | Type::Coroutine(_)
-            | Type::Channel(_)
-            | Type::Generator(_)
-            | Type::Vec(_)
-            | Type::Map(_, _)
-            | Type::Fn(_, _) => 8,
-            Type::Array(et, n) => self.type_size_of(et).next_multiple_of(8) * (*n as u64),
-            Type::Tuple(tys) => tys
-                .iter()
-                .map(|t| self.type_size_of(t).next_multiple_of(8))
-                .sum::<u64>()
-                .max(1),
-            Type::View(_) => 16,
-            Type::Alias(_, inner) | Type::Newtype(_, inner) | Type::Frozen(inner) => {
-                self.type_size_of(inner)
-            }
-            Type::Struct(name, _) => {
-                if let Some(fields) = self.structs.get(name) {
-                    fields
-                        .iter()
-                        .map(|(_, t)| self.type_size_of(t).next_multiple_of(8))
-                        .sum::<u64>()
-                        .max(1)
-                } else if let Some(st) = self.module.get_struct_type(&name.as_str())
-                    && !st.get_field_types().is_empty()
-                {
-                    self.type_store_size(st.into())
-                } else {
-                    8
-                }
-            }
-            Type::Row(name) => {
-                let sname = format!("__store_{}", name.as_str());
-                if let Some(st) = self.module.get_struct_type(&sname)
-                    && !st.get_field_types().is_empty()
-                {
-                    self.type_store_size(st.into())
-                } else if let Some(fields) =
-                    self.structs.get(&crate::intern::Symbol::intern(&sname))
-                {
-                    fields
-                        .iter()
-                        .map(|(_, t)| self.type_size_of(t).next_multiple_of(8))
-                        .sum::<u64>()
-                        .max(1)
-                } else {
-                    8
-                }
-            }
-            Type::Enum(name) => {
-                if let Some(variants) = self.enums.get(name) {
-                    let max_payload = variants
-                        .iter()
-                        .map(|(_, ftys)| {
-                            ftys.iter()
-                                .map(|t| self.type_size_of(t).next_multiple_of(8))
-                                .sum::<u64>()
-                        })
-                        .max()
-                        .unwrap_or(0);
-                    if max_payload == 0 { 4 } else { 8 + max_payload }
-                } else if let Some(st) = self.module.get_struct_type(&name.as_str())
-                    && !st.get_field_types().is_empty()
-                {
-                    self.type_store_size(st.into())
-                } else {
-                    8
-                }
-            }
-            _ => 8,
-        }
+        self.type_store_size(self.llvm_ty(ty))
     }
 
     pub(crate) fn type_abi_align(&self, ty: BasicTypeEnum<'ctx>) -> u64 {
-        match ty {
-            BasicTypeEnum::IntType(it) => {
-                let bytes = it.get_bit_width().div_ceil(8) as u64;
-                bytes.next_power_of_two().min(8)
-            }
-            BasicTypeEnum::FloatType(_) => self.type_store_size(ty).min(8),
-            BasicTypeEnum::PointerType(_) => 8,
-            BasicTypeEnum::StructType(st) => st
-                .get_field_types()
-                .iter()
-                .map(|f| self.type_abi_align(*f))
-                .max()
-                .unwrap_or(1),
-            BasicTypeEnum::ArrayType(at) => {
-                let elem: BasicTypeEnum = at.get_element_type();
-                self.type_abi_align(elem)
-            }
-            _ => 8,
-        }
+        assert!(ty.is_sized(), "unsized native layout: {ty}");
+        u64::from(self.layout().get_abi_alignment(&ty))
     }
 
     pub(crate) fn default_val(&self, ty: &Type) -> BasicValueEnum<'ctx> {
-        match ty {
-            Type::I8 | Type::U8 => self.ctx.i8_type().const_int(0, false).into(),
-            Type::I16 | Type::U16 => self.ctx.i16_type().const_int(0, false).into(),
-            Type::I32 | Type::U32 => self.ctx.i32_type().const_int(0, false).into(),
-            Type::I64 | Type::U64 => self.ctx.i64_type().const_int(0, false).into(),
-            Type::F32 => self.ctx.f32_type().const_float(0.0).into(),
-            Type::F64 => self.ctx.f64_type().const_float(0.0).into(),
-            Type::Bool => self.ctx.bool_type().const_int(0, false).into(),
-            Type::String => self.string_type().const_zero().into(),
-            Type::Fn(_, _) => self.closure_type().const_zero().into(),
-            Type::View(_) => self.view_type().const_zero().into(),
-            Type::Frozen(inner) => self.default_val(inner),
-            _ => self.ctx.i64_type().const_int(0, false).into(),
-        }
+        self.llvm_ty(ty).const_zero()
     }
 
     pub(crate) fn int_const(&self, n: i64, ty: &Type) -> BasicValueEnum<'ctx> {

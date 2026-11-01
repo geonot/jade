@@ -13,9 +13,9 @@ type Prng
     Prng(s0 is a, s1 is b, s2 is c, s3 is d)
 
 *splitmix(x as i64) returns i64
-    z is wrapping_add(x, 0x9E3779B97F4A7C15)
-    z is wrapping_mul(z ^ (z >> 30), 0xBF58476D1CE4E5B7)
-    z is wrapping_mul(z ^ (z >> 27), 0x94D049BB133111EB)
+    z is wrapping_add(x, 0x9E3779B97F4A7C15 as i64)
+    z is wrapping_mul(z ^ (z >> 30), 0xBF58476D1CE4E5B7 as i64)
+    z is wrapping_mul(z ^ (z >> 27), 0x94D049BB133111EB as i64)
     z ^ (z >> 31)
 
 *rotl(x as i64, k as i64) returns i64

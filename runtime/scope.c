@@ -176,10 +176,7 @@ void jinn_scope_cancel(jinn_scope_t *s) {
         jinn_coro_t *c = s->children[i];
         if (c) {
             atomic_store_explicit(&c->cancelled, 1, memory_order_release);
-            void *wc = c->wait_chan;
-            if (wc) {
-                jinn_chan_wake_coro((jinn_chan_t *)wc, c);
-            }
+            jinn_chan_wake_cancelled(c);
         }
     }
     for (int i = 0; i < s->actor_count; i++) {
@@ -216,9 +213,12 @@ int jinn_scope_take_error(jinn_scope_t *s, int64_t *out) {
     return 0;
 }
 int jinn_scope_check_cancelled(void) {
-    jinn_worker_t *w = tl_worker;
-    if (w && w->current) {
-        return atomic_load_explicit(&w->current->cancelled, memory_order_acquire);
+    jinn_coro_t *c = jinn_current_coro();
+    for (jinn_coro_t *p = c; p; p = p->generator_parent) {
+        if (p->cleanup_depth) return 0;
+    }
+    for (; c; c = c->generator_parent) {
+        if (atomic_load_explicit(&c->cancelled, memory_order_acquire)) return 1;
     }
     return 0;
 }
@@ -235,10 +235,7 @@ static void scope_wake_cancelled(jinn_scope_t *s) {
     scope_lock(s);
     for (int i = 0; i < s->child_count; i++) {
         jinn_coro_t *c = s->children[i];
-        if (c && c->state == JINN_CORO_SUSPENDED) {
-            void *wc = c->wait_chan;
-            if (wc) jinn_chan_wake_coro((jinn_chan_t *)wc, c);
-        }
+        jinn_chan_wake_cancelled(c);
     }
     scope_unlock(s);
 }
@@ -249,6 +246,7 @@ static int jinn_scope_join_no_free(jinn_scope_t *s) {
             scope_unlock(s);
             break;
         }
+        if (jinn_txn_active()) jinn_persistence_fail("waiting for tasks inside a transaction is unsupported");
         scope_wake_cancelled(s);
         jinn_worker_t *w = jinn_worker_self();
         if (!w || !w->current) {

@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <errno.h>
+#include <math.h>
+#include <sys/stat.h>
 #include "jinn_rt.h"
 #define BLOOM_MAGIC "JINNBLM\0"
 #define BLOOM_HEADER_SIZE 24
@@ -20,7 +23,10 @@ static uint64_t bloom_hash(const void *data, int64_t len, int64_t k) {
 
 JinnBloom *jinn_bloom_create(int64_t expected_items, double fp_rate) {
     JinnBloom *b = (JinnBloom *)calloc(1, sizeof(JinnBloom));
-    if (!b) return NULL;
+    if (!b) jinn_persistence_fail("bloom allocation");
+    if (expected_items <= 0 || expected_items > (INT64_MAX - 7) / 10 ||
+        !isfinite(fp_rate) || fp_rate <= 0 || fp_rate >= 1)
+        jinn_persistence_fail("bloom parameters");
 
     double ln2 = 0.6931471805599453;
     double m = -(double)expected_items * (fp_rate < 0.001 ? -6.9 : (fp_rate < 0.01 ? -4.6 : -2.3));
@@ -33,36 +39,50 @@ JinnBloom *jinn_bloom_create(int64_t expected_items, double fp_rate) {
     b->num_hashes = (int64_t)k;
     int64_t bytes = (b->num_bits + 7) / 8;
     b->bits = (uint8_t *)calloc(bytes, 1);
-    if (!b->bits) { free(b); return NULL; }
+    if (!b->bits) jinn_persistence_fail("bloom bits allocation");
     b->path[0] = '\0';
     return b;
 }
 
 JinnBloom *jinn_bloom_open(const char *path, int64_t expected_items) {
+    jinn_persistence_check_path(path);
     JinnBloom *b = (JinnBloom *)calloc(1, sizeof(JinnBloom));
-    if (!b) return NULL;
-    strncpy(b->path, path, sizeof(b->path) - 1);
-    b->path[sizeof(b->path) - 1] = '\0';
+    if (!b) jinn_persistence_fail("bloom allocation");
+    if (strlen(path) >= sizeof b->path || expected_items <= 0 ||
+        expected_items > (INT64_MAX - 7) / 10)
+        jinn_persistence_fail("bloom parameters");
+    strcpy(b->path, path);
     FILE *fp = fopen(path, "rb");
     if (fp) {
         char magic[8];
-        fread(magic, 1, 8, fp);
-        fread(&b->num_bits, 8, 1, fp);
-        fread(&b->num_hashes, 8, 1, fp);
+        jinn_store_fread(magic, 1, 8, fp);
+        jinn_store_fread(&b->num_bits, 8, 1, fp);
+        jinn_store_fread(&b->num_hashes, 8, 1, fp);
+        struct stat st;
+        if (memcmp(magic, BLOOM_MAGIC, 8) || b->num_bits < 64 || b->num_bits > INT64_MAX - 7 ||
+            b->num_hashes < 1 || b->num_hashes > 16 || fstat(fileno(fp), &st) != 0 ||
+            st.st_size != BLOOM_HEADER_SIZE + (b->num_bits + 7) / 8)
+            jinn_persistence_fail("bloom header validation");
         int64_t bytes = (b->num_bits + 7) / 8;
         b->bits = (uint8_t *)calloc(bytes, 1);
-        if (!b->bits) { fclose(fp); free(b); return NULL; }
-        fread(b->bits, 1, bytes, fp);
-        fclose(fp);
+        if (!b->bits) jinn_persistence_fail("bloom bits allocation");
+        jinn_store_fread(b->bits, 1, bytes, fp);
+        if (fclose(fp) != 0) jinn_persistence_fail("bloom close");
     } else {
+        if (errno != ENOENT) jinn_persistence_fail("bloom open");
         b->num_bits = expected_items * 10;
         if (b->num_bits < 64) b->num_bits = 64;
         b->num_hashes = 7;
         int64_t bytes = (b->num_bits + 7) / 8;
         b->bits = (uint8_t *)calloc(bytes, 1);
-        if (!b->bits) { free(b); return NULL; }
+        if (!b->bits) jinn_persistence_fail("bloom bits allocation");
     }
     return b;
+}
+static int bloom_fill(FILE *tmp, void *arg);
+static void bloom_save(JinnBloom *b) {
+    if (b->path[0] && jinn_atomic_rewrite(b->path, bloom_fill, b) != 0)
+        jinn_persistence_fail("bloom persistence");
 }
 static int bloom_fill(FILE *tmp, void *arg) {
     JinnBloom *b = (JinnBloom *)arg;
@@ -77,9 +97,7 @@ static int bloom_fill(FILE *tmp, void *arg) {
 }
 void jinn_bloom_close(JinnBloom *b) {
     if (!b) return;
-    if (b->path[0]) {
-        (void)jinn_atomic_rewrite(b->path, bloom_fill, b);
-    }
+    bloom_save(b);
     free(b->bits);
     free(b);
 }
@@ -113,6 +131,10 @@ static void bloom_txn_guard(JinnBloom *b) {
     s->b = b;
     s->bits = copy;
     s->num_bits = b->num_bits;
+    if (b->path[0]) {
+        bloom_save(b);
+        jinn_txn_track_path(b->path);
+    }
     jinn_txn_track_mem(b, bloom_txn_rollback, bloom_txn_release, s);
 }
 void jinn_bloom_add(JinnBloom *b, const void *data, int64_t len) {
@@ -122,6 +144,7 @@ void jinn_bloom_add(JinnBloom *b, const void *data, int64_t len) {
         uint64_t h = bloom_hash(data, len, k) % (uint64_t)b->num_bits;
         b->bits[h / 8] |= (1 << (h % 8));
     }
+    bloom_save(b);
 }
 int64_t jinn_bloom_test(JinnBloom *b, const void *data, int64_t len) {
     if (!b || !b->bits) return 0;

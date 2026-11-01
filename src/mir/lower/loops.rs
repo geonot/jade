@@ -15,6 +15,7 @@ impl Lowerer {
 
                 self.set_terminator(Terminator::Goto(cond_bb));
                 self.switch_to(cond_bb);
+                self.lower_cancel_checkpoint(w.span, true);
 
                 let cond = self.lower_expr(&w.cond);
                 self.set_terminator(Terminator::Branch(cond, body_bb, exit_bb));
@@ -57,11 +58,13 @@ impl Lowerer {
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
+                    self.lower_cancel_checkpoint(f.span, true);
                     let got = self.emit(
                         InstKind::Call("__chan_iter_next".into(), vec![iter_val]),
                         Type::Bool,
                         f.span,
                     );
+                    self.lower_cancel_checkpoint(f.span, false);
                     self.set_terminator(Terminator::Branch(got, body_bb, exit_bb));
 
                     self.loop_stack.push((cond_bb, exit_bb));
@@ -72,7 +75,16 @@ impl Lowerer {
                         f.bind_ty.clone(),
                         f.span,
                     );
-                    self.write_var(f.bind, self.current_block, val);
+                    if !self.bind_cleanup_cell(
+                        f.bind_id,
+                        f.bind,
+                        val,
+                        f.bind_ty.clone(),
+                        true,
+                        f.span,
+                    ) {
+                        self.write_var(f.bind, self.current_block, val);
+                    }
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
                         self.set_terminator(Terminator::Goto(cond_bb));
@@ -84,12 +96,14 @@ impl Lowerer {
                     self.set_terminator(Terminator::Goto(cond_bb));
 
                     self.switch_to(cond_bb);
+                    self.lower_cancel_checkpoint(f.span, true);
                     let _resume = self.emit(
                         InstKind::Call("__gen_resume".into(), vec![iter_val]),
                         Type::Void,
                         f.span,
                     );
 
+                    self.lower_cancel_checkpoint(f.span, false);
                     let done = self.emit(
                         InstKind::Call("__gen_done".into(), vec![iter_val]),
                         Type::Bool,
@@ -106,7 +120,7 @@ impl Lowerer {
                         f.bind_ty.clone(),
                         f.span,
                     );
-                    self.write_var(f.bind, self.current_block, val);
+                    self.bind_cleanup_borrow(f.bind_id, f.bind, val, f.bind_ty.clone(), f.span);
                     self.lower_block_stmts(&f.body);
                     if !self.current_block_has_terminator() {
                         self.set_terminator(Terminator::Goto(cond_bb));
@@ -140,6 +154,7 @@ impl Lowerer {
                 self.set_terminator(Terminator::Goto(body_bb));
 
                 self.switch_to(body_bb);
+                self.lower_cancel_checkpoint(l.span, true);
 
                 self.loop_stack.push((body_bb, exit_bb));
                 self.lower_block_stmts(&l.body);
@@ -218,7 +233,8 @@ impl Lowerer {
         self.set_terminator(Terminator::Goto(cond_bb));
 
         self.switch_to(cond_bb);
-        let idx = self.read_var(idx_name, cond_bb, idx_ty.clone(), span);
+        self.lower_cancel_checkpoint(span, true);
+        let idx = self.read_var(idx_name, self.current_block, idx_ty.clone(), span);
         let limit = match end {
             Some(e) => e,
             None => self.emit(InstKind::VecLen(iter_val), Type::I64, span),
@@ -239,7 +255,7 @@ impl Lowerer {
                 f.bind_ty.clone(),
                 span,
             );
-            self.write_var(f.bind, body_bb, elem);
+            self.bind_cleanup_borrow(f.bind_id, f.bind, elem, f.bind_ty.clone(), span);
             if let Some(b2) = f.bind2 {
                 self.write_var(b2, body_bb, idx);
             }

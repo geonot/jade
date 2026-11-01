@@ -2096,10 +2096,13 @@ fn drop_does_not_affect_scalars() {
 }
 
 #[test]
-fn packed_struct_field_access() {
-    expect(
-        "type Compact @packed\n    a as i8\n    b as i64\n    c as i8\n\n*main()\n    s is Compact(a is 1, b is 42, c is 3)\n    log(s.a)\n    log(s.b)\n    log(s.c)\n",
-        "1\n42\n3",
+fn packed_struct_is_rejected_not_ignored() {
+    let err = expect_compile_fail(
+        "type Compact @packed\n    a as i8\n    b as i64\n    c as i8\n\n*main()\n    s is Compact(a is 1, b is 42, c is 3)\n    log(s.a)\n",
+    );
+    assert!(
+        err.contains("`Compact` uses @packed, which is not supported"),
+        "{err}"
     );
 }
 
@@ -2112,19 +2115,22 @@ fn strict_struct_field_order() {
 }
 
 #[test]
-fn align_struct_field_access() {
-    expect(
-        "type Aligned @align(64)\n    val as i64\n    flag as i8\n\n*main()\n    s is Aligned(val is 99, flag is 7)\n    log(s.val)\n    log(s.flag)\n",
-        "99\n7",
+fn custom_alignment_is_rejected_not_ignored() {
+    let err = expect_compile_fail(
+        "type Aligned @align(64)\n    val as i64\n    flag as i8\n\n*main()\n    s is Aligned(val is 99, flag is 7)\n    log(s.val)\n",
+    );
+    assert!(
+        err.contains("`Aligned` uses @align(64), which is not supported"),
+        "{err}"
     );
 }
 
 #[test]
-fn packed_strict_combined() {
-    expect(
-        "type PS @packed @strict\n    a as i8\n    b as i64\n\n*main()\n    s is PS(a is 5, b is 100)\n    log(s.a)\n    log(s.b)\n",
-        "5\n100",
+fn packed_strict_combined_is_rejected() {
+    let err = expect_compile_fail(
+        "type PS @packed @strict\n    a as i8\n    b as i64\n\n*main()\n    s is PS(a is 5, b is 100)\n    log(s.a)\n",
     );
+    assert!(err.contains("`PS` uses @packed"), "{err}");
 }
 
 #[test]
@@ -2186,6 +2192,51 @@ fn comptime_size_of_type() {
 #[test]
 fn comptime_size_of_primitive() {
     expect("*main\n    log(size of i64)\n    log(size of i8)\n", "8\n1");
+}
+
+#[test]
+fn size_of_uses_native_target_layout() {
+    expect(
+        "type Mixed\n    a as i8\n    b as i64\n    c as i8\n\ntype Pair\n    a as i32\n    b as i32\n\nenum Shape\n    Circle(f64)\n    Rect(f64, f64)\n\n*main\n    log(size of Mixed)\n    log(size of Pair)\n    log(size_of(String))\n    log(size_of((i8, i64, i8)))\n    log(size of Shape)\n    x is 3\n    log(size of x)\n    w is 'hi'\n    log(size of w)\n",
+        "24\n8\n24\n24\n24\n8\n24",
+    );
+}
+
+#[test]
+fn fallible_success_value_must_match_declared_type() {
+    let err = expect_compile_fail(
+        "err E\n    Bad\n\n*f(x as i64) returns i64 ! E\n    if x < 0\n        err Bad\n    'data'\n\n*main\n    match f(1)\n        Ok(v) ? log(v)\n        Err(e) ? log('e')\n",
+    );
+    assert!(
+        err.contains("success value of this fallible function has the wrong type"),
+        "{err}"
+    );
+    assert!(!err.contains("ICE"), "{err}");
+}
+
+#[test]
+fn resource_payload_moved_out_of_result_in_loop_is_dropped_once() {
+    expect(
+        "err E\n    Bad\n\ntype H @resource\n    fd as i64\n\n    *drop\n        log('close ' + to_string(self.fd))\n\n*mk(n as i64) returns H ! E\n    if n < 0\n        err Bad\n    H(fd is n)\n\n*use_h(h as H)\n    log(h.fd)\n\n*serve ! E\n    i is 0\n    while i < 2\n        h is mk(i)\n        use_h(h)\n        i is i + 1\n\n*main\n    match serve()\n        Ok(v) ? log('ok')\n        Err(e) ? log('err')\n",
+        "0\nclose 0\n1\nclose 1\nok",
+    );
+}
+
+#[test]
+fn void_call_as_tail_of_unit_fallible_function() {
+    expect(
+        "err E\n    Bad\n\n*u(x as i64)\n    log(x)\n\n*serve ! E\n    u(3)\n\n*main\n    match serve()\n        Ok(v) ? log('ok')\n        Err(e) ? log('err')\n",
+        "3\nok",
+    );
+}
+
+#[test]
+fn size_of_unknown_type_is_rejected() {
+    let err = expect_compile_fail("*main\n    log(size of Nope)\n");
+    assert!(
+        err.contains("`size of` needs a concrete, declared type"),
+        "{err}"
+    );
 }
 
 #[test]

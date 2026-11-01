@@ -65,60 +65,7 @@ impl Typer {
         }
 
         match expr {
-            ast::Expr::Int(n, span) => {
-                let resolved_expected = expected.map(|t| self.infer_ctx.shallow_resolve(t));
-                let ty = match &resolved_expected {
-                    Some(t) if t.is_int() => {
-                        if let Some((lo, hi)) = Self::int_type_range(t)
-                            && (*n < lo || *n > hi)
-                        {
-                            self.type_errors.push(format!(
-                                "{}: integer literal {} does not fit in `{}` (its range is \
-                                 {}..{}); use a wider type, or an explicit cast to wrap to {}",
-                                span.loc(),
-                                n,
-                                t,
-                                lo,
-                                hi,
-                                Self::wrap_literal_to(*n, t),
-                            ));
-                        }
-                        t.clone()
-                    }
-                    Some(t) if t.is_float() => {
-                        return Ok(hir::Expr {
-                            kind: hir::ExprKind::Float(*n as f64),
-                            ty: t.clone(),
-                            span: *span,
-                        });
-                    }
-                    Some(Type::TypeVar(v))
-                        if matches!(
-                            self.infer_ctx.constraint(*v),
-                            crate::typer::unify::TypeConstraint::Float
-                        ) =>
-                    {
-                        let fv = self.infer_ctx.fresh_float_var();
-                        let _ = self.infer_ctx.unify(&fv, &Type::TypeVar(*v));
-                        return Ok(hir::Expr {
-                            kind: hir::ExprKind::Float(*n as f64),
-                            ty: fv,
-                            span: *span,
-                        });
-                    }
-                    Some(t) => {
-                        let fresh = self.infer_ctx.fresh_integer_var();
-                        let _ = self.infer_ctx.unify(&fresh, t);
-                        fresh
-                    }
-                    None => self.infer_ctx.fresh_integer_var(),
-                };
-                Ok(hir::Expr {
-                    kind: hir::ExprKind::Int(*n),
-                    ty,
-                    span: *span,
-                })
-            }
+            ast::Expr::Int(n, span) => self.lower_integer_literal(*n as i128, *span, expected),
 
             ast::Expr::Float(n, span) => {
                 let ty = match expected {
@@ -223,7 +170,7 @@ impl Typer {
             ),
 
             ast::Expr::As(inner, target_ty, span) => {
-                let hi = self.lower_expr(inner)?;
+                let hi = self.lower_cast_operand(inner)?;
                 let src = self.infer_ctx.resolve(&hi.ty);
                 let tgt = self.infer_ctx.resolve(target_ty);
                 if !Self::cast_legal(&src, &tgt) {
@@ -448,8 +395,15 @@ impl Typer {
             }
 
             ast::Expr::StrictCast(inner, target_ty, span) => {
-                let hinner = self.lower_expr(inner)?;
+                let hinner = self.lower_cast_operand(inner)?;
                 let resolved = self.resolve_ty(target_ty.clone());
+                let numeric = self.infer_ctx.fresh_numeric_var();
+                if !resolved.is_num() || self.infer_ctx.unify(&hinner.ty, &numeric).is_err() {
+                    return Err(format!(
+                        "{}: strict cast requires numeric source and destination",
+                        span.loc()
+                    ));
+                }
                 Ok(hir::Expr {
                     kind: hir::ExprKind::StrictCast(Box::new(hinner), resolved.clone()),
                     ty: resolved,
@@ -500,28 +454,100 @@ impl Typer {
         }
     }
 
-    fn int_type_range(t: &Type) -> Option<(i64, i64)> {
-        Some(match t {
-            Type::I8 => (i8::MIN as i64, i8::MAX as i64),
-            Type::I16 => (i16::MIN as i64, i16::MAX as i64),
-            Type::I32 => (i32::MIN as i64, i32::MAX as i64),
-            Type::U8 => (0, u8::MAX as i64),
-            Type::U16 => (0, u16::MAX as i64),
-            Type::U32 => (0, u32::MAX as i64),
-            Type::U64 => (0, i64::MAX),
-            _ => return None,
+    pub(in crate::typer) fn lower_integer_literal(
+        &mut self,
+        value: i128,
+        span: ast::Span,
+        expected: Option<&Type>,
+    ) -> Result<hir::Expr, String> {
+        let resolved_expected = expected.map(|t| self.infer_ctx.shallow_resolve(t));
+        let ty = match &resolved_expected {
+            Some(t) if t.is_int() => t.clone(),
+            Some(t) if t.is_float() => {
+                return Ok(hir::Expr {
+                    kind: hir::ExprKind::Float(value as f64),
+                    ty: t.clone(),
+                    span,
+                });
+            }
+            Some(Type::TypeVar(v))
+                if matches!(
+                    self.infer_ctx.constraint(*v),
+                    crate::typer::unify::TypeConstraint::Float
+                ) =>
+            {
+                let fv = self.infer_ctx.fresh_float_var();
+                let _ = self.infer_ctx.unify(&fv, &Type::TypeVar(*v));
+                return Ok(hir::Expr {
+                    kind: hir::ExprKind::Float(value as f64),
+                    ty: fv,
+                    span,
+                });
+            }
+            Some(t) => {
+                let fresh = self.infer_ctx.fresh_integer_var();
+                let _ = self.infer_ctx.unify(&fresh, t);
+                fresh
+            }
+            None => self.infer_ctx.fresh_integer_var(),
+        };
+        self.integer_literals.push((value, ty.clone(), span));
+        Ok(hir::Expr {
+            kind: hir::ExprKind::Int(value as i64),
+            ty,
+            span,
         })
     }
 
-    fn wrap_literal_to(n: i64, t: &Type) -> i64 {
-        match t {
-            Type::I8 => n as i8 as i64,
-            Type::I16 => n as i16 as i64,
-            Type::I32 => n as i32 as i64,
-            Type::U8 => n as u8 as i64,
-            Type::U16 => n as u16 as i64,
-            Type::U32 => n as u32 as i64,
-            _ => n,
+    fn lower_cast_operand(&mut self, inner: &ast::Expr) -> Result<hir::Expr, String> {
+        let expected = match inner {
+            ast::Expr::Int(n, _) if *n > i64::MAX as u64 => Some(&Type::U64),
+            _ => None,
+        };
+        self.lower_expr_expected(inner, expected)
+    }
+
+    pub(in crate::typer) fn adapt_integer_literal_to_float(
+        &mut self,
+        expr: &mut hir::Expr,
+        target: &Type,
+    ) {
+        let hir::ExprKind::Int(bits) = expr.kind else {
+            return;
+        };
+        let value = if let Some((value, ty, _)) = self
+            .integer_literals
+            .iter_mut()
+            .rev()
+            .find(|(_, ty, span)| *ty == expr.ty && *span == expr.span)
+        {
+            *ty = target.clone();
+            *value
+        } else if expr.ty.is_unsigned() {
+            bits as u64 as i128
+        } else {
+            bits as i128
+        };
+        expr.kind = hir::ExprKind::Float(value as f64);
+        expr.ty = target.clone();
+    }
+
+    pub(in crate::typer) fn validate_integer_literals(&mut self) {
+        for (n, ty, span) in std::mem::take(&mut self.integer_literals) {
+            let ty = self.infer_ctx.resolve(&ty);
+            if let Some((lo, hi)) = ty.integer_range()
+                && (n < lo || n > hi)
+            {
+                self.type_errors.push(format!(
+                    "{}: integer literal {} does not fit in `{}` (its range is {}..{}); \
+                     use a wider type or an explicit cast to wrap",
+                    span.loc(),
+                    n,
+                    ty,
+                    lo,
+                    hi,
+                ));
+            }
         }
     }
 

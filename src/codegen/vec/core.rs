@@ -210,7 +210,7 @@ impl<'ctx> Compiler<'ctx> {
         let elem_gep = unsafe { b!(self.bld.build_gep(lty, data_ptr, &[idx], "vg.egep")) };
         let raw = b!(self.bld.build_load(lty, elem_gep, "vg.v"));
 
-        if !borrow && Self::is_value_clonable(elem_ty) {
+        if !borrow && self.is_value_clonable(elem_ty) {
             self.clone_value(raw, elem_ty)
         } else {
             Ok(raw)

@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <errno.h>
+#include <sys/stat.h>
 #include "jinn_rt.h"
 #define COL_MAGIC "JINNCOL\0"
 #define COL_HEADER_SIZE 24
@@ -23,67 +25,67 @@ struct JinnCol {
     char    path[256];
 };
 JinnCol *jinn_col_open(const char *path, int64_t elem_size) {
+    jinn_persistence_check_path(path);
     JinnCol *c = (JinnCol *)calloc(1, sizeof(JinnCol));
-    if (!c) return NULL;
-    strncpy(c->path, path, 255);
+    if (!c) jinn_persistence_fail("column allocation");
+    if (strlen(path) >= sizeof c->path || elem_size <= 0)
+        jinn_persistence_fail("column arguments");
+    strcpy(c->path, path);
     c->elem_size = elem_size;
     c->fp = fopen(path, "r+b");
     if (c->fp) {
         char magic[8];
-        fread(magic, 1, 8, c->fp);
-        fread(&c->count, 8, 1, c->fp);
-        fread(&c->elem_size, 8, 1, c->fp);
+        jinn_store_fread(magic, 1, 8, c->fp);
+        jinn_store_fread(&c->count, 8, 1, c->fp);
+        jinn_store_fread(&c->elem_size, 8, 1, c->fp);
+        struct stat st;
+        if (memcmp(magic, COL_MAGIC, 8) || c->count < 0 || c->elem_size != elem_size ||
+            c->count > (INT64_MAX - COL_HEADER_SIZE) / elem_size ||
+            fstat(fileno(c->fp), &st) != 0 || st.st_size != COL_HEADER_SIZE + c->count * elem_size)
+            jinn_persistence_fail("column header validation");
     } else {
-        c->fp = fopen(path, "w+b");
-        if (!c->fp) { free(c); return NULL; }
-        fwrite(COL_MAGIC, 1, 8, c->fp);
+        if (errno != ENOENT) jinn_persistence_fail("column open");
+        c->fp = fopen(path, "w+bx");
+        if (!c->fp) jinn_persistence_fail("column creation");
+        jinn_store_fwrite(COL_MAGIC, 1, 8, c->fp);
         c->count = 0;
-        fwrite(&c->count, 8, 1, c->fp);
-        fwrite(&c->elem_size, 8, 1, c->fp);
-        fflush(c->fp);
+        jinn_store_fwrite(&c->count, 8, 1, c->fp);
+        jinn_store_fwrite(&c->elem_size, 8, 1, c->fp);
+        jinn_store_finish_create(c->fp, path);
     }
     return c;
 }
 void jinn_col_close(JinnCol *c) {
     if (!c) return;
-    if (c->fp) fclose(c->fp);
+    if (c->fp && fclose(c->fp) != 0) jinn_persistence_fail("column close");
     free(c);
 }
 static void col_txn_rollback(void *arg) {
     JinnCol *c = (JinnCol *)arg;
     if (!c || !c->fp) return;
-    int64_t v = 0;
-    if (fseek(c->fp, 8, SEEK_SET) == 0 && fread(&v, 8, 1, c->fp) == 1) {
-        c->count = v;
-    }
+    jinn_store_fseek(c->fp, 8, SEEK_SET);
+    jinn_store_fread(&c->count, 8, 1, c->fp);
 }
 void jinn_col_append(JinnCol *c, const void *data) {
-    if (!c || !c->fp) return;
+    if (!c || !c->fp) jinn_persistence_fail("column append handle");
     if (jinn_txn_active()) jinn_txn_track_aux(c->fp, col_txn_rollback, c);
-    if (fseek(c->fp, COL_HEADER_SIZE + c->count * c->elem_size, SEEK_SET) != 0) {
-        fprintf(stderr, "jinn: column: fseek to data region failed\n");
-        return;
-    }
-    if (fwrite(data, c->elem_size, 1, c->fp) != 1) {
-        fprintf(stderr, "jinn: column: fwrite data failed\n");
-        return;
-    }
+    if (c->count > (INT64_MAX - COL_HEADER_SIZE) / c->elem_size - 1)
+        jinn_persistence_fail("column capacity");
+    jinn_store_fseek(c->fp, COL_HEADER_SIZE + c->count * c->elem_size, SEEK_SET);
+    jinn_store_fwrite(data, c->elem_size, 1, c->fp);
     c->count++;
-    if (fseek(c->fp, 8, SEEK_SET) != 0 ||
-        fwrite(&c->count, 8, 1, c->fp) != 1) {
-        fprintf(stderr, "jinn: column: failed to update count header\n");
-        c->count--;
-    }
-    fflush(c->fp);
+    jinn_store_fseek(c->fp, 8, SEEK_SET);
+    jinn_store_fwrite(&c->count, 8, 1, c->fp);
+    jinn_store_fflush(c->fp);
 }
 int64_t jinn_col_count(JinnCol *c) {
     return c ? c->count : 0;
 }
 int64_t jinn_col_read_all(JinnCol *c, void *buf, int64_t max_elems) {
-    if (!c || !c->fp || c->count == 0) return 0;
+    if (!c || !c->fp || c->count == 0 || max_elems <= 0) return 0;
     int64_t n = c->count < max_elems ? c->count : max_elems;
-    fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
-    int64_t got = (int64_t)fread(buf, c->elem_size, n, c->fp);
+    jinn_store_fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
+    int64_t got = (int64_t)jinn_store_fread(buf, c->elem_size, n, c->fp);
     return got;
 }
 
@@ -91,8 +93,8 @@ int64_t jinn_col_sum_i64(JinnCol *c) {
     if (!c || c->count == 0) return 0;
     int64_t *buf = (int64_t *)col_alloc(c->count, 8);
     if (!buf) return 0;
-    fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
-    int64_t n = (int64_t)fread(buf, 8, c->count, c->fp);
+    jinn_store_fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
+    int64_t n = (int64_t)jinn_store_fread(buf, 8, c->count, c->fp);
     int64_t sum = 0;
     for (int64_t i = 0; i < n; i++) {
         sum += buf[i];
@@ -104,8 +106,8 @@ int64_t jinn_col_min_i64(JinnCol *c) {
     if (!c || c->count == 0) return 0;
     int64_t *buf = (int64_t *)col_alloc(c->count, 8);
     if (!buf) return 0;
-    fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
-    int64_t n = (int64_t)fread(buf, 8, c->count, c->fp);
+    jinn_store_fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
+    int64_t n = (int64_t)jinn_store_fread(buf, 8, c->count, c->fp);
     int64_t val = buf[0];
     for (int64_t i = 1; i < n; i++) {
         if (buf[i] < val) val = buf[i];
@@ -117,8 +119,8 @@ int64_t jinn_col_max_i64(JinnCol *c) {
     if (!c || c->count == 0) return 0;
     int64_t *buf = (int64_t *)col_alloc(c->count, 8);
     if (!buf) return 0;
-    fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
-    int64_t n = (int64_t)fread(buf, 8, c->count, c->fp);
+    jinn_store_fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
+    int64_t n = (int64_t)jinn_store_fread(buf, 8, c->count, c->fp);
     int64_t val = buf[0];
     for (int64_t i = 1; i < n; i++) {
         if (buf[i] > val) val = buf[i];
@@ -133,8 +135,8 @@ double jinn_col_sum_f64(JinnCol *c) {
     if (!c || c->count == 0) return 0.0;
     double *buf = (double *)col_alloc(c->count, 8);
     if (!buf) return 0.0;
-    fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
-    int64_t n = (int64_t)fread(buf, 8, c->count, c->fp);
+    jinn_store_fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
+    int64_t n = (int64_t)jinn_store_fread(buf, 8, c->count, c->fp);
     double sum = 0.0;
     for (int64_t i = 0; i < n; i++) {
         sum += buf[i];
@@ -146,8 +148,8 @@ double jinn_col_min_f64(JinnCol *c) {
     if (!c || c->count == 0) return 0.0;
     double *buf = (double *)col_alloc(c->count, 8);
     if (!buf) return 0.0;
-    fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
-    int64_t n = (int64_t)fread(buf, 8, c->count, c->fp);
+    jinn_store_fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
+    int64_t n = (int64_t)jinn_store_fread(buf, 8, c->count, c->fp);
     double val = buf[0];
     for (int64_t i = 1; i < n; i++) {
         if (buf[i] < val) val = buf[i];
@@ -159,8 +161,8 @@ double jinn_col_max_f64(JinnCol *c) {
     if (!c || c->count == 0) return 0.0;
     double *buf = (double *)col_alloc(c->count, 8);
     if (!buf) return 0.0;
-    fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
-    int64_t n = (int64_t)fread(buf, 8, c->count, c->fp);
+    jinn_store_fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
+    int64_t n = (int64_t)jinn_store_fread(buf, 8, c->count, c->fp);
     double val = buf[0];
     for (int64_t i = 1; i < n; i++) {
         if (buf[i] > val) val = buf[i];
@@ -172,8 +174,8 @@ int64_t jinn_col_distinct_i64(JinnCol *c) {
     if (!c || c->count == 0) return 0;
     int64_t *buf = (int64_t *)col_alloc(c->count, 8);
     if (!buf) return 0;
-    fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
-    int64_t n = (int64_t)fread(buf, 8, c->count, c->fp);
+    jinn_store_fseek(c->fp, COL_HEADER_SIZE, SEEK_SET);
+    int64_t n = (int64_t)jinn_store_fread(buf, 8, c->count, c->fp);
     int64_t unique = 0;
     int64_t tbl_cap = n < 16 ? 32 : n * 2;
 

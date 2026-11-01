@@ -288,7 +288,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(init_bb);
         let new_fp: inkwell::values::BasicValueEnum<'ctx> = fp_val;
 
-        let fwrite_fn = crate::codegen::fn_or_die(&self.module, "fwrite");
+        let fwrite_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fwrite");
 
         let magic = b!(self.bld.build_global_string_ptr("JADESTR\0", "magic"));
         b!(self.bld.build_call(
@@ -363,7 +363,7 @@ impl<'ctx> Compiler<'ctx> {
         ));
 
         if is_transient {
-            let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
+            let fflush_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fflush");
             b!(self.bld.build_call(fflush_fn, &[new_fp.into()], ""));
         } else {
             let finish_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_finish_create");
@@ -464,7 +464,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(open_bb);
         let wal_path = format!("{store_name}.wal\0");
         let wal_str = b!(self.bld.build_global_string_ptr(&wal_path, "wal.path"));
-        let wal_open_fn = crate::codegen::fn_or_die(&self.module, "jinn_wal_open");
+        let wal_open_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_wal_open");
         let new_wal = self
             .call_result(b!(self.bld.build_call(
                 wal_open_fn,
@@ -884,8 +884,8 @@ impl<'ctx> Compiler<'ctx> {
         let fp = self.store_lock(store_name)?;
 
         let total = self.store_read_count(fp, rec_size, store_name)?;
-        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
-        let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
+        let fseek_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fseek");
+        let fread_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fread");
 
         let i_ptr = self.entry_alloca(i64t.into(), "rb.i");
         b!(self.bld.build_store(i_ptr, i64t.const_int(0, false)));

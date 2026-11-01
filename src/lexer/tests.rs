@@ -42,6 +42,29 @@ fn bases() {
 }
 
 #[test]
+fn integer_magnitudes_preserve_all_u64_bits() {
+    for text in [
+        "18446744073709551615".to_string(),
+        format!("0x{:x}", u64::MAX),
+        format!("0o{:o}", u64::MAX),
+        format!("0b{:b}", u64::MAX),
+    ] {
+        assert_eq!(lex(&text)[0], Token::Int(u64::MAX));
+        let tokens = lex(&format!("-{text}"));
+        assert_eq!(tokens[0], Token::Minus);
+        assert_eq!(tokens[1], Token::Int(u64::MAX));
+    }
+    for text in [
+        "18446744073709551616".to_string(),
+        "0x10000000000000000".to_string(),
+        format!("0o{:o}", 1u128 << 64),
+        format!("0b{:b}", 1u128 << 64),
+    ] {
+        assert!(Lexer::new(&text).tokenize().is_err(), "{text}");
+    }
+}
+
+#[test]
 fn floats() {
     let t = lex("3.5 1e-3 2.5e10");
     assert_eq!(t[0], Token::Float(3.5));

@@ -1,7 +1,7 @@
 use super::*;
 
 impl<'ctx> Compiler<'ctx> {
-    pub(crate) fn setup_target(&self) -> Result<(), String> {
+    pub(crate) fn setup_target(&mut self) -> Result<(), String> {
         let tm = self.target_machine(OptimizationLevel::None)?;
         let triple = if let Some(ref t) = self.target_triple {
             inkwell::targets::TargetTriple::create(t)
@@ -11,6 +11,7 @@ impl<'ctx> Compiler<'ctx> {
         self.module.set_triple(&triple);
         self.module
             .set_data_layout(&tm.get_target_data().get_data_layout());
+        self.target_data = Some(tm.get_target_data());
         Ok(())
     }
 
@@ -55,16 +56,7 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     pub(crate) fn zero_init(&self, ty: &Type) -> BasicValueEnum<'ctx> {
-        match ty {
-            Type::I8 | Type::U8 => self.ctx.i8_type().const_int(0, false).into(),
-            Type::I16 | Type::U16 => self.ctx.i16_type().const_int(0, false).into(),
-            Type::I32 | Type::U32 => self.ctx.i32_type().const_int(0, false).into(),
-            Type::I64 | Type::U64 => self.ctx.i64_type().const_int(0, false).into(),
-            Type::F32 => self.ctx.f32_type().const_float(0.0).into(),
-            Type::F64 => self.ctx.f64_type().const_float(0.0).into(),
-            Type::Bool => self.ctx.bool_type().const_int(0, false).into(),
-            _ => self.ctx.i64_type().const_int(0, false).into(),
-        }
+        self.default_val(ty)
     }
 
     pub(crate) fn compile_const_expr(
@@ -140,7 +132,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> BasicValueEnum<'ctx> {
         csv.try_as_basic_value()
             .basic()
-            .unwrap_or_else(|| self.ctx.i64_type().const_int(0, false).into())
+            .unwrap_or_else(|| self.llvm_ty(&Type::Void).const_zero())
     }
 
     #[track_caller]
@@ -429,7 +421,7 @@ impl<'ctx> Compiler<'ctx> {
                     | ExprKind::ChannelSend(_, _)
                     | ExprKind::ChannelRecv(_)
                     | ExprKind::Select(_, _)
-                    | ExprKind::CoroutineCreate(_, _)
+                    | ExprKind::CoroutineCreate(..)
                     | ExprKind::Yield(_)
             )
         }

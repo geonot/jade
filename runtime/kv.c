@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <errno.h>
+#include <sys/stat.h>
 #include "jinn_rt.h"
 
 __attribute__((weak)) int jinn_txn_active(void) { return 0; }
@@ -16,6 +18,7 @@ __attribute__((weak)) void jinn_txn_track_mem(void *key, void (*rb)(void *),
     (void)arg;
     if (rel) rel(arg);
 }
+__attribute__((weak)) void jinn_txn_track_path(const char *path) { (void)path; }
 __attribute__((weak)) void jinn_store_truncation_warn(int64_t original_len,
                                                       int64_t max_len) {
     fprintf(stderr,
@@ -56,9 +59,11 @@ static uint64_t kv_hash(const char *key, int64_t len) {
 static int64_t kv_find_slot(JinnKV *kv, uint64_t hash, const char *key, int64_t key_len) {
     int64_t mask = kv->capacity - 1;
     int64_t slot = (int64_t)(hash & (uint64_t)mask);
-    for (;;) {
+    int64_t tombstone = -1;
+    for (int64_t probes = 0; probes < kv->capacity; probes++) {
         KvSlot *s = &kv->slots[slot];
-        if (s->status == KV_EMPTY) return -(slot + 1);
+        if (s->status == KV_TOMBSTONE && tombstone < 0) tombstone = slot;
+        if (s->status == KV_EMPTY) return -((tombstone >= 0 ? tombstone : slot) + 1);
         if (s->status == KV_OCCUPIED && s->hash == hash) {
             int64_t slen = (int64_t)strnlen(s->key, KV_KEY_SIZE);
             if (slen == key_len && memcmp(s->key, key, (size_t)key_len) == 0) {
@@ -67,17 +72,18 @@ static int64_t kv_find_slot(JinnKV *kv, uint64_t hash, const char *key, int64_t 
         }
         slot = (slot + 1) & mask;
     }
+    if (tombstone >= 0) return -(tombstone + 1);
+    jinn_persistence_fail("key-value table capacity");
+    return 0;
 }
 static void kv_grow(JinnKV *kv) {
     int64_t old_cap = kv->capacity;
     KvSlot *old_slots = kv->slots;
+    if (old_cap > INT64_MAX / 2 || (uint64_t)old_cap > SIZE_MAX / (2 * sizeof(KvSlot)))
+        jinn_persistence_fail("key-value capacity overflow");
     kv->capacity = old_cap * 2;
     kv->slots = (KvSlot *)calloc((size_t)kv->capacity, sizeof(KvSlot));
-    if (!kv->slots) {
-        kv->capacity = old_cap;
-        kv->slots = old_slots;
-        return;
-    }
+    if (!kv->slots) jinn_persistence_fail("key-value growth allocation");
     kv->count = 0;
     for (int64_t i = 0; i < old_cap; i++) {
         if (old_slots[i].status == KV_OCCUPIED) {
@@ -112,8 +118,7 @@ static int kv_fill(FILE *tmp, void *arg) {
 static void kv_save(JinnKV *kv) {
     if (!kv->path) return;
     if (jinn_atomic_rewrite(kv->path, kv_fill, kv) != 0) {
-        fprintf(stderr, "jinn: kv: persisting %s failed — on-disk state is stale\n",
-                kv->path);
+        jinn_persistence_fail("key-value persistence");
     }
 }
 typedef struct {
@@ -151,56 +156,47 @@ static void kv_txn_guard(JinnKV *kv) {
     s->slots = copy;
     s->capacity = kv->capacity;
     s->count = kv->count;
+    jinn_txn_track_path(kv->path);
     jinn_txn_track_mem(kv, kv_txn_rollback, kv_txn_release, s);
 }
 JinnKV *jinn_kv_open(const char *path) {
     int lock_fd = jinn_writer_lock(path);
     if (lock_fd < 0) return NULL;
     JinnKV *kv = (JinnKV *)calloc(1, sizeof(JinnKV));
-    if (!kv) {
-        jinn_writer_unlock(lock_fd);
-        return NULL;
-    }
+    if (!kv) jinn_persistence_fail("key-value allocation");
     kv->path = strdup(path);
     kv->lock_fd = lock_fd;
     kv->capacity = KV_INIT_CAP;
     kv->slots = (KvSlot *)calloc((size_t)kv->capacity, sizeof(KvSlot));
-    if (!kv->slots) {
-        jinn_writer_unlock(lock_fd);
-        free(kv->path);
-        free(kv);
-        return NULL;
-    }
+    if (!kv->path || !kv->slots) jinn_persistence_fail("key-value allocation");
     kv->count = 0;
     FILE *fp = fopen(path, "r+b");
     if (fp) {
         char magic[KV_MAGIC_SIZE];
-        if (fread(magic, 1, KV_MAGIC_SIZE, fp) == KV_MAGIC_SIZE
-            && memcmp(magic, KV_MAGIC, KV_MAGIC_SIZE) == 0) {
-            int64_t entry_count = 0;
-            if (fread(&entry_count, sizeof(int64_t), 1, fp) != 1 || entry_count < 0) {
-                entry_count = 0;
-            }
-            while ((double)(entry_count + 1) / (double)kv->capacity > KV_LOAD_MAX) {
-                int64_t new_cap = kv->capacity * 2;
-                free(kv->slots);
-                kv->capacity = new_cap;
-                kv->slots = (KvSlot *)calloc((size_t)kv->capacity, sizeof(KvSlot));
-            }
-
-            for (int64_t i = 0; i < entry_count; i++) {
-                KvSlot entry;
-                if (fread(&entry, sizeof(KvSlot), 1, fp) != 1) break;
-                entry.status = KV_OCCUPIED;
-                int64_t key_len = (int64_t)strnlen(entry.key, KV_KEY_SIZE);
-                int64_t slot = kv_find_slot(kv, entry.hash, entry.key, key_len);
-                if (slot < 0) slot = -(slot + 1);
-                kv->slots[slot] = entry;
-                kv->count++;
-            }
+        jinn_store_fread(magic, 1, KV_MAGIC_SIZE, fp);
+        int64_t entry_count;
+        jinn_store_fread(&entry_count, sizeof entry_count, 1, fp);
+        struct stat st;
+        if (memcmp(magic, KV_MAGIC, KV_MAGIC_SIZE) || entry_count < 0 ||
+            (uint64_t)entry_count > (INT64_MAX - 16) / sizeof(KvSlot) ||
+            fstat(fileno(fp), &st) != 0 || st.st_size != 16 + entry_count * (int64_t)sizeof(KvSlot))
+            jinn_persistence_fail("key-value header validation");
+        while ((double)(entry_count + 1) / (double)kv->capacity > KV_LOAD_MAX) kv_grow(kv);
+        for (int64_t i = 0; i < entry_count; i++) {
+            KvSlot entry;
+            jinn_store_fread(&entry, sizeof entry, 1, fp);
+            int64_t key_len = (int64_t)strnlen(entry.key, KV_KEY_SIZE);
+            if (entry.status != KV_OCCUPIED || key_len <= 0 || key_len >= KV_KEY_SIZE ||
+                kv_hash(entry.key, key_len) != entry.hash)
+                jinn_persistence_fail("key-value entry validation");
+            int64_t slot = kv_find_slot(kv, entry.hash, entry.key, key_len);
+            if (slot >= 0) jinn_persistence_fail("duplicate key-value entry");
+            kv->slots[-(slot + 1)] = entry;
+            kv->count++;
         }
-        fclose(fp);
+        if (fclose(fp) != 0) jinn_persistence_fail("key-value close");
     } else {
+        if (errno != ENOENT) jinn_persistence_fail("key-value open");
         kv_save(kv);
     }
     return kv;

@@ -7,9 +7,31 @@ pub fn format_source(src: &str) -> Result<String, String> {
     let tokens = lexer.tokenize().map_err(|e| e.to_string())?;
     let mut sink = CommentSink::new(src, lexer.comments());
     let prog = Parser::new(tokens)
-        .parse_program()
+        .parse_syntax_program()
         .map_err(|e| e.to_string())?;
-    Ok(format_program(&prog, &mut sink))
+    let formatted = format_program(&prog, &mut sink);
+    verify_preservation(src, &formatted)?;
+    Ok(formatted)
+}
+
+fn normalized_program(src: &str) -> Result<Program, String> {
+    let mut tokens = Lexer::new(src).tokenize().map_err(|e| e.to_string())?;
+    for token in &mut tokens {
+        token.span = Span::dummy();
+    }
+    Parser::new(tokens)
+        .parse_syntax_program()
+        .map_err(|e| e.to_string())
+}
+
+fn verify_preservation(src: &str, formatted: &str) -> Result<(), String> {
+    let before = normalized_program(src)?;
+    let after = normalized_program(formatted)
+        .map_err(|e| format!("refusing output that does not parse; source is unchanged: {e}"))?;
+    if before != after {
+        return Err("refusing output that changes the syntax tree; source is unchanged".into());
+    }
+    Ok(())
 }
 
 struct CommentSink {
@@ -201,6 +223,9 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize, sink: &mut CommentSi
                     out.push_str(&fields.join(", "));
                     out.push(')');
                 }
+                if let Some(discriminant) = v.discriminant {
+                    out.push_str(&format!(" is {discriminant}"));
+                }
                 out.push('\n');
             }
         }
@@ -306,7 +331,7 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize, sink: &mut CommentSi
                         out.push_str(&format_expr(sleep_ms));
                     }
                 } else {
-                    out.push_str(&format!("@{}", h.name));
+                    out.push_str(&format!("{}{}", if h.is_sync { "*" } else { "@" }, h.name));
                     let ps: Vec<String> = h
                         .params
                         .iter()
@@ -389,19 +414,36 @@ fn format_decl(out: &mut String, decl: &Decl, level: usize, sink: &mut CommentSi
 
 fn format_fn(out: &mut String, f: &Fn, level: usize, sink: &mut CommentSink) {
     indent(out, level);
+    for (enabled, name) in [
+        (f.attrs.inline, "inline"),
+        (f.attrs.noinline, "noinline"),
+        (f.attrs.cold, "cold"),
+        (f.attrs.hot, "hot"),
+        (f.attrs.no_yield, "no_yield"),
+    ] {
+        if enabled {
+            out.push_str(&format!("@{name} "));
+        }
+    }
     out.push('*');
     out.push_str(&f.name.to_string());
     if !f.type_params.is_empty() {
-        out.push_str(&format!(" of {}", Symbol::join_vec(&f.type_params, ", ")));
+        let params: Vec<_> = f
+            .type_params
+            .iter()
+            .map(|name| {
+                if let Some((_, bounds)) = f.type_bounds.iter().find(|(n, _)| n == name) {
+                    format!("{name}: {}", Symbol::join_vec(bounds, " + "))
+                } else {
+                    name.to_string()
+                }
+            })
+            .collect();
+        out.push_str(&format!(" of {}", params.join(", ")));
     }
-    let visible_params: Vec<&Param> = f
-        .params
-        .iter()
-        .filter(|p| p.name.as_str() != "self")
-        .collect();
-    if !visible_params.is_empty() {
+    if !f.params.is_empty() {
         out.push('(');
-        for (i, p) in visible_params.iter().enumerate() {
+        for (i, p) in f.params.iter().enumerate() {
             if i > 0 {
                 out.push_str(", ");
             }
@@ -435,6 +477,21 @@ fn format_fn(out: &mut String, f: &Fn, level: usize, sink: &mut CommentSink) {
     for et in &f.error_types {
         out.push_str(&format!(" ! {}", format_type(et)));
     }
+    if let Some(needs) = &f.needs {
+        out.push_str(" needs ");
+        if needs.is_empty() {
+            out.push_str("pure");
+        } else {
+            let annots: Vec<_> = needs
+                .iter()
+                .map(|annot| match &annot.scope {
+                    Some(scope) => format!("{} '{}'", annot.class, escape_string_literal(scope)),
+                    None => annot.class.clone(),
+                })
+                .collect();
+            out.push_str(&annots.join(", "));
+        }
+    }
     out.push('\n');
     format_block(out, &f.body, level + 1, sink);
 }
@@ -463,13 +520,68 @@ fn format_block(out: &mut String, stmts: &[Stmt], level: usize, sink: &mut Comme
     }
 }
 
-fn format_postfix_recv(e: &Expr) -> String {
-    match e {
-        Expr::BinOp(..) | Expr::Ternary(..) | Expr::As(..) | Expr::UnaryOp(..) => {
-            format!("({})", format_expr(e))
-        }
-        _ => format_expr(e),
+fn binary_precedence(op: BinOp) -> u8 {
+    match op {
+        BinOp::Or => 2,
+        BinOp::And => 4,
+        BinOp::Eq | BinOp::Ne => 6,
+        BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => 7,
+        BinOp::BitOr => 8,
+        BinOp::BitXor => 9,
+        BinOp::BitAnd => 10,
+        BinOp::Shl | BinOp::Shr | BinOp::Ushr => 11,
+        BinOp::Add | BinOp::Sub => 12,
+        BinOp::Mul | BinOp::Div | BinOp::Mod => 13,
+        BinOp::Exp => 14,
     }
+}
+
+fn expression_precedence(e: &Expr) -> u8 {
+    match e {
+        Expr::Ternary(..) | Expr::Quaternary(..) | Expr::IfExpr(..) => 0,
+        Expr::Pipe(..) => 1,
+        Expr::BinOp(_, op, _, _) => binary_precedence(*op),
+        Expr::UnaryOp(UnaryOp::Not, _, _) => 5,
+        Expr::UnaryOp(..) | Expr::Deref(..) | Expr::Freeze(..) => 15,
+        Expr::Call(..)
+        | Expr::Method(..)
+        | Expr::Field(..)
+        | Expr::Index(..)
+        | Expr::As(..)
+        | Expr::AsFormat(..)
+        | Expr::StrictCast(..) => 16,
+        Expr::None(..)
+        | Expr::Void(..)
+        | Expr::Int(..)
+        | Expr::Float(..)
+        | Expr::Str(..)
+        | Expr::Bool(..)
+        | Expr::Ident(..)
+        | Expr::Array(..)
+        | Expr::Tuple(..)
+        | Expr::Struct(..)
+        | Expr::Placeholder(..)
+        | Expr::IndexPlaceholder(..)
+        | Expr::ListComp(..)
+        | Expr::ChannelCreate(..)
+        | Expr::Unreachable(..)
+        | Expr::QualifiedIdent(..)
+        | Expr::Grad(..) => 17,
+        _ => 0,
+    }
+}
+
+fn format_operand(e: &Expr, minimum: u8) -> String {
+    let text = format_expr(e);
+    if expression_precedence(e) < minimum {
+        format!("({text})")
+    } else {
+        text
+    }
+}
+
+fn format_postfix_recv(e: &Expr) -> String {
+    format_operand(e, 16)
 }
 
 fn format_query_block(out: &mut String, src: &Expr, clauses: &[QueryClause], level: usize) {
@@ -604,6 +716,9 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize, sink: &mut CommentSi
     match stmt {
         Stmt::Bind(b) => {
             indent(out, level);
+            if b.atomic {
+                out.push_str("atomic ");
+            }
             out.push_str(&b.name.to_string());
             if let Some(ref ty) = b.ty {
                 out.push_str(&format!(" as {}", format_type(ty)));
@@ -627,7 +742,11 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize, sink: &mut CommentSi
         }
         Stmt::Assign(lhs, rhs, _) => {
             indent(out, level);
-            out.push_str(&format_expr(lhs));
+            if matches!(lhs, Expr::Ident(..)) {
+                out.push_str(&format!("(({}))", format_expr(lhs)));
+            } else {
+                out.push_str(&format_expr(lhs));
+            }
             out.push_str(" is ");
             out.push_str(&format_expr(rhs));
             out.push('\n');
@@ -690,6 +809,9 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize, sink: &mut CommentSi
                 out.push_str(&format!("{label} is "));
             }
             out.push_str("for ");
+            if let Some(access) = f.access_mod {
+                out.push_str(&format!("{access} "));
+            }
             out.push_str(&f.bind.to_string());
             if let Some(ref b2) = f.bind2 {
                 out.push_str(&format!(", {b2}"));
@@ -724,9 +846,19 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize, sink: &mut CommentSi
             out.push_str("loop\n");
             format_block(out, &l.body, level + 1, sink);
         }
-        Stmt::Break(_, _) => {
+        Stmt::Break(value, _) => {
             indent(out, level);
-            out.push_str("break\n");
+            match value {
+                Some(Expr::Str(marker, _)) if marker.starts_with("__break_label__") => {
+                    out.push_str(&format!("break {}", &marker[15..]));
+                }
+                Some(Expr::Str(marker, _)) if marker.starts_with("__continue_label__") => {
+                    out.push_str(&format!("continue {}", &marker[18..]));
+                }
+                Some(e) => out.push_str(&format!("break {}", format_expr(e))),
+                None => out.push_str("break"),
+            }
+            out.push('\n');
         }
         Stmt::Continue(_) => {
             indent(out, level);
@@ -735,6 +867,21 @@ fn format_stmt(out: &mut String, stmt: &Stmt, level: usize, sink: &mut CommentSi
         Stmt::Nop(_) => {
             indent(out, level);
             out.push_str("nop\n");
+        }
+        Stmt::Match(m)
+            if m.arms.len() == 2
+                && m.arms[0].guard.is_none()
+                && m.arms[1].guard.is_none()
+                && matches!(m.arms[1].pat, Pat::Wild(_))
+                && m.arms[1].body.is_empty() =>
+        {
+            indent(out, level);
+            out.push_str(&format!(
+                "if {} is {}\n",
+                format_expr(&m.subject),
+                format_pat(&m.arms[0].pat)
+            ));
+            format_block(out, &m.arms[0].body, level + 1, sink);
         }
         Stmt::Match(m) => {
             indent(out, level);
@@ -906,7 +1053,7 @@ fn escape_string_literal(s: &str) -> String {
 fn format_expr(e: &Expr) -> String {
     match e {
         Expr::None(_) => "none".into(),
-        Expr::Void(_) => "void".into(),
+        Expr::Void(_) => "()".into(),
         Expr::Int(n, _) => n.to_string(),
         Expr::Float(f, _) => {
             let t = format!("{f}");
@@ -943,19 +1090,16 @@ fn format_expr(e: &Expr) -> String {
                 BinOp::Ushr => ">>>",
                 BinOp::Exp => "pow",
             };
-            let wrap = |e: &Expr| -> String {
-                match e {
-                    Expr::BinOp(_, sub_op, _, _) if sub_op != op => {
-                        format!("({})", format_expr(e))
-                    }
-                    Expr::Ternary(..) => format!("({})", format_expr(e)),
-                    Expr::UnaryOp(UnaryOp::Not, _, _) if !matches!(op, BinOp::And | BinOp::Or) => {
-                        format!("({})", format_expr(e))
-                    }
-                    _ => format_expr(e),
-                }
-            };
-            format!("{} {} {}", wrap(l), ops, wrap(r))
+            let precedence = binary_precedence(*op);
+            let comparison = matches!(op, BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge);
+            let left = precedence + u8::from(*op == BinOp::Exp || comparison);
+            let right = precedence + u8::from(*op != BinOp::Exp);
+            format!(
+                "{} {} {}",
+                format_operand(l, left),
+                ops,
+                format_operand(r, right)
+            )
         }
         Expr::UnaryOp(op, e, _) => {
             let ops = match op {
@@ -963,11 +1107,12 @@ fn format_expr(e: &Expr) -> String {
                 UnaryOp::Not => "not ",
                 UnaryOp::BitNot => "~",
             };
-            format!("{}{}", ops, format_expr(e))
+            let minimum = if *op == UnaryOp::Not { 5 } else { 15 };
+            format!("{}{}", ops, format_operand(e, minimum))
         }
         Expr::Call(callee, args, _) => {
             let arg_strs: Vec<String> = args.iter().map(format_expr).collect();
-            format!("{}({})", format_expr(callee), arg_strs.join(", "))
+            format!("{}({})", format_postfix_recv(callee), arg_strs.join(", "))
         }
         Expr::Method(obj, method, args, _) => {
             let arg_strs: Vec<String> = args.iter().map(format_expr).collect();
@@ -983,44 +1128,45 @@ fn format_expr(e: &Expr) -> String {
         }
         Expr::Ternary(c, t, f, _) => {
             if matches!(**f, Expr::Void(_)) {
-                format!("{} ? {}", format_expr(c), format_expr(t))
+                format!("{} ? {}", format_operand(c, 1), format_operand(t, 1))
             } else if matches!(**t, Expr::Void(_)) {
-                format!("{} ?! {}", format_expr(c), format_expr(f))
+                format!("{} ! {}", format_operand(c, 1), format_operand(f, 1))
             } else {
                 format!(
                     "{} ? {} ! {}",
-                    format_expr(c),
-                    format_expr(t),
-                    format_expr(f)
+                    format_operand(c, 1),
+                    format_operand(t, 1),
+                    format_operand(f, 1)
                 )
             }
         }
         Expr::Quaternary(subj, ok, nothing, err, _) => {
-            let mut s = format_expr(subj);
+            let mut s = format_operand(subj, 1);
             if let Some(ok) = ok {
-                s.push_str(&format!(" ? {}", format_expr(ok)));
+                s.push_str(&format!(" ? {}", format_operand(ok, 1)));
             }
             if let Some(nothing) = nothing {
-                s.push_str(&format!(" ! {}", format_expr(nothing)));
+                s.push_str(&format!(" ! {}", format_operand(nothing, 1)));
             }
             if let Some(err) = err {
-                s.push_str(&format!(" !! {}", format_expr(err)));
+                s.push_str(&format!(" !! {}", format_operand(err, 1)));
             }
             s
         }
-        Expr::As(e, ty, _) => match **e {
-            Expr::BinOp(..) | Expr::Ternary(..) => {
-                format!("({}) as {}", format_expr(e), format_type(ty))
-            }
-            _ => format!("{} as {}", format_expr(e), format_type(ty)),
-        },
+        Expr::As(e, ty, _) => {
+            format!("{} as {}", format_postfix_recv(e), format_type(ty))
+        }
         Expr::Array(elems, _) => {
             let es: Vec<String> = elems.iter().map(format_expr).collect();
             format!("[{}]", es.join(", "))
         }
         Expr::Tuple(elems, _) => {
             let es: Vec<String> = elems.iter().map(format_expr).collect();
-            format!("({})", es.join(", "))
+            if elems.len() == 1 {
+                format!("({},)", es[0])
+            } else {
+                format!("({})", es.join(", "))
+            }
         }
         Expr::Struct(name, fields, _) => {
             let fs: Vec<String> = fields
@@ -1054,7 +1200,7 @@ fn format_expr(e: &Expr) -> String {
             }
         }
         Expr::Pipe(l, r, rest, _) => {
-            let mut out = format!("{} ~ {}", format_expr(l), format_expr(r));
+            let mut out = format!("{} ~ {}", format_operand(l, 1), format_operand(r, 2));
             for e in rest {
                 out.push_str(&format!(", {}", format_expr(e)));
             }
@@ -1082,9 +1228,9 @@ fn format_expr(e: &Expr) -> String {
         }
         Expr::Placeholder(_) => "$".into(),
         Expr::IndexPlaceholder(_) => "$$".into(),
-        Expr::Ref(e, _) => format!("%{}", format_expr(e)),
-        Expr::Deref(e, _) => format!("@{}", format_expr(e)),
-        Expr::Freeze(e, _) => format!("freeze {}", format_expr(e)),
+        Expr::Ref(e, _) => format!("%{}", format_operand(e, 17)),
+        Expr::Deref(e, _) => format!("@{}", format_operand(e, 15)),
+        Expr::Freeze(e, _) => format!("freeze {}", format_operand(e, 15)),
         Expr::Embed(path, _) => format!("embed '{path}'"),
         Expr::ListComp(body, bind, iter, end, cond, _) => {
             let mut s = format!("[{} for {bind} in {}", format_expr(body), format_expr(iter));
@@ -1098,14 +1244,16 @@ fn format_expr(e: &Expr) -> String {
             s
         }
         Expr::Unreachable(_) => "unreachable".into(),
-        Expr::AsFormat(e, fmt, _) => format!("{} as {fmt}", format_expr(e)),
-        Expr::StrictCast(e, ty, _) => format!("{} as strict {}", format_expr(e), format_type(ty)),
+        Expr::AsFormat(e, fmt, _) => format!("{} as {fmt}", format_postfix_recv(e)),
+        Expr::StrictCast(e, ty, _) => {
+            format!("{} as strict {}", format_postfix_recv(e), format_type(ty))
+        }
         Expr::Slice(obj, from, to, _) => {
             format!(
                 "{} from {} to {}",
-                format_expr(obj),
-                format_expr(from),
-                format_expr(to)
+                format_postfix_recv(obj),
+                format_operand(from, 7),
+                format_operand(to, 7)
             )
         }
         Expr::NamedArg(name, value, _) => {
@@ -1132,7 +1280,7 @@ fn format_expr(e: &Expr) -> String {
             format!("send {}, {}", format_expr(ch), format_expr(v))
         }
         Expr::OfCall(f, arg, _) => {
-            format!("{} of {}", format_expr(f), format_expr(arg))
+            format!("{} of {}", format_expr(f), format_operand(arg, 17))
         }
         Expr::StoreQuery(store, filter, _) => {
             format!("{store}{}", format_store_filter(filter))
@@ -1234,5 +1382,67 @@ fn format_type(ty: &crate::types::Type) -> String {
             format!("{n}<{}>", ts.join(", "))
         }
         _ => format!("{ty}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preservation_guard_rejects_valid_but_changed_programs() {
+        for (source, changed) in [
+            (
+                "*main\n    log(10 - (3 - 1))\n",
+                "*main\n    log(10 - 3 - 1)\n",
+            ),
+            ("*main\n    log(-(1 + 2))\n", "*main\n    log(-1 + 2)\n"),
+            ("*main\n    x is -1 as u8\n", "*main\n    x is (-1) as u8\n"),
+            ("*f needs pure\n    1\n", "*f\n    1\n"),
+            ("enum E\n    A is 1\n", "enum E\n    A\n"),
+            ("*main\n    atomic x is 1\n", "*main\n    x is 1\n"),
+            ("*main\n    x is 1.0\n", "*main\n    x is 1\n"),
+            ("*main\n    x is (1,)\n", "*main\n    x is (1)\n"),
+        ] {
+            assert!(normalized_program(source).is_ok());
+            assert!(normalized_program(changed).is_ok());
+            assert!(
+                verify_preservation(source, changed)
+                    .unwrap_err()
+                    .contains("changes the syntax tree")
+            );
+        }
+        assert!(
+            verify_preservation("*main\n    log(1)\n", "*main\n    log(\n")
+                .unwrap_err()
+                .contains("does not parse")
+        );
+        verify_preservation(
+            "*main\n    log(0xff)\n",
+            "\n*main\n    log(255) # comment\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn printer_preserves_parser_desugaring() {
+        for src in [
+            include_str!("../snippets/1-100/s046.jn"),
+            include_str!("../std/csv.jn"),
+            include_str!("../std/http.jn"),
+            include_str!("../std/glob.jn"),
+            include_str!("../std/bangle.jn"),
+            include_str!("../snippets/guide_tour.jn"),
+        ] {
+            let mut lexer = Lexer::new(src);
+            let tokens = lexer.tokenize().unwrap();
+            let mut sink = CommentSink::new(src, lexer.comments());
+            let prog = Parser::new(tokens).parse_syntax_program().unwrap();
+            let formatted = format_program(&prog, &mut sink);
+            pretty_assertions::assert_eq!(
+                normalized_program(src).unwrap(),
+                normalized_program(&formatted).unwrap()
+            );
+        }
     }
 }

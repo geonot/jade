@@ -639,7 +639,7 @@ impl Typer {
                     }))
                 } else {
                     let lambda_captures_outer = match &value.kind {
-                        hir::ExprKind::Lambda(lparams, lbody) => {
+                        hir::ExprKind::Lambda(lparams, lbody, _) => {
                             let mut used: std::collections::HashSet<crate::hir::DefId> =
                                 std::collections::HashSet::new();
                             for st in lbody {
@@ -714,6 +714,19 @@ impl Typer {
                         .map(|_| self.infer_ctx.fresh_var())
                         .collect(),
                 };
+                let tuple_ty = Type::Tuple(tys.clone());
+                let result = self
+                    .infer_ctx
+                    .unify_at(&hval.ty, &tuple_ty, *span, "tuple binding");
+                self.collect_unify_error(result);
+                if tys.len() != names.len() {
+                    return Err(format!(
+                        "{}: tuple binding has {} names but {} elements",
+                        span.loc(),
+                        names.len(),
+                        tys.len()
+                    ));
+                }
                 for t in &tys {
                     if crate::typer::expr::views::type_contains_view(
                         &self.infer_ctx.shallow_resolve(t),
@@ -1067,6 +1080,7 @@ impl Typer {
                             Type::Vec(et) => *et.clone(),
                             Type::View(et) => *et.clone(),
                             Type::Channel(et) => *et.clone(),
+                            Type::Coroutine(et) | Type::Generator(et) => *et.clone(),
                             Type::String => Type::I64,
                             _ => {
                                 let iter_ty = iter.ty.clone();
@@ -1086,6 +1100,40 @@ impl Typer {
                             }
                         }
                     }
+                };
+                let (iter, iter_binding) = if end.is_none()
+                    && matches!(resolved_iter_ty, Type::Coroutine(_) | Type::Generator(_))
+                    && crate::typer::place::place_of_expr(&iter).is_none()
+                {
+                    let id = self.fresh_id();
+                    let name = Symbol::intern(&format!("__for_iter_{}", id.0));
+                    self.define_var(
+                        &name.as_str(),
+                        VarInfo {
+                            def_id: id,
+                            ty: iter.ty.clone(),
+                            ownership: Ownership::Owned,
+                            scheme: None,
+                        },
+                    );
+                    let value = hir::Expr {
+                        kind: hir::ExprKind::Var(id, name),
+                        ty: iter.ty.clone(),
+                        span: f.span,
+                    };
+                    let binding = hir::Stmt::Bind(hir::Bind {
+                        def_id: id,
+                        name,
+                        ty: iter.ty.clone(),
+                        value: iter,
+                        ownership: Ownership::Owned,
+                        atomic: false,
+                        access_mod: None,
+                        span: f.span,
+                    });
+                    (value, Some(binding))
+                } else {
+                    (iter, None)
                 };
                 let bind_id = self.fresh_id();
                 let outer_ids = self.in_scope_def_ids();
@@ -1150,6 +1198,9 @@ impl Typer {
                 self.finalize_loop_body_drops(&mut body);
                 self.pop_scope();
                 self.restore_moved_fields(pre_loop);
+                if let Some(binding) = iter_binding {
+                    self.pending_prelude_stmts.push(binding);
+                }
                 Ok(hir::Stmt::For(hir::For {
                     bind_id,
                     bind: f.bind,
@@ -1356,7 +1407,18 @@ impl Typer {
             }
 
             ast::Stmt::Defer(body, span) => {
-                let hbody = self.lower_block(body, ret_ty)?;
+                let saved_ret = self.current_fn_ret_ty.replace(Type::Void);
+                let saved_errors = std::mem::take(&mut self.current_fn_declared_errors);
+                let saved_reads = self.defer_read_vars.clone();
+                for id in self.in_scope_def_ids() {
+                    self.defer_read_vars.entry(id).or_insert(*span);
+                }
+                let hbody = self.lower_block(body, &Type::Void);
+                self.current_fn_ret_ty = saved_ret;
+                self.current_fn_declared_errors = saved_errors;
+                self.defer_read_vars = saved_reads;
+                let hbody =
+                    hbody.map_err(|error| format!("{}: in defer body: {error}", span.loc()))?;
                 Ok(hir::Stmt::Defer(hbody, *span))
             }
 

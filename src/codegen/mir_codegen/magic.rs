@@ -13,6 +13,12 @@ impl<'ctx> Compiler<'ctx> {
         args: &[mir::ValueId],
         _result_ty: &Type,
     ) -> Result<Option<BasicValueEnum<'ctx>>, String> {
+        if name == "__cancel_default" {
+            return Ok(Some(self.llvm_ty(_result_ty).const_zero()));
+        }
+        if name.starts_with("__cleanup_") {
+            return self.emit_cleanup_call(name, args).map(Some);
+        }
         if let Some(coro_name) = name.strip_prefix("__coro_create_") {
             return self.emit_coro_create(coro_name, args).map(Some);
         }
@@ -138,15 +144,17 @@ impl<'ctx> Compiler<'ctx> {
                 .map(Some);
         }
 
-        if name == "__sched_yield" {
-            let f = self
-                .module
-                .get_function("jinn_sched_yield")
-                .unwrap_or_else(|| {
-                    let ft = self.ctx.void_type().fn_type(&[], false);
-                    self.module
-                        .add_function("jinn_sched_yield", ft, Some(Linkage::External))
-                });
+        if matches!(name, "__sched_yield" | "__sched_poll") {
+            let runtime_name = if name == "__sched_poll" {
+                "jinn_sched_poll"
+            } else {
+                "jinn_sched_yield"
+            };
+            let f = self.module.get_function(runtime_name).unwrap_or_else(|| {
+                let ft = self.ctx.void_type().fn_type(&[], false);
+                self.module
+                    .add_function(runtime_name, ft, Some(Linkage::External))
+            });
             b!(self.bld.build_call(f, &[], ""));
             return Ok(Some(self.ctx.i8_type().const_int(0, false).into()));
         }
@@ -158,12 +166,13 @@ impl<'ctx> Compiler<'ctx> {
             if let Some(bufs) = self.select_data_bufs.get(&select_vid)
                 && let Some(&buf_ptr) = bufs.get(idx)
             {
-                let i64t = self.ctx.i64_type();
-                let val = b!(self.bld.build_load(i64t, buf_ptr, "recv.val"));
+                let val = b!(self
+                    .bld
+                    .build_load(self.llvm_ty(_result_ty), buf_ptr, "recv.val"));
                 return Ok(Some(val));
             }
 
-            return Ok(Some(self.ctx.i64_type().const_int(0, false).into()));
+            return Err("select payload buffer is unavailable".into());
         }
 
         if let Some(rest) = name.strip_prefix("__send_") {
@@ -642,12 +651,6 @@ impl<'ctx> Compiler<'ctx> {
             self.gen_field_ptr(gen_mem, Compiler::GEN_CORO_PTR_OFF, "gen.coro_ptr")?;
         b!(self.bld.build_store(coro_ptr_field, coro));
 
-        if name != "__anon" {
-            let name_alloca = self.entry_alloca(ptr.into(), name);
-            b!(self.bld.build_store(name_alloca, gen_mem));
-            self.set_var(name, name_alloca, Type::Coroutine(Box::new(Type::I64)));
-        }
-
         Ok(gen_mem.into())
     }
 
@@ -802,9 +805,25 @@ impl<'ctx> Compiler<'ctx> {
             .module
             .get_function("jinn_chan_send")
             .ok_or("jinn_chan_send not declared")?;
-        b!(self
+        let sent = b!(self
             .bld
-            .build_call(chan_send, &[ch_ptr.into(), msg_alloca.into()], ""));
+            .build_call(chan_send, &[ch_ptr.into(), msg_alloca.into()], "sent"));
+        let sent = self.call_result(sent).into_int_value();
+        let delivered = b!(self.bld.build_int_compare(
+            inkwell::IntPredicate::NE,
+            sent,
+            i32t.const_zero(),
+            "delivered"
+        ));
+        let function = self.cur_fn.ok_or("actor send outside function")?;
+        let rejected = self.ctx.append_basic_block(function, "message.rejected");
+        let next = self.ctx.append_basic_block(function, "message.sent");
+        b!(self.bld.build_conditional_branch(delivered, next, rejected));
+        self.bld.position_at_end(rejected);
+        let drop = self.actor_message_drop_fn(&actor_name.as_str())?;
+        b!(self.bld.build_call(drop, &[msg_alloca.into()], ""));
+        b!(self.bld.build_unconditional_branch(next));
+        self.bld.position_at_end(next);
 
         Ok(i64t.const_int(0, false).into())
     }
@@ -817,7 +836,6 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, String> {
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         let i32t = self.ctx.i32_type();
-        let i64t = self.ctx.i64_type();
         let n = channels.len();
 
         let case_struct_ty = self
@@ -830,7 +848,12 @@ impl<'ctx> Compiler<'ctx> {
         for (i, ch_vid) in channels.iter().enumerate() {
             let ch_val = self.val(*ch_vid).into_pointer_value();
 
-            let data_alloca = self.entry_alloca(i64t.into(), &format!("select.data.{i}"));
+            let elem_ty = match self.value_types.get(ch_vid) {
+                Some(Type::Channel(elem)) => (**elem).clone(),
+                _ => return Err("select requires channel operands".into()),
+            };
+            let data_alloca =
+                self.entry_alloca(self.llvm_ty(&elem_ty), &format!("select.data.{i}"));
             data_bufs.push(data_alloca);
 
             let idx0 = i32t.const_int(0, false);

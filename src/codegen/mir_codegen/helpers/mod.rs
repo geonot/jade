@@ -7,5 +7,6 @@ use inkwell::module::Linkage;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::BasicValueEnum;
 
+mod cleanup;
 mod runtime;
 mod values;

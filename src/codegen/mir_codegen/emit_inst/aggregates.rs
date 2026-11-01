@@ -114,13 +114,19 @@ impl<'ctx> Compiler<'ctx> {
                             .map(|(_, ftys)| ftys.clone())
                             .unwrap_or_default();
 
-                        let mut byte_offset: u64 = 0;
+                        if variant_field_types.len() != payload.len() {
+                            return Err(format!(
+                                "invalid native variant payload: {enum_name}.{variant}"
+                            ));
+                        }
+                        let layout = self.variant_layout(&enum_name.as_str(), &variant_field_types);
                         for (i, vid) in payload.iter().enumerate() {
+                            let byte_offset = layout.offsets[i];
+                            let field_ty = &variant_field_types[i];
                             let v = self.val(*vid);
-                            let is_rec = variant_field_types
-                                .get(i)
-                                .map(|fty| Compiler::is_recursive_field(fty, &enum_name.as_str()))
-                                .unwrap_or(false);
+                            let v = self.coerce_aggregate_value(v, self.llvm_ty(field_ty))?;
+                            let is_rec =
+                                Compiler::is_recursive_field(field_ty, &enum_name.as_str());
                             let field_ptr = if byte_offset == 0 {
                                 payload_gep
                             } else {
@@ -135,8 +141,7 @@ impl<'ctx> Compiler<'ctx> {
                                 }
                             };
                             if is_rec {
-                                let actual_ty =
-                                    self.llvm_ty(variant_field_types.get(i).unwrap_or(&Type::I64));
+                                let actual_ty = self.llvm_ty(field_ty);
                                 let size = self.type_store_size(actual_ty);
                                 let malloc_fn = self.ensure_malloc();
                                 let heap = b!(self.bld.build_call(
@@ -150,12 +155,8 @@ impl<'ctx> Compiler<'ctx> {
                                 .into_pointer_value();
                                 b!(self.bld.build_store(heap, v));
                                 b!(self.bld.build_store(field_ptr, heap));
-                                byte_offset += 8;
                             } else {
                                 b!(self.bld.build_store(field_ptr, v));
-
-                                let type_size = self.type_store_size(v.get_type());
-                                byte_offset += (type_size + 7) & !7;
                             }
                         }
                         agg = b!(self.bld.build_load(enum_ty, alloca, "variant.loaded"));
@@ -685,28 +686,7 @@ impl<'ctx> Compiler<'ctx> {
                     let src_ty = self.value_types.get(val).cloned().ok_or_else(|| {
                         format!("ICE: missing value type for strict cast source {val:?}")
                     })?;
-                    let target_llvm = self.llvm_ty(target_ty);
-                    let casted = self.emit_cast(v, &src_ty, target_ty, target_llvm)?;
-
-                    let source_llvm = v.get_type();
-                    if v.is_int_value() && casted.is_int_value() {
-                        let back = self.emit_cast(casted, target_ty, &src_ty, source_llvm)?;
-                        let eq = b!(self.bld.build_int_compare(
-                            inkwell::IntPredicate::EQ,
-                            v.into_int_value(),
-                            back.into_int_value(),
-                            "strict.eq"
-                        ));
-
-                        let cur_fn = self.bld.get_insert_block().unwrap().get_parent().unwrap();
-                        let ok_bb = self.ctx.append_basic_block(cur_fn, "strict.ok");
-                        let trap_bb = self.ctx.append_basic_block(cur_fn, "strict.trap");
-                        b!(self.bld.build_conditional_branch(eq, ok_bb, trap_bb));
-                        self.bld.position_at_end(trap_bb);
-                        self.emit_trap("strict cast lost information");
-                        self.bld.position_at_end(ok_bb);
-                    }
-                    Ok(casted)
+                    self.emit_strict_cast(v, &src_ty, target_ty)
                 }
                 mir::InstKind::Ref(val) => {
                     let v = self.val(*val);
@@ -739,10 +719,10 @@ impl<'ctx> Compiler<'ctx> {
                 mir::InstKind::Alloc(val) => {
                     let v = self.val(*val);
                     let malloc = self.ensure_malloc();
-                    let size = v
-                        .get_type()
-                        .size_of()
-                        .unwrap_or(self.ctx.i64_type().const_int(8, false));
+                    let size = self
+                        .ctx
+                        .i64_type()
+                        .const_int(self.type_store_size(v.get_type()), false);
                     let ptr = b!(self.bld.build_call(malloc, &[size.into()], "alloc"))
                         .try_as_basic_value()
                         .basic()

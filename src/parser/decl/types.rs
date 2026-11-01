@@ -157,7 +157,10 @@ impl Parser {
         if self.check(Token::Is) {
             self.advance();
             if let Token::Int(n) = self.peek() {
-                discriminant = Some(*n);
+                discriminant = Some(
+                    i64::try_from(*n)
+                        .map_err(|_| self.error("enum discriminant does not fit in i64"))?,
+                );
                 self.advance();
             }
         }

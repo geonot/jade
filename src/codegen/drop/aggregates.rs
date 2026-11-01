@@ -266,16 +266,10 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(*case_bb);
 
             let payload_gep = b!(self.bld.build_struct_gep(st, ptr, 1, "de.payload"));
-            let mut byte_offset: u64 = 0;
-            for fty in vd.field_types.iter() {
+            let layout = self.variant_layout(name, &vd.field_types);
+            for (fty, byte_offset) in vd.field_types.iter().zip(layout.offsets) {
                 let is_rec = Compiler::is_recursive_field(fty, name);
-                let slot_size: u64 = if is_rec {
-                    8
-                } else {
-                    self.type_store_size(self.llvm_ty(fty))
-                };
                 if fty.is_trivially_droppable() && !is_rec {
-                    byte_offset += (slot_size + 7) & !7;
                     continue;
                 }
                 let f_ptr = if byte_offset == 0 {
@@ -300,7 +294,6 @@ impl<'ctx> Compiler<'ctx> {
                     let f_val = b!(self.bld.build_load(self.llvm_ty(fty), f_ptr, "de.vfv"));
                     self.drop_value(f_val, fty)?;
                 }
-                byte_offset += (slot_size + 7) & !7;
             }
             b!(self.bld.build_unconditional_branch(done_bb));
         }

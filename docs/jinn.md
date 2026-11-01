@@ -168,8 +168,24 @@ DEFAULT_PORT is 8080
 | `bool`                   | `true` or `false`        |
 | `String`                 | UTF-8 text               |
 
-Integer literals default to `i64` and adapt to the type they are used with.
+Integer literals default to `i64` and adapt to an inferred or expected numeric
+type. Their mathematical value must fit the resolved integer type; a positive
+literal is never reinterpreted as a negative bit pattern. Decimal, hexadecimal
+(`0x`), octal (`0o`) and binary (`0b`) magnitudes support up to `u64` maximum.
 Underscores may be used as digit separators: `1_000_000`.
+
+A leading minus negates the literal's magnitude before range checking, so
+`-9223372036854775808` is the `i64` minimum in every base. The positive magnitude
+`9223372036854775808` does not fit the default `i64`; use a `u64` annotation or
+an explicit cast. For example, `top as u64 is 18446744073709551615` and
+`top is 18446744073709551615 as u64` both preserve the unsigned maximum.
+An explicit cast takes a positive literal above `i64` maximum as a `u64` source;
+ordinary integer casts may then wrap into the destination. A negative literal
+below `i64` minimum has no representable integer source type and is rejected
+unless it adapts directly to a floating-point type.
+
+Negating an already typed signed integer is a checked arithmetic operation:
+negating its minimum traps, even when the result is unused.
 
 ---
 
@@ -301,8 +317,21 @@ result that does not fit the operand type traps with
 `runtime error: integer overflow` (exit status 134), as do division by zero,
 `INT_MIN / -1`, and a shift count at or above the bit width. Wrapping is
 opt-in and named at the call site — `wrapping_add`, `wrapping_sub`,
-`wrapping_mul` — for hashes, PRNGs, and bit masks; `saturating_*` clamps and
-`checked_*` returns `(value, overflowed)`.
+`wrapping_mul` — for hashes, PRNGs, and bit masks. These functions and
+`saturating_add/sub/mul` and `checked_add/sub/mul` require two operands of
+the same integer type, inferred from context when possible. Saturating
+operations clamp the mathematical result to that type's minimum or maximum;
+unsigned subtraction clamps at zero. Checked operations return
+`(wrapped_value, overflowed)`, including the wrapped value and a `true`
+overflow flag when the mathematical result does not fit. They do not trap
+on overflow.
+
+Integer `pow` is exact and checked in every build mode, in the integer
+domain selected by ordinary numeric coercions. It returns one for exponent zero, including
+`0 pow 0`; a negative integer exponent traps with
+`runtime error: negative integer exponent`. A result outside the operand
+type traps with `runtime error: integer overflow`. Floating `pow` remains
+a floating-point operation.
 
 <!-- doctest:prelude
 h is 14695981039346656037 as u64
@@ -327,6 +356,22 @@ y is x as f64            # widen — always safe
 z is big as strict i16   # narrow, panics if the value does not fit
 w is big as i16          # narrow, truncates
 ```
+
+Ordinary floating-to-integer casts truncate toward zero, saturate to the
+destination type's bounds, and convert NaN to zero. Positive and negative
+infinity saturate to the appropriate bound; negative values converted to
+an unsigned type clamp at zero. This applies to both `f32` and `f64` sources
+and every integer width. Integer-to-integer casts retain their low-bit
+truncation/sign-extension rules.
+
+Strict casts accept only numeric source and destination types and preserve the
+mathematical value exactly. Integer sign changes check the destination range,
+even at equal widths. Integer-to-float casts reject rounding; float-to-integer
+casts reject fractions and out-of-range values. Float-to-float casts reject
+rounding and overflow. All strict casts from floats reject NaN and infinities;
+signed zero is numerically zero and is accepted. Failure traps with
+`runtime error: strict cast lost information`, even if the result is unused.
+Ordinary integer-to-float and float-to-float casts may round.
 
 An integer literal that does not fit its annotated type is a compile error —
 `y as i8 is 300` rejects rather than wrapping. Cast explicitly (`300 as i8`)
@@ -990,8 +1035,35 @@ open('config')
     !! log('open failed')
 ```
 
-`defer` registers cleanup that runs when the function exits, whichever way it
-exits. Deferred blocks run in reverse order of registration.
+`defer` registers cleanup only when execution reaches it. Each execution registers
+one obligation, so an untaken branch registers nothing and a loop may register
+zero or many obligations. Registered blocks run once in reverse registration
+order when the enclosing function, handler, lambda or task returns normally,
+returns early, propagates an error or cooperatively unwinds from cancellation.
+A nested lexical block does not shorten this function scope; `break` and
+`continue` preserve obligations until function exit.
+
+Cleanup reads the current state of captured lexical bindings when it runs, not a
+snapshot of their values at registration. Distinct loop-body bindings have fresh
+storage each iteration; the counted-loop counter denotes that iteration's value.
+Captured owners and the owners behind borrowed views remain live until all
+registered blocks finish. Moving a captured owner while cleanup still needs it,
+returning it, or consuming it inside cleanup, is rejected; use an explicit local
+`copy` for a consuming call or return. Mutations and rebinding remain visible to cleanup. The return
+value is evaluated before cleanup starts.
+
+A deferred block must finish locally: it cannot return from the enclosing
+callable, propagate an error, yield, or break/continue an enclosing loop. Its own
+loops and nested callables retain their usual local control flow, and fallible
+operations may be handled explicitly. Cleanup is shielded from cooperative
+cancellation, including channel operations, so an obligation is not interrupted
+by the cancellation that triggered it. Blocking cleanup can therefore delay
+shutdown indefinitely; it must not depend on an already-joined or cancelled peer.
+
+Traps, allocation failure and process termination are fail-stop, not unwinding
+exits; they do not guarantee cleanup. Normal generator exhaustion runs registered
+cleanup. Dropping a suspended generator is not yet an unwinding exit and remains
+a tracked lifetime limitation.
 
 ```jinn
 *process()
@@ -1378,33 +1450,77 @@ store users
     r.age
 ```
 
-A `transaction` block is atomic with respect to escaping errors: if an error
-propagates out of the block (`err`, a failed `?` propagation), if `return`
-leaves mid-block, the writes are handled as a unit. Normal completion and
-`return` commit the batch durably (one group fsync instead of one per record);
-an escaping error or a runtime trap rolls every store touched inside the block
-back to its pre-transaction state — data files, WAL, and indexes alike.
-Nested `transaction` blocks join the outermost one: only the outermost commit
-makes the batch durable, and any rollback aborts the whole nest.
+### Transactions and persistence outcomes
 
-> **Current limitation:** rollback is ordered for safety (WAL truncated
-> first, then the data file restored atomically), but a crash exactly
-> between the two steps leaves the last transaction's writes in the data
-> file — structurally intact, not torn. Transaction state is per-task:
-> concurrent tasks each get their own, and one task's rollback never
-> touches another task's committed writes — a transaction holds the
-> store's writer lock from its first mutation to commit or rollback, so
-> other tasks' writes to that store wait for it. Two caveats follow from
-> the lock: transactions that touch the same two stores in opposite orders
-> can deadlock (roadmap `S-12`), and a task cancelled mid-transaction
-> currently leaves the lock held (`S-11`) — do not `stop` a scope whose
-> children are inside `transaction` blocks.
+A `transaction` groups mutations to every store and sidecar it touches.
+Nested blocks join the outermost transaction: only its completion acknowledges
+commit, and an escaping error aborts the whole nest. Transaction state belongs
+to the executing task. A process-wide writer gate serializes transactions and
+ordinary store mutations, so opposite store-acquisition orders do not deadlock
+and rollback cannot undo another task's committed writes. This is writer
+serialization, not snapshot isolation for concurrent readers.
 
-The supported field types are `i64`, `f64`, `bool`, and `String`.
-(Aggregate-typed fields currently compile and round-trip in simple cases,
-but they are unspecified and untested surface — `V-1`.) Query operators are
-`equals`, `neq`, `<`, `>`, `<=`, and `>=`, combined with `and` / `or`. Data is
-stored in a `<name>.store` file in the working directory.
+The supported native outcome contract is the same for a single store and for
+multiple stores with their WAL, index, key/value, bloom, column, version,
+full-text and vector participants:
+
+| Exit or failure | Outcome |
+| --- | --- |
+| Normal block completion | Commit; acknowledgement follows required participant and commit-decision durability. |
+| `return`, `break` or `continue` leaving the block | Commit before control leaves the transaction. |
+| `err` or another error propagating out | Roll back the entire transaction before propagating. A handled error that does not escape does not itself roll back. |
+| Cooperative task cancellation | Roll back before reached user `defer` actions run, release writer ownership, then unwind the task and its nested scopes. |
+| Runtime trap | Fail-stop. The trap path attempts rollback, but neither completed cleanup nor in-process recovery is guaranteed. Any retained journal is recovered on the next managed open. |
+| I/O, allocation, snapshot-limit or recovery-integrity failure | Fail-stop without a success acknowledgement. Failed persistence handles cannot be reused by user code; retain recovery evidence when recovery cannot safely finish. |
+| Process exit, kill or crash before acknowledgement | On reopen, an unfinished transaction restores the old state. A crash racing the durable commit decision may expose the whole old or whole new state, never a promised particular outcome. |
+| Crash after commit acknowledgement | The whole committed state survives within the filesystem and storage assumptions below. |
+
+Before a participant is mutated, its complete undo image is appended and synced
+to `.jinn-transaction`. Managed opens recover this directory journal before
+opening or replaying store/WAL/sidecar state. Commit syncs participants and WAL
+commit records before durably retiring the journal. Rollback durably restores
+all participants before retiring it. Recovery validates all complete records
+before rewriting any participant, ignores an incomplete append tail, and
+refuses corrupt complete records while preserving the evidence. Recovery itself
+may be interrupted and retried while that evidence remains intact.
+
+These guarantees are bounded to the tested Linux native runtime, one cooperating
+process, and ordinary unaliased regular files directly in the initialized
+working directory. The runtime takes nonblocking process exclusion through
+`.jinn-transaction.lock`; a second process fails rather than sharing stores.
+Symlinks, multiply linked files, subdirectory participants, reserved
+`.jinn-transaction` names, and a changed working directory are rejected. The
+directory must not be concurrently renamed or modified by an external process.
+Filesystem rename and file/directory sync must work, and storage must honor them.
+This is not protection against hostile filesystem races, media corruption or
+hardware that lies about flush completion. Copying a live directory, deleting
+its journal, and cross-directory journal relocation are unsupported. Relaxed
+or volatile operation outside a transaction does not acquire an acknowledged
+transaction's durability guarantee.
+
+Transactions currently snapshot entire files, not changed pages. Each tracked
+file, including WAL and sidecars, defaults to a 256 MiB preimage limit;
+`JINN_TXN_SNAPSHOT_MAX` accepts a positive byte count to override it. Invalid
+values fail-stop. Memory and journal space are O(total participant bytes), with
+additional WAL undo images; the WAL frame encoding also bounds an undo image
+below 4 GiB. Raising the cap is not a scalability fix. Blocking channel sends,
+receives, select waits, task/actor joins, and generator resume/suspension inside
+an active transaction are unsupported and fail-stop rather than waiting while
+holding writer ownership. Immediately ready channel operations are permitted.
+A lexical generator `yield` in a transaction is rejected at compile time.
+
+Persisted record fields accept all eight integer widths, `f32`, `f64`, `bool`,
+and `String`. Other fields, including aggregates and raw pointers, reject for
+lack of a defined encoding. Scalar fields and record padding use the native
+target ABI and endianness, not a portable wire format. A string occupies 256
+bytes: a native 64-bit byte length followed by at most 248 payload bytes;
+longer inputs are truncated to that payload limit. Schema migrations are
+bounded native add/drop/default transformations. An interrupted migration
+fingerprint refuses subsequent opens; automatic restartable migration progress,
+portable schema evolution and cross-target store interchange are not promised.
+
+Query operators are `equals`, `neq`, `<`, `>`, `<=`, and `>=`, combined with
+`and` / `or`. Data is stored in a `<name>.store` file in the working directory.
 
 ---
 

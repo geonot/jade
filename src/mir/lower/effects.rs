@@ -17,7 +17,9 @@ impl Lowerer {
             }
             hir::Stmt::Stop(expr, span) => {
                 let v = self.lower_expr(expr);
-                self.emit(InstKind::Call("__stop".into(), vec![v]), Type::Void, *span)
+                let result = self.emit(InstKind::Call("__stop".into(), vec![v]), Type::Void, *span);
+                self.lower_cancel_checkpoint(*span, false);
+                result
             }
             hir::Stmt::ScopeCancel(name, span) => {
                 if let Some((_, scope)) = self.scope_named.iter().rev().find(|(n, _)| n == name) {
@@ -33,7 +35,9 @@ impl Lowerer {
             }
             hir::Stmt::Join(expr, span) => {
                 let v = self.lower_expr(expr);
-                self.emit(InstKind::Call("__join".into(), vec![v]), Type::Void, *span)
+                let result = self.emit(InstKind::Call("__join".into(), vec![v]), Type::Void, *span);
+                self.lower_cancel_checkpoint(*span, false);
+                result
             }
             hir::Stmt::Asm(asm) => {
                 let input_vals: Vec<_> =

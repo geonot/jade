@@ -66,16 +66,6 @@
     log(v)
 
 
-type NetworkHeader @packed @strict
-    version as u8
-    msg_type as u8
-    length as u16
-    sequence as u32
-
-type AlignedBuffer @align(64)
-    data as i64
-
-
 *ffi_demo
     log('ffi demo (variadic printf not yet supported)')
 

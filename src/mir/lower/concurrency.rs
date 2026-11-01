@@ -54,6 +54,7 @@ impl Lowerer {
                     ty.clone(),
                     span,
                 );
+                let select_block = self.current_block;
 
                 if !arms.is_empty() {
                     let merge_bb = self.new_block("select.merge");
@@ -64,38 +65,52 @@ impl Lowerer {
                         cases.push((i as i64, arm_bb));
                         arm_bbs.push(arm_bb);
                         self.switch_to(arm_bb);
+                        let idx_val = self.emit(InstKind::IntConst(i as i64), Type::I64, span);
+                        let recv_val = self.emit(
+                            InstKind::Call(
+                                Symbol::intern("__select_recv"),
+                                vec![select_val, idx_val],
+                            ),
+                            arm.elem_ty.clone(),
+                            span,
+                        );
                         if let Some(bind_name) = &arm.binding {
-                            let idx_val = self.emit(InstKind::IntConst(i as i64), Type::I64, span);
-                            let recv_val = self.emit(
-                                InstKind::Call(
-                                    Symbol::intern("__select_recv"),
-                                    vec![select_val, idx_val],
-                                ),
-                                arm.elem_ty.clone(),
+                            if let Some(id) = arm.bind_id {
+                                if !self.bind_cleanup_cell(
+                                    id,
+                                    *bind_name,
+                                    recv_val,
+                                    arm.elem_ty.clone(),
+                                    true,
+                                    span,
+                                ) {
+                                    let key = self.alias_binder(id, *bind_name);
+                                    self.write_var(key, self.current_block, recv_val);
+                                }
+                            } else {
+                                self.write_var(*bind_name, self.current_block, recv_val);
+                            }
+                        } else if !arm.elem_ty.is_trivially_droppable() {
+                            self.emit(
+                                InstKind::Drop(recv_val, arm.elem_ty.clone()),
+                                Type::Void,
                                 span,
                             );
-                            self.write_var(*bind_name, self.current_block, recv_val);
                         }
+                        self.lower_cancel_checkpoint(span, false);
                         self.lower_block_stmts(&arm.body);
                         self.set_terminator(Terminator::Goto(merge_bb));
                     }
                     let default_bb = if let Some(def_body) = default {
                         let db = self.new_block("select.default");
                         self.switch_to(db);
+                        self.lower_cancel_checkpoint(span, false);
                         self.lower_block_stmts(def_body);
                         self.set_terminator(Terminator::Goto(merge_bb));
                         db
                     } else {
                         merge_bb
                     };
-
-                    let select_block = self
-                        .func
-                        .blocks
-                        .iter()
-                        .find(|b| b.insts.iter().any(|i| i.dest == Some(select_val)))
-                        .map(|b| b.id)
-                        .unwrap_or(self.current_block);
 
                     let saved_block = self.current_block;
                     self.switch_to(select_block);
@@ -112,30 +127,37 @@ impl Lowerer {
                     self.seal_block(merge_bb);
                 }
 
+                self.lower_cancel_checkpoint(span, false);
                 self.emit(InstKind::IntConst(0), Type::I64, span)
             }
 
-            ExprKind::CoroutineCreate(name, body) => {
+            ExprKind::CoroutineCreate(name, body, moved) => {
                 if name.as_str().starts_with("__anon")
                     && let Some(&scope_val) = self.scope_stack.last()
                 {
                     let mut refs = super::closures::VarRefs::default();
                     super::closures::collect_var_refs_block(body, &mut refs);
-                    let mut resolved: Vec<(Symbol, Symbol)> = refs
+                    let mut resolved: Vec<(Symbol, Symbol, hir::DefId)> = refs
                         .vars
                         .into_iter()
-                        .map(|(id, n)| (self.var_key(id, n), n))
+                        .map(|(id, n)| (self.var_key(id, n), n, id))
                         .collect();
-                    resolved.sort_by_key(|(key, n)| (n.as_str().to_string(), *key == *n));
-                    resolved.dedup_by_key(|(_, n)| *n);
+                    resolved.sort_by_key(|(key, n, _)| (n.as_str().to_string(), *key == *n));
+                    resolved.dedup_by_key(|(_, n, _)| *n);
 
                     let mut captures: Vec<(Symbol, Type)> = Vec::new();
                     let mut cap_vals: Vec<ValueId> = Vec::new();
-                    for (key, n) in resolved {
+                    for (key, n, id) in resolved {
                         let Some(t) = self.var_types.get(&key).cloned() else {
                             continue;
                         };
-                        cap_vals.push(self.read_var(key, self.current_block, t.clone(), span));
+                        let value = self.read_var(key, self.current_block, t.clone(), span);
+                        let value = if !moved.contains(&id) && !t.is_trivially_droppable() {
+                            self.emit(InstKind::Clone(value, t.clone()), t.clone(), span)
+                        } else {
+                            value
+                        };
+                        cap_vals.push(value);
                         captures.push((n, t));
                     }
                     for (sn, sv) in self.scope_named.clone() {
@@ -157,11 +179,13 @@ impl Lowerer {
                     );
                 }
                 self.lower_coroutine(*name, body, &[], span);
-                self.emit(
+                let value = self.emit(
                     InstKind::Call(Symbol::intern(&format!("__coro_create_{name}")), vec![]),
                     ty,
                     span,
-                )
+                );
+                self.write_var(*name, self.current_block, value);
+                value
             }
             ExprKind::CoroutineNext(coro) => {
                 let c = self.lower_expr(coro);
@@ -186,7 +210,17 @@ impl Lowerer {
                 let mut arg_ids: Vec<ValueId> = Vec::with_capacity(captures.len());
                 for (cap_name, cap_ty) in captures {
                     let key = alias_of.get(cap_name).copied().unwrap_or(*cap_name);
-                    arg_ids.push(self.read_var(key, self.current_block, cap_ty.clone(), span));
+                    let value = self.read_var(key, self.current_block, cap_ty.clone(), span);
+                    let owned = self
+                        .cleanup_param_ids
+                        .get(cap_name)
+                        .is_some_and(|id| self.cleanup_owned_params.contains(id));
+                    let value = if !owned && !cap_ty.is_trivially_droppable() {
+                        self.emit(InstKind::Clone(value, cap_ty.clone()), cap_ty.clone(), span)
+                    } else {
+                        value
+                    };
+                    arg_ids.push(value);
                 }
                 self.lower_coroutine_with_def(*name, *def_id, body, captures, span);
                 self.emit(
@@ -217,6 +251,7 @@ impl Lowerer {
             span,
         );
         self.scope_stack.push(scope);
+        self.owned_scopes.push(scope);
         if let Some(n) = name {
             self.scope_named.push((n, scope));
         }
@@ -225,6 +260,7 @@ impl Lowerer {
             self.scope_named.pop();
         }
         self.scope_stack.pop();
+        self.owned_scopes.pop();
         self.emit(
             InstKind::Call(Symbol::intern("__scope_stop_actors"), vec![scope]),
             Type::Void,
@@ -232,11 +268,13 @@ impl Lowerer {
         );
 
         if errs.is_empty() && handler.is_none() {
-            return self.emit(
+            let result = self.emit(
                 InstKind::Call(Symbol::intern("__scope_join"), vec![scope]),
                 Type::Void,
                 span,
             );
+            self.lower_cancel_checkpoint(span, false);
+            return result;
         }
 
         let result_ty = self.func.ret_ty.clone();
@@ -249,6 +287,7 @@ impl Lowerer {
             Type::I64,
             span,
         );
+        self.lower_cancel_checkpoint(span, false);
         let sentinel = self.emit(InstKind::IntConst(i64::MIN), Type::I64, span);
         let has_err = self.emit(
             InstKind::Cmp(crate::mir::CmpOp::Ne, got, sentinel, Type::I64),
@@ -279,8 +318,13 @@ impl Lowerer {
                         h.err_ty.clone(),
                         span,
                     );
-                    self.write_var(Symbol::intern("err"), self.current_block, err_inner);
-                    let _ = h.err_bind;
+                    self.bind_cleanup_borrow(
+                        h.err_bind,
+                        Symbol::intern("err"),
+                        err_inner,
+                        h.err_ty.clone(),
+                        span,
+                    );
                     self.lower_block_stmts(err_arm);
                 }
                 self.set_terminator(Terminator::Goto(done_bb));
@@ -361,14 +405,21 @@ impl Lowerer {
         sub.func.is_coroutine = true;
         sub.func.scheduler_task = scheduler_task;
 
+        let mut refs = super::closures::VarRefs::default();
+        super::closures::collect_var_refs_block(body, &mut refs);
         let entry = sub.func.entry;
         for (cap_name, cap_ty) in captures {
+            if let Some((id, _)) = refs.vars.iter().find(|(_, name)| name == cap_name) {
+                sub.cleanup_param_ids.insert(*cap_name, *id);
+                sub.cleanup_owned_params.insert(*id);
+            }
             let val = sub.new_value();
             sub.func.params.push(Param {
                 value: val,
                 name: *cap_name,
                 ty: cap_ty.clone(),
                 by_ref: false,
+                owned: !cap_ty.is_trivially_droppable(),
             });
             sub.var_types.insert(*cap_name, cap_ty.clone());
             sub.current_def
@@ -383,17 +434,6 @@ impl Lowerer {
         }
 
         super::finish_body(&mut sub, body, &Type::Void, span, false);
-
-        if scheduler_task {
-            let cleanup = sub.new_block("cancel.cleanup");
-            sub.seal_block(cleanup);
-            let saved = sub.current_block;
-            sub.switch_to(cleanup);
-            sub.lower_deferred_in_reverse();
-            sub.set_terminator(Terminator::Return(None));
-            sub.switch_to(saved);
-            sub.func.cancel_cleanup = Some(cleanup);
-        }
 
         self.lambda_fns.push(sub.func);
         self.lambda_fns.append(&mut sub.lambda_fns);

@@ -8,6 +8,9 @@ pub struct HirValidator {
     fn_defs: HashMap<u32, Span>,
     fn_sigs: HashMap<u32, (String, usize, usize)>,
     errors: Vec<String>,
+    cleanup: bool,
+    loop_depth: usize,
+    transaction_depth: usize,
 }
 
 impl HirValidator {
@@ -16,6 +19,9 @@ impl HirValidator {
             fn_defs: HashMap::new(),
             fn_sigs: HashMap::new(),
             errors: Vec::new(),
+            cleanup: false,
+            loop_depth: 0,
+            transaction_depth: 0,
         };
 
         for f in &prog.fns {
@@ -54,6 +60,17 @@ impl HirValidator {
                     v.validate_expr(sleep_ms);
                 }
                 v.validate_block(&h.body);
+            }
+        }
+        for store in &prog.stores {
+            for field in &store.fields {
+                if let Err(error) = crate::store_decorators::validate_field_encoding(
+                    &store.name.as_str(),
+                    &field.name.as_str(),
+                    &field.ty,
+                ) {
+                    v.errors.push(error);
+                }
             }
         }
         for ti in &prog.trait_impls {
@@ -107,6 +124,28 @@ impl HirValidator {
         }
     }
 
+    fn reject_cleanup_exit(&mut self, span: Span, kind: &str) {
+        if self.cleanup {
+            self.errors.push(format!(
+                "{}: `{kind}` cannot exit a defer body; cleanup must complete locally and handle errors explicitly",
+                span.loc()
+            ));
+        }
+    }
+
+    fn validate_callable_body(&mut self, body: &hir::Block) {
+        let cleanup = self.cleanup;
+        let depth = self.loop_depth;
+        let transaction_depth = self.transaction_depth;
+        self.cleanup = false;
+        self.loop_depth = 0;
+        self.transaction_depth = 0;
+        self.validate_block(body);
+        self.cleanup = cleanup;
+        self.loop_depth = depth;
+        self.transaction_depth = transaction_depth;
+    }
+
     fn validate_stmt(&mut self, stmt: &hir::Stmt) {
         match stmt {
             hir::Stmt::Bind(b) => {
@@ -150,7 +189,9 @@ impl HirValidator {
             }
             hir::Stmt::While(w) => {
                 self.validate_expr(&w.cond);
+                self.loop_depth += 1;
                 self.validate_block(&w.body);
+                self.loop_depth -= 1;
             }
             hir::Stmt::For(f) => {
                 self.validate_expr(&f.iter);
@@ -160,20 +201,34 @@ impl HirValidator {
                 if let Some(s) = &f.step {
                     self.validate_expr(s);
                 }
+                self.loop_depth += 1;
                 self.validate_block(&f.body);
+                self.loop_depth -= 1;
             }
-            hir::Stmt::Loop(l) => self.validate_block(&l.body),
-            hir::Stmt::Ret(e, _, _) => {
+            hir::Stmt::Loop(l) => {
+                self.loop_depth += 1;
+                self.validate_block(&l.body);
+                self.loop_depth -= 1;
+            }
+            hir::Stmt::Ret(e, _, span) => {
+                self.reject_cleanup_exit(*span, "return");
                 if let Some(expr) = e {
                     self.validate_expr(expr);
                 }
             }
-            hir::Stmt::Break(e, _) => {
+            hir::Stmt::Break(e, span) => {
+                if self.loop_depth == 0 {
+                    self.reject_cleanup_exit(*span, "break");
+                }
                 if let Some(expr) = e {
                     self.validate_expr(expr);
                 }
             }
-            hir::Stmt::Continue(_) => {}
+            hir::Stmt::Continue(span) => {
+                if self.loop_depth == 0 {
+                    self.reject_cleanup_exit(*span, "continue");
+                }
+            }
             hir::Stmt::Nop(_) => {}
             hir::Stmt::Match(m) => {
                 self.validate_expr(&m.subject);
@@ -186,26 +241,56 @@ impl HirValidator {
                 }
             }
             hir::Stmt::Drop(_, _, _, _) => {}
-            hir::Stmt::Asm(_) => {}
-            hir::Stmt::ErrReturn(e, _, _) => self.validate_expr(e),
-            hir::Stmt::Defer(body, _) => self.validate_block(body),
+            hir::Stmt::Asm(asm) => {
+                for (_, expr) in &asm.inputs {
+                    self.validate_expr(expr);
+                }
+            }
+            hir::Stmt::ErrReturn(e, _, span) => {
+                self.reject_cleanup_exit(*span, "error propagation");
+                self.validate_expr(e);
+            }
+            hir::Stmt::Defer(body, _) => {
+                let cleanup = self.cleanup;
+                let depth = self.loop_depth;
+                self.cleanup = true;
+                self.loop_depth = 0;
+                self.validate_block(body);
+                self.cleanup = cleanup;
+                self.loop_depth = depth;
+            }
             hir::Stmt::StoreInsert(_, exprs, _) => {
                 for e in exprs {
                     self.validate_expr(e);
                 }
             }
-            hir::Stmt::StoreDelete(_, _, _) => {}
-            hir::Stmt::StoreDestroy(_, _, _) => {}
-            hir::Stmt::StoreRestore(_, _, _) => {}
+            hir::Stmt::StoreDelete(_, filter, _)
+            | hir::Stmt::StoreDestroy(_, filter, _)
+            | hir::Stmt::StoreRestore(_, filter, _) => self.validate_filter(filter),
             hir::Stmt::StoreSave(_, _) => {}
             hir::Stmt::StoreCompact(_, _) => {}
-            hir::Stmt::StoreSet(_, updates, _, _) => {
+            hir::Stmt::StoreSet(_, updates, filter, _) => {
                 for (_, e) in updates {
                     self.validate_expr(e);
                 }
+                self.validate_filter(filter);
             }
-            hir::Stmt::Transaction(block, _) => self.validate_block(block),
-            hir::Stmt::Together(_, block, _, _, _) => self.validate_block(block),
+            hir::Stmt::Transaction(block, _) => {
+                self.transaction_depth += 1;
+                self.validate_block(block);
+                self.transaction_depth -= 1;
+            }
+            hir::Stmt::Together(_, block, _, handler, _) => {
+                self.validate_block(block);
+                if let Some(handler) = handler {
+                    if let Some(body) = &handler.ok_arm {
+                        self.validate_block(body);
+                    }
+                    if let Some(body) = &handler.err_arm {
+                        self.validate_block(body);
+                    }
+                }
+            }
             hir::Stmt::ChannelClose(e, _) => self.validate_expr(e),
             hir::Stmt::Stop(e, _) => self.validate_expr(e),
             hir::Stmt::ScopeCancel(_, _) => {}
@@ -218,11 +303,20 @@ impl HirValidator {
                 if let Some(e) = &f.step {
                     self.validate_expr(e);
                 }
+                self.loop_depth += 1;
                 self.validate_block(&f.body);
+                self.loop_depth -= 1;
             }
             hir::Stmt::SimBlock(b, _) => self.validate_block(b),
             hir::Stmt::UseLocal(_, _, _, _) => {}
             hir::Stmt::GlobalStore(_, e, _) => self.validate_expr(e),
+        }
+    }
+
+    fn validate_filter(&mut self, filter: &hir::StoreFilter) {
+        self.validate_expr(&filter.value);
+        for (_, condition) in &filter.extra {
+            self.validate_expr(&condition.value);
         }
     }
 
@@ -354,7 +448,7 @@ impl HirValidator {
                 }
             }
             hir::ExprKind::Block(block) => self.validate_block(block),
-            hir::ExprKind::Lambda(_, body) => self.validate_block(body),
+            hir::ExprKind::Lambda(_, body, _) => self.validate_callable_body(body),
             hir::ExprKind::Ref(inner) | hir::ExprKind::Deref(inner) => {
                 self.validate_expr(inner);
             }
@@ -374,10 +468,20 @@ impl HirValidator {
                     self.validate_expr(a);
                 }
             }
-            hir::ExprKind::CoroutineCreate(_, stmts) => {
-                self.validate_block(stmts);
+            hir::ExprKind::CoroutineCreate(_, stmts, _) => {
+                self.validate_callable_body(stmts);
             }
-            hir::ExprKind::CoroutineNext(inner) | hir::ExprKind::Yield(inner) => {
+            hir::ExprKind::Yield(inner) => {
+                self.reject_cleanup_exit(expr.span, "yield");
+                if self.transaction_depth > 0 {
+                    self.errors.push(format!(
+                        "{}: generator yield inside a transaction is unsupported; complete the transaction before yielding",
+                        expr.span.loc()
+                    ));
+                }
+                self.validate_expr(inner);
+            }
+            hir::ExprKind::CoroutineNext(inner) => {
                 self.validate_expr(inner);
             }
             hir::ExprKind::Syscall(args) => {
@@ -385,23 +489,30 @@ impl HirValidator {
                     self.validate_expr(a);
                 }
             }
-            hir::ExprKind::StoreQuery(_, _) => {}
-            hir::ExprKind::ViewCount(_, _) => {}
-            hir::ExprKind::ViewAll(_, _) => {}
-            hir::ExprKind::StoreGet(_, key) => self.validate_expr(key),
-            hir::ExprKind::StoreFirst(_, _) => {}
-            hir::ExprKind::StoreExists(_, _) => {}
-            hir::ExprKind::StoreQueryGroup(_, _, _, _) => {}
-            hir::ExprKind::StoreAllWhere(_, _) => {}
+            hir::ExprKind::StoreQuery(_, filter)
+            | hir::ExprKind::ViewCount(_, filter)
+            | hir::ExprKind::ViewAll(_, filter)
+            | hir::ExprKind::StoreFirst(_, filter)
+            | hir::ExprKind::StoreExists(_, filter)
+            | hir::ExprKind::StoreAllWhere(_, filter) => self.validate_filter(filter),
+            hir::ExprKind::StoreGet(_, key)
+            | hir::ExprKind::StoreVersionCount(_, key)
+            | hir::ExprKind::StoreHistory(_, key) => self.validate_expr(key),
+            hir::ExprKind::StoreAtVersion(_, key, version) => {
+                self.validate_expr(key);
+                self.validate_expr(version);
+            }
+            hir::ExprKind::StoreQueryGroup(_, _, _, filter) => {
+                if let Some(filter) = filter {
+                    self.validate_filter(filter);
+                }
+            }
             hir::ExprKind::StoreDistinct(_, _)
             | hir::ExprKind::StoreGroup(_, _, _, _)
             | hir::ExprKind::StoreSum(_, _)
             | hir::ExprKind::StoreAvg(_, _)
             | hir::ExprKind::StoreMin(_, _)
-            | hir::ExprKind::StoreMax(_, _)
-            | hir::ExprKind::StoreVersionCount(_, _)
-            | hir::ExprKind::StoreHistory(_, _)
-            | hir::ExprKind::StoreAtVersion(_, _, _) => {}
+            | hir::ExprKind::StoreMax(_, _) => {}
             hir::ExprKind::Int(_)
             | hir::ExprKind::Float(_)
             | hir::ExprKind::Str(_)
@@ -412,8 +523,8 @@ impl HirValidator {
             | hir::ExprKind::FnRef(_, _)
             | hir::ExprKind::VariantRef(_, _, _)
             | hir::ExprKind::MapNew
-            | hir::ExprKind::Spawn(_, _)
             | hir::ExprKind::GlobalLoad(_)
+            | hir::ExprKind::SizeOf(_)
             | hir::ExprKind::StoreCount(_)
             | hir::ExprKind::StoreAll(_)
             | hir::ExprKind::IterNext(_, _, _) => {}
@@ -424,13 +535,23 @@ impl HirValidator {
             }
             hir::ExprKind::ChannelRecv(ch) => self.validate_expr(ch),
             hir::ExprKind::Unreachable => {}
-            hir::ExprKind::StrictCast(inner, _)
-            | hir::ExprKind::AsFormat(inner, _)
-            | hir::ExprKind::AtomicLoad(inner)
-            | hir::ExprKind::AtomicStore(inner, _)
-            | hir::ExprKind::AtomicAdd(inner, _)
-            | hir::ExprKind::AtomicSub(inner, _) => {
+            hir::ExprKind::StrictCast(inner, target) => {
                 self.validate_expr(inner);
+                if !inner.ty.is_num() || !target.is_num() || &expr.ty != target {
+                    self.errors.push(format!(
+                        "invalid strict numeric cast contract at line {}",
+                        expr.span.line
+                    ));
+                }
+            }
+            hir::ExprKind::AsFormat(inner, _) | hir::ExprKind::AtomicLoad(inner) => {
+                self.validate_expr(inner);
+            }
+            hir::ExprKind::AtomicStore(inner, value)
+            | hir::ExprKind::AtomicAdd(inner, value)
+            | hir::ExprKind::AtomicSub(inner, value) => {
+                self.validate_expr(inner);
+                self.validate_expr(value);
             }
             hir::ExprKind::AtomicCas(ptr, expected, new) => {
                 self.validate_expr(ptr);
@@ -465,13 +586,13 @@ impl HirValidator {
                     self.validate_expr(a);
                 }
             }
-            hir::ExprKind::Builder(_, fields) => {
+            hir::ExprKind::Spawn(_, fields) | hir::ExprKind::Builder(_, fields) => {
                 for (_, v) in fields {
                     self.validate_expr(v);
                 }
             }
             hir::ExprKind::GeneratorCreate(_, _, stmts, _) => {
-                self.validate_block(stmts);
+                self.validate_callable_body(stmts);
             }
 
             hir::ExprKind::KvGet(_, e)

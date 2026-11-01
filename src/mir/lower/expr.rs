@@ -226,6 +226,7 @@ impl Lowerer {
                 )
             }
             ExprKind::GlobalLoad(name) => self.emit(InstKind::GlobalLoad(*name), ty, span),
+            ExprKind::SizeOf(t) => self.emit(InstKind::SizeOf(t.clone()), ty, span),
             ExprKind::Unreachable => {
                 self.set_terminator(Terminator::Unreachable);
                 let dead = self.new_block("after.unreachable");

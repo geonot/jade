@@ -1,7 +1,7 @@
 
 
 *fnv1a_hash(data as String)
-    hash is 14695981039346656037
+    hash is 14695981039346656037 as i64
     for i from 0 to data.length
         byte is data.char_at(i)
         hash is hash ^ byte

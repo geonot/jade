@@ -287,6 +287,20 @@ impl Typer {
         self.struct_attrs.insert(td.name, td.layout.clone());
     }
 
+    pub(crate) fn check_native_layout_attrs(td: &ast::TypeDef) -> Result<(), String> {
+        let attr = match (td.layout.packed, td.layout.align) {
+            (true, _) => String::from("@packed"),
+            (false, Some(n)) => format!("@align({n})"),
+            (false, None) => return Ok(()),
+        };
+        Err(format!(
+            "{}: type `{}` uses {attr}, which is not supported: native layout always uses the \
+             target's natural field alignment, so this attribute would be silently ignored",
+            td.span.loc(),
+            td.name
+        ))
+    }
+
     pub(crate) fn check_category_assertion(&mut self, td: &ast::TypeDef) -> Result<(), String> {
         let Some(cat) = self.struct_attrs.get(&td.name).and_then(|a| a.category) else {
             return Ok(());

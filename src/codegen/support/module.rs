@@ -4,6 +4,7 @@ impl<'ctx> Compiler<'ctx> {
     pub fn new(ctx: &'ctx Context, name: &str) -> Self {
         Self {
             module: ctx.create_module(name),
+            target_data: None,
             bld: ctx.create_builder(),
             alloca_bld: ctx.create_builder(),
             ctx,
@@ -329,11 +330,7 @@ impl<'ctx> Compiler<'ctx> {
                             if matches!(param_tys.first(), Some(Type::Ptr(_))) {
                                 self_ptr.into()
                             } else {
-                                let concrete_ty: inkwell::types::BasicTypeEnum<'ctx> = self
-                                    .module
-                                    .get_struct_type(&ti.type_name.as_str())
-                                    .map(|st| st.into())
-                                    .unwrap_or_else(|| self.ctx.i64_type().into());
+                                let concrete_ty = self.llvm_ty(&param_tys[0]);
                                 b!(self.bld.build_load(concrete_ty, self_ptr, "self.loaded"))
                             };
                         let mut call_args: Vec<inkwell::values::BasicMetadataValueEnum<'ctx>> =

@@ -189,11 +189,7 @@ int jinn_select(jinn_select_case_t *cases, int n, int has_default) {
         }
     }
     for (;;) {
-        jinn_worker_t *wc = jinn_worker_self();
-        if (wc && wc->current
-            && atomic_load_explicit(&wc->current->cancelled, memory_order_acquire)) {
-            return -1;
-        }
+        if (jinn_scope_check_cancelled()) return -1;
         lock_all(cases, lock_order, n);
         for (int i = 0; i < n; i++) {
             int idx = poll_order[i];
@@ -202,7 +198,7 @@ int jinn_select(jinn_select_case_t *cases, int n, int has_default) {
             jinn_coro_t *counterpart = fire_case_locked(c);
             unlock_all(cases, lock_order, n);
             if (counterpart) {
-                counterpart->wait_chan = NULL;
+                jinn_coro_set_wait_chan(counterpart, NULL);
                 counterpart->state = JINN_CORO_READY;
                 jinn_sched_enqueue(counterpart);
             }
@@ -212,6 +208,7 @@ int jinn_select(jinn_select_case_t *cases, int n, int has_default) {
             unlock_all(cases, lock_order, n);
             return -1;
         }
+        if (jinn_txn_active()) jinn_persistence_fail("blocking select inside a transaction is unsupported");
         jinn_worker_t *pw = jinn_worker_self();
         if (!pw || !pw->current) {
             unlock_all(cases, lock_order, n);
@@ -239,7 +236,7 @@ int jinn_select(jinn_select_case_t *cases, int n, int has_default) {
             }
         }
         self->state = JINN_CORO_SUSPENDED;
-        self->wait_chan = first_chan;
+        jinn_coro_set_wait_chan(self, first_chan);
 
         pw->held_locks = locks;
         pw->held_locks_n = n_locks;
@@ -258,7 +255,7 @@ int jinn_select(jinn_select_case_t *cases, int n, int has_default) {
         unlock_all(cases, lock_order, n);
         jinn_worker_t *ww = jinn_worker_self();
         if (ww && ww->current) {
-            ww->current->wait_chan = NULL;
+            jinn_coro_set_wait_chan(ww->current, NULL);
         }
         shuffle(poll_order, n, &rng);
         if (ww) ww->rng_state = rng;

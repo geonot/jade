@@ -138,7 +138,7 @@ impl Typer {
     }
 
     #[allow(clippy::only_used_in_recursion)]
-    fn expr_to_single_type(&self, e: &ast::Expr) -> Option<Type> {
+    pub(in crate::typer) fn expr_to_single_type(&self, e: &ast::Expr) -> Option<Type> {
         match e {
             ast::Expr::Ident(name, _) => Some(Self::ident_to_type(&name.as_str())),
             ast::Expr::OfCall(outer, inner, _) => {
@@ -166,7 +166,7 @@ impl Typer {
         }
     }
 
-    fn ident_to_type(n: &str) -> Type {
+    pub(in crate::typer) fn ident_to_type(n: &str) -> Type {
         match n {
             "i8" => Type::I8,
             "i16" => Type::I16,

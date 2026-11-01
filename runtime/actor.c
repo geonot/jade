@@ -12,7 +12,10 @@ struct jinn_join {
     _Atomic(int32_t) done;
     _Atomic(int32_t) lock;
     jinn_coro_t     *waitq;
+    struct jinn_join *next;
 };
+static jinn_join_t *g_joins = NULL;
+static pthread_mutex_t g_join_lock = PTHREAD_MUTEX_INITIALIZER;
 static inline void join_lock(jinn_join_t *j) {
     while (atomic_exchange_explicit(&j->lock, 1, memory_order_acquire) != 0) {
 #if defined(__x86_64__)
@@ -30,6 +33,7 @@ jinn_join_t *jinn_join_create(void) {
     atomic_store(&j->done, 0);
     atomic_store(&j->lock, 0);
     j->waitq = NULL;
+    j->next = NULL;
     return j;
 }
 jinn_join_t *jinn_join_get(void *join_slot_ptr) {
@@ -41,6 +45,10 @@ jinn_join_t *jinn_join_get(void *join_slot_ptr) {
         if (atomic_compare_exchange_strong_explicit(
                 slot, &expected, fresh,
                 memory_order_acq_rel, memory_order_acquire)) {
+            pthread_mutex_lock(&g_join_lock);
+            fresh->next = g_joins;
+            g_joins = fresh;
+            pthread_mutex_unlock(&g_join_lock);
             j = fresh;
         } else {
             free(fresh);
@@ -69,6 +77,9 @@ void jinn_actor_join(void *join_slot_ptr) {
     for (;;) {
         if (atomic_load_explicit(&j->done, memory_order_acquire)) {
             return;
+        }
+        if (jinn_txn_active()) {
+            jinn_persistence_fail("waiting for an actor inside a transaction is unsupported");
         }
         jinn_worker_t *wk = jinn_worker_self();
         if (!wk || !wk->current) {
@@ -188,6 +199,15 @@ void jinn_actor_retire_flush(void) {
         free(n);
         n = next;
     }
+    pthread_mutex_lock(&g_join_lock);
+    jinn_join_t *join = g_joins;
+    g_joins = NULL;
+    pthread_mutex_unlock(&g_join_lock);
+    while (join) {
+        jinn_join_t *next = join->next;
+        free(join);
+        join = next;
+    }
 }
 void jinn_actor_destroy(void *mailbox_ptr) {
     if (!mailbox_ptr) return;
@@ -196,15 +216,9 @@ void jinn_actor_destroy(void *mailbox_ptr) {
     if (w && w->current && w->current->scope) {
         jinn_scope_unregister_actor((jinn_scope_t *)w->current->scope, mailbox_ptr);
     }
-    pthread_mutex_lock(&g_live_mb_lock);
     jinn_chan_t *ch = *(jinn_chan_t **)mailbox_ptr;
-    if (ch) {
-        *(jinn_chan_t **)mailbox_ptr = NULL;
-    }
-    pthread_mutex_unlock(&g_live_mb_lock);
     if (ch) {
         jinn_chan_close(ch);
     }
-    *(int32_t *)((char *)mailbox_ptr + sizeof(void *)) = 0;
     jinn_actor_retire_mailbox(mailbox_ptr, ch);
 }

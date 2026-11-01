@@ -89,16 +89,7 @@ impl<'ctx> Compiler<'ctx> {
         {
             return self.coerce_to_i64(val);
         }
-        let size_iv = match val.get_type() {
-            inkwell::types::BasicTypeEnum::StructType(t) => t.size_of(),
-            inkwell::types::BasicTypeEnum::ArrayType(t) => t.size_of(),
-            inkwell::types::BasicTypeEnum::IntType(t) => Some(t.size_of()),
-            inkwell::types::BasicTypeEnum::FloatType(t) => Some(t.size_of()),
-            inkwell::types::BasicTypeEnum::PointerType(t) => Some(t.size_of()),
-            inkwell::types::BasicTypeEnum::VectorType(t) => t.size_of(),
-            inkwell::types::BasicTypeEnum::ScalableVectorType(t) => t.size_of(),
-        }
-        .unwrap_or(i64t.const_int(16, false));
+        let size_iv = i64t.const_int(self.type_store_size(val.get_type()), false);
         let malloc_fn = self.ensure_malloc();
         let mem = self
             .bld

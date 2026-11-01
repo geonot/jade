@@ -322,6 +322,20 @@ pub fn validate_store_decorators(store: &str, decorators: &[StoreDecorator]) -> 
     Ok(())
 }
 
+pub fn has_field_encoding(ty: &Type) -> bool {
+    ty.is_int() || matches!(ty, Type::F32 | Type::F64 | Type::Bool | Type::String)
+}
+
+pub fn validate_field_encoding(store: &str, field: &str, ty: &Type) -> Result<(), String> {
+    if has_field_encoding(ty) {
+        Ok(())
+    } else {
+        Err(format!(
+            "store '{store}': field '{field}' has type {ty} without a defined persistence encoding; use an integer, float, bool or String"
+        ))
+    }
+}
+
 pub fn validate_field_decorators(
     store: &str,
     field: &str,

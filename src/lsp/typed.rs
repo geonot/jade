@@ -609,7 +609,7 @@ impl Walk<'_> {
             }
             hir::ExprKind::IfExpr(i) => self.if_stmt(i),
             hir::ExprKind::Block(b) => self.block(b),
-            hir::ExprKind::Lambda(params, body) => {
+            hir::ExprKind::Lambda(params, body, _) => {
                 for p in params {
                     self.record_def(p.def_id, p.name, format!("{} as {}", p.name, p.ty), &p.span);
                 }

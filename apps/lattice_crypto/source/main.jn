@@ -33,7 +33,7 @@ use aead
     loop(0, $ < 96, $ + 1)
         msg.push($ & 0xFF)
 
-    nonce is 0xC0FFEE12_34567890
+    nonce is 0xC0FFEE12_34567890 as i64
     ad    is vec()
     ct    is aead.seal(key_a, nonce, ad, msg)
     pt    is aead.open(key_b, nonce, ad, ct)

@@ -271,10 +271,10 @@ void jinn_sched_shutdown(void) {
         for (int i = 0; i < g_sched.num_workers; i++) {
             pthread_join(g_sched.workers[i].thread, NULL);
         }
-        for (int i = 0; i < g_sched.num_workers; i++) {
-            jinn_deque_destroy(&g_sched.workers[i].run_queue);
-        }
         jinn_actor_retire_flush();
+    }
+    for (int i = 0; i < g_sched.num_workers; i++) {
+        jinn_deque_destroy(&g_sched.workers[i].run_queue);
     }
     pthread_mutex_destroy(&g_sched.idle_lock);
     pthread_cond_destroy(&g_sched.idle_cond);
@@ -282,6 +282,11 @@ void jinn_sched_shutdown(void) {
     pthread_cond_destroy(&g_sched.done_cond);
     free(g_sched.workers);
     g_sched.workers = NULL;
+}
+
+void jinn_sched_poll(void) {
+    jinn_worker_t *w = tl_worker;
+    if (w && w->current) jinn_coro_yield();
 }
 
 void jinn_sched_yield(void) {

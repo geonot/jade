@@ -2,7 +2,7 @@ use crate::intern::Symbol;
 use std::collections::HashMap;
 
 use crate::ast;
-use crate::hir::{self, DefId, Ownership};
+use crate::hir::{self, Ownership};
 use crate::types::Type;
 
 use super::{Typer, VarInfo};
@@ -508,7 +508,8 @@ impl Typer {
             .iter()
             .map(|p| {
                 let base = p.ty.clone().unwrap_or_else(|| self.infer_ctx.fresh_var());
-                Self::substitute_type(&base, type_map)
+                let substituted = Self::substitute_type(&base, type_map);
+                self.monomorphize_named_annotation(&substituted)
             })
             .collect();
         self.push_scope();
@@ -531,11 +532,23 @@ impl Typer {
             .clone()
             .map(|r| Self::substitute_type(&r, type_map))
             .unwrap_or_else(|| self.infer_ctx.fresh_var());
+        let ret = if gf.is_generator {
+            Type::Generator(Box::new(ret))
+        } else {
+            ret
+        };
         self.pop_scope();
         let id = self.fresh_id();
         self.fns.insert(mangled, (id, ptys.clone(), ret.clone()));
 
-        if let Some(access) = self.fn_param_access.get(&Symbol::from(name)).cloned() {
+        if let Some(mut access) = self.fn_param_access.get(&Symbol::from(name)).cloned() {
+            if gf.is_generator {
+                for ((slot, param), ty) in access.iter_mut().zip(&gf.params).zip(&ptys) {
+                    if param.access_mod.is_none() && !self.type_is_aggregate(ty) {
+                        *slot = None;
+                    }
+                }
+            }
             self.fn_param_access.insert(mangled, access);
         }
         if let Some(mutates) = self.fn_param_mutates.get(&Symbol::from(name)).cloned() {
@@ -549,7 +562,7 @@ impl Typer {
             self.fn_param_consume_sites.insert(mangled, sites);
         }
 
-        let mono_fn = self.lower_generic_fn_body(&gf, &mangled.as_str(), id, &ptys, &ret, name)?;
+        let mono_fn = self.lower_generic_fn_body(&gf, mangled, name)?;
         self.mono_fns.push(mono_fn);
         Ok(mangled)
     }
@@ -557,116 +570,24 @@ impl Typer {
     fn lower_generic_fn_body(
         &mut self,
         gf: &ast::Fn,
-        mangled: &str,
-        def_id: DefId,
-        ptys: &[Type],
-        ret: &Type,
+        mangled: Symbol,
         origin: &str,
     ) -> Result<hir::Fn, String> {
         let saved_scopes = std::mem::take(&mut self.scopes);
-        self.push_scope();
-
-        let accs = self
-            .fn_param_access
-            .get(&Symbol::intern(mangled))
-            .cloned()
-            .or_else(|| self.fn_param_access.get(&Symbol::from(origin)).cloned());
-        let mut params = Vec::new();
-        for (i, p) in gf.params.iter().enumerate() {
-            let pid = self.fresh_id();
-            let ty = ptys[i].clone();
-            let eff_mod = accs
-                .as_ref()
-                .and_then(|a| a.get(i).copied())
-                .flatten()
-                .or(p.access_mod);
-            let ownership = self
-                .param_ownership_with_mod(&ty, eff_mod)
-                .map_err(|e| format!("{}: {e}", p.span.loc()))?;
-            self.define_var(
-                &p.name.as_str(),
-                VarInfo {
-                    def_id: pid,
-                    ty: ty.clone(),
-                    ownership,
-                    scheme: None,
-                },
-            );
-            params.push(hir::Param {
-                def_id: pid,
-                name: p.name,
-                ty,
-                ownership,
-                default: None,
-                access_mod: eff_mod,
-                span: p.span,
-            });
-        }
-        let prev_param_ids = std::mem::replace(
-            &mut self.current_fn_param_ids,
-            params.iter().map(|p| p.def_id).collect(),
-        );
-
-        let body_res = self.lower_block(&gf.body, ret);
-        self.current_fn_param_ids = prev_param_ids;
-        let mut body = body_res?;
-
-        let mut borrow_alias_ids: std::collections::HashSet<DefId> = params
-            .iter()
-            .filter(|p| {
-                matches!(
-                    p.ownership,
-                    crate::hir::Ownership::Borrowed | crate::hir::Ownership::BorrowMut
-                )
-            })
-            .map(|p| p.def_id)
-            .collect();
-        if !borrow_alias_ids.is_empty() {
-            Self::repair_borrow_alias_binds(&mut body, &mut borrow_alias_ids)?;
-        }
-        let mut strip_ids = borrow_alias_ids;
-        strip_ids.extend(
-            params
-                .iter()
-                .filter(|p| matches!(p.ownership, crate::hir::Ownership::Raw))
-                .map(|p| p.def_id),
-        );
-        if !strip_ids.is_empty() {
-            Self::strip_drops_for(&mut body, &strip_ids);
-        }
-
-        if gf.ret.is_none() {
-            if let Some(tail_ty) = self.hir_tail_type(&body) {
-                let _ =
-                    self.infer_ctx
-                        .unify_at(ret, &tail_ty, gf.span, "generic fn tail expression");
-            } else {
-                let _ = self.infer_ctx.unify(ret, &Type::Void);
-            }
-        }
+        let mut concrete = gf.clone();
+        concrete.name = mangled;
+        let result = self.lower_fn_deferred(&concrete);
+        self.scopes = saved_scopes;
+        let mut function = result?;
         let was_strict = self.infer_ctx.is_strict();
         self.infer_ctx.set_strict(false);
-        let resolved_ret = self.infer_ctx.resolve(ret);
+        function.ret = self.infer_ctx.resolve(&function.ret);
         self.infer_ctx.set_strict(was_strict);
-        if let Some(entry) = self.fns.get_mut(&Symbol::intern(mangled)) {
-            entry.2 = resolved_ret.clone();
+        if let Some(entry) = self.fns.get_mut(&mangled) {
+            entry.2 = function.ret.clone();
         }
-
-        self.pop_scope();
-        self.scopes = saved_scopes;
-
-        Ok(hir::Fn {
-            def_id,
-            name: mangled.into(),
-            params,
-            ret: resolved_ret,
-            error_types: Vec::new(),
-            body,
-            span: gf.span,
-            generic_origin: Some(origin.into()),
-            is_generator: false,
-            attrs: gf.attrs.clone(),
-        })
+        function.generic_origin = Some(origin.into());
+        Ok(function)
     }
 
     pub(crate) fn monomorphize_enum(

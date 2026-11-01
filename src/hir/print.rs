@@ -493,6 +493,7 @@ impl PrettyPrinter {
             ExprKind::Void => "void".into(),
             ExprKind::Var(id, name) => format!("{name}[d{}]", id.0),
             ExprKind::GlobalLoad(name) => format!("global {name}"),
+            ExprKind::SizeOf(t) => format!("size_of<{t}>"),
             ExprKind::FnRef(id, name) => format!("&fn {name}[d{}]", id.0),
             ExprKind::VariantRef(enum_n, var_n, tag) => format!("{enum_n}::{var_n}#{tag}"),
             ExprKind::BinOp(l, op, r) => {
@@ -604,7 +605,7 @@ impl PrettyPrinter {
                     format!("{{ ... {} stmts }}", blk.len())
                 }
             }
-            ExprKind::Lambda(params, body) => {
+            ExprKind::Lambda(params, body, _) => {
                 let ps: Vec<String> = params
                     .iter()
                     .map(|p| format!("{}: {}", p.name, p.ty))
@@ -699,7 +700,7 @@ impl PrettyPrinter {
             ExprKind::GraphFrom(name, _) => format!("graph_from {name}"),
             ExprKind::GraphTo(name, _) => format!("graph_to {name}"),
             ExprKind::TsLatest(name) => format!("ts_latest {name}"),
-            ExprKind::CoroutineCreate(name, _) => format!("coroutine {name}"),
+            ExprKind::CoroutineCreate(name, _, _) => format!("coroutine {name}"),
             ExprKind::CoroutineNext(e) => format!("{}.next()", self.expr_str(e)),
             ExprKind::Yield(e) => format!("yield {}", self.expr_str(e)),
             ExprKind::IterNext(var, ty, method) => {

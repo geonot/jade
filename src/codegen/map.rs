@@ -305,7 +305,7 @@ impl<'ctx> Compiler<'ctx> {
                 .build_gep(i8t, entry_ptr, &[i64t.const_int(32, false)], "mg.vp"))
         };
         let raw = b!(self.bld.build_load(lty, val_ptr, "mg.fv"));
-        let found_val = if borrow || !val_ty.is_value_clonable() {
+        let found_val = if borrow || !self.is_value_clonable(val_ty) {
             raw
         } else {
             self.clone_value(raw, val_ty)?
@@ -319,7 +319,7 @@ impl<'ctx> Compiler<'ctx> {
             self.bld.position_at_end(merge_bb);
             return Ok(found_val);
         };
-        let missing = if val_ty.is_value_clonable() {
+        let missing = if self.is_value_clonable(val_ty) {
             self.clone_value(d, val_ty)?
         } else {
             d

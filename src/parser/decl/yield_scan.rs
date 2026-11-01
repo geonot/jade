@@ -18,6 +18,7 @@ pub(super) fn stmt_has_yield(s: &Stmt) -> bool {
         Stmt::While(w) => expr_has_yield(&w.cond) || body_contains_yield(&w.body),
         Stmt::For(f) => body_contains_yield(&f.body),
         Stmt::Loop(l) => body_contains_yield(&l.body),
+        Stmt::Transaction(body, _) => body_contains_yield(body),
         Stmt::Match(m) => m.arms.iter().any(|a| body_contains_yield(&a.body)),
         _ => false,
     }

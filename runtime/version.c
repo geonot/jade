@@ -4,66 +4,79 @@
 #include <stdint.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
+#include <sys/stat.h>
 #include "jinn_rt.h"
 static const char VER_MAGIC[8] = {'J','I','N','N','V','E','R','\0'};
 #define VER_HEADER 8
 #define VER_ENTRY_HDR 24
 FILE *jinn_ver_open(const char *path) {
+    jinn_persistence_check_path(path);
     FILE *f = fopen(path, "r+b");
     if (f) {
         char magic[8];
         if (fread(magic, 1, 8, f) != 8 || memcmp(magic, VER_MAGIC, 8) != 0) {
-            fclose(f);
-            return NULL;
+            jinn_persistence_fail("version header validation");
         }
         return f;
     }
-    f = fopen(path, "w+b");
-    if (!f) return NULL;
-    fwrite(VER_MAGIC, 1, 8, f);
-    fflush(f);
+    if (errno != ENOENT) jinn_persistence_fail("version open");
+    f = fopen(path, "w+bx");
+    if (!f) jinn_persistence_fail("version creation");
+    jinn_store_fwrite(VER_MAGIC, 1, 8, f);
+    jinn_store_finish_create(f, path);
     return f;
 }
 void jinn_ver_close(FILE *f) {
-    if (f) fclose(f);
+    if (f && fclose(f) != 0) jinn_persistence_fail("version close");
 }
 void jinn_ver_append(FILE *f, int64_t sid, int64_t version,
                      const void *record_data, int64_t rec_size) {
-    if (!f) return;
+    if (!f || rec_size <= 0) jinn_persistence_fail("version append arguments");
     jinn_txn_track_trunc(f);
-    fseek(f, 0, SEEK_END);
+    jinn_store_fseek(f, 0, SEEK_END);
     int64_t ts = (int64_t)time(NULL);
-    fwrite(&sid, 8, 1, f);
-    fwrite(&version, 8, 1, f);
-    fwrite(&ts, 8, 1, f);
-    fwrite(record_data, (size_t)rec_size, 1, f);
-    fflush(f);
+    jinn_store_fwrite(&sid, 8, 1, f);
+    jinn_store_fwrite(&version, 8, 1, f);
+    jinn_store_fwrite(&ts, 8, 1, f);
+    jinn_store_fwrite(record_data, (size_t)rec_size, 1, f);
+    jinn_store_fflush(f);
+}
+static int64_t ver_entries(FILE *f, int64_t rec_size) {
+    struct stat st;
+    if (!f || rec_size <= 0 || rec_size > INT64_MAX - VER_ENTRY_HDR ||
+        fflush(f) != 0 || fstat(fileno(f), &st) != 0 || st.st_size < VER_HEADER ||
+        (st.st_size - VER_HEADER) % (VER_ENTRY_HDR + rec_size))
+        jinn_persistence_fail("version file length");
+    jinn_store_fseek(f, VER_HEADER, SEEK_SET);
+    return (st.st_size - VER_HEADER) / (VER_ENTRY_HDR + rec_size);
 }
 int64_t jinn_ver_count(FILE *f, int64_t sid, int64_t rec_size) {
     if (!f) return 0;
     int64_t count = 0;
-    (void)rec_size;
-    fseek(f, VER_HEADER, SEEK_SET);
-    int64_t entry_sid;
-    while (fread(&entry_sid, 8, 1, f) == 1) {
+    int64_t total = ver_entries(f, rec_size);
+    for (int64_t i = 0; i < total; i++) {
+        int64_t entry_sid;
+        jinn_store_fread(&entry_sid, 8, 1, f);
         if (entry_sid == sid) count++;
-        fseek(f, 8 + 8 + rec_size, SEEK_CUR);
+        jinn_store_fseek(f, 16 + rec_size, SEEK_CUR);
     }
     return count;
 }
 int64_t jinn_ver_at(FILE *f, int64_t sid, int64_t version,
                     void *out_buf, int64_t rec_size) {
     if (!f) return 0;
-    fseek(f, VER_HEADER, SEEK_SET);
+    int64_t total = ver_entries(f, rec_size);
     int64_t entry_sid, entry_ver;
-    while (fread(&entry_sid, 8, 1, f) == 1) {
-        fread(&entry_ver, 8, 1, f);
-        fseek(f, 8, SEEK_CUR);
+    for (int64_t i = 0; i < total; i++) {
+        jinn_store_fread(&entry_sid, 8, 1, f);
+        jinn_store_fread(&entry_ver, 8, 1, f);
+        jinn_store_fseek(f, 8, SEEK_CUR);
         if (entry_sid == sid && entry_ver == version) {
-            fread(out_buf, (size_t)rec_size, 1, f);
+            jinn_store_fread(out_buf, (size_t)rec_size, 1, f);
             return 1;
         }
-        fseek(f, rec_size, SEEK_CUR);
+        jinn_store_fseek(f, rec_size, SEEK_CUR);
     }
     return 0;
 }
@@ -71,18 +84,22 @@ int64_t jinn_ver_history(FILE *f, int64_t sid,
                          void *out_buf, int64_t rec_size,
                          int64_t max_versions) {
     if (!f) return 0;
-    fseek(f, VER_HEADER, SEEK_SET);
+    int64_t total = ver_entries(f, rec_size);
+    if (max_versions <= 0) return 0;
+    if ((uint64_t)max_versions > SIZE_MAX / (uint64_t)rec_size)
+        jinn_persistence_fail("version output capacity");
     int64_t written = 0;
     int64_t entry_sid, entry_ver;
     uint8_t *dst = (uint8_t *)out_buf;
-    while (fread(&entry_sid, 8, 1, f) == 1 && written < max_versions) {
-        fread(&entry_ver, 8, 1, f);
-        fseek(f, 8, SEEK_CUR);
+    for (int64_t i = 0; i < total && written < max_versions; i++) {
+        jinn_store_fread(&entry_sid, 8, 1, f);
+        jinn_store_fread(&entry_ver, 8, 1, f);
+        jinn_store_fseek(f, 8, SEEK_CUR);
         if (entry_sid == sid) {
-            fread(dst + written * rec_size, (size_t)rec_size, 1, f);
+            jinn_store_fread(dst + written * rec_size, (size_t)rec_size, 1, f);
             written++;
         } else {
-            fseek(f, rec_size, SEEK_CUR);
+            jinn_store_fseek(f, rec_size, SEEK_CUR);
         }
     }
     return written;
@@ -107,23 +124,16 @@ static int ver_fill(FILE *tmp, void *arg) {
 void jinn_ver_compact(FILE **fpp, const char *path, int64_t rec_size, int64_t keep_n) {
     if (!fpp || !*fpp || !path || keep_n <= 0) return;
     FILE *f = *fpp;
-    fseek(f, VER_HEADER, SEEK_SET);
-    int64_t total = 0;
-    {
-        int64_t s;
-        while (fread(&s, 8, 1, f) == 1) {
-            total++;
-            fseek(f, 8 + 8 + rec_size, SEEK_CUR);
-        }
-    }
+    int64_t total = ver_entries(f, rec_size);
     if (total == 0) return;
-
+    jinn_txn_track_trunc(f);
     size_t entry_size = VER_ENTRY_HDR + (size_t)rec_size;
+    if ((uint64_t)total > SIZE_MAX / entry_size) jinn_persistence_fail("version image capacity");
     uint8_t *entries = (uint8_t *)malloc((size_t)total * entry_size);
-    if (!entries) return;
-    fseek(f, VER_HEADER, SEEK_SET);
-    fread(entries, entry_size, (size_t)total, f);
     uint8_t *keep = (uint8_t *)calloc((size_t)total, 1);
+    if (!entries || !keep) jinn_persistence_fail("version compaction allocation");
+    jinn_store_fseek(f, VER_HEADER, SEEK_SET);
+    jinn_store_fread(entries, entry_size, (size_t)total, f);
     for (int64_t i = total - 1; i >= 0; i--) {
         int64_t sid_i;
         memcpy(&sid_i, entries + i * entry_size, 8);
@@ -136,7 +146,8 @@ void jinn_ver_compact(FILE **fpp, const char *path, int64_t rec_size, int64_t ke
         if (kept < keep_n) keep[i] = 1;
     }
     VerImage im = { entries, keep, total, entry_size };
-    (void)jinn_atomic_rewrite_reopen(path, ver_fill, &im, fpp);
+    if (jinn_atomic_rewrite_reopen(path, ver_fill, &im, fpp) != 0)
+        jinn_persistence_fail("version compaction rewrite");
     free(entries);
     free(keep);
 }

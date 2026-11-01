@@ -128,7 +128,7 @@ impl Typer {
                 self.task_body_depth -= 1;
                 let hbody = lowered?;
 
-                self.mark_task_captures(&hbody, &outer_ids, *span)?;
+                let moved = self.mark_task_captures(&hbody, &outer_ids, *span)?;
                 let yield_ty = self.infer_coroutine_yield_type(&hbody);
                 let coro_ty = Type::Coroutine(Box::new(yield_ty));
                 let coro_name = if name.as_str() == "__anon" {
@@ -149,7 +149,7 @@ impl Typer {
                     *name
                 };
                 Ok(hir::Expr {
-                    kind: hir::ExprKind::CoroutineCreate(coro_name, hbody),
+                    kind: hir::ExprKind::CoroutineCreate(coro_name, hbody, moved),
                     ty: coro_ty,
                     span: *span,
                 })
@@ -312,6 +312,7 @@ impl Typer {
                     } else {
                         None
                     };
+                    self.push_scope();
                     let bind_id = arm.binding.as_ref().map(|_| self.fresh_id());
                     if let (Some(name), Some(id)) = (&arm.binding, bind_id) {
                         self.define_var(
@@ -324,7 +325,9 @@ impl Typer {
                             },
                         );
                     }
-                    let hbody = self.lower_block_no_scope(&arm.body, &Type::Void)?;
+                    let mut hbody = self.lower_block_no_scope(&arm.body, &Type::Void)?;
+                    self.finalize_block_drops(&mut hbody);
+                    self.pop_scope();
                     harms.push(hir::SelectArm {
                         is_send: arm.is_send,
                         chan: hch,
@@ -337,7 +340,7 @@ impl Typer {
                     });
                 }
                 let hdefault = if let Some(body) = default_body {
-                    Some(self.lower_block_no_scope(body, &Type::Void)?)
+                    Some(self.lower_block(body, &Type::Void)?)
                 } else {
                     None
                 };

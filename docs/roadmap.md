@@ -120,7 +120,7 @@ residue, ids `O-*`, `T-*`, `E-*`, `S-*`, `X-*`, `N-*`, `P-*`) still stand.
 - **Tooling** — `fmt` is corpus-gated and refuses to write output that stops
   parsing; the LSP runs the full frontend per edit (type diagnostics,
   inferred-type hover, scope-aware rename); `jinn bind` is a stated
-  approximation; `.jni` interface reuse is off by default.
+  approximation; `.jni` interfaces are emitted but never read back.
 - **Packages** — design only ([`design/lamp.md`](design/lamp.md)); the
   compiler machinery it assumes is
   [`design/compiler-prereqs.md`](design/compiler-prereqs.md).
@@ -759,8 +759,8 @@ read; (2) a *method-form* call on an unresolvable receiver whose name matches
 no user method contributes nothing (taint here would misfire on every builtin
 container method name); (3) a consuming call *inside* a `match` arm can still
 launder its capability where the arm-local dataflow hides the callee; (4)
-modules imported through `.jni` interface files have no bodies to scan
-(interface reuse is off by default — `X-3`).
+modules imported as precompiled interfaces will have no bodies to scan once
+interface v2 reuse lands (`X-3`).
 
 ### E-3 (m) Capability ceilings and manifests are design only
 
@@ -892,10 +892,12 @@ with a stated reason rather than translated.
 
 ### X-3 (m) `.jni` interface reuse has no safe-and-useful configuration
 
-Reading `.jni` files is off by default because a stale-but-newer file made the
-compiler accept a type-incorrect program. Either remove the feature or rebuild
-it as interface v2 with the hash ladder in
-[`design/compiler-prereqs.md`](design/compiler-prereqs.md).
+The v1 reader was removed in [181] (`TDX-13`): it rebuilt declarations
+without function bodies or type methods, so any build that reused a `.jni`
+failed with `undefined function`, and a stale-but-newer file could make the
+compiler accept a type-incorrect program. `.jni` is now write-only. Reuse
+returns only as interface v2 with the hash ladder in
+[`design/compiler-prereqs.md`](design/compiler-prereqs.md) (task 2-32-4).
 
 ### X-4 (m) LSP residue: packages, cross-file rename, generics
 

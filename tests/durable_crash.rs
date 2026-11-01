@@ -11,6 +11,7 @@ fn durable_rewrite_survives_crash_injection() {
         .args([
             "tests/durable_crash.c",
             "runtime/durable.c",
+            "runtime/txn_journal.c",
             "runtime/kv.c",
             "-o",
         ])

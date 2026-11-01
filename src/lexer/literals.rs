@@ -85,7 +85,6 @@ impl<'s> Lexer<'s> {
         } else {
             let val = text
                 .parse::<u64>()
-                .map(|u| u as i64)
                 .map_err(|_| self.mkerr(&format!("bad int: {text}")))?;
             Ok(Spanned {
                 token: Token::Int(val),
@@ -123,7 +122,6 @@ impl<'s> Lexer<'s> {
             .collect();
 
         let val = u64::from_str_radix(&text, radix)
-            .map(|u| u as i64)
             .map_err(|_| self.mkerr(&format!("bad base-{radix} literal")))?;
         Ok(Spanned {
             token: Token::Int(val),

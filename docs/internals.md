@@ -105,8 +105,9 @@ Load-bearing design facts:
 ## Incremental compilation
 
 **There is none.** `src/incr.rs` was deleted. `src/cache.rs` is the *package*
-cache despite the name; the only compile-time reuse is `.jni` interface files
-(`src/interface.rs`), and reading those is off by default (`X-3`).
+cache despite the name. `--emit-interface` writes a `.jni` interface file
+(`src/interface.rs`), but no compile reads one back: module resolution always
+compiles from source (`TDX-13`, closed in [181]).
 
 The deleted design is recorded here so the next attempt does not rebuild the
 same broken shape. Its call sites only ever logged a dirty count,

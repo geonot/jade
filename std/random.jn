@@ -52,8 +52,8 @@ type RNG
 
     *jump
         JUMP_0 is 0x180ec6d33cfd0aba
-        JUMP_1 is 0xd5a61266f0c9392c
-        JUMP_2 is 0xa9582618e03fc9aa
+        JUMP_1 is 0xd5a61266f0c9392c as i64
+        JUMP_2 is 0xa9582618e03fc9aa as i64
         JUMP_3 is 0x39abdc4529b1661c
         s0 is 0
         s1 is 0

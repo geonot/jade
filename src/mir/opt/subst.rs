@@ -139,6 +139,7 @@ pub(crate) fn subst_inst(inst: &mut Instruction, map: &HashMap<ValueId, ValueId>
             }
         }
         InstKind::IntConst(_)
+        | InstKind::SizeOf(_)
         | InstKind::FloatConst(_)
         | InstKind::BoolConst(_)
         | InstKind::StringConst(_)

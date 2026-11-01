@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <errno.h>
 #include "jinn_rt.h"
 #define IDX_MAGIC     "JINNIDX1"
 #define IDX_MAGIC_LEN 8
@@ -29,7 +30,7 @@ struct JinnIndex {
 };
 
 static int read_header(JinnIndex *idx) {
-    fseek(idx->fp, 0, SEEK_SET);
+    if (fseek(idx->fp, 0, SEEK_SET) != 0) jinn_persistence_fail("index header seek");
     char mag[IDX_MAGIC_LEN];
     if (fread(mag, 1, IDX_MAGIC_LEN, idx->fp) != IDX_MAGIC_LEN) return -1;
     if (memcmp(mag, IDX_MAGIC, IDX_MAGIC_LEN) != 0) return -1;
@@ -45,8 +46,7 @@ static int write_header(JinnIndex *idx) {
         fwrite(&idx->capacity, 8, 1, idx->fp) != 1 ||
         fwrite(&idx->count, 8, 1, idx->fp) != 1 ||
         fwrite(&idx->fingerprint, 8, 1, idx->fp) != 1) {
-        fprintf(stderr, "jinn: index: write_header failed\n");
-        return -1;
+        jinn_persistence_fail("index header write");
     }
     return 0;
 }
@@ -57,14 +57,14 @@ static void init_file(JinnIndex *idx) {
     uint8_t zero0[SLOT_SIZE];
     memset(zero0, 0, SLOT_SIZE);
     for (int64_t i = 0; i < INITIAL_CAP; i++) {
-        fwrite(zero0, 1, SLOT_SIZE, idx->fp);
+        jinn_store_fwrite(zero0, 1, SLOT_SIZE, idx->fp);
     }
-    fflush(idx->fp);
+    jinn_store_fflush(idx->fp);
 }
 static int header_is_sane(JinnIndex *idx) {
     int64_t cap = idx->capacity;
     if (cap < INITIAL_CAP) return 0;
-    if (cap > ((int64_t)1 << 60)) return 0;
+    if (cap > (INT64_MAX - IDX_HEADER) / SLOT_SIZE) return 0;
     if ((cap & (cap - 1)) != 0) return 0;
     if (idx->count < 0 || idx->count > cap) return 0;
     if (fseek(idx->fp, 0, SEEK_END) != 0) return 0;
@@ -74,19 +74,22 @@ static int header_is_sane(JinnIndex *idx) {
 }
 JinnIndex *jinn_idx_open_checked(const char *path, int64_t fingerprint,
                                  int *needs_rebuild) {
+    jinn_persistence_check_path(path);
     JinnIndex *idx = (JinnIndex *)calloc(1, sizeof(JinnIndex));
-    if (!idx) { if (needs_rebuild) *needs_rebuild = 0; return NULL; }
+    if (!idx) jinn_persistence_fail("index allocation");
     idx->fp = fopen(path, "r+b");
+    if (!idx->fp && errno != ENOENT) jinn_persistence_fail("index open");
     if (idx->fp && read_header(idx) == 0 &&
         idx->fingerprint == fingerprint && header_is_sane(idx)) {
         if (needs_rebuild) *needs_rebuild = 0;
         return idx;
     }
-    if (idx->fp) fclose(idx->fp);
+    if (idx->fp && fclose(idx->fp) != 0) jinn_persistence_fail("index rebuild close");
     idx->fp = fopen(path, "w+b");
-    if (!idx->fp) { free(idx); if (needs_rebuild) *needs_rebuild = 0; return NULL; }
+    if (!idx->fp) jinn_persistence_fail("index creation");
     idx->fingerprint = fingerprint;
     init_file(idx);
+    jinn_store_finish_create(idx->fp, path);
     if (needs_rebuild) *needs_rebuild = 1;
     return idx;
 }
@@ -95,7 +98,7 @@ JinnIndex *jinn_idx_open(const char *path) {
 }
 void jinn_idx_close(JinnIndex *idx) {
     if (!idx) return;
-    if (idx->fp) fclose(idx->fp);
+    if (idx->fp && fclose(idx->fp) != 0) jinn_persistence_fail("index close");
     free(idx);
 }
 static void read_slot(JinnIndex *idx, int64_t slot,
@@ -103,13 +106,12 @@ static void read_slot(JinnIndex *idx, int64_t slot,
     *hash = 0;
     *offset = 0;
     *status = 0;
-    if (fseek(idx->fp, IDX_HEADER + slot * SLOT_SIZE, SEEK_SET) != 0) return;
+    jinn_store_fseek(idx->fp, IDX_HEADER + slot * SLOT_SIZE, SEEK_SET);
     if (fread(hash, 8, 1, idx->fp) != 1 ||
         fread(offset, 8, 1, idx->fp) != 1 ||
-        fread(status, 8, 1, idx->fp) != 1) {
-        *hash = 0;
-        *offset = 0;
-        *status = 0;
+        fread(status, 8, 1, idx->fp) != 1 ||
+        *status < STATUS_EMPTY || *status > STATUS_TOMBSTONE) {
+        jinn_persistence_fail("index slot read");
     }
 }
 static int write_slot(JinnIndex *idx, int64_t slot,
@@ -118,8 +120,7 @@ static int write_slot(JinnIndex *idx, int64_t slot,
         fwrite(&hash, 8, 1, idx->fp) != 1 ||
         fwrite(&offset, 8, 1, idx->fp) != 1 ||
         fwrite(&status, 8, 1, idx->fp) != 1) {
-        fprintf(stderr, "jinn: index: write_slot failed\n");
-        return -1;
+        jinn_persistence_fail("index slot write");
     }
     return 0;
 }
@@ -127,22 +128,26 @@ static int write_slot(JinnIndex *idx, int64_t slot,
 static void grow(JinnIndex *idx) {
     int64_t old_cap = idx->capacity;
 
-    if (old_cap > ((int64_t)1 << 60)) return;
+    if (old_cap > (INT64_MAX - IDX_HEADER) / (2 * SLOT_SIZE))
+        jinn_persistence_fail("index capacity overflow");
 
     typedef struct { uint64_t h; int64_t off; } Entry;
-    if (idx->count <= 0 || (size_t)idx->count > SIZE_MAX / sizeof(Entry)) return;
+    if (idx->count <= 0 || (uint64_t)idx->count > SIZE_MAX / sizeof(Entry))
+        jinn_persistence_fail("index entry count");
     Entry *entries = (Entry *)malloc(sizeof(Entry) * (size_t)idx->count);
-    if (!entries) return;
+    if (!entries) jinn_persistence_fail("index growth allocation");
     int64_t n = 0;
     for (int64_t i = 0; i < old_cap; i++) {
         uint64_t h; int64_t off, st;
         read_slot(idx, i, &h, &off, &st);
         if (st == STATUS_OCCUPIED) {
+            if (n >= idx->count) jinn_persistence_fail("index inconsistent count");
             entries[n].h = h;
             entries[n].off = off;
             n++;
         }
     }
+    if (n != idx->count) jinn_persistence_fail("index inconsistent count");
     idx->capacity = old_cap * 2;
     idx->count = 0;
     write_header(idx);
@@ -150,9 +155,9 @@ static void grow(JinnIndex *idx) {
     uint8_t zero[SLOT_SIZE];
     memset(zero, 0, SLOT_SIZE);
     for (int64_t i = 0; i < idx->capacity; i++) {
-        fwrite(zero, 1, SLOT_SIZE, idx->fp);
+        jinn_store_fwrite(zero, 1, SLOT_SIZE, idx->fp);
     }
-    fflush(idx->fp);
+    jinn_store_fflush(idx->fp);
 
     for (int64_t i = 0; i < n; i++) {
         int64_t slot = (int64_t)(entries[i].h & (uint64_t)(idx->capacity - 1));
@@ -168,13 +173,14 @@ static void grow(JinnIndex *idx) {
         }
     }
     write_header(idx);
-    fflush(idx->fp);
+    jinn_store_fflush(idx->fp);
     free(entries);
 }
 
 static void idx_txn_rollback(void *arg) {
     JinnIndex *idx = (JinnIndex *)arg;
-    if (idx && idx->fp) (void)read_header(idx);
+    if (idx && idx->fp && read_header(idx) != 0)
+        jinn_persistence_fail("index rollback header");
 }
 static void idx_txn_guard(JinnIndex *idx) {
     if (idx && idx->fp && jinn_txn_active()) {
@@ -184,34 +190,36 @@ static void idx_txn_guard(JinnIndex *idx) {
 void jinn_idx_insert(JinnIndex *idx, uint64_t hash, int64_t record_offset) {
     if (!idx) return;
     idx_txn_guard(idx);
-    if (idx->count * 10 >= idx->capacity * 7) {
+    if (idx->count >= idx->capacity / 10 * 7) {
         grow(idx);
     }
     int64_t slot = (int64_t)(hash & (uint64_t)(idx->capacity - 1));
-    for (;;) {
+    for (int64_t probes = 0; probes < idx->capacity; probes++) {
         uint64_t sh; int64_t so, ss;
         read_slot(idx, slot, &sh, &so, &ss);
         if (ss == STATUS_EMPTY || ss == STATUS_TOMBSTONE) {
             write_slot(idx, slot, hash, record_offset, STATUS_OCCUPIED);
             idx->count++;
             write_header(idx);
-            fflush(idx->fp);
+            jinn_store_fflush(idx->fp);
             return;
         }
         slot = (slot + 1) & (idx->capacity - 1);
     }
+    jinn_persistence_fail("index insertion capacity");
 }
 
 int64_t jinn_idx_lookup(JinnIndex *idx, uint64_t hash) {
     if (!idx) return -1;
     int64_t slot = (int64_t)(hash & (uint64_t)(idx->capacity - 1));
-    for (;;) {
+    for (int64_t probes = 0; probes < idx->capacity; probes++) {
         uint64_t sh; int64_t so, ss;
         read_slot(idx, slot, &sh, &so, &ss);
         if (ss == STATUS_EMPTY) return -1;
         if (ss == STATUS_OCCUPIED && sh == hash) return so;
         slot = (slot + 1) & (idx->capacity - 1);
     }
+    return -1;
 }
 int jinn_idx_contains(JinnIndex *idx, uint64_t hash) {
     return jinn_idx_lookup(idx, hash) >= 0 ? 1 : 0;
@@ -220,7 +228,7 @@ void jinn_idx_delete(JinnIndex *idx, uint64_t hash) {
     if (!idx) return;
     idx_txn_guard(idx);
     int64_t slot = (int64_t)(hash & (uint64_t)(idx->capacity - 1));
-    for (;;) {
+    for (int64_t probes = 0; probes < idx->capacity; probes++) {
         uint64_t sh; int64_t so, ss;
         read_slot(idx, slot, &sh, &so, &ss);
         if (ss == STATUS_EMPTY) return;
@@ -228,7 +236,7 @@ void jinn_idx_delete(JinnIndex *idx, uint64_t hash) {
             write_slot(idx, slot, 0, 0, STATUS_TOMBSTONE);
             idx->count--;
             write_header(idx);
-            fflush(idx->fp);
+            jinn_store_fflush(idx->fp);
             return;
         }
         slot = (slot + 1) & (idx->capacity - 1);
@@ -236,6 +244,7 @@ void jinn_idx_delete(JinnIndex *idx, uint64_t hash) {
 }
 
 void jinn_idx_clear(JinnIndex *idx) {
-    if (!idx) return;
+    if (!idx) jinn_persistence_fail("index clear handle");
+    idx_txn_guard(idx);
     init_file(idx);
 }

@@ -89,7 +89,7 @@ impl Typer {
                             for i in 0..*len {
                                 expanded.push(ast::Expr::Index(
                                     Box::new((**inner).clone()),
-                                    Box::new(ast::Expr::Int(i as i64, *sp)),
+                                    Box::new(ast::Expr::Int(i as u64, *sp)),
                                     *sp,
                                 ));
                             }
@@ -98,7 +98,7 @@ impl Typer {
                             for i in 0..tys.len() {
                                 expanded.push(ast::Expr::Index(
                                     Box::new((**inner).clone()),
-                                    Box::new(ast::Expr::Int(i as i64, *sp)),
+                                    Box::new(ast::Expr::Int(i as u64, *sp)),
                                     *sp,
                                 ));
                             }
@@ -129,7 +129,7 @@ impl Typer {
                 for i in 0..*len {
                     expanded.push(ast::Expr::Index(
                         Box::new(args[0].clone()),
-                        Box::new(ast::Expr::Int(i as i64, sp)),
+                        Box::new(ast::Expr::Int(i as u64, sp)),
                         sp,
                     ));
                 }

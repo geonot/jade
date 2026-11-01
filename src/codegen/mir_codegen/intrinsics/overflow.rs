@@ -1,4 +1,5 @@
 use super::*;
+use inkwell::IntPredicate;
 
 impl<'ctx> Compiler<'ctx> {
     pub(in crate::codegen) fn try_handle_overflow_builtin(
@@ -15,6 +16,7 @@ impl<'ctx> Compiler<'ctx> {
             "Bswap" | "Popcount" | "Clz" | "Ctz" | "RotateLeft" | "RotateRight" => {
                 return self.try_handle_bit_builtin(builtin_name, args);
             }
+            "PayloadMove" => return Ok(Some(self.val(args[1]))),
             "Likely" | "Unlikely" => {
                 if args.is_empty() {
                     return Ok(None);
@@ -566,127 +568,69 @@ impl<'ctx> Compiler<'ctx> {
             }
             _ => {}
         }
-        if args.len() != 2 {
+        use crate::integer_arithmetic::{IntegerArithmetic, IntegerOp, OverflowMode};
+        let Some(op) = IntegerArithmetic::from_mir(name) else {
             return Ok(None);
+        };
+        if args.len() != 2 {
+            return Err(format!("ICE: {} requires two operands", op.source_name));
         }
+        let ty = self
+            .value_types
+            .get(&args[0])
+            .ok_or("ICE: missing integer operand type")?;
+        if !ty.is_int() || self.value_types.get(&args[1]) != Some(ty) {
+            return Err(format!("ICE: invalid {} operand types", op.source_name));
+        }
+        let signed = ty.is_signed();
         let lhs = self.val(args[0]).into_int_value();
         let rhs = self.val(args[1]).into_int_value();
-        let result = match builtin_name {
-            "WrappingAdd" => b!(self.bld.build_int_add(lhs, rhs, "wrap.add")),
-            "WrappingSub" => b!(self.bld.build_int_sub(lhs, rhs, "wrap.sub")),
-            "WrappingMul" => b!(self.bld.build_int_mul(lhs, rhs, "wrap.mul")),
-
-            "SaturatingAdd" => {
-                let bw = lhs.get_type().get_bit_width();
-                let name = format!("llvm.sadd.sat.i{bw}");
-                let ft = lhs
-                    .get_type()
-                    .fn_type(&[lhs.get_type().into(), rhs.get_type().into()], false);
-                let f = self
-                    .module
-                    .get_function(&name)
-                    .unwrap_or_else(|| self.module.add_function(&name, ft, None));
-                b!(self.bld.build_call(f, &[lhs.into(), rhs.into()], "sat.add"))
-                    .try_as_basic_value()
-                    .basic()
-                    .expect("ICE: call returned void")
-                    .into_int_value()
-            }
-            "SaturatingSub" => {
-                let bw = lhs.get_type().get_bit_width();
-                let name = format!("llvm.ssub.sat.i{bw}");
-                let ft = lhs
-                    .get_type()
-                    .fn_type(&[lhs.get_type().into(), rhs.get_type().into()], false);
-                let f = self
-                    .module
-                    .get_function(&name)
-                    .unwrap_or_else(|| self.module.add_function(&name, ft, None));
-                b!(self.bld.build_call(f, &[lhs.into(), rhs.into()], "sat.sub"))
-                    .try_as_basic_value()
-                    .basic()
-                    .expect("ICE: call returned void")
-                    .into_int_value()
-            }
-            "SaturatingMul" => {
-                let bw = lhs.get_type().get_bit_width();
-                let intr = format!("llvm.smul.with.overflow.i{bw}");
-                let ovf_ty = self
-                    .ctx
-                    .struct_type(&[lhs.get_type().into(), self.ctx.bool_type().into()], false);
-                let ft = ovf_ty.fn_type(&[lhs.get_type().into(), rhs.get_type().into()], false);
-                let f = self
-                    .module
-                    .get_function(&intr)
-                    .unwrap_or_else(|| self.module.add_function(&intr, ft, None));
-                let r = b!(self.bld.build_call(f, &[lhs.into(), rhs.into()], "smul"))
-                    .try_as_basic_value()
-                    .basic()
-                    .expect("ICE: call returned void")
-                    .into_struct_value();
-                let val = b!(self.bld.build_extract_value(r, 0, "smul.val")).into_int_value();
-                let ovf = b!(self.bld.build_extract_value(r, 1, "smul.ovf")).into_int_value();
-                let max_val = lhs.get_type().const_int(i64::MAX as u64, false);
-                b!(self.bld.build_select(ovf, max_val, val, "sat.mul")).into_int_value()
-            }
-
-            "CheckedAdd" => {
-                let bw = lhs.get_type().get_bit_width();
-                let intr = format!("llvm.sadd.with.overflow.i{bw}");
-                let ovf_ty = self
-                    .ctx
-                    .struct_type(&[lhs.get_type().into(), self.ctx.bool_type().into()], false);
-                let ft = ovf_ty.fn_type(&[lhs.get_type().into(), rhs.get_type().into()], false);
-                let f = self
-                    .module
-                    .get_function(&intr)
-                    .unwrap_or_else(|| self.module.add_function(&intr, ft, None));
-                let r = b!(self.bld.build_call(f, &[lhs.into(), rhs.into()], "cadd"))
-                    .try_as_basic_value()
-                    .basic()
-                    .expect("ICE: call returned void")
-                    .into_struct_value();
-
-                b!(self.bld.build_extract_value(r, 0, "cadd.val")).into_int_value()
-            }
-            "CheckedSub" => {
-                let bw = lhs.get_type().get_bit_width();
-                let intr = format!("llvm.ssub.with.overflow.i{bw}");
-                let ovf_ty = self
-                    .ctx
-                    .struct_type(&[lhs.get_type().into(), self.ctx.bool_type().into()], false);
-                let ft = ovf_ty.fn_type(&[lhs.get_type().into(), rhs.get_type().into()], false);
-                let f = self
-                    .module
-                    .get_function(&intr)
-                    .unwrap_or_else(|| self.module.add_function(&intr, ft, None));
-                let r = b!(self.bld.build_call(f, &[lhs.into(), rhs.into()], "csub"))
-                    .try_as_basic_value()
-                    .basic()
-                    .expect("ICE: call returned void")
-                    .into_struct_value();
-                b!(self.bld.build_extract_value(r, 0, "csub.val")).into_int_value()
-            }
-            "CheckedMul" => {
-                let bw = lhs.get_type().get_bit_width();
-                let intr = format!("llvm.smul.with.overflow.i{bw}");
-                let ovf_ty = self
-                    .ctx
-                    .struct_type(&[lhs.get_type().into(), self.ctx.bool_type().into()], false);
-                let ft = ovf_ty.fn_type(&[lhs.get_type().into(), rhs.get_type().into()], false);
-                let f = self
-                    .module
-                    .get_function(&intr)
-                    .unwrap_or_else(|| self.module.add_function(&intr, ft, None));
-                let r = b!(self.bld.build_call(f, &[lhs.into(), rhs.into()], "cmul"))
-                    .try_as_basic_value()
-                    .basic()
-                    .expect("ICE: call returned void")
-                    .into_struct_value();
-                b!(self.bld.build_extract_value(r, 0, "cmul.val")).into_int_value()
-            }
-            _ => return Ok(None),
+        if op.mode == OverflowMode::Wrapping {
+            let result = match op.op {
+                IntegerOp::Add => b!(self.bld.build_int_add(lhs, rhs, "wrap.add")),
+                IntegerOp::Sub => b!(self.bld.build_int_sub(lhs, rhs, "wrap.sub")),
+                IntegerOp::Mul => b!(self.bld.build_int_mul(lhs, rhs, "wrap.mul")),
+            };
+            return Ok(Some(result.into()));
+        }
+        let pair = self.overflow_pair(op.op, lhs, rhs, signed)?;
+        if op.mode == OverflowMode::Checked {
+            return Ok(Some(pair.into()));
+        }
+        let value = b!(self.bld.build_extract_value(pair, 0, "sat.value")).into_int_value();
+        let overflow = b!(self.bld.build_extract_value(pair, 1, "sat.overflow")).into_int_value();
+        let it = lhs.get_type();
+        let bound = if signed {
+            let min = it.const_int(1u64 << (it.get_bit_width() - 1), false);
+            let max = it.const_int((1u64 << (it.get_bit_width() - 1)) - 1, false);
+            let negative = match op.op {
+                IntegerOp::Mul => {
+                    let signs = b!(self.bld.build_xor(lhs, rhs, "sat.signs"));
+                    b!(self.bld.build_int_compare(
+                        IntPredicate::SLT,
+                        signs,
+                        it.const_zero(),
+                        "sat.negative"
+                    ))
+                }
+                IntegerOp::Add | IntegerOp::Sub => b!(self.bld.build_int_compare(
+                    IntPredicate::SLT,
+                    lhs,
+                    it.const_zero(),
+                    "sat.negative"
+                )),
+            };
+            b!(self.bld.build_select(negative, min, max, "sat.bound")).into_int_value()
+        } else if matches!(op.op, IntegerOp::Sub) {
+            it.const_zero()
+        } else {
+            it.const_all_ones()
         };
-        Ok(Some(result.into()))
+        Ok(Some(b!(self.bld.build_select(
+            overflow,
+            bound,
+            value,
+            "sat.result"
+        ))))
     }
 }

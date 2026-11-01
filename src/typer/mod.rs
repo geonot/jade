@@ -177,6 +177,7 @@ pub struct Typer {
     pub(crate) poly_lambda_asts:
         IndexMap<Symbol, (Vec<ast::Param>, Option<Type>, ast::Block, Span)>,
     pub(crate) type_errors: Vec<String>,
+    pub(crate) integer_literals: Vec<(i128, Type, Span)>,
     pub(crate) fn_param_names: IndexMap<Symbol, Vec<String>>,
     pub(crate) fn_defaults: IndexMap<Symbol, Vec<Option<ast::Expr>>>,
 
@@ -314,6 +315,7 @@ impl Typer {
             unannotated_struct_fields: Vec::new(),
             poly_lambda_asts: IndexMap::new(),
             type_errors: Vec::new(),
+            integer_literals: Vec::new(),
             fn_param_names: IndexMap::new(),
             fn_defaults: IndexMap::new(),
             fn_param_access: IndexMap::new(),
@@ -807,6 +809,30 @@ impl Typer {
         }
     }
 
+    pub(crate) fn is_value_clonable(&self, ty: &Type) -> bool {
+        ty.is_value_clonable_with(&|nominal| match nominal {
+            Type::Struct(name, args) if !self.type_has_resource_annotation(nominal) => {
+                if self.structs.contains_key(name) {
+                    Some(self.struct_field_types(name, args))
+                } else {
+                    self.enums.get(name).map(|variants| {
+                        variants
+                            .iter()
+                            .flat_map(|(_, fields)| fields.iter().cloned())
+                            .collect()
+                    })
+                }
+            }
+            Type::Enum(name) => self.enums.get(name).map(|variants| {
+                variants
+                    .iter()
+                    .flat_map(|(_, fields)| fields.iter().cloned())
+                    .collect()
+            }),
+            _ => None,
+        })
+    }
+
     pub(crate) fn ownership_with_mod(
         &self,
         ty: &Type,
@@ -828,7 +854,7 @@ impl Typer {
                         "cannot `copy` a @resource type ({ty}): use `take` (move) instead"
                     ));
                 }
-                if !ty.is_value_clonable() && self.needs_drop(ty) {
+                if !self.is_value_clonable(ty) && self.needs_drop(ty) {
                     return Err(format!(
                         "cannot `copy` a value of type {ty}: deep-copy is not defined \
                          for this type, so the copy would silently become a move; \

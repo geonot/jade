@@ -3,15 +3,17 @@
 #include <string.h>
 #include <stdint.h>
 #include <time.h>
+#include <errno.h>
+#include <limits.h>
 #include <unistd.h>
 #include "jinn_rt.h"
 #define JINN_WAL_SYNC_NONE       0
 #define JINN_WAL_SYNC_FDATASYNC  1
 #define JINN_WAL_SYNC_FSYNC      2
 #define JINN_WAL_SYNC_GROUP      3
-static int jinn_wal_env_policy = -2;
-static int jinn_wal_get_env_policy(void) {
-    if (jinn_wal_env_policy >= -1) return jinn_wal_env_policy;
+static int jinn_wal_env_policy = -1;
+static pthread_once_t wal_policy_once = PTHREAD_ONCE_INIT;
+static void jinn_wal_init_env_policy(void) {
     const char *env = getenv("JINN_WAL_SYNC");
     if (!env || !*env) {
         jinn_wal_env_policy = -1;
@@ -31,6 +33,9 @@ static int jinn_wal_get_env_policy(void) {
         }
         jinn_wal_env_policy = JINN_WAL_SYNC_FDATASYNC;
     }
+}
+static int jinn_wal_get_env_policy(void) {
+    pthread_once(&wal_policy_once, jinn_wal_init_env_policy);
     return jinn_wal_env_policy;
 }
 static int jinn_wal_get_policy(void) {
@@ -94,9 +99,6 @@ static int jinn_wal_effective_policy(FILE *wal) {
 }
 static int jinn_wal_force(FILE *wal, int policy) {
     if (!wal) return -1;
-    if (jinn_txn_active()) {
-        return fflush(wal) == 0 ? 0 : -1;
-    }
     if (fflush(wal) != 0) return -1;
     int fd = fileno(wal);
     if (fd < 0) return -1;
@@ -109,32 +111,20 @@ static int jinn_wal_force(FILE *wal, int policy) {
         case JINN_WAL_SYNC_FDATASYNC:
         default:
 #if defined(__linux__)
-            if (fdatasync(fd) == 0) return 0;
-#endif
+            return fdatasync(fd) == 0 ? 0 : -1;
+#else
             return fsync(fd) == 0 ? 0 : -1;
+#endif
     }
 }
 void jinn_wal_commit_group(FILE *wal) {
-    if (!wal) return;
-    if (fflush(wal) != 0) {
-        fprintf(stderr, "jinn: wal: group-commit flush failed\n");
-        return;
-    }
-    int fd = fileno(wal);
-    if (fd < 0) return;
-#if defined(__linux__)
-    if (fdatasync(fd) == 0) return;
-#endif
-    if (fsync(fd) != 0) {
-        fprintf(stderr, "jinn: wal: group-commit fsync failed — batch may not be durable\n");
-    }
+    jinn_persistence_sync(wal);
 }
 static const char WAL_MAGIC[8]    = {'J','I','N','N','W','A','L','2'};
 static const char WAL_MAGIC_V1[8] = {'J','I','N','N','W','A','L','\0'};
 static uint32_t crc32_table[256];
-static int crc32_initialized = 0;
+static pthread_once_t crc32_once = PTHREAD_ONCE_INIT;
 static void crc32_init(void) {
-    if (crc32_initialized) return;
     for (uint32_t i = 0; i < 256; i++) {
         uint32_t c = i;
         for (int j = 0; j < 8; j++) {
@@ -142,12 +132,11 @@ static void crc32_init(void) {
         }
         crc32_table[i] = c;
     }
-    crc32_initialized = 1;
 }
 
 #define JINN_CRC_SEED 0xFFFFFFFFu
 static uint32_t crc32_update(uint32_t crc, const void *data, size_t len) {
-    crc32_init();
+    pthread_once(&crc32_once, crc32_init);
     const uint8_t *p = (const uint8_t *)data;
     for (size_t i = 0; i < len; i++) {
         crc = crc32_table[(crc ^ p[i]) & 0xFF] ^ (crc >> 8);
@@ -169,10 +158,11 @@ static int wal_frame_len_ok(uint8_t op, uint32_t payload_len) {
     return payload_len <= 64u * 1024 * 1024;
 }
 static long wal_scan_valid_end(FILE *f, int *damaged) {
-    fseek(f, 0, SEEK_END);
+    if (fseek(f, 0, SEEK_END) != 0) jinn_persistence_fail("WAL scan seek");
     long file_end = ftell(f);
     long valid_end = 8;
-    fseek(f, 8, SEEK_SET);
+    if (file_end < 8 || fseek(f, 8, SEEK_SET) != 0)
+        jinn_persistence_fail("WAL scan position");
     *damaged = 0;
     while (ftell(f) < file_end) {
         uint32_t payload_len;
@@ -202,10 +192,16 @@ static long wal_scan_valid_end(FILE *f, int *damaged) {
         valid_end = ftell(f);
     }
 done:
+    if (ferror(f)) jinn_persistence_fail("WAL scan read");
     return valid_end;
+}
+FILE *jinn_store_wal_open(const char *path) {
+    jinn_persistence_check_path(path);
+    return jinn_wal_open(path);
 }
 FILE *jinn_wal_open(const char *path) {
     FILE *f = fopen(path, "r+b");
+    if (!f && errno != ENOENT) return NULL;
     if (f) {
         char magic[8];
         size_t got = fread(magic, 1, 8, f);
@@ -223,7 +219,11 @@ FILE *jinn_wal_open(const char *path) {
                     return NULL;
                 }
             }
-            fseek(f, valid_end, SEEK_SET);
+            if (fseek(f, valid_end, SEEK_SET) != 0) {
+                fclose(f);
+                return NULL;
+            }
+            if (damaged) jinn_persistence_sync(f);
             return f;
         }
         if (got == 8 && memcmp(magic, WAL_MAGIC_V1, 8) == 0) {
@@ -235,8 +235,10 @@ FILE *jinn_wal_open(const char *path) {
                 fclose(f);
                 return NULL;
             }
-            fseek(f, 0, SEEK_SET);
-            fwrite(WAL_MAGIC, 1, 8, f);
+            if (fseek(f, 0, SEEK_SET) != 0 || fwrite(WAL_MAGIC, 1, 8, f) != 8) {
+                fclose(f);
+                return NULL;
+            }
             if (jinn_wal_force(f, JINN_WAL_SYNC_FDATASYNC) != 0) {
                 fclose(f);
                 return NULL;
@@ -255,7 +257,10 @@ FILE *jinn_wal_open(const char *path) {
     }
     f = fopen(path, "w+b");
     if (!f) return NULL;
-    fwrite(WAL_MAGIC, 1, 8, f);
+    if (fwrite(WAL_MAGIC, 1, 8, f) != 8) {
+        fclose(f);
+        return NULL;
+    }
     if (jinn_wal_force(f, jinn_wal_get_policy() == JINN_WAL_SYNC_NONE
                               ? JINN_WAL_SYNC_NONE
                               : JINN_WAL_SYNC_FDATASYNC) != 0) {
@@ -264,7 +269,10 @@ FILE *jinn_wal_open(const char *path) {
         return NULL;
     }
     if (jinn_wal_get_policy() != JINN_WAL_SYNC_NONE) {
-        (void)jinn_dir_fsync(path);
+        if (jinn_dir_fsync(path) != 0) {
+            fclose(f);
+            return NULL;
+        }
     }
     return f;
 }
@@ -276,6 +284,7 @@ int jinn_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload_
         return -1;
     }
     long start = ftell(wal);
+    if (start < 0 || (payload_len && !payload)) return -1;
     uint32_t checksum = wal_frame_crc(payload_len, op, ts, payload);
     int ok = fwrite(&payload_len, 4, 1, wal) == 1 &&
              fwrite(&op, 1, 1, wal) == 1 &&
@@ -299,49 +308,21 @@ int jinn_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload_
 }
 void jinn_wal_write_must(FILE *wal, uint8_t op, const void *payload,
                          uint32_t payload_len) {
-    if (!wal) return;
     if (jinn_wal_write(wal, op, payload, payload_len) != 0) {
         fprintf(stderr, "jinn: wal: cannot guarantee durability — aborting\n");
         abort();
     }
 }
 void jinn_wal_checkpoint(FILE *wal) {
-    if (!wal) return;
-    fflush(wal);
-    int fd = fileno(wal);
-    if (fd < 0) return;
-    if (ftruncate(fd, 8) != 0) {
-        fprintf(stderr, "jinn: wal: checkpoint truncate failed\n");
-        return;
-    }
-    fseek(wal, 8, SEEK_SET);
-    int policy = jinn_wal_effective_policy(wal);
-    if (jinn_wal_force(wal, policy == JINN_WAL_SYNC_NONE
-                                ? JINN_WAL_SYNC_NONE
-                                : JINN_WAL_SYNC_FDATASYNC) != 0) {
-        fprintf(stderr, "jinn: wal: checkpoint sync failed\n");
-    }
+    if (!wal || jinn_txn_active()) return;
+    jinn_persistence_sync(wal);
+    if (ftruncate(fileno(wal), 8) != 0 || fseek(wal, 8, SEEK_SET) != 0)
+        jinn_persistence_fail("WAL checkpoint truncation");
+    jinn_persistence_sync(wal);
 }
 
 void jinn_store_save(FILE *fp, FILE *wal) {
-    int policy = wal ? jinn_wal_effective_policy(wal) : jinn_wal_get_policy();
-    if (fp) {
-        if (fflush(fp) != 0) {
-            fprintf(stderr, "jinn: save: data-file flush failed — keeping the WAL\n");
-            return;
-        }
-        int fd = fileno(fp);
-        if (fd >= 0 && policy != JINN_WAL_SYNC_NONE) {
-#if defined(__linux__)
-            if (fdatasync(fd) != 0)
-#endif
-                if (fsync(fd) != 0) {
-                    fprintf(stderr,
-                            "jinn: save: data-file sync failed — keeping the WAL\n");
-                    return;
-                }
-        }
-    }
+    if (fp) jinn_persistence_sync(fp);
     jinn_wal_checkpoint(wal);
 }
 
@@ -359,7 +340,7 @@ void jinn_wal_close(FILE *wal) {
         }
     }
     jinn_wal_policy_release();
-    fclose(wal);
+    if (fclose(wal) != 0) jinn_persistence_fail("WAL close");
 }
 typedef struct JinnTxnFile {
     FILE  *fp;
@@ -370,7 +351,7 @@ typedef struct JinnTxnFile {
     unsigned char *snap;
     long   snap_len;
     int    mem_only;
-    int    trunc_only;
+    int    disk_only;
     void (*on_rollback)(void *);
     void (*on_release)(void *);
     void  *rb_arg;
@@ -382,10 +363,8 @@ typedef struct JinnTxnState {
 } JinnTxnState;
 static _Thread_local JinnTxnState *tl_txn_fallback = NULL;
 static JinnTxnState **jinn_txn_slot(void) {
-    jinn_worker_t *w = jinn_worker_self();
-    if (w && w->current) {
-        return (JinnTxnState **)&w->current->txn_state;
-    }
+    jinn_coro_t *c = jinn_current_coro();
+    if (c) return (JinnTxnState **)&c->txn_state;
     return &tl_txn_fallback;
 }
 static JinnTxnState *jinn_txn_cur(void) {
@@ -397,6 +376,10 @@ int jinn_txn_active(void) {
 }
 void jinn_txn_begin(void) {
     JinnTxnState **slot = jinn_txn_slot();
+    if (!*slot || (*slot)->depth == 0) {
+        jinn_store_writer_enter();
+        jinn_persistence_prepare();
+    }
     if (!*slot) {
         *slot = (JinnTxnState *)calloc(1, sizeof(JinnTxnState));
         if (!*slot) {
@@ -431,14 +414,22 @@ static void jinn_txn_release(void) {
         jinn_txn_free_files(*slot);
         free(*slot);
         *slot = NULL;
+        jinn_store_writer_leave();
     }
 }
 static long jinn_txn_snapshot_max(void) {
     static long cached = -1;
     if (cached >= 0) return cached;
     const char *env = getenv("JINN_TXN_SNAPSHOT_MAX");
-    long v = env ? atol(env) : 0;
-    cached = v > 0 ? v : 256L * 1024 * 1024;
+    long v = 256L * 1024 * 1024;
+    if (env) {
+        char *end;
+        errno = 0;
+        v = strtol(env, &end, 10);
+        if (errno || !*env || *end || v <= 0)
+            jinn_persistence_fail("JINN_TXN_SNAPSHOT_MAX must be a positive byte count");
+    }
+    cached = v;
     return cached;
 }
 static void jinn_txn_track_impl(FILE **fpp, FILE *fp, FILE *wal,
@@ -447,7 +438,7 @@ static void jinn_txn_track_impl(FILE **fpp, FILE *fp, FILE *wal,
     JinnTxnState *st = jinn_txn_cur();
     if (!st || st->depth <= 0) return;
     FILE *cur_fp = fpp ? *fpp : fp;
-    if (!cur_fp) return;
+    if (!cur_fp) jinn_persistence_fail("transaction participant handle");
     if (jinn_txn_find(st, fpp, fp)) return;
     JinnTxnFile *t = (JinnTxnFile *)calloc(1, sizeof *t);
     if (!t) {
@@ -458,20 +449,20 @@ static void jinn_txn_track_impl(FILE **fpp, FILE *fp, FILE *wal,
     t->fp = fp;
     t->fpp = fpp;
     t->wal = wal;
-    t->path = path ? strdup(path) : NULL;
+    t->path = path ? strdup(path) : jinn_persistence_file_path(cur_fp);
+    if (!t->path) jinn_persistence_fail("transaction path allocation");
     t->on_rollback = cb;
     t->rb_arg = arg;
-    if (t->path) jinn_store_wlock(t->path);
+    if (path) jinn_store_wlock(t->path);
     if (wal) {
-        fflush(wal);
-        fseek(wal, 0, SEEK_END);
-        t->wal_off = ftell(wal);
+        if (fflush(wal) != 0 || fseek(wal, 0, SEEK_END) != 0 ||
+            (t->wal_off = ftell(wal)) < 0)
+            jinn_persistence_fail("transaction WAL position");
     }
-    fflush(cur_fp);
+    if (fflush(cur_fp) != 0) jinn_persistence_fail("transaction snapshot flush");
     long cur = ftell(cur_fp);
-    fseek(cur_fp, 0, SEEK_END);
-    t->snap_len = ftell(cur_fp);
-    if (t->snap_len < 0) t->snap_len = 0;
+    if (cur < 0 || fseek(cur_fp, 0, SEEK_END) != 0 || (t->snap_len = ftell(cur_fp)) < 0)
+        jinn_persistence_fail("transaction snapshot position");
     if (t->snap_len > jinn_txn_snapshot_max()) {
         fprintf(stderr,
                 "jinn: txn: store%s%s is %ld bytes, over the transaction "
@@ -491,8 +482,8 @@ static void jinn_txn_track_impl(FILE **fpp, FILE *fp, FILE *wal,
         abort();
     }
     if (t->snap_len > 0) {
-        fseek(cur_fp, 0, SEEK_SET);
-        if (fread(t->snap, 1, (size_t)t->snap_len, cur_fp) != (size_t)t->snap_len) {
+        if (fseek(cur_fp, 0, SEEK_SET) != 0 ||
+            fread(t->snap, 1, (size_t)t->snap_len, cur_fp) != (size_t)t->snap_len) {
             fprintf(stderr, "jinn: txn: snapshot read failed — aborting\n");
             free(t->snap);
             free(t->path);
@@ -500,26 +491,15 @@ static void jinn_txn_track_impl(FILE **fpp, FILE *fp, FILE *wal,
             abort();
         }
     }
-    fseek(cur_fp, cur, SEEK_SET);
+    if (fseek(cur_fp, cur, SEEK_SET) != 0)
+        jinn_persistence_fail("transaction snapshot seek");
+    jinn_txn_journal_snapshot(t->path, t->snap, t->snap_len);
     if (wal) {
-        if (t->snap_len <= (long)UINT32_MAX) {
-            if (jinn_wal_write(wal, JINN_WAL_OP_TXN_BEGIN, t->snap,
-                               (uint32_t)t->snap_len) == 0) {
-                if (jinn_wal_effective_policy(wal) != JINN_WAL_SYNC_NONE) {
-                    jinn_wal_commit_group(wal);
-                }
-            } else {
-                fprintf(stderr,
-                        "jinn: txn: cannot write the transaction begin frame — "
-                        "crash recovery may keep this transaction's partial "
-                        "writes\n");
-            }
-        } else {
-            fprintf(stderr,
-                    "jinn: txn: store snapshot exceeds 4 GiB — begin frame "
-                    "skipped; crash recovery may keep this transaction's "
-                    "partial writes\n");
-        }
+        jinn_txn_track_impl(NULL, wal, NULL, NULL, NULL, NULL);
+        if ((uint64_t)t->snap_len > UINT32_MAX)
+            jinn_persistence_fail("WAL undo image exceeds 4 GiB");
+        jinn_wal_write_must(wal, JINN_WAL_OP_TXN_BEGIN, t->snap, (uint32_t)t->snap_len);
+        jinn_persistence_sync(wal);
     }
     t->next = st->files;
     st->files = t;
@@ -558,19 +538,23 @@ void jinn_txn_track_mem(void *key, void (*rb)(void *), void (*rel)(void *), void
     st->files = t;
 }
 void jinn_txn_track_trunc(FILE *fp) {
+    jinn_txn_track_aux(fp, NULL, NULL);
+}
+void jinn_txn_track_path(const char *path) {
     JinnTxnState *st = jinn_txn_cur();
-    if (!st || st->depth <= 0 || !fp) return;
-    if (jinn_txn_find(st, NULL, fp)) return;
-    JinnTxnFile *t = jinn_txn_new_entry();
-    t->fp = fp;
-    t->trunc_only = 1;
-    fflush(fp);
-    long cur = ftell(fp);
-    fseek(fp, 0, SEEK_END);
-    t->snap_len = ftell(fp);
-    fseek(fp, cur, SEEK_SET);
-    t->next = st->files;
-    st->files = t;
+    if (!st || st->depth <= 0) return;
+    for (JinnTxnFile *t = st->files; t; t = t->next)
+        if (t->disk_only && strcmp(t->path, path) == 0) return;
+    FILE *fp = fopen(path, "r+b");
+    if (!fp) jinn_persistence_fail("transaction sidecar open");
+    jinn_txn_track_aux(fp, NULL, NULL);
+    JinnTxnFile *t = st->files;
+    free(t->path);
+    t->path = strdup(path);
+    if (!t->path) jinn_persistence_fail("transaction path allocation");
+    t->disk_only = 1;
+    t->fp = NULL;
+    if (fclose(fp) != 0) jinn_persistence_fail("transaction sidecar close");
 }
 void jinn_txn_swap_fp(FILE *oldfp, FILE *newfp) {
     JinnTxnState *st = jinn_txn_cur();
@@ -584,32 +568,17 @@ void jinn_txn_commit(void) {
     if (!st || st->depth <= 0) return;
     if (--st->depth > 0) return;
     for (JinnTxnFile *t = st->files; t; t = t->next) {
-        if (t->mem_only) continue;
-        FILE *fp = t->fpp ? *t->fpp : t->fp;
-        if (fp) {
-            fflush(fp);
-            int fd = fileno(fp);
-            if (fd >= 0 && jinn_wal_get_policy() != JINN_WAL_SYNC_NONE) {
-#if defined(__linux__)
-                if (fdatasync(fd) != 0)
-#endif
-                    if (fsync(fd) != 0) {
-                        fprintf(stderr,
-                                "jinn: txn: commit fsync failed — batch may "
-                                "not be durable\n");
-                    }
-            }
-        }
-        if (t->wal) {
-            (void)jinn_wal_write(t->wal, JINN_WAL_OP_TXN_COMMIT, NULL, 0);
-        }
-        if (t->wal && jinn_wal_effective_policy(t->wal) != JINN_WAL_SYNC_NONE) {
-            jinn_wal_commit_group(t->wal);
-        } else if (t->wal) {
-            fflush(t->wal);
-        }
-        if (t->path) jinn_store_wunlock(t->path);
+        if (t->mem_only || t->disk_only) continue;
+        jinn_persistence_sync(t->fpp ? *t->fpp : t->fp);
     }
+    for (JinnTxnFile *t = st->files; t; t = t->next) {
+        if (!t->wal) continue;
+        jinn_wal_write_must(t->wal, JINN_WAL_OP_TXN_COMMIT, NULL, 0);
+        jinn_persistence_sync(t->wal);
+    }
+    jinn_txn_journal_finish();
+    for (JinnTxnFile *t = st->files; t; t = t->next)
+        if (t->fpp && t->path) jinn_store_wunlock(t->path);
     jinn_txn_release();
 }
 static int txn_snap_fill(FILE *tmp, void *arg) {
@@ -625,57 +594,29 @@ void jinn_txn_rollback(void) {
     if (!st || st->depth <= 0) return;
     st->depth = 0;
     for (JinnTxnFile *t = st->files; t; t = t->next) {
-        if (t->wal) {
-            fflush(t->wal);
-            int wfd = fileno(t->wal);
-            if (wfd >= 0 && ftruncate(wfd, (off_t)t->wal_off) != 0) {
-                fprintf(stderr, "jinn: txn: WAL truncate failed\n");
-            }
-            fseek(t->wal, t->wal_off, SEEK_SET);
-        }
         if (t->mem_only) {
             if (t->on_rollback) t->on_rollback(t->rb_arg);
-            if (t->path) jinn_store_wunlock(t->path);
-            continue;
-        }
-        if (t->trunc_only && t->fp) {
-            fflush(t->fp);
-            int fd = fileno(t->fp);
-            if (fd >= 0 && ftruncate(fd, (off_t)t->snap_len) != 0) {
-                fprintf(stderr, "jinn: txn: rollback truncate failed\n");
-            }
-            fseek(t->fp, 0, SEEK_END);
             continue;
         }
         if (t->fpp && t->path) {
-            int rc = jinn_atomic_rewrite_reopen(t->path, txn_snap_fill, t, t->fpp);
-            if (rc == -1) {
-                fprintf(stderr, "jinn: txn: rollback of %s failed — store "
-                                "left in pre-rollback state\n", t->path);
-            } else if (rc == -2) {
-                fprintf(stderr,
-                        "jinn: txn: %s was rolled back on disk, but reopening it "
-                        "failed — this process's handle is stale and further "
-                        "operations on this store are unsafe\n",
-                        t->path);
-            }
+            if (jinn_atomic_rewrite_reopen(t->path, txn_snap_fill, t, t->fpp) != 0)
+                jinn_persistence_fail("transaction rollback rewrite");
+        } else if (t->disk_only) {
+            if (jinn_atomic_rewrite(t->path, txn_snap_fill, t) != 0)
+                jinn_persistence_fail("transaction rollback sidecar rewrite");
         } else if (t->fp) {
-            fseek(t->fp, 0, SEEK_SET);
-            if (t->snap_len > 0 &&
-                fwrite(t->snap, 1, (size_t)t->snap_len, t->fp)
-                    != (size_t)t->snap_len) {
-                fprintf(stderr, "jinn: txn: rollback restore failed\n");
-            }
-            fflush(t->fp);
-            int fd = fileno(t->fp);
-            if (fd >= 0 && ftruncate(fd, (off_t)t->snap_len) != 0) {
-                fprintf(stderr, "jinn: txn: rollback truncate failed\n");
-            }
-            fseek(t->fp, 0, SEEK_END);
+            if (fseek(t->fp, 0, SEEK_SET) != 0 ||
+                fwrite(t->snap, 1, (size_t)t->snap_len, t->fp) != (size_t)t->snap_len ||
+                fflush(t->fp) != 0 || ftruncate(fileno(t->fp), (off_t)t->snap_len) != 0 ||
+                fseek(t->fp, 0, SEEK_END) != 0)
+                jinn_persistence_fail("transaction rollback restore");
+            jinn_persistence_sync(t->fp);
         }
         if (t->on_rollback) t->on_rollback(t->rb_arg);
-        if (t->path) jinn_store_wunlock(t->path);
     }
+    jinn_txn_journal_finish();
+    for (JinnTxnFile *t = st->files; t; t = t->next)
+        if (t->fpp && t->path) jinn_store_wunlock(t->path);
     jinn_txn_release();
 }
 
@@ -759,14 +700,9 @@ int jinn_wal_uncommitted_begin(FILE *wal, unsigned char **snap_out,
     unsigned char *buf = NULL;
     if (payload_len > 0) {
         buf = (unsigned char *)malloc(payload_len);
-        if (!buf) {
-            fseek(wal, saved, SEEK_SET);
-            return 0;
-        }
+        if (!buf) jinn_persistence_fail("WAL undo allocation");
         if (fread(buf, 1, payload_len, wal) != payload_len) {
-            free(buf);
-            fseek(wal, saved, SEEK_SET);
-            return 0;
+            jinn_persistence_fail("WAL undo read");
         }
     }
     if (snap_out) {
@@ -828,6 +764,7 @@ int64_t jinn_wal_replay(FILE *wal, jinn_wal_replay_cb callback, void *user_data)
         free(payload);
         count++;
     }
-    fseek(wal, saved, SEEK_SET);
+    if (ftell(wal) != stop_at || ferror(wal)) tl_wal_replay_complete = 0;
+    if (fseek(wal, saved, SEEK_SET) != 0) tl_wal_replay_complete = 0;
     return count;
 }

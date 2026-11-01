@@ -28,6 +28,15 @@ impl Typer {
         span: Span,
         expected: Option<&Type>,
     ) -> Result<hir::Expr, String> {
+        if let Some(param) = params
+            .iter()
+            .find(|p| matches!(p.access_mod, Some(ast::AccessMod::Take)))
+        {
+            return Err(format!(
+                "{}: consuming closure parameters are unsupported; use a named function with a take parameter",
+                param.span.loc()
+            ));
+        }
         let (expected_ptys, expected_ret) = match expected {
             Some(Type::Fn(ptys, ret)) => (Some(ptys.as_slice()), Some(ret.as_ref())),
             _ => (None, None),
@@ -46,7 +55,9 @@ impl Typer {
                     .unwrap_or_else(|| self.infer_ctx.fresh_var())
             });
             ptys.push(ty.clone());
-            let ownership = Self::ownership_for_type(&ty);
+            let ownership = self
+                .param_ownership_with_mod(&ty, p.access_mod)
+                .map_err(|e| format!("{}: {e}", p.span.loc()))?;
             self.define_var(
                 &p.name.as_str(),
                 VarInfo {
@@ -62,7 +73,7 @@ impl Typer {
                 ty,
                 ownership,
                 default: None,
-                access_mod: None,
+                access_mod: p.access_mod,
                 span: p.span,
             });
         }
@@ -78,7 +89,7 @@ impl Typer {
         let hbody = self.lower_block_no_scope_with_tail(body, &ret_ty, Some(&ret_ty))?;
         self.pop_scope();
 
-        self.mark_closure_captures(&hbody, &outer_ids, span)?;
+        let moved = self.mark_closure_captures(&hbody, &outer_ids, span)?;
 
         if let Some(hir::Stmt::Expr(e)) = hbody.last()
             && e.ty != Type::Void
@@ -99,7 +110,7 @@ impl Typer {
         };
 
         Ok(hir::Expr {
-            kind: hir::ExprKind::Lambda(hparams, hbody),
+            kind: hir::ExprKind::Lambda(hparams, hbody, moved),
             ty: Type::Fn(ptys, Box::new(final_ret)),
             span,
         })

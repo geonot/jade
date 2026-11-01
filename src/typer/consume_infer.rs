@@ -38,6 +38,7 @@ fn annotated_non_consumable(ty: &Option<Type>) -> bool {
                 | Type::Ptr(_)
                 | Type::View(_)
                 | Type::Frozen(_)
+                | Type::Channel(_)
         ),
     }
 }

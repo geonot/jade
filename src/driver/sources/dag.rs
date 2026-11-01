@@ -39,27 +39,25 @@ impl ResolutionDag {
 }
 
 pub fn flatten_workspace(
-    root_name: Symbol,
+    root: PkgId,
     root_path: &std::path::Path,
     root_deps: &[Dependency],
     pkg_paths: &HashMap<Symbol, PathBuf>,
 ) -> Result<ResolutionDag, String> {
     let mut dag = ResolutionDag::default();
     let mut visiting: HashSet<(Symbol, String)> = HashSet::new();
+    let rec = root.record();
     resolve_node(
-        root_name,
-        ScopePath::root(),
-        &SemVer {
-            major: 0,
-            minor: 0,
-            patch: 0,
-        },
+        rec.name,
+        rec.owner_scope,
+        &rec.version,
         root_path,
         root_deps,
-        load_visibility(root_path),
+        rec.visibility,
         pkg_paths,
         &mut dag,
         &mut visiting,
+        Some(root),
     )?;
     reject_multi_version(&dag)?;
     Ok(dag)
@@ -99,22 +97,10 @@ fn reject_multi_version(dag: &ResolutionDag) -> Result<(), String> {
     Ok(())
 }
 
-pub fn source_bytes_for(path: &std::path::Path) -> Vec<u8> {
-    let mut out = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(path) {
-        let mut paths: Vec<PathBuf> = entries
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().map(|e| e == "jn").unwrap_or(false))
-            .collect();
-        paths.sort();
-        for p in &paths {
-            if let Ok(bytes) = std::fs::read(p) {
-                out.extend_from_slice(&bytes);
-            }
-        }
-    }
-    out
+pub fn package_sources_digest(path: &std::path::Path) -> Result<[u8; 32], String> {
+    crate::source_manifest::SourceManifest::scan(path, crate::source_manifest::PACKAGE_FILE_LIMIT)
+        .map(|m| m.digest())
+        .map_err(|e| e.to_string())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -128,6 +114,7 @@ fn resolve_node(
     pkg_paths: &HashMap<Symbol, PathBuf>,
     dag: &mut ResolutionDag,
     visiting: &mut HashSet<(Symbol, String)>,
+    fixed: Option<PkgId>,
 ) -> Result<PkgId, String> {
     let cycle_key = (name, version.to_string());
     if visiting.contains(&cycle_key) {
@@ -169,24 +156,28 @@ fn resolve_node(
             pkg_paths,
             dag,
             visiting,
+            None,
         )?;
         dep_ids.push(dep_id);
     }
 
-    let src = source_bytes_for(path);
-    let mut sorted_dep_hashes: Vec<[u8; 32]> =
-        dep_ids.iter().map(|d| d.record().semantic_hash).collect();
-    sorted_dep_hashes.sort();
-
-    let hash = compute_semantic_hash(name, owner_scope, version, &src, &sorted_dep_hashes);
-
-    let pkg_id = PkgId::intern(PackageRecord {
-        name,
-        owner_scope,
-        version: version.clone(),
-        semantic_hash: hash,
-        visibility,
-    });
+    let pkg_id = match fixed {
+        Some(id) => id,
+        None => {
+            let src = package_sources_digest(path)?;
+            let mut sorted_dep_hashes: Vec<[u8; 32]> =
+                dep_ids.iter().map(|d| d.record().semantic_hash).collect();
+            sorted_dep_hashes.sort();
+            let hash = compute_semantic_hash(name, owner_scope, version, &src, &sorted_dep_hashes);
+            PkgId::intern(PackageRecord {
+                name,
+                owner_scope,
+                version: version.clone(),
+                semantic_hash: hash,
+                visibility,
+            })
+        }
+    };
 
     if let Some(&existing_idx) = dag.by_id.get(&pkg_id) {
         let existing = &dag.nodes[existing_idx];
@@ -256,6 +247,23 @@ mod tests {
         }
     }
 
+    fn flatten_workspace(
+        name: Symbol,
+        path: &std::path::Path,
+        deps: &[Dependency],
+        pkg_paths: &HashMap<Symbol, PathBuf>,
+    ) -> Result<ResolutionDag, String> {
+        let digest = package_sources_digest(path)?;
+        let root = PkgId::intern(PackageRecord {
+            name,
+            owner_scope: ScopePath::root(),
+            version: ver(0),
+            semantic_hash: compute_semantic_hash(name, ScopePath::root(), &ver(0), &digest, &[]),
+            visibility: load_visibility(path),
+        });
+        super::flatten_workspace(root, path, deps, pkg_paths)
+    }
+
     fn write_src(dir: &std::path::Path, name: &str, content: &str) {
         std::fs::write(dir.join(name), content).unwrap();
     }
@@ -279,8 +287,10 @@ mod tests {
         let v = ver(0);
         let scope = ScopePath::root();
         let name = sym("pkg");
-        let h1 = compute_semantic_hash(name, scope, &v, &source_bytes_for(tmp1.path()), &[]);
-        let h2 = compute_semantic_hash(name, scope, &v, &source_bytes_for(tmp2.path()), &[]);
+        let d1 = package_sources_digest(tmp1.path()).unwrap();
+        let d2 = package_sources_digest(tmp2.path()).unwrap();
+        let h1 = compute_semantic_hash(name, scope, &v, &d1, &[]);
+        let h2 = compute_semantic_hash(name, scope, &v, &d2, &[]);
         assert_ne!(
             h1, h2,
             "different source bytes must produce different hashes"

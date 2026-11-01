@@ -15,7 +15,7 @@ impl Parser {
             Token::CharLit(n) => {
                 let n = *n;
                 self.advance();
-                Ok(Expr::Int(n, sp))
+                Ok(Expr::Int(n as u64, sp))
             }
             Token::Float(n) => {
                 let n = *n;

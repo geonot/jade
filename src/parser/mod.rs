@@ -69,6 +69,14 @@ impl Parser {
     }
 
     pub fn parse_program(&mut self) -> Result<Program, ParseError> {
+        self.parse_program_inner(true)
+    }
+
+    pub(crate) fn parse_syntax_program(&mut self) -> Result<Program, ParseError> {
+        self.parse_program_inner(false)
+    }
+
+    fn parse_program_inner(&mut self, lower: bool) -> Result<Program, ParseError> {
         let mut decls = Vec::new();
         while !self.eof() {
             self.skip_nl();
@@ -134,7 +142,7 @@ impl Parser {
             .decls
             .iter()
             .any(|d| matches!(d, Decl::TopStmt(_) | Decl::Const(..)));
-        if has_top_stmts && !has_explicit_main {
+        if lower && has_top_stmts && !has_explicit_main {
             let mut body_stmts: Vec<Stmt> = Vec::new();
             let mut remaining_decls: Vec<Decl> = Vec::new();
             let mut main_span = Span::dummy();
@@ -172,7 +180,7 @@ impl Parser {
             }
             prog.decls = remaining_decls;
         }
-        if let Err(msg) = desugar_multi_clause_fns(&mut prog) {
+        if lower && let Err(msg) = desugar_multi_clause_fns(&mut prog) {
             return Err(ParseError::Plain { msg });
         }
         Ok(prog)
@@ -439,8 +447,7 @@ impl Parser {
         };
 
         match self.peek_at(1) {
-            Token::Ident(_) => {}
-
+            Token::Ident(_) | Token::LParen => {}
             _ => return None,
         }
         let am = Self::ident_to_access_mod(&name)?;

@@ -89,18 +89,14 @@ impl<'ctx> Compiler<'ctx> {
         })
     }
 
-    pub(crate) fn checked_arith(
+    pub(crate) fn overflow_pair(
         &mut self,
-        op: crate::mir::BinOp,
+        op: crate::integer_arithmetic::IntegerOp,
         l: inkwell::values::IntValue<'ctx>,
         r: inkwell::values::IntValue<'ctx>,
         signed: bool,
-    ) -> Result<inkwell::values::IntValue<'ctx>, String> {
-        let kind = match op {
-            crate::mir::BinOp::Add => "add",
-            crate::mir::BinOp::Sub => "sub",
-            _ => "mul",
-        };
+    ) -> Result<inkwell::values::StructValue<'ctx>, String> {
+        let kind = op.name();
         let it = l.get_type();
         let intr = format!(
             "llvm.{}{kind}.with.overflow.i{}",
@@ -114,11 +110,28 @@ impl<'ctx> Compiler<'ctx> {
             self.module
                 .add_function(&intr, st.fn_type(&[it.into(), it.into()], false), None)
         });
-        let pair = b!(self.bld.build_call(f, &[l.into(), r.into()], kind))
+        Ok(b!(self.bld.build_call(f, &[l.into(), r.into()], kind))
             .try_as_basic_value()
             .basic()
             .expect("ICE: overflow intrinsic returned void")
-            .into_struct_value();
+            .into_struct_value())
+    }
+
+    pub(crate) fn checked_arith(
+        &mut self,
+        op: crate::mir::BinOp,
+        l: inkwell::values::IntValue<'ctx>,
+        r: inkwell::values::IntValue<'ctx>,
+        signed: bool,
+    ) -> Result<inkwell::values::IntValue<'ctx>, String> {
+        use crate::integer_arithmetic::IntegerOp;
+        let op = match op {
+            crate::mir::BinOp::Add => IntegerOp::Add,
+            crate::mir::BinOp::Sub => IntegerOp::Sub,
+            crate::mir::BinOp::Mul => IntegerOp::Mul,
+            _ => return Err("ICE: invalid checked arithmetic operation".into()),
+        };
+        let pair = self.overflow_pair(op, l, r, signed)?;
         let val = b!(self.bld.build_extract_value(pair, 0, "ov.val")).into_int_value();
         let ovf = b!(self.bld.build_extract_value(pair, 1, "ov.flag")).into_int_value();
         let fv = self.current_fn();
@@ -129,6 +142,93 @@ impl<'ctx> Compiler<'ctx> {
         self.emit_trap("integer overflow");
         self.bld.position_at_end(ok_bb);
         Ok(val)
+    }
+
+    pub(crate) fn checked_pow(
+        &mut self,
+        base: inkwell::values::IntValue<'ctx>,
+        exponent: inkwell::values::IntValue<'ctx>,
+        signed: bool,
+    ) -> Result<inkwell::values::IntValue<'ctx>, String> {
+        let function = self.current_fn();
+        let it = base.get_type();
+        let zero = it.const_zero();
+        let one = it.const_int(1, false);
+        if signed {
+            let negative =
+                b!(self
+                    .bld
+                    .build_int_compare(IntPredicate::SLT, exponent, zero, "pow.negative"));
+            let trap = self.ctx.append_basic_block(function, "pow.trap");
+            let valid = self.ctx.append_basic_block(function, "pow.valid");
+            b!(self.bld.build_conditional_branch(negative, trap, valid));
+            self.bld.position_at_end(trap);
+            self.emit_trap("negative integer exponent");
+            self.bld.position_at_end(valid);
+        }
+        let entry = self
+            .bld
+            .get_insert_block()
+            .ok_or("ICE: pow without insertion block")?;
+        let head = self.ctx.append_basic_block(function, "pow.head");
+        let body = self.ctx.append_basic_block(function, "pow.body");
+        let multiply = self.ctx.append_basic_block(function, "pow.multiply");
+        let advance = self.ctx.append_basic_block(function, "pow.advance");
+        let square = self.ctx.append_basic_block(function, "pow.square");
+        let exit = self.ctx.append_basic_block(function, "pow.exit");
+        b!(self.bld.build_unconditional_branch(head));
+        self.bld.position_at_end(head);
+        let accumulator = b!(self.bld.build_phi(it, "pow.accumulator"));
+        let factor = b!(self.bld.build_phi(it, "pow.factor"));
+        let remaining = b!(self.bld.build_phi(it, "pow.remaining"));
+        accumulator.add_incoming(&[(&one, entry)]);
+        factor.add_incoming(&[(&base, entry)]);
+        remaining.add_incoming(&[(&exponent, entry)]);
+        let a = accumulator.as_basic_value().into_int_value();
+        let f = factor.as_basic_value().into_int_value();
+        let e = remaining.as_basic_value().into_int_value();
+        let done = b!(self
+            .bld
+            .build_int_compare(IntPredicate::EQ, e, zero, "pow.done"));
+        b!(self.bld.build_conditional_branch(done, exit, body));
+        self.bld.position_at_end(body);
+        let low = b!(self.bld.build_and(e, one, "pow.low"));
+        let odd = b!(self
+            .bld
+            .build_int_compare(IntPredicate::NE, low, zero, "pow.odd"));
+        b!(self.bld.build_conditional_branch(odd, multiply, advance));
+        self.bld.position_at_end(multiply);
+        let product = self.checked_arith(crate::mir::BinOp::Mul, a, f, signed)?;
+        let multiplied = self
+            .bld
+            .get_insert_block()
+            .ok_or("ICE: missing pow multiply block")?;
+        b!(self.bld.build_unconditional_branch(advance));
+        self.bld.position_at_end(advance);
+        let next_accumulator = b!(self.bld.build_phi(it, "pow.next_accumulator"));
+        next_accumulator.add_incoming(&[(&a, body), (&product, multiplied)]);
+        let next_a = next_accumulator.as_basic_value().into_int_value();
+        let next_e = b!(self
+            .bld
+            .build_right_shift(e, one, false, "pow.next_exponent"));
+        let last = b!(self
+            .bld
+            .build_int_compare(IntPredicate::EQ, next_e, zero, "pow.last"));
+        b!(self.bld.build_conditional_branch(last, exit, square));
+        self.bld.position_at_end(square);
+        let next_f = self.checked_arith(crate::mir::BinOp::Mul, f, f, signed)?;
+        let squared = self
+            .bld
+            .get_insert_block()
+            .ok_or("ICE: missing pow square block")?;
+        b!(self.bld.build_unconditional_branch(head));
+        accumulator.add_incoming(&[(&next_a, squared)]);
+        factor.add_incoming(&[(&next_f, squared)]);
+        remaining.add_incoming(&[(&next_e, squared)]);
+        self.bld.position_at_end(exit);
+        let result = b!(self.bld.build_phi(it, "pow.result"));
+        result.add_incoming(&[(&a, head), (&next_a, advance)]);
+        Ok(result.as_basic_value().into_int_value())
     }
 
     pub(crate) fn checked_shift_count(

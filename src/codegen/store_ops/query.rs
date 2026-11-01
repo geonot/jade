@@ -44,7 +44,7 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<inkwell::values::PointerValue<'ctx>, String> {
         let i64t = self.ctx.i64_type();
         let i32t = self.ctx.i32_type();
-        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
+        let fseek_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fseek");
         b!(self.bld.build_call(
             fseek_fn,
             &[
@@ -78,7 +78,7 @@ impl<'ctx> Compiler<'ctx> {
                 "sl.buf"
             )))
             .into_pointer_value();
-        let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
+        let fread_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fread");
         b!(self.bld.build_call(
             fread_fn,
             &[

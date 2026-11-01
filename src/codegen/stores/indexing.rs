@@ -346,7 +346,7 @@ impl<'ctx> Compiler<'ctx> {
                                     .build_load(ptr_ty, fp_g.as_pointer_value(), "mig.fp"))
                                 .into_pointer_value();
 
-                            let fseek = crate::codegen::fn_or_die(&self.module, "fseek");
+                            let fseek = crate::codegen::fn_or_die(&self.module, "jinn_store_fseek");
                             b!(self.bld.build_call(
                                 fseek,
                                 &[
@@ -357,7 +357,7 @@ impl<'ctx> Compiler<'ctx> {
                                 ""
                             ));
                             let rec_size_buf = self.entry_alloca(i64t.into(), "mig.rsz");
-                            let fread = crate::codegen::fn_or_die(&self.module, "fread");
+                            let fread = crate::codegen::fn_or_die(&self.module, "jinn_store_fread");
                             b!(self.bld.build_call(
                                 fread,
                                 &[
@@ -417,7 +417,7 @@ impl<'ctx> Compiler<'ctx> {
                                     .bld
                                     .build_load(ptr_ty, fp_g.as_pointer_value(), "mig.dfp"))
                                 .into_pointer_value();
-                            let fseek = crate::codegen::fn_or_die(&self.module, "fseek");
+                            let fseek = crate::codegen::fn_or_die(&self.module, "jinn_store_fseek");
                             b!(self.bld.build_call(
                                 fseek,
                                 &[
@@ -428,7 +428,7 @@ impl<'ctx> Compiler<'ctx> {
                                 ""
                             ));
                             let rec_size_buf = self.entry_alloca(i64t.into(), "mig.drsz");
-                            let fread = crate::codegen::fn_or_die(&self.module, "fread");
+                            let fread = crate::codegen::fn_or_die(&self.module, "jinn_store_fread");
                             b!(self.bld.build_call(
                                 fread,
                                 &[
@@ -544,20 +544,20 @@ impl<'ctx> Compiler<'ctx> {
         field_size: u64,
     ) -> Result<Vec<u8>, String> {
         enum Lit {
-            Int(i64),
+            Int(i128),
             Float(f64),
             Bool(bool),
             Str(String),
         }
         fn lit(e: &crate::ast::Expr) -> Option<Lit> {
             match e {
-                crate::ast::Expr::Int(n, _) => Some(Lit::Int(*n)),
+                crate::ast::Expr::Int(n, _) => Some(Lit::Int(*n as i128)),
                 crate::ast::Expr::Float(f, _) => Some(Lit::Float(*f)),
                 crate::ast::Expr::Bool(b, _) => Some(Lit::Bool(*b)),
                 crate::ast::Expr::Str(s, _) => Some(Lit::Str(s.clone())),
                 crate::ast::Expr::UnaryOp(crate::ast::UnaryOp::Neg, inner, _) => {
                     match lit(inner)? {
-                        Lit::Int(n) => Some(Lit::Int(n.wrapping_neg())),
+                        Lit::Int(n) => n.checked_neg().map(Lit::Int),
                         Lit::Float(f) => Some(Lit::Float(-f)),
                         _ => None,
                     }
@@ -588,23 +588,10 @@ impl<'ctx> Compiler<'ctx> {
                 ));
             }
         };
-        let int_range = |k: &str| -> Option<(i64, i64)> {
-            Some(match k {
-                "I8" => (i8::MIN as i64, i8::MAX as i64),
-                "I16" => (i16::MIN as i64, i16::MAX as i64),
-                "I32" => (i32::MIN as i64, i32::MAX as i64),
-                "I64" => (i64::MIN, i64::MAX),
-                "U8" => (0, u8::MAX as i64),
-                "U16" => (0, u16::MAX as i64),
-                "U32" => (0, u32::MAX as i64),
-                "U64" => (0, i64::MAX),
-                _ => return None,
-            })
-        };
         let mut out = vec![0u8; field_size as usize];
         match (kind.as_str(), v) {
             (k @ ("I8" | "U8" | "I16" | "U16" | "I32" | "U32" | "I64" | "U64"), Lit::Int(n)) => {
-                if let Some((lo, hi)) = int_range(k)
+                if let Some((lo, hi)) = ty.integer_range()
                     && (n < lo || n > hi)
                 {
                     return Err(format!("default {n} does not fit in `{k}`"));

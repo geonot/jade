@@ -21,8 +21,14 @@ pub(super) struct Lowerer {
     pub(super) loop_stack: Vec<(BlockId, BlockId)>,
     pub(super) label_stack: Vec<(Symbol, BlockId, BlockId)>,
     pub(super) lambda_fns: Vec<Function>,
-    pub(super) function_defers: Vec<crate::hir::Block>,
+    pub(super) cleanup_frame: Option<ValueId>,
+    pub(super) cleanup_bindings: HashSet<crate::hir::DefId>,
+    pub(super) cleanup_cells: HashMap<Symbol, Symbol>,
+    pub(super) cleanup_param_ids: HashMap<Symbol, crate::hir::DefId>,
+    pub(super) cleanup_owned_params: HashSet<crate::hir::DefId>,
     pub(super) txn_stack: Vec<usize>,
+    pub(super) cancellation_enabled: bool,
+    pub(super) owned_scopes: Vec<ValueId>,
 
     pub(super) current_def: HashMap<BlockId, HashMap<Symbol, ValueId>>,
 
@@ -126,8 +132,14 @@ impl Lowerer {
             loop_stack: Vec::new(),
             label_stack: Vec::new(),
             lambda_fns: Vec::new(),
-            function_defers: Vec::new(),
+            cleanup_frame: None,
+            cleanup_bindings: HashSet::new(),
+            cleanup_cells: HashMap::new(),
+            cleanup_param_ids: HashMap::new(),
+            cleanup_owned_params: HashSet::new(),
             txn_stack: Vec::new(),
+            cancellation_enabled: false,
+            owned_scopes: Vec::new(),
             current_def: {
                 let mut m = HashMap::new();
                 m.insert(entry, HashMap::new());
@@ -200,15 +212,6 @@ impl Lowerer {
                 Type::Void,
                 span,
             );
-        }
-    }
-
-    pub(super) fn lower_deferred_in_reverse(&mut self) {
-        let defers: Vec<crate::hir::Block> = self.function_defers.clone();
-        for block in defers.into_iter().rev() {
-            for stmt in &block {
-                let _ = self.lower_stmt(stmt);
-            }
         }
     }
 
@@ -398,6 +401,9 @@ impl Lowerer {
         ptr_ty: Type,
         span: Span,
     ) -> ValueId {
+        if let Some(&cell_name) = self.cleanup_cells.get(&key) {
+            return self.read_var(cell_name, self.current_block, ptr_ty, span);
+        }
         if !self.addr_taken.contains(&key) {
             let cur = self.read_var(key, self.current_block, var_ty.clone(), span);
             self.emit_void_typed(InstKind::Store(key, cur), var_ty.clone(), span);

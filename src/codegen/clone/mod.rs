@@ -8,8 +8,32 @@ use super::Compiler;
 use super::b;
 
 impl<'ctx> Compiler<'ctx> {
-    pub(crate) fn is_value_clonable(ty: &Type) -> bool {
-        ty.is_value_clonable()
+    pub(crate) fn is_value_clonable(&self, ty: &Type) -> bool {
+        ty.is_value_clonable_with(&|nominal| {
+            let name = match nominal {
+                Type::Struct(name, _) | Type::Enum(name) => *name,
+                Type::Row(name) => format!("__store_{name}").into(),
+                _ => return None,
+            };
+            if self
+                .struct_layouts
+                .get(&name)
+                .is_some_and(|attrs| attrs.resource)
+            {
+                return None;
+            }
+            if let Some(variants) = self.enums.get(&name) {
+                return Some(
+                    variants
+                        .iter()
+                        .flat_map(|(_, fields)| fields.iter().cloned())
+                        .collect(),
+                );
+            }
+            self.structs
+                .get(&name)
+                .map(|fields| fields.iter().map(|(_, ty)| ty.clone()).collect())
+        })
     }
 
     pub(crate) fn clone_value(
@@ -45,6 +69,7 @@ impl<'ctx> Compiler<'ctx> {
             Type::Array(elem, n) => self.clone_array(val, elem, *n),
             Type::Tuple(tys) => self.clone_tuple(val, tys),
             Type::Enum(name) => self.clone_enum(val, &name.as_str()),
+            Type::Row(name) => self.clone_struct(val, &format!("__store_{name}")),
             Type::Struct(name, _) => {
                 if self.enums.contains_key(&name.as_str()) {
                     self.clone_enum(val, &name.as_str())
@@ -492,16 +517,10 @@ impl<'ctx> Compiler<'ctx> {
             for (vc, (_tag_iv, case_bb)) in clone_variants.iter().zip(case_bbs.iter()) {
                 self.bld.position_at_end(*case_bb);
                 let payload_gep = b!(self.bld.build_struct_gep(st, out_ptr, 1, "ce.payload"));
-                let mut byte_offset: u64 = 0;
-                for fty in vc.field_types.iter() {
+                let layout = self.variant_layout(name, &vc.field_types);
+                for (fty, byte_offset) in vc.field_types.iter().zip(layout.offsets) {
                     let is_rec = Compiler::is_recursive_field(fty, name);
-                    let slot_size: u64 = if is_rec {
-                        8
-                    } else {
-                        self.type_store_size(self.llvm_ty(fty))
-                    };
                     if fty.is_trivially_droppable() && !is_rec {
-                        byte_offset += (slot_size + 7) & !7;
                         continue;
                     }
                     let f_ptr = if byte_offset == 0 {
@@ -538,7 +557,6 @@ impl<'ctx> Compiler<'ctx> {
                         let cloned = self.clone_value(f_val, fty)?;
                         b!(self.bld.build_store(f_ptr, cloned));
                     }
-                    byte_offset += (slot_size + 7) & !7;
                 }
                 b!(self.bld.build_unconditional_branch(done_bb));
             }

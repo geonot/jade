@@ -126,7 +126,7 @@ impl Parser {
                     self.expect(Token::LParen)?;
                     let n = match self.peek() {
                         Token::Int(v) => {
-                            let n = *v as u64;
+                            let n = *v;
                             self.advance();
                             n
                         }
@@ -329,7 +329,8 @@ impl Parser {
 
         let version = match self.peek() {
             Token::Int(n) => {
-                let v = *n;
+                let v = i64::try_from(*n)
+                    .map_err(|_| self.error("version number does not fit in i64"))?;
                 self.advance();
                 v
             }

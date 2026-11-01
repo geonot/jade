@@ -248,37 +248,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    pub(in crate::codegen::drop) fn drop_ptr_allocated(
-        &mut self,
-        val: BasicValueEnum<'ctx>,
-    ) -> Result<(), String> {
-        let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
-        let fv = self.current_fn();
-        let free = self.ensure_free();
-
-        let ptr = if val.is_pointer_value() {
-            val.into_pointer_value()
-        } else {
-            return Ok(());
-        };
-
-        let null = ptr_ty.const_null();
-        let is_null =
-            b!(self
-                .bld
-                .build_int_compare(inkwell::IntPredicate::EQ, ptr, null, "dpa.null"));
-        let free_bb = self.ctx.append_basic_block(fv, "dpa.free");
-        let done_bb = self.ctx.append_basic_block(fv, "dpa.done");
-        b!(self.bld.build_conditional_branch(is_null, done_bb, free_bb));
-
-        self.bld.position_at_end(free_bb);
-        b!(self.bld.build_call(free, &[ptr.into()], ""));
-        b!(self.bld.build_unconditional_branch(done_bb));
-
-        self.bld.position_at_end(done_bb);
-        Ok(())
-    }
-
     pub(in crate::codegen::drop) fn drop_generator(
         &mut self,
         val: BasicValueEnum<'ctx>,

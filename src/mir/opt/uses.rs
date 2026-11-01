@@ -17,7 +17,7 @@ pub(super) fn collect_used(func: &Function) -> HashSet<ValueId> {
     used
 }
 
-fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
+pub(super) fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
     match kind {
         InstKind::BinOp(_, a, b) | InstKind::Cmp(_, a, b, _) => {
             s.insert(*a);
@@ -145,6 +145,7 @@ fn collect_inst_uses(kind: &InstKind, s: &mut HashSet<ValueId>) {
             }
         }
         InstKind::IntConst(_)
+        | InstKind::SizeOf(_)
         | InstKind::FloatConst(_)
         | InstKind::BoolConst(_)
         | InstKind::StringConst(_)
@@ -170,10 +171,18 @@ fn collect_term_uses(term: &Terminator, s: &mut HashSet<ValueId>) {
 
 pub(super) fn may_trap(kind: &InstKind) -> bool {
     match kind {
-        InstKind::StrictCast(..) => true,
+        InstKind::StrictCast(..) | InstKind::UnaryOp(UnaryOp::Neg, _) => true,
         InstKind::BinOp(op, _, _) => matches!(
             op,
-            BinOp::Div | BinOp::Mod | BinOp::Shl | BinOp::Shr | BinOp::Ushr
+            BinOp::Add
+                | BinOp::Sub
+                | BinOp::Mul
+                | BinOp::Div
+                | BinOp::Mod
+                | BinOp::Exp
+                | BinOp::Shl
+                | BinOp::Shr
+                | BinOp::Ushr
         ),
         _ => false,
     }
@@ -183,6 +192,7 @@ pub(super) fn is_pure(kind: &InstKind) -> bool {
     matches!(
         kind,
         InstKind::IntConst(_)
+            | InstKind::SizeOf(_)
             | InstKind::FloatConst(_)
             | InstKind::BoolConst(_)
             | InstKind::StringConst(_)

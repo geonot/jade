@@ -35,8 +35,8 @@ static jinn_deque_buf_t *deque_grow(jinn_deque_t *dq, jinn_deque_buf_t *old,
         atomic_store_explicit(
             &nb->slots[i & (nb->size - 1)],
             atomic_load_explicit(&old->slots[i & (old->size - 1)],
-                                 memory_order_relaxed),
-            memory_order_relaxed);
+                                 memory_order_acquire),
+            memory_order_release);
     }
     atomic_store_explicit(&dq->buf, nb, memory_order_release);
     return nb;
@@ -48,9 +48,8 @@ void jinn_deque_push(jinn_deque_t *dq, jinn_coro_t *c) {
     if (b - t >= buf->size) {
         buf = deque_grow(dq, buf, t, b);
     }
-    atomic_store_explicit(&buf->slots[b & (buf->size - 1)], c, memory_order_relaxed);
-    atomic_thread_fence(memory_order_release);
-    atomic_store_explicit(&dq->bottom, b + 1, memory_order_relaxed);
+    atomic_store_explicit(&buf->slots[b & (buf->size - 1)], c, memory_order_release);
+    atomic_store_explicit(&dq->bottom, b + 1, memory_order_release);
 }
 jinn_coro_t *jinn_deque_pop(jinn_deque_t *dq) {
     int64_t b = atomic_load_explicit(&dq->bottom, memory_order_relaxed) - 1;
@@ -60,7 +59,7 @@ jinn_coro_t *jinn_deque_pop(jinn_deque_t *dq) {
     int64_t t = atomic_load_explicit(&dq->top, memory_order_relaxed);
     if (t <= b) {
         jinn_coro_t *c =
-            atomic_load_explicit(&buf->slots[b & (buf->size - 1)], memory_order_relaxed);
+            atomic_load_explicit(&buf->slots[b & (buf->size - 1)], memory_order_acquire);
         if (t == b) {
             if (!atomic_compare_exchange_strong_explicit(
                     &dq->top, &t, t + 1,
@@ -81,7 +80,7 @@ jinn_coro_t *jinn_deque_steal(jinn_deque_t *dq) {
     if (t < b) {
         jinn_deque_buf_t *buf = atomic_load_explicit(&dq->buf, memory_order_acquire);
         jinn_coro_t *c =
-            atomic_load_explicit(&buf->slots[t & (buf->size - 1)], memory_order_relaxed);
+            atomic_load_explicit(&buf->slots[t & (buf->size - 1)], memory_order_acquire);
         if (atomic_compare_exchange_strong_explicit(
                 &dq->top, &t, t + 1,
                 memory_order_seq_cst, memory_order_relaxed)) {

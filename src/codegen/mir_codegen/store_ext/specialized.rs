@@ -249,8 +249,8 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_store(gv_c, i64t.const_int(0, false)));
 
         let total = self.store_read_count(fp, rec_size, store_name)?;
-        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
-        let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
+        let fseek_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fseek");
+        let fread_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fread");
 
         b!(self.bld.build_call(
             fseek_fn,

@@ -371,9 +371,17 @@ impl Typer {
                     self.push_scope();
                     let mut fn_params = Vec::new();
                     for (i, p) in lparams.iter().enumerate() {
+                        if matches!(p.access_mod, Some(crate::ast::AccessMod::Take)) {
+                            return Err(format!(
+                                "{}: consuming closure parameters are unsupported; use a named function with a take parameter",
+                                p.span.loc()
+                            ));
+                        }
                         let pid = self.fresh_id();
                         let ty = resolved_params.get(i).cloned().unwrap_or(Type::I64);
-                        let ownership = Self::ownership_for_type(&ty);
+                        let ownership = self
+                            .param_ownership_with_mod(&ty, p.access_mod)
+                            .map_err(|e| format!("{}: {e}", p.span.loc()))?;
                         self.define_var(
                             &p.name.as_str(),
                             VarInfo {
@@ -389,7 +397,7 @@ impl Typer {
                             ty,
                             ownership,
                             default: None,
-                            access_mod: None,
+                            access_mod: p.access_mod,
                             span: p.span,
                         });
                     }

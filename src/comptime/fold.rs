@@ -196,7 +196,7 @@ pub(super) fn fold_expr(expr: &mut Expr) {
             }
         }
         ExprKind::Block(b) => fold_block(b),
-        ExprKind::Lambda(_, b) => fold_block(b),
+        ExprKind::Lambda(_, b, _) => fold_block(b),
         ExprKind::Ref(e) | ExprKind::Deref(e) => fold_expr(e),
         ExprKind::ListComp(body, _, _, iter, end, cond) => {
             fold_expr(body);
@@ -237,7 +237,7 @@ pub(super) fn fold_expr(expr: &mut Expr) {
                 fold_block(b);
             }
         }
-        ExprKind::CoroutineCreate(_, stmts) => {
+        ExprKind::CoroutineCreate(_, stmts, _) => {
             for s in stmts {
                 fold_stmt(s);
             }
@@ -273,6 +273,7 @@ pub(super) fn fold_expr(expr: &mut Expr) {
         | ExprKind::MapNew
         | ExprKind::Spawn(_, _)
         | ExprKind::GlobalLoad(_)
+        | ExprKind::SizeOf(_)
         | ExprKind::StoreQuery(_, _)
         | ExprKind::StoreCount(_)
         | ExprKind::StoreAll(_)
@@ -421,9 +422,9 @@ pub(super) fn fold_float_op(a: f64, op: BinOp, b: f64) -> Option<ExprKind> {
 
 pub(super) fn fold_unary(op: UnaryOp, e: &Expr, ty: Type, span: Span) -> Option<Expr> {
     match (op, &e.kind) {
-        (UnaryOp::Neg, ExprKind::Int(n)) if matches!(e.ty, Type::I64) => {
-            Some(make(ExprKind::Int(n.wrapping_neg()), ty, span))
-        }
+        (UnaryOp::Neg, ExprKind::Int(n)) if matches!(e.ty, Type::I64) => n
+            .checked_neg()
+            .map(|value| make(ExprKind::Int(value), ty, span)),
         (UnaryOp::Neg, ExprKind::Float(f)) if matches!(e.ty, Type::F64) => {
             Some(make(ExprKind::Float(-f), ty, span))
         }
@@ -446,10 +447,20 @@ pub(super) fn fold_ternary(cond: &Expr, t: &Expr, f: &Expr) -> Option<Expr> {
 pub(super) fn fold_cast(e: &Expr, to_ty: &Type, span: Span) -> Option<Expr> {
     match (&e.kind, to_ty) {
         (ExprKind::Int(n), Type::F64) => {
-            Some(make(ExprKind::Float(*n as f64), to_ty.clone(), span))
+            let value = if e.ty.is_unsigned() {
+                *n as u64 as f64
+            } else {
+                *n as f64
+            };
+            Some(make(ExprKind::Float(value), to_ty.clone(), span))
         }
         (ExprKind::Int(n), Type::F32) => {
-            Some(make(ExprKind::Float(*n as f32 as f64), to_ty.clone(), span))
+            let value = if e.ty.is_unsigned() {
+                *n as u64 as f32
+            } else {
+                *n as f32
+            };
+            Some(make(ExprKind::Float(value as f64), to_ty.clone(), span))
         }
         (ExprKind::Float(f), Type::I64) => {
             Some(make(ExprKind::Int(*f as i64), to_ty.clone(), span))

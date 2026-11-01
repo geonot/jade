@@ -24,7 +24,8 @@ int jinn_dir_fsync(const char *filepath) {
     char dirbuf[4096];
     const char *slash = strrchr(filepath, '/');
     const char *dir;
-    if (slash && (size_t)(slash - filepath) < sizeof(dirbuf)) {
+    if (slash && (size_t)(slash - filepath) >= sizeof(dirbuf) - 1) return -1;
+    if (slash) {
         size_t n = (size_t)(slash - filepath);
         if (n == 0) n = 1;
         memcpy(dirbuf, filepath, n);
@@ -82,13 +83,15 @@ int jinn_atomic_rewrite(const char *path, jinn_fill_fn fill, void *arg) {
         rc = -1;
     }
     if (rc == 0) {
-        rc = jinn_dir_fsync(path);
+        if (jinn_dir_fsync(path) != 0)
+            jinn_persistence_fail("post-rename directory synchronization");
     } else {
         unlink(tmp_path);
     }
     free(tmp_path);
     return rc;
 }
+__attribute__((weak)) void jinn_txn_swap_fp(FILE *oldfp, FILE *newfp);
 int jinn_atomic_rewrite_reopen(const char *path, jinn_fill_fn fill, void *arg,
                                FILE **fpp) {
     if (jinn_atomic_rewrite(path, fill, arg) != 0) return -1;
@@ -97,10 +100,13 @@ int jinn_atomic_rewrite_reopen(const char *path, jinn_fill_fn fill, void *arg,
         if (!nf) {
             fprintf(stderr, "jinn: reopen after rewrite of %s failed: %s\n",
                     path, strerror(errno));
-            return -2;
+            jinn_persistence_fail("post-rename reopen");
         }
-        fseek(nf, 0, SEEK_END);
-        if (*fpp) fclose(*fpp);
+        if (fseek(nf, 0, SEEK_END) != 0)
+            jinn_persistence_fail("post-rename seek");
+        if (jinn_txn_swap_fp) jinn_txn_swap_fp(*fpp, nf);
+        if (*fpp && fclose(*fpp) != 0)
+            jinn_persistence_fail("post-rename old handle close");
         *fpp = nf;
     }
     return 0;
@@ -180,16 +186,18 @@ FILE *jinn_rewrite_commit(JinnRewrite *rw, FILE *old_fp) {
         rewrite_free(rw);
         return NULL;
     }
-    jinn_dir_fsync(rw->path);
-    if (old_fp) fclose(old_fp);
+    if (jinn_dir_fsync(rw->path) != 0)
+        jinn_persistence_fail("post-rename directory synchronization");
     FILE *nf = fopen(rw->path, "r+b");
     if (!nf) {
         fprintf(stderr, "jinn: reopen after rewrite of %s failed: %s\n", rw->path,
                 strerror(errno));
-        rewrite_free(rw);
-        return NULL;
+        jinn_persistence_fail("post-rename reopen");
     }
-    fseek(nf, 0, SEEK_END);
+    if (fseek(nf, 0, SEEK_END) != 0)
+        jinn_persistence_fail("post-rename seek");
+    if (old_fp && fclose(old_fp) != 0)
+        jinn_persistence_fail("post-rename old handle close");
     rewrite_free(rw);
     return nf;
 }
@@ -209,6 +217,8 @@ static void jinn_store_process_lock(const char *path) {
         }
     }
     size_t plen = strlen(path);
+    if (plen >= sizeof jinn_proc_locks[0].path || jinn_proc_lock_n == JINN_PROC_LOCK_MAX)
+        jinn_persistence_fail("process lock registry capacity");
     char *lock_path = (char *)malloc(plen + 6);
     if (!lock_path) {
         pthread_mutex_unlock(&jinn_proc_lock_mu);
@@ -252,6 +262,7 @@ FILE *jinn_store_open_data(const char *path, int transient, int *created) {
         fprintf(stderr, "jinn: store: internal error — no path to open\n");
         exit(2);
     }
+    jinn_persistence_check_path(path);
     jinn_store_process_lock(path);
     if (!transient) {
         errno = 0;
@@ -280,8 +291,8 @@ void jinn_store_finish_create(FILE *fp, const char *path) {
                 path ? path : "(store)", strerror(errno));
         exit(2);
     }
-    (void)jinn_fsync_checked(fileno(fp), path);
-    (void)jinn_dir_fsync(path);
+    if (jinn_fsync_checked(fileno(fp), path) != 0 || jinn_dir_fsync(path) != 0)
+        jinn_persistence_fail("new store synchronization");
 }
 void jinn_store_drop_indexes(const char *store_path) {
     if (!store_path) return;
@@ -315,14 +326,13 @@ void jinn_store_drop_indexes(const char *store_path) {
     closedir(d);
 }
 int64_t jinn_store_read_count_checked(FILE *fp, int64_t rec_size, const char *path) {
-    if (!fp || rec_size <= 0) return 0;
+    if (!fp || rec_size <= 0) jinn_persistence_fail("store count arguments");
     int64_t count = 0;
-    if (fseek(fp, 8, SEEK_SET) != 0 || fread(&count, 8, 1, fp) != 1) {
-        fseek(fp, 0, SEEK_END);
-        return 0;
-    }
-    if (fseek(fp, 0, SEEK_END) != 0) return 0;
+    jinn_store_fseek(fp, 8, SEEK_SET);
+    jinn_store_fread(&count, 8, 1, fp);
+    jinn_store_fseek(fp, 0, SEEK_END);
     long file_end = ftell(fp);
+    if (file_end < 40) jinn_persistence_fail("store file length");
     int64_t max_records = file_end >= 40 ? ((int64_t)file_end - 40) / rec_size : 0;
     if (count < 0 || count > max_records) {
         fprintf(stderr,
@@ -345,7 +355,8 @@ static JinnStoreLock g_store_locks[JINN_STORE_LOCK_MAX];
 static pthread_mutex_t g_store_lock_table = PTHREAD_MUTEX_INITIALIZER;
 
 static JinnStoreLock *store_lock_slot(const char *path) {
-    if (!path) return NULL;
+    if (!path || strlen(path) >= sizeof g_store_locks[0].path)
+        jinn_persistence_fail("writer lock path");
     pthread_mutex_lock(&g_store_lock_table);
     for (int i = 0; i < JINN_STORE_LOCK_MAX; i++) {
         if (g_store_locks[i].used && strcmp(g_store_locks[i].path, path) == 0) {
@@ -368,7 +379,7 @@ static JinnStoreLock *store_lock_slot(const char *path) {
             "jinn: more than %d distinct stores opened for writing; the writer lock "
             "table is full and writes to '%s' are no longer serialised\n",
             JINN_STORE_LOCK_MAX, path);
-    return NULL;
+    jinn_persistence_fail("writer lock registry capacity");
 }
 __attribute__((weak)) void jinn_sched_yield(void);
 __attribute__((weak)) jinn_coro_t *jinn_current_coro(void);
@@ -389,7 +400,37 @@ static void *store_lock_self(void) {
     }
     return &tl_lock_id;
 }
+static _Atomic(void *) writer_owner;
+static int32_t writer_depth;
+
+void jinn_store_writer_enter(void) {
+    void *self = store_lock_self();
+    if (atomic_load_explicit(&writer_owner, memory_order_relaxed) == self) {
+        writer_depth++;
+        return;
+    }
+    for (;;) {
+        void *expected = NULL;
+        if (atomic_compare_exchange_weak_explicit(&writer_owner, &expected, self,
+                                                  memory_order_acquire,
+                                                  memory_order_relaxed)) {
+            writer_depth = 1;
+            return;
+        }
+        store_lock_backoff();
+    }
+}
+
+void jinn_store_writer_leave(void) {
+    if (atomic_load_explicit(&writer_owner, memory_order_relaxed) != store_lock_self() ||
+        writer_depth <= 0)
+        jinn_persistence_fail("writer gate ownership");
+    if (--writer_depth == 0)
+        atomic_store_explicit(&writer_owner, NULL, memory_order_release);
+}
+
 void jinn_store_wlock(const char *path) {
+    jinn_store_writer_enter();
     JinnStoreLock *slot = store_lock_slot(path);
     if (!slot) return;
     void *self = store_lock_self();
@@ -418,9 +459,11 @@ void jinn_store_wunlock(const char *path) {
         slot->depth = 0;
         atomic_store_explicit(&slot->owner, NULL, memory_order_release);
     }
+    jinn_store_writer_leave();
 }
 int jinn_writer_lock(const char *path) {
     if (!path) return -1;
+    jinn_persistence_check_path(path);
     size_t plen = strlen(path);
     char *lock_path = (char *)malloc(plen + 6);
     if (!lock_path) return -1;

@@ -23,7 +23,7 @@ fn runs_in_coroutine_context(func: &Function) -> bool {
 }
 
 pub fn inject_yields(func: &mut Function) -> bool {
-    if func.attrs.no_yield || !runs_in_coroutine_context(func) {
+    if func.attrs.no_yield || func.cancel_cleanup.is_some() || !runs_in_coroutine_context(func) {
         return false;
     }
 

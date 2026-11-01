@@ -76,15 +76,16 @@ impl Lowerer {
                             b.span,
                         );
                     } else {
+                        let parent_key = self.var_key(*parent_did, *parent_name);
                         let parent_val = self.read_var(
-                            *parent_name,
+                            parent_key,
                             self.current_block,
                             parent_ty.clone(),
                             b.span,
                         );
                         let cleared =
                             self.emit(InstKind::FieldClear(parent_val, *field), parent_ty, b.span);
-                        self.write_var(*parent_name, self.current_block, cleared);
+                        self.write_var(parent_key, self.current_block, cleared);
                     }
                 }
 
@@ -107,8 +108,19 @@ impl Lowerer {
                         state_ty,
                         b.span,
                     );
-                } else {
-                    self.write_var(b.name, self.current_block, val);
+                } else if !self.bind_cleanup_cell(
+                    b.def_id,
+                    b.name,
+                    val,
+                    b.ty.clone(),
+                    !matches!(
+                        b.ownership,
+                        hir::Ownership::Borrowed | hir::Ownership::BorrowMut
+                    ),
+                    b.span,
+                ) {
+                    let key = self.var_key(b.def_id, b.name);
+                    self.write_var(key, self.current_block, val);
                 }
                 val
             }
@@ -160,7 +172,8 @@ impl Lowerer {
                                     target.span,
                                 );
                             } else {
-                                self.write_var(*name, self.current_block, updated);
+                                let key = self.var_key(*def_id, *name);
+                                self.write_var(key, self.current_block, updated);
                             }
                             return val;
                         }
@@ -175,7 +188,7 @@ impl Lowerer {
             hir::Stmt::Expr(e) => self.lower_expr(e),
             hir::Stmt::Drop(id, name, ty, span) => {
                 let key = self.var_key(*id, *name);
-                if self.var_types.contains_key(&key) {
+                if self.var_types.contains_key(&key) && !self.cleanup_cells.contains_key(&key) {
                     let val = self.read_var(key, self.current_block, ty.clone(), *span);
                     self.emit_void(InstKind::Drop(val, ty.clone()), *span);
                 }
@@ -183,17 +196,38 @@ impl Lowerer {
             }
             hir::Stmt::TupleBind(bindings, value, _span) => {
                 let val = self.lower_expr(value);
-                for (i, (_id, name, bind_ty)) in bindings.iter().enumerate() {
+                for (i, (id, name, bind_ty)) in bindings.iter().enumerate() {
                     let idx = self.emit(InstKind::IntConst(i as i64), Type::I64, Span::dummy());
                     let elem = self.emit(InstKind::Index(val, idx), bind_ty.clone(), Span::dummy());
-                    self.write_var(*name, self.current_block, elem);
+                    let elem = if !bind_ty.is_trivially_droppable() && bind_ty.is_value_clonable() {
+                        self.emit(
+                            InstKind::Clone(elem, bind_ty.clone()),
+                            bind_ty.clone(),
+                            value.span,
+                        )
+                    } else {
+                        elem
+                    };
+                    if !self.bind_cleanup_cell(*id, *name, elem, bind_ty.clone(), true, value.span)
+                    {
+                        self.write_var(*name, self.current_block, elem);
+                    }
+                }
+                if value.ty.is_value_clonable()
+                    && !value.ty.is_trivially_droppable()
+                    && matches!(
+                        value.kind,
+                        ExprKind::Call(..)
+                            | ExprKind::Method(..)
+                            | ExprKind::IndirectCall(..)
+                            | ExprKind::Tuple(..)
+                    )
+                {
+                    self.emit_void(InstKind::Drop(val, value.ty.clone()), value.span);
                 }
                 val
             }
-            hir::Stmt::Defer(body, span) => {
-                self.function_defers.push(body.clone());
-                self.emit(InstKind::Void, Type::Void, *span)
-            }
+            hir::Stmt::Defer(body, span) => self.lower_defer(body, *span),
             _ => unreachable!("statement dispatched to wrong MIR lowering module"),
         }
     }

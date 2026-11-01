@@ -457,7 +457,7 @@ pub enum ExprKind {
     IfExpr(Box<If>),
     Pipe(Box<Expr>, DefId, Symbol, Vec<Expr>),
     Block(Block),
-    Lambda(Vec<Param>, Block),
+    Lambda(Vec<Param>, Block, Vec<DefId>),
     Ref(Box<Expr>),
     Deref(Box<Expr>),
     ListComp(
@@ -471,7 +471,7 @@ pub enum ExprKind {
     Syscall(Vec<Expr>),
     Spawn(Symbol, Vec<(Symbol, Expr)>),
     Send(Box<Expr>, Symbol, Symbol, u32, Vec<Expr>),
-    CoroutineCreate(Symbol, Vec<Stmt>),
+    CoroutineCreate(Symbol, Vec<Stmt>, Vec<DefId>),
     CoroutineNext(Box<Expr>),
     Yield(Box<Expr>),
     StoreQuery(Symbol, Box<StoreFilter>),
@@ -545,6 +545,8 @@ pub enum ExprKind {
     EnumIs(Box<Expr>, u32),
 
     GlobalLoad(Symbol),
+
+    SizeOf(Type),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -603,9 +605,6 @@ pub enum BuiltinFn {
     AtomicAdd,
     AtomicSub,
     AtomicCas,
-    CompTimeTypeOf,
-    CompTimeFieldsOf,
-    CompTimeSizeOf,
     CharMethod(Symbol),
     Matmul,
     RegexMatch,

@@ -85,7 +85,7 @@ close ch                    # mark the channel closed
 
 | Operation | Runtime symbol | Blocking behaviour |
 | --- | --- | --- |
-| `send ch, v` | `jinn_chan_send` | Parks while full. Yields `false` and discards `v` if the channel is closed (`N-11`: a heap payload is currently leaked, not dropped); `true` once delivered. |
+| `send ch, v` | `jinn_chan_send` | Parks while full. Yields `false` and drops the owned payload if the channel is closed; `true` once delivered. |
 | `receive ch` | `jinn_chan_recv` | Parks while empty. Drains buffered values even after close. |
 | `close ch` | `jinn_chan_close` | Idempotent; sets the closed flag and wakes all parked waiters. |
 
@@ -100,6 +100,11 @@ The two closed-channel behaviours are load-bearing for clean shutdown:
 2. **Receive drains, then signals end-of-stream.** `receive` keeps returning
    buffered values until the buffer is empty, and only then — empty *and* closed
    — reports end-of-stream. No message enqueued before the close is lost.
+
+Final channel destruction drops any owned values still buffered. Closing alone
+preserves queued values for draining. A selected receive binding is scoped to
+its own arm; an unbound selected payload is dropped after receipt. Different
+arms may receive different element types without sharing an untyped data slot.
 
 ## Actors
 
@@ -154,8 +159,9 @@ The actor loop is generated in one of two shapes:
   non-blocking receive — got a message, dispatch; empty but open, loop again;
   closed, exit. A loop actor does periodic work *and* services messages.
 
-Both shapes converge on the same exit path: signal the completion latch so any
-pending `join` wakes, then close and *retire* the mailbox channel — the
+Both shapes converge on the same exit path: release owned actor state, signal
+the completion latch so any pending `join` wakes, then close and *retire* the
+mailbox channel — the
 actual free is deferred to scheduler shutdown, so a racing waiter never
 touches freed memory — and return.
 
@@ -242,38 +248,49 @@ into nested scopes: cancelling a scope marks its direct children and cancels
 every child scope, so a grandchild parked in an inner join is released when
 its own children unwind.
 
-- **C1 — Cancellation points.** A cancelled coroutine unwinds at its next
-  channel or select suspension point (`send` on full, `receive` on empty).
-  Already-parked coroutines are woken immediately. Channel `send`/`receive`
-  check the cancelled flag at the top of their park loop *and* just before
-  committing to park, which closes the lost-wakeup race under the channel
-  lock. Loop back-edges are cancellation points in every scheduler task.
-  **Gap (`N-6r`):** sleeps (currently a raw `nanosleep` on the worker
-  thread), IO parks, and joins are *not* cancellation points.
+- **C1 — Cancellation points.** Generated callable entry, call boundaries and
+  loop back-edges poll cancellation, including ordinary helpers invoked by a
+  task and generators executing on its behalf. Channel and select waits wake
+  when cancelled; channel park loops check again while holding the channel lock
+  before registering a waiter. A selected heap payload is bound or dropped
+  before the post-select cancellation checkpoint. Blocking foreign calls, raw
+  sleeps and operating-system I/O are not preempted by compiler checkpoints.
 - **C2 — Unwind semantics.** Unwinding reuses the error model's early-return
   path: `defer`s run, drops are emitted, the coroutine returns. It behaves as if
   a built-in `Cancelled` error were raised at the suspension point. `Cancelled`
   is not catchable and never enters a function's inferred error union — it is
   the runtime tearing the child down, not a value the program handles. Cleanup
-  belongs in `defer`.
+  belongs in `defer`. Active transactions roll back and release writer ownership
+  before these actions run, so deferred writes are outside the cancelled batch.
+  Nested scopes settle before enclosing cleanup. Destroying a suspended generator
+  runs only reached obligations; destroying an unstarted one does not execute its
+  body and releases its owned captures.
 - **C3 — Actors under cancellation.** Cancellation closes the mailbox *and*
   marks the actor cancelled: unlike a plain `stop`, a cancelled message actor
-  does **not** drain — it unwinds at its next receive.
+  does **not** guarantee delivery of pending messages. Handler arguments own
+  their delivered payloads. Rejected sends and undelivered retired mailbox
+  payloads are dropped, and actor state is released when its loop exits.
 - **C4 — Channels are untouched.** A channel is ordinary user data with its own
   `close`; cancellation does not reach into it. Parked operations are woken with
   closed-style results only for the unwinding coroutine.
-- **C5 — The non-yielding child.** Cancellation cannot interrupt a child that
-  never reaches a suspension point. A cancelled scope whose child spins forever
-  joins forever.
+- **C5 — Cooperative, not preemptive.** Ordinary generated spin loops poll
+  cancellation even without suspension. A child stuck in a foreign call, an
+  uninstrumented operation, or cancellation-shielded cleanup can still delay
+  joining indefinitely.
 - **C6 — Idempotent and monotone.** Cancelling an already-cancelled scope, or
   stopping an already-stopped actor, is a no-op.
 
-Two limitations are documented rather than silently mishandled: `defer`s whose
-cleanup references values defined inside a loop are not materialised at the
-synthesized cleanup block, and a coroutine parent parked in the scope join
-relies on the direct wake from cancel (the join-loop re-wake only runs when the
-parent is `*main`). Neither affects the common
-`together`/`dispatch`/`stop` shape; both are tracked as `N-1` and `N-2` in
+Cancellation cleanup uses the dynamically reached obligation stack, including
+multiple registrations and heap-owning locals from distinct loop iterations.
+These owners remain live until all registered blocks finish. Cooperative
+cancellation is shielded while cleanup runs, including cleanup's channel
+operations and loop back-edges; cleanup that blocks waiting for an unavailable
+peer can delay shutdown indefinitely. Allocation failure and traps remain
+fail-stop rather than unwinding exits.
+
+A remaining limitation is that a coroutine parent parked in the scope join
+relies on the direct wake from cancel; the join-loop re-wake only runs when the
+parent is `*main`. This is tracked as `N-2` in
 [`roadmap.md`](roadmap.md#concurrency).
 
 ### Error propagation from children

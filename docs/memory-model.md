@@ -62,6 +62,22 @@ Since [147] a type can pin its category — `type Point @value` / `type Bag
 compile error naming the field that flips it. Types without an assertion still
 transition silently; the embedding-site diagnostic remains open (`O-5`).
 
+### Current callable ownership boundary
+
+Named functions may explicitly consume function values and generators with
+`take` parameters. Their environments and owned parameters are released on
+normal return, early return, error and cooperative cancellation. Generator
+creation transfers consuming captures; destruction releases them whether the
+generator was unstarted, suspended or completed.
+
+Consuming parameters on closure literals are currently rejected: function-value
+types do not yet carry a complete per-parameter access contract. Use a named
+consuming function instead. A generator that needs to retain a borrowed
+noncopyable closure or an unsupported map clone is rejected during native
+lowering rather than silently aliasing an owner; pass an explicitly owned
+consuming argument when supported. This is a bounded supported surface, not a
+claim that every higher-order ownership combination is implemented.
+
 ## 3. Bindings and moves
 
 ### M1 — assignment moves an aggregate
@@ -269,13 +285,19 @@ shared, it is *relocated*.
 
 ### M10 — one drop per owner, after `defer`
 
-At scope exit, live owned aggregates drop exactly once, in reverse binding
-order. On early exits, repair-inserted drops land after the inlined `defer`
-bodies; on the normal exit path, scope-end drops currently run **before** the
-`defer` bodies — a `defer` that reads a dropped aggregate's contents is a
-latent use-after-free (benign today only for header reads like `.length`);
-reordering normal-exit drops after defers is open work. Tombstoned bindings drop nothing. Moving a value
-that a registered `defer` reads is a compile error:
+At lexical scope exit, live owned aggregates normally drop exactly once in reverse
+binding order. An owner needed by function-scoped `defer` is instead retained in
+stable cleanup storage until every registered obligation finishes. This includes
+transitive owners behind captured borrowed views. Its ordinary scope-end and
+early-exit drops are suppressed, and cleanup releases the current stored value
+once after the deferred blocks. Unrelated owners retain their ordinary drop
+points. Tombstoned bindings drop nothing.
+
+Only dynamically reached registrations run, in LIFO order. Cleanup observes the
+current binding state; loop-body bindings have independent per-iteration storage.
+A return value is evaluated before cleanup. Moving a value that registered
+cleanup reads, returning that owner, or consuming it inside cleanup, is a compile
+error; an explicit local copy may be consumed or returned:
 
 ```
 error: cannot move `buf`: it is read by the `defer` registered at m.jn:4:5
@@ -372,7 +394,12 @@ type File @resource
 ```
 
 `@align(N)`, `@packed`, and `@strict` are layout attributes and have no bearing
-on access semantics.
+on access semantics. Native layout is computed by one authority, the target's
+LLVM data layout: fields use natural alignment, and `size of T` reports the ABI
+store size of `T` on the compilation target (`size of` on an undeclared or
+non-concrete type is a compile error). `@packed` and `@align(N)` are parsed but
+rejected with a diagnostic, because packed storage and over-alignment are not
+implemented and silently ignoring them would misstate the ABI.
 
 There is no `@atomic` type annotation. Two unrelated uses of the word "atomic"
 remain and neither is about ownership: the `atomic x is value` binding, which

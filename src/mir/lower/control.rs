@@ -218,14 +218,18 @@ impl Lowerer {
                                         ty.clone(),
                                         arm.span,
                                     );
-                                    let key = self.alias_binder(*bid, *name);
-                                    self.write_var(key, self.current_block, field);
+                                    self.bind_cleanup_borrow(
+                                        *bid,
+                                        *name,
+                                        field,
+                                        ty.clone(),
+                                        arm.span,
+                                    );
                                 }
                             }
                         }
                         if let Pat::Bind(bid, name, _ty, _) = &arm.pat {
-                            let key = self.alias_binder(*bid, *name);
-                            self.write_var(key, self.current_block, subj);
+                            self.bind_cleanup_borrow(*bid, *name, subj, _ty.clone(), arm.span);
                         }
 
                         if let Pat::Tuple(sub_pats, _) = &arm.pat {
@@ -236,8 +240,13 @@ impl Lowerer {
                                         ty.clone(),
                                         arm.span,
                                     );
-                                    let key = self.alias_binder(*bid, *name);
-                                    self.write_var(key, self.current_block, field);
+                                    self.bind_cleanup_borrow(
+                                        *bid,
+                                        *name,
+                                        field,
+                                        ty.clone(),
+                                        arm.span,
+                                    );
                                 }
                             }
                         }
@@ -252,8 +261,13 @@ impl Lowerer {
                                     );
                                     let elem =
                                         self.emit(InstKind::Index(subj, idx), ty.clone(), arm.span);
-                                    let key = self.alias_binder(*bid, *name);
-                                    self.write_var(key, self.current_block, elem);
+                                    self.bind_cleanup_borrow(
+                                        *bid,
+                                        *name,
+                                        elem,
+                                        ty.clone(),
+                                        arm.span,
+                                    );
                                 }
                             }
                         }
@@ -460,8 +474,7 @@ impl Lowerer {
                         self.seal_block(arm_bb);
 
                         if let Pat::Bind(bid, name, _ty, _) = &arm.pat {
-                            let key = self.alias_binder(*bid, *name);
-                            self.write_var(key, self.current_block, subj);
+                            self.bind_cleanup_borrow(*bid, *name, subj, _ty.clone(), arm.span);
                         }
 
                         if let Pat::Ctor(_, ctor_tag, sub_pats, _) = &arm.pat {
@@ -475,8 +488,13 @@ impl Lowerer {
                                         ty.clone(),
                                         arm.span,
                                     );
-                                    let key = self.alias_binder(*bid, *name);
-                                    self.write_var(key, self.current_block, field);
+                                    self.bind_cleanup_borrow(
+                                        *bid,
+                                        *name,
+                                        field,
+                                        ty.clone(),
+                                        arm.span,
+                                    );
                                 }
                             }
                         }
@@ -489,8 +507,13 @@ impl Lowerer {
                                         ty.clone(),
                                         arm.span,
                                     );
-                                    let key = self.alias_binder(*bid, *name);
-                                    self.write_var(key, self.current_block, field);
+                                    self.bind_cleanup_borrow(
+                                        *bid,
+                                        *name,
+                                        field,
+                                        ty.clone(),
+                                        arm.span,
+                                    );
                                 }
                             }
                         }
@@ -505,8 +528,13 @@ impl Lowerer {
                                     );
                                     let elem =
                                         self.emit(InstKind::Index(subj, idx), ty.clone(), arm.span);
-                                    let key = self.alias_binder(*bid, *name);
-                                    self.write_var(key, self.current_block, elem);
+                                    self.bind_cleanup_borrow(
+                                        *bid,
+                                        *name,
+                                        elem,
+                                        ty.clone(),
+                                        arm.span,
+                                    );
                                 }
                             }
                         }

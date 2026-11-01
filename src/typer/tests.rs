@@ -1427,7 +1427,7 @@ fn test_pkg_id(name: &str) -> PkgId {
             minor: 0,
             patch: 0,
         },
-        name.as_bytes(),
+        blake3::hash(name.as_bytes()).as_bytes(),
         &[],
     );
     PkgId::intern(PackageRecord {

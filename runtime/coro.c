@@ -123,7 +123,13 @@ void jinn_coro_destroy(jinn_coro_t *c) {
     free(c);
 }
 
-_Thread_local jinn_coro_t *tl_gen_coro = NULL;
+static _Thread_local jinn_coro_t *tl_gen_coro = NULL;
+__attribute__((noinline)) jinn_coro_t *jinn_generator_current(void) {
+    return tl_gen_coro;
+}
+__attribute__((noinline)) void jinn_generator_set_current(jinn_coro_t *c) {
+    tl_gen_coro = c;
+}
 static void jinn_coro_trampoline(void) {
 #ifdef JINN_SAN_ASAN_FIBERS
     const void *san_old_bottom = NULL;
@@ -131,9 +137,8 @@ static void jinn_coro_trampoline(void) {
     __sanitizer_finish_switch_fiber(NULL, &san_old_bottom, &san_old_size);
 #endif
     jinn_coro_t *self;
-    jinn_coro_t *gen = tl_gen_coro;
+    jinn_coro_t *gen = jinn_generator_current();
     if (gen) {
-        tl_gen_coro = NULL;
         self = gen;
 #ifdef JINN_SAN_ASAN_FIBERS
         self->san_ret_bottom = san_old_bottom;
@@ -179,6 +184,8 @@ void jinn_coro_yield(void) {
     jinn_coro_swap_out(c, &w->sched_ctx);
 }
 jinn_coro_t *jinn_current_coro(void) {
+    jinn_coro_t *gen = jinn_generator_current();
+    if (gen) return gen;
     jinn_worker_t *w = jinn_worker_self();
     return w ? w->current : NULL;
 }
@@ -199,23 +206,32 @@ void jinn_coro_set_on_exit(jinn_coro_t *c, void (*cb)(void *), void *arg) {
 #define GEN_DONE_OFF       17
 
 void jinn_gen_resume(void *gen_blk) {
+    if (jinn_txn_active()) jinn_persistence_fail("generator resume inside a transaction is unsupported");
     uint8_t done = *((uint8_t *)gen_blk + GEN_DONE_OFF);
     if (done) return;
     jinn_coro_t *c = *(jinn_coro_t **)((char *)gen_blk + GEN_CORO_OFF);
     jinn_context_t caller_ctx;
     *(jinn_context_t **)((char *)gen_blk + GEN_CALLER_CTX_OFF) = &caller_ctx;
-    tl_gen_coro = c;
+    jinn_coro_t *previous = jinn_generator_current();
+    c->generator_parent = jinn_current_coro();
+    jinn_generator_set_current(c);
     jinn_coro_swap_in(&caller_ctx, c);
-    tl_gen_coro = NULL;
+    jinn_generator_set_current(previous);
 }
 
 void jinn_gen_suspend(void *gen_blk) {
+    if (jinn_txn_active()) jinn_persistence_fail("generator yield inside a transaction is unsupported");
     jinn_coro_t *c = *(jinn_coro_t **)((char *)gen_blk + GEN_CORO_OFF);
     jinn_context_t *caller_ctx = *(jinn_context_t **)((char *)gen_blk + GEN_CALLER_CTX_OFF);
     jinn_coro_swap_out(c, caller_ctx);
 }
 void jinn_gen_destroy(void *gen_blk) {
+    if (!gen_blk) return;
     jinn_coro_t *c = *(jinn_coro_t **)((char *)gen_blk + GEN_CORO_OFF);
-    if (c) jinn_coro_destroy(c);
+    if (c) {
+        atomic_store_explicit(&c->cancelled, 1, memory_order_release);
+        while (!*((uint8_t *)gen_blk + GEN_DONE_OFF)) jinn_gen_resume(gen_blk);
+        jinn_coro_destroy(c);
+    }
     free(gen_blk);
 }

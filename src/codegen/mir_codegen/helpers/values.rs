@@ -141,21 +141,7 @@ impl<'ctx> Compiler<'ctx> {
                 }
                 mir::BinOp::And => b!(self.bld.build_and(li, ri, "land")),
                 mir::BinOp::Or => b!(self.bld.build_or(li, ri, "lor")),
-                mir::BinOp::Exp => {
-                    let f64t = self.ctx.f64_type();
-                    let lf = b!(self.bld.build_signed_int_to_float(li, f64t, "exp.l"));
-                    let rf = b!(self.bld.build_signed_int_to_float(ri, f64t, "exp.r"));
-                    let pow = self.module.get_function("pow").unwrap_or_else(|| {
-                        let ft = f64t.fn_type(&[f64t.into(), f64t.into()], false);
-                        self.module.add_function("pow", ft, Some(Linkage::External))
-                    });
-                    let result = b!(self.bld.build_call(pow, &[lf.into(), rf.into()], "pow"));
-                    let fv = self.call_result(result).into_float_value();
-                    let iv = b!(self
-                        .bld
-                        .build_float_to_signed_int(fv, li.get_type(), "exp.i"));
-                    return Ok(iv.into());
-                }
+                mir::BinOp::Exp => self.checked_pow(li, ri, result_ty.is_signed())?,
             };
             Ok(res.into())
         }
@@ -526,67 +512,130 @@ impl<'ctx> Compiler<'ctx> {
         Ok(b!(self.bld.build_load(target_llvm, alloca, "cast")))
     }
 
+    pub(in crate::codegen) fn emit_strict_cast(
+        &mut self,
+        value: BasicValueEnum<'ctx>,
+        source: &Type,
+        target: &Type,
+    ) -> Result<BasicValueEnum<'ctx>, String> {
+        if !source.is_num() || !target.is_num() {
+            return Err(format!(
+                "invalid strict numeric cast from {source} to {target}"
+            ));
+        }
+        let target_llvm = self.llvm_ty(target);
+        let converted = self.emit_cast(value, source, target, target_llvm)?;
+        let valid = if source.is_int() {
+            let wide = self.ctx.custom_width_int_type(128);
+            let original = if source.is_signed() {
+                b!(self
+                    .bld
+                    .build_int_s_extend(value.into_int_value(), wide, "strict.source"))
+            } else {
+                b!(self
+                    .bld
+                    .build_int_z_extend(value.into_int_value(), wide, "strict.source"))
+            };
+            let restored = if target.is_int() {
+                if target.is_signed() {
+                    b!(self.bld.build_int_s_extend(
+                        converted.into_int_value(),
+                        wide,
+                        "strict.target"
+                    ))
+                } else {
+                    b!(self.bld.build_int_z_extend(
+                        converted.into_int_value(),
+                        wide,
+                        "strict.target"
+                    ))
+                }
+            } else {
+                self.emit_float_to_int_saturating(converted.into_float_value(), wide, true)?
+                    .into_int_value()
+            };
+            b!(self.bld.build_int_compare(
+                inkwell::IntPredicate::EQ,
+                original,
+                restored,
+                "strict.exact"
+            ))
+        } else {
+            let original = value.into_float_value();
+            let restored = self
+                .emit_cast(converted, target, source, value.get_type())?
+                .into_float_value();
+            let equal = b!(self.bld.build_float_compare(
+                inkwell::FloatPredicate::OEQ,
+                original,
+                restored,
+                "strict.exact"
+            ));
+            let below_infinity = b!(self.bld.build_float_compare(
+                inkwell::FloatPredicate::OLT,
+                original,
+                original.get_type().const_float(f64::INFINITY),
+                "strict.below.infinity",
+            ));
+            let above_infinity = b!(self.bld.build_float_compare(
+                inkwell::FloatPredicate::OGT,
+                original,
+                original.get_type().const_float(f64::NEG_INFINITY),
+                "strict.above.infinity",
+            ));
+            let finite = b!(self
+                .bld
+                .build_and(below_infinity, above_infinity, "strict.finite"));
+            let in_range = if target.is_int() {
+                let (low, high) = target.integer_range().unwrap();
+                let lower = b!(self.bld.build_float_compare(
+                    inkwell::FloatPredicate::OGE,
+                    original,
+                    original.get_type().const_float(low as f64),
+                    "strict.lower",
+                ));
+                let upper = b!(self.bld.build_float_compare(
+                    inkwell::FloatPredicate::OLT,
+                    original,
+                    original.get_type().const_float((high + 1) as f64),
+                    "strict.upper",
+                ));
+                b!(self.bld.build_and(lower, upper, "strict.range"))
+            } else {
+                finite
+            };
+            let exact_finite = b!(self.bld.build_and(equal, finite, "strict.finite.exact"));
+            b!(self.bld.build_and(exact_finite, in_range, "strict.valid"))
+        };
+        let function = self.bld.get_insert_block().unwrap().get_parent().unwrap();
+        let ok = self.ctx.append_basic_block(function, "strict.ok");
+        let trap = self.ctx.append_basic_block(function, "strict.trap");
+        b!(self.bld.build_conditional_branch(valid, ok, trap));
+        self.bld.position_at_end(trap);
+        self.emit_trap("strict cast lost information");
+        self.bld.position_at_end(ok);
+        Ok(converted)
+    }
+
     fn emit_float_to_int_saturating(
         &mut self,
         f: inkwell::values::FloatValue<'ctx>,
         dst: inkwell::types::IntType<'ctx>,
         signed: bool,
     ) -> Result<BasicValueEnum<'ctx>, String> {
-        let bits = dst.get_bit_width();
-        let ft = f.get_type();
-        let (lo_f, hi_f, lo_i, hi_i) = if signed {
-            let hi = if bits >= 64 {
-                i64::MAX as f64
-            } else {
-                ((1u64 << (bits - 1)) - 1) as f64
-            };
-            let lo = -hi - 1.0;
-            (
-                ft.const_float(lo),
-                ft.const_float(hi),
-                dst.const_int(1u64 << (bits - 1), false),
-                dst.const_int(u64::MAX >> (64 - bits + 1), false),
-            )
+        let intrinsic = inkwell::intrinsics::Intrinsic::find(if signed {
+            "llvm.fptosi.sat"
         } else {
-            let hi = if bits >= 64 {
-                u64::MAX as f64
-            } else {
-                ((1u128 << bits) - 1) as f64
-            };
-            (
-                ft.const_float(0.0),
-                ft.const_float(hi),
-                dst.const_zero(),
-                dst.const_all_ones(),
-            )
-        };
-
-        let raw = if signed {
-            b!(self.bld.build_float_to_signed_int(f, dst, "f2i"))
-        } else {
-            b!(self.bld.build_float_to_unsigned_int(f, dst, "f2u"))
-        };
-
-        let too_lo =
-            b!(self
-                .bld
-                .build_float_compare(inkwell::FloatPredicate::OLT, f, lo_f, "f2i.lo"));
-        let too_hi =
-            b!(self
-                .bld
-                .build_float_compare(inkwell::FloatPredicate::OGT, f, hi_f, "f2i.hi"));
-        let is_nan =
-            b!(self
-                .bld
-                .build_float_compare(inkwell::FloatPredicate::UNO, f, f, "f2i.nan"));
-
-        let r = b!(self.bld.build_select(too_hi, hi_i, raw, "f2i.clamphi")).into_int_value();
-        let r = b!(self.bld.build_select(too_lo, lo_i, r, "f2i.clamplo")).into_int_value();
-        let r = b!(self
-            .bld
-            .build_select(is_nan, dst.const_zero(), r, "f2i.nan0"))
-        .into_int_value();
-        Ok(r.into())
+            "llvm.fptoui.sat"
+        })
+        .ok_or("ICE: missing saturating float conversion intrinsic")?;
+        let function = intrinsic
+            .get_declaration(&self.module, &[dst.into(), f.get_type().into()])
+            .ok_or("ICE: invalid saturating float conversion overload")?;
+        Ok(b!(self.bld.build_call(function, &[f.into()], "f2i.sat"))
+            .try_as_basic_value()
+            .basic()
+            .ok_or("ICE: saturating float conversion returned void")?)
     }
 
     pub(in crate::codegen) fn emit_field_get(
@@ -661,8 +710,8 @@ impl<'ctx> Compiler<'ctx> {
                         let payload_gep = b!(self.bld.build_struct_gep(st, alloca, 1, "payload"));
                         let res_llvm = self.llvm_ty(result_ty);
                         let byte_offset = match vtag {
-                            Some(t) => self.compute_variant_payload_offset(name, t, idx),
-                            None => self.compute_enum_payload_offset(name, idx),
+                            Some(t) => self.compute_variant_payload_offset(name, t, idx)?,
+                            None => self.compute_enum_payload_offset(name, idx)?,
                         };
                         let field_ptr = if byte_offset == 0 {
                             payload_gep
@@ -774,8 +823,10 @@ impl<'ctx> Compiler<'ctx> {
                     if let Some((vtag, idx)) = Self::parse_payload_field(field) {
                         let payload_gep = b!(self.bld.build_struct_gep(st, ptr, 1, "payload"));
                         let byte_offset = match vtag {
-                            Some(t) => self.compute_variant_payload_offset(&name.as_str(), t, idx),
-                            None => self.compute_enum_payload_offset(&name.as_str(), idx),
+                            Some(t) => {
+                                self.compute_variant_payload_offset(&name.as_str(), t, idx)?
+                            }
+                            None => self.compute_enum_payload_offset(&name.as_str(), idx)?,
                         };
                         let field_ptr = if byte_offset == 0 {
                             payload_gep

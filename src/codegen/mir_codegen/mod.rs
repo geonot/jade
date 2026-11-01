@@ -12,7 +12,7 @@ use indexmap::IndexMap;
 use inkwell::AddressSpace;
 use inkwell::basic_block::BasicBlock as LLVMBlock;
 use inkwell::module::Linkage;
-use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
+use inkwell::types::{BasicMetadataTypeEnum, BasicType};
 use inkwell::values::{BasicValue, BasicValueEnum};
 
 use crate::drops::DropHints;
@@ -106,36 +106,6 @@ impl<'ctx> Compiler<'ctx> {
         self.setup_target()?;
         self.declare_builtins();
 
-        for td in &prog.types {
-            self.ctx.opaque_struct_type(&td.name.as_str());
-        }
-        for ed in &hir_prog.enums {
-            if self.module.get_struct_type(&ed.name.as_str()).is_none() {
-                self.ctx.opaque_struct_type(&ed.name.as_str());
-            }
-        }
-        for ed in &hir_prog.err_defs {
-            if self.module.get_struct_type(&ed.name.as_str()).is_none() {
-                self.ctx.opaque_struct_type(&ed.name.as_str());
-            }
-        }
-
-        for td in &prog.types {
-            let ltys: Vec<BasicTypeEnum<'ctx>> =
-                td.fields.iter().map(|(_, ty)| self.llvm_ty(ty)).collect();
-            let st = self
-                .module
-                .get_struct_type(&td.name.as_str())
-                .expect("opaque struct just created");
-            st.set_body(&ltys, false);
-            let fields: Vec<(String, Type)> = td
-                .fields
-                .iter()
-                .map(|(n, t)| (n.as_str(), t.clone()))
-                .collect();
-            self.structs.insert(td.name, fields);
-        }
-
         if !hir_prog.stores.is_empty() {
             self.declare_store_runtime();
             for sd in &hir_prog.stores {
@@ -143,6 +113,8 @@ impl<'ctx> Compiler<'ctx> {
                 self.store_defs.insert(sd.name, sd.clone());
             }
         }
+
+        self.declare_native_types(prog, hir_prog)?;
 
         for ed in &hir_prog.enums {
             let variants: Vec<(String, Vec<Type>)> = ed
@@ -162,12 +134,6 @@ impl<'ctx> Compiler<'ctx> {
                 .map(|v| (v.name.as_str(), v.fields.clone()))
                 .collect();
             self.enums.insert(ed.name.as_str().into(), variants);
-        }
-        for ed in &hir_prog.enums {
-            let _ = self.declare_enum(ed);
-        }
-        for ed in &hir_prog.err_defs {
-            self.declare_err_def(ed)?;
         }
 
         for td in &hir_prog.types {
@@ -319,6 +285,7 @@ impl<'ctx> Compiler<'ctx> {
                 self.actor_defs.insert(ad.name, ad.clone());
             }
         }
+        self.validate_native_program(prog)?;
 
         if !hir_prog.migrations.is_empty() {
             if hir_prog.stores.is_empty() {
@@ -569,6 +536,7 @@ impl<'ctx> Compiler<'ctx> {
         self.value_types.clear();
         self.chan_iter_slots.clear();
         self.self_allocs.clear();
+        self.self_alloc_types.clear();
         self.by_ref_values.clear();
         self.local_struct_values.clear();
         self.vec_growth_floor_by_value = Self::compute_vec_growth_floors(func);
@@ -623,17 +591,7 @@ impl<'ctx> Compiler<'ctx> {
                     self.by_ref_values.insert(param.value);
                 }
 
-                let effective_ty = match &param.ty {
-                    Type::Ptr(inner)
-                        if matches!(
-                            inner.as_ref(),
-                            Type::Struct(_, _) | Type::Tuple(_) | Type::Enum(_)
-                        ) =>
-                    {
-                        (**inner).clone()
-                    }
-                    _ => param.ty.clone(),
-                };
+                let effective_ty = param.ty.clone();
                 if matches!(
                     effective_ty,
                     Type::Struct(_, _) | Type::Tuple(_) | Type::Enum(_)
@@ -880,6 +838,14 @@ impl<'ctx> Compiler<'ctx> {
                         );
                         b!(self.bld.build_call(f, &[errval.into()], ""));
                     }
+                    let ptr = self.ctx.ptr_type(AddressSpace::default());
+                    let (task_alloca, _) = self
+                        .find_var("__coro_ctx")
+                        .cloned()
+                        .ok_or("internal: no __coro_ctx in task body")?;
+                    let task = b!(self.bld.build_load(ptr, task_alloca, "task.ctx"));
+                    let free = self.ensure_free();
+                    b!(self.bld.build_call(free, &[task.into()], ""));
                     b!(self.bld.build_return(None));
                     return Ok(());
                 }
@@ -962,8 +928,13 @@ mod mangle_tests {
 
     fn pkg_id_ver(name: &str, ver: SemVer, src: &str) -> PkgId {
         let nm = Symbol::intern(name);
-        let hash =
-            crate::pkgid::compute_semantic_hash(nm, ScopePath::root(), &ver, src.as_bytes(), &[]);
+        let hash = crate::pkgid::compute_semantic_hash(
+            nm,
+            ScopePath::root(),
+            &ver,
+            blake3::hash(src.as_bytes()).as_bytes(),
+            &[],
+        );
         PkgId::intern(PackageRecord {
             name: nm,
             owner_scope: ScopePath::root(),
@@ -1029,8 +1000,9 @@ mod mangle_tests {
         let prefix = sym.strip_suffix("_greeter_hello").unwrap();
         assert_eq!(
             prefix.len(),
-            8,
-            "pkgid_hash prefix must be 8 hex chars, got {prefix:?}"
+            2 * crate::pkgid::MANGLE_PREFIX_BYTES,
+            "pkgid_hash prefix must be {} hex chars, got {prefix:?}",
+            2 * crate::pkgid::MANGLE_PREFIX_BYTES
         );
         assert!(
             prefix.chars().all(|c| c.is_ascii_hexdigit()),

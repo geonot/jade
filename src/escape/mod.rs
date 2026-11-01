@@ -232,7 +232,7 @@ fn seed_binds_in_stmt(stmt: &Stmt, info: &mut EscapeInfo) {
 fn seed_binds_in_expr(expr: &Expr, info: &mut EscapeInfo) {
     use ExprKind::*;
     match &expr.kind {
-        Lambda(_, body) | Block(body) => seed_binds_in_block(body, info),
+        Lambda(_, body, _) | Block(body) => seed_binds_in_block(body, info),
         IfExpr(i) => {
             seed_binds_in_expr(&i.cond, info);
             seed_binds_in_block(&i.then, info);
@@ -337,7 +337,7 @@ fn seed_binds_in_expr(expr: &Expr, info: &mut EscapeInfo) {
                 seed_binds_in_expr(e, info);
             }
         }
-        CoroutineCreate(_, stmts) | GeneratorCreate(_, _, stmts, _) => {
+        CoroutineCreate(_, stmts, _) | GeneratorCreate(_, _, stmts, _) => {
             for s in stmts {
                 seed_binds_in_stmt(s, info);
             }
@@ -393,6 +393,7 @@ fn seed_binds_in_expr(expr: &Expr, info: &mut EscapeInfo) {
         | VariantRef(_, _, _)
         | Unreachable
         | GlobalLoad(_)
+        | SizeOf(_)
         | StoreQuery(_, _)
         | StoreCount(_)
         | StoreAll(_)
@@ -573,6 +574,7 @@ impl<'a> EscapeWalk<'a> {
             | VariantRef(_, _, _)
             | Unreachable
             | GlobalLoad(_)
+            | SizeOf(_)
             | StoreQuery(_, _)
             | StoreCount(_)
             | StoreAll(_)
@@ -709,7 +711,7 @@ impl<'a> EscapeWalk<'a> {
             Field(e, _, _) | ChannelRecv(e) | CoroutineNext(e) | GeneratorNext(e) | Yield(e) => {
                 self.walk_expr_consumer(e, BindContext::LocalRead);
             }
-            CoroutineCreate(_, stmts) | GeneratorCreate(_, _, stmts, _) => {
+            CoroutineCreate(_, stmts, _) | GeneratorCreate(_, _, stmts, _) => {
                 for s in stmts {
                     let prev = self.in_lambda;
                     self.in_lambda = prev + 1;
@@ -717,7 +719,7 @@ impl<'a> EscapeWalk<'a> {
                     self.in_lambda = prev;
                 }
             }
-            Lambda(_, body) => {
+            Lambda(_, body, _) => {
                 let prev = self.in_lambda;
                 self.in_lambda = prev + 1;
                 self.walk_block(body);

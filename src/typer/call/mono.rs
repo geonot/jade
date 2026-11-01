@@ -50,9 +50,6 @@ impl Typer {
     ) -> Result<hir::Expr, String> {
         let mangled = self.monomorphize_fn(name, type_map)?;
         let base = Symbol::intern(name);
-        if let Some(access) = self.fn_param_access.get(&base).cloned() {
-            self.fn_param_access.insert(mangled, access);
-        }
         if let Some(mutates) = self.fn_param_mutates.get(&base).cloned() {
             self.fn_param_mutates.insert(mangled, mutates);
         }

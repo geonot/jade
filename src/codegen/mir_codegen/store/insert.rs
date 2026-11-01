@@ -228,7 +228,7 @@ impl<'ctx> Compiler<'ctx> {
 
         self.wal_write_insert(store_name, rec_ptr, rec_size)?;
 
-        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
+        let fseek_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fseek");
         let header_size = crate::codegen::stores::HEADER_SIZE;
         let reserve_fn = self
             .module
@@ -282,7 +282,7 @@ impl<'ctx> Compiler<'ctx> {
             "rec.off"
         ));
 
-        let fwrite_fn = crate::codegen::fn_or_die(&self.module, "fwrite");
+        let fwrite_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fwrite");
         b!(self.bld.build_call(
             fwrite_fn,
             &[
@@ -304,7 +304,7 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
         let count_buf = self.entry_alloca(i64t.into(), "count.buf");
-        let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
+        let fread_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fread");
         b!(self.bld.build_call(
             fread_fn,
             &[
@@ -341,7 +341,7 @@ impl<'ctx> Compiler<'ctx> {
             ""
         ));
 
-        let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
+        let fflush_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fflush");
         b!(self.bld.build_call(fflush_fn, &[fp.into()], ""));
 
         {

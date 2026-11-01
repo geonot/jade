@@ -144,6 +144,34 @@ fn verify_function_inner(f: &Function, sigs: Option<&CallSigs>) -> Result<(), Ve
     if let Some(sigs) = sigs {
         check_call_sites(f, &value_ty, sigs, &mut errors);
     }
+    for bb in &f.blocks {
+        for inst in &bb.insts {
+            if let InstKind::StrictCast(value, target) = &inst.kind
+                && (!value_ty.get(value).is_some_and(Type::is_num)
+                    || !target.is_num()
+                    || &inst.ty != target)
+            {
+                errors.push(format!("invalid strict numeric cast contract in {}", bb.id));
+            }
+            if let InstKind::Call(name, args) = &inst.kind
+                && let Some(op) =
+                    crate::integer_arithmetic::IntegerArithmetic::from_mir(&name.as_str())
+            {
+                let valid = args.len() == 2
+                    && value_ty.get(&args[0]).is_some_and(|ty| {
+                        ty.is_int()
+                            && value_ty.get(&args[1]) == Some(ty)
+                            && inst.ty == op.result_type(ty)
+                    });
+                if !valid {
+                    errors.push(format!(
+                        "invalid integer intrinsic contract for {} in {}",
+                        op.source_name, bb.id
+                    ));
+                }
+            }
+        }
+    }
 
     let preds = f.predecessors();
 
@@ -351,7 +379,7 @@ fn inst_used_values(k: &InstKind) -> Vec<ValueId> {
     use InstKind::*;
     match k {
         IntConst(_) | FloatConst(_) | BoolConst(_) | StringConst(_) | Void | Load(_)
-        | AddrOf(_) | FnRef(_) | MapInit | GlobalLoad(_) => Vec::new(),
+        | AddrOf(_) | FnRef(_) | MapInit | GlobalLoad(_) | SizeOf(_) => Vec::new(),
 
         BinOp(_, a, b) | Cmp(_, a, b, _) => vec![*a, *b],
         UnaryOp(_, a) => vec![*a],
@@ -406,6 +434,7 @@ fn inst_tag(k: &InstKind) -> &'static str {
     use InstKind::*;
     match k {
         IntConst(_) => "IntConst",
+        SizeOf(_) => "SizeOf",
         FloatConst(_) => "FloatConst",
         BoolConst(_) => "BoolConst",
         StringConst(_) => "StringConst",
@@ -479,6 +508,7 @@ mod tests {
                 name: Symbol::intern("p"),
                 ty: Type::I64,
                 by_ref: false,
+                owned: false,
             }],
             ret_ty,
             blocks,
@@ -680,6 +710,132 @@ mod tests {
         );
         let errs = verify_function(&f).unwrap_err();
         assert!(errs.iter().any(|e| e.contains("truthy")));
+    }
+
+    #[test]
+    fn integer_intrinsics_enforce_operand_and_result_contracts() {
+        for name in [
+            "WrappingAdd",
+            "WrappingSub",
+            "WrappingMul",
+            "SaturatingAdd",
+            "SaturatingSub",
+            "SaturatingMul",
+            "CheckedAdd",
+            "CheckedSub",
+            "CheckedMul",
+        ] {
+            let symbol = Symbol::intern(&format!("__builtin_{name}"));
+            let op =
+                crate::integer_arithmetic::IntegerArithmetic::from_mir(&symbol.as_str()).unwrap();
+            for operand in [Type::I8, Type::U64] {
+                let result = op.result_type(&operand);
+                let valid = func(
+                    vec![block(
+                        0,
+                        vec![
+                            inst(1, InstKind::IntConst(1), operand.clone()),
+                            inst(
+                                2,
+                                InstKind::Call(symbol, vec![ValueId(1), ValueId(1)]),
+                                result.clone(),
+                            ),
+                        ],
+                        Terminator::Return(None),
+                    )],
+                    Type::Void,
+                );
+                assert!(verify_function(&valid).is_ok());
+                for (args, ty) in [
+                    (vec![], result.clone()),
+                    (vec![ValueId(1)], result.clone()),
+                    (vec![ValueId(1), ValueId(0)], result.clone()),
+                    (vec![ValueId(1), ValueId(1)], Type::Bool),
+                ] {
+                    let mut invalid = valid.clone();
+                    invalid.blocks[0].insts[1] = inst(2, InstKind::Call(symbol, args), ty);
+                    let errors = verify_function(&invalid).unwrap_err();
+                    assert!(
+                        errors
+                            .iter()
+                            .any(|error| error.contains("integer intrinsic contract"))
+                    );
+                }
+                for other in [Type::Bool, Type::F64, Type::U32] {
+                    let mut invalid = valid.clone();
+                    invalid.params[0].ty = other.clone();
+                    invalid.blocks[0].insts[1] = inst(
+                        2,
+                        InstKind::Call(symbol, vec![ValueId(1), ValueId(0)]),
+                        result.clone(),
+                    );
+                    assert!(
+                        verify_function(&invalid)
+                            .unwrap_err()
+                            .iter()
+                            .any(|e| e.contains("integer intrinsic contract"))
+                    );
+                    invalid.blocks[0].insts[0].ty = other.clone();
+                    invalid.blocks[0].insts[1].ty = op.result_type(&other);
+                    if other.is_int() {
+                        assert!(verify_function(&invalid).is_ok());
+                    } else {
+                        assert!(
+                            verify_function(&invalid)
+                                .unwrap_err()
+                                .iter()
+                                .any(|e| e.contains("integer intrinsic contract"))
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn strict_cast_contract_requires_numeric_source_destination_and_result() {
+        for source in [
+            Type::I64,
+            Type::U64,
+            Type::F32,
+            Type::F64,
+            Type::Bool,
+            Type::String,
+        ] {
+            for target in [
+                Type::I8,
+                Type::U64,
+                Type::F32,
+                Type::F64,
+                Type::Bool,
+                Type::String,
+            ] {
+                let mut f = func(
+                    vec![block(
+                        0,
+                        vec![inst(
+                            1,
+                            InstKind::StrictCast(ValueId(0), target.clone()),
+                            target.clone(),
+                        )],
+                        Terminator::Return(Some(ValueId(1))),
+                    )],
+                    target.clone(),
+                );
+                f.params[0].ty = source.clone();
+                assert_eq!(
+                    verify_function(&f).is_ok(),
+                    source.is_num() && target.is_num()
+                );
+                f.blocks[0].insts[0].ty = Type::Void;
+                assert!(
+                    verify_function(&f)
+                        .unwrap_err()
+                        .iter()
+                        .any(|e| e.contains("strict numeric cast contract"))
+                );
+            }
+        }
     }
 
     #[test]

@@ -38,8 +38,10 @@ impl<'ctx> Compiler<'ctx> {
 
                 mir::InstKind::Clone(val, ty) => {
                     let v = self.val(*val);
-                    if !Self::is_value_clonable(ty) || ty.is_trivially_droppable() {
-                        Ok(v)
+                    if !self.is_value_clonable(ty) {
+                        Err(format!(
+                            "cannot copy or retain {ty}: this type is move-only; transfer an owning value instead"
+                        ))
                     } else {
                         self.clone_value(v, ty)
                     }

@@ -49,6 +49,19 @@ impl Type {
                 | Self::U64
         )
     }
+    pub fn integer_range(&self) -> Option<(i128, i128)> {
+        if !self.is_int() {
+            return None;
+        }
+        let bits = self.bits() - u32::from(self.is_signed());
+        let high = (1i128 << bits) - 1;
+        let low = if self.is_signed() {
+            -(1i128 << bits)
+        } else {
+            0
+        };
+        Some((low, high))
+    }
     pub fn is_unsigned(&self) -> bool {
         matches!(self, Self::U8 | Self::U16 | Self::U32 | Self::U64)
     }
@@ -122,12 +135,49 @@ impl Type {
             Self::Enum(_) => true,
             Self::Vec(elem) | Self::Array(elem, _) => elem.is_value_clonable(),
             Self::Tuple(tys) => tys.iter().all(|t| t.is_value_clonable()),
-            Self::Struct(_, _) => true,
+            Self::Struct(_, _) | Self::Row(_) => true,
             Self::Alias(_, inner) | Self::Newtype(_, inner) | Self::Frozen(inner) => {
                 inner.is_value_clonable()
             }
             _ => false,
         }
+    }
+
+    pub fn is_value_clonable_with(
+        &self,
+        nominal_fields: &impl Fn(&Type) -> Option<Vec<Type>>,
+    ) -> bool {
+        fn visit(
+            ty: &Type,
+            nominal_fields: &impl Fn(&Type) -> Option<Vec<Type>>,
+            visiting: &mut Vec<Type>,
+        ) -> bool {
+            if ty.is_trivially_droppable() {
+                return true;
+            }
+            match ty {
+                Type::String | Type::Channel(_) => true,
+                Type::Vec(t) | Type::Array(t, _) => visit(t, nominal_fields, visiting),
+                Type::Tuple(ts) => ts.iter().all(|t| visit(t, nominal_fields, visiting)),
+                Type::Alias(_, t) | Type::Newtype(_, t) | Type::Frozen(t) => {
+                    visit(t, nominal_fields, visiting)
+                }
+                Type::Struct(_, _) | Type::Enum(_) | Type::Row(_) => {
+                    if visiting.contains(ty) {
+                        return true;
+                    }
+                    let Some(fields) = nominal_fields(ty) else {
+                        return false;
+                    };
+                    visiting.push(ty.clone());
+                    let clonable = fields.iter().all(|t| visit(t, nominal_fields, visiting));
+                    visiting.pop();
+                    clonable
+                }
+                _ => false,
+            }
+        }
+        visit(self, nominal_fields, &mut Vec::new())
     }
 
     pub fn default_ownership(&self) -> crate::hir::Ownership {

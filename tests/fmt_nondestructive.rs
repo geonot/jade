@@ -230,10 +230,7 @@ fn fmt_output_still_frontend_checks_over_corpus() {
             Some(format!(
                 "{}: compiled before fmt but not after: {}",
                 p.display(),
-                String::from_utf8_lossy(&after.stderr)
-                    .lines()
-                    .next()
-                    .unwrap_or("")
+                String::from_utf8_lossy(&after.stderr).trim()
             ))
         }
     })

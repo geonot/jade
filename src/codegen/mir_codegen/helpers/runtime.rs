@@ -43,20 +43,11 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_store(drop_gep, drop_fn.as_global_value().as_pointer_value()));
             for (i, v) in cap_vals.iter().enumerate() {
-                let ty = &cap_mir_tys[i];
-                let stored = if !self.capture_moves_ownership(ty)
-                    && !ty.is_trivially_droppable()
-                    && Self::is_value_clonable(ty)
-                {
-                    self.clone_value(*v, ty)?
-                } else {
-                    *v
-                };
                 let gep =
                     b!(self
                         .bld
                         .build_struct_gep(env_struct_ty, ep, (i + 1) as u32, "env.field"));
-                b!(self.bld.build_store(gep, stored));
+                b!(self.bld.build_store(gep, *v));
             }
             ep
         } else {
@@ -150,37 +141,6 @@ impl<'ctx> Compiler<'ctx> {
         Ok(agg)
     }
 
-    pub(in crate::codegen) fn capture_moves_ownership(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Vec(_) | Type::Map(_, _) | Type::Coroutine(_) | Type::Generator(_) => true,
-            Type::Fn(_, _) => true,
-            Type::Struct(name, _) => self
-                .structs
-                .get(name)
-                .map(|fields| {
-                    fields
-                        .iter()
-                        .any(|(_, fty)| self.capture_moves_ownership(fty))
-                })
-                .unwrap_or(false),
-            Type::Enum(name) => self
-                .enums
-                .get(name)
-                .map(|variants| {
-                    variants
-                        .iter()
-                        .any(|(_, ftys)| ftys.iter().any(|t| self.capture_moves_ownership(t)))
-                })
-                .unwrap_or(false),
-            Type::Tuple(ts) => ts.iter().any(|t| self.capture_moves_ownership(t)),
-            Type::Array(elem, _) => self.capture_moves_ownership(elem),
-            Type::Alias(_, inner) | Type::Newtype(_, inner) | Type::Frozen(inner) => {
-                self.capture_moves_ownership(inner)
-            }
-            _ => false,
-        }
-    }
-
     fn closure_env_drop_fn(
         &mut self,
         fn_name: &str,
@@ -243,10 +203,7 @@ impl<'ctx> Compiler<'ctx> {
         let i64t = self.ctx.i64_type();
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
         if let Some(fv) = self.module.get_function("jinn_chan_create") {
-            let elem_size = self
-                .llvm_ty(elem_ty)
-                .size_of()
-                .unwrap_or(i64t.const_int(8, false));
+            let elem_size = i64t.const_int(self.type_size_of(elem_ty), false);
             let capacity = if let Some(cap_id) = cap {
                 self.val(*cap_id).into_int_value()
             } else {
@@ -255,7 +212,29 @@ impl<'ctx> Compiler<'ctx> {
             let csv = b!(self
                 .bld
                 .build_call(fv, &[elem_size.into(), capacity.into()], "chan"));
-            Ok(self.call_result(csv))
+            let channel = self.call_result(csv);
+            if !elem_ty.is_trivially_droppable() {
+                let drop = self
+                    .value_drop_fn(elem_ty)?
+                    .as_global_value()
+                    .as_pointer_value();
+                let setter = self
+                    .module
+                    .get_function("jinn_chan_set_drop")
+                    .unwrap_or_else(|| {
+                        self.module.add_function(
+                            "jinn_chan_set_drop",
+                            self.ctx
+                                .void_type()
+                                .fn_type(&[ptr_ty.into(), ptr_ty.into()], false),
+                            Some(Linkage::External),
+                        )
+                    });
+                b!(self
+                    .bld
+                    .build_call(setter, &[channel.into(), drop.into()], ""));
+            }
+            Ok(channel)
         } else {
             Ok(ptr_ty.const_null().into())
         }
@@ -349,57 +328,56 @@ impl<'ctx> Compiler<'ctx> {
         enum_name: &str,
         tag: u32,
         target_idx: usize,
-    ) -> u64 {
-        if let Some(variants) = self.enums.get(enum_name) {
-            for (vname, field_types) in variants {
-                let vtag = self
-                    .variant_tags
-                    .get(vname)
-                    .map(|(_, t)| *t)
-                    .unwrap_or(u32::MAX);
-                if vtag == tag && field_types.len() > target_idx {
-                    let mut offset: u64 = 0;
-                    for (i, fty) in field_types.iter().enumerate() {
-                        if i == target_idx {
-                            return offset;
-                        }
-                        let type_size = if Compiler::is_recursive_field(fty, enum_name) {
-                            8
-                        } else {
-                            self.type_store_size(self.llvm_ty(fty))
-                        };
-                        offset += (type_size + 7) & !7;
-                    }
-                }
-            }
-        }
-        (target_idx * 8) as u64
+    ) -> Result<u64, String> {
+        let fields = self
+            .enums
+            .get(enum_name)
+            .and_then(|variants| {
+                variants
+                    .iter()
+                    .find(|(name, _)| self.variant_tags.get(name).is_some_and(|(_, t)| *t == tag))
+            })
+            .map(|(_, fields)| fields)
+            .ok_or_else(|| format!("unknown native variant layout: {enum_name} tag {tag}"))?;
+        self.variant_layout(enum_name, fields)
+            .offsets
+            .get(target_idx)
+            .copied()
+            .ok_or_else(|| {
+                format!(
+                    "native variant field out of range: {enum_name} tag {tag} field {target_idx}"
+                )
+            })
     }
 
     pub(in crate::codegen) fn compute_enum_payload_offset(
         &self,
         enum_name: &str,
         target_idx: usize,
-    ) -> u64 {
-        if let Some(variants) = self.enums.get(enum_name) {
-            for (_, field_types) in variants {
-                if field_types.len() > target_idx {
-                    let mut offset: u64 = 0;
-                    for (i, fty) in field_types.iter().enumerate() {
-                        if i == target_idx {
-                            return offset;
-                        }
-                        let type_size = if Compiler::is_recursive_field(fty, enum_name) {
-                            8
-                        } else {
-                            self.type_store_size(self.llvm_ty(fty))
-                        };
-                        offset += (type_size + 7) & !7;
-                    }
+    ) -> Result<u64, String> {
+        let variants = self
+            .enums
+            .get(enum_name)
+            .ok_or_else(|| format!("unknown native enum layout: {enum_name}"))?;
+        let mut offset = None;
+        for (_, fields) in variants {
+            if let Some(candidate) = self
+                .variant_layout(enum_name, fields)
+                .offsets
+                .get(target_idx)
+                .copied()
+            {
+                if offset.is_some_and(|previous| previous != candidate) {
+                    return Err(format!(
+                        "ambiguous native enum field layout: {enum_name} field {target_idx}"
+                    ));
                 }
+                offset = Some(candidate);
             }
         }
-        (target_idx * 8) as u64
+        offset.ok_or_else(|| {
+            format!("native enum field out of range: {enum_name} field {target_idx}")
+        })
     }
 
     pub(in crate::codegen) fn emit_slice(

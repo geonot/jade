@@ -1,6 +1,5 @@
 use crate::ast::{self, Span};
 use crate::hir;
-use crate::intern::Symbol;
 use crate::types::Type;
 
 use super::Typer;
@@ -12,6 +11,31 @@ impl Typer {
         args: &[ast::Expr],
         span: Span,
     ) -> Option<Result<hir::Expr, String>> {
+        if let Some(op) = crate::integer_arithmetic::IntegerArithmetic::from_source(name)
+            && !self.fns.contains_key(name)
+        {
+            return Some((|| {
+                if args.len() != 2 {
+                    return Err(format!("{name} requires exactly two integer operands"));
+                }
+                let lhs = self.lower_expr(&args[0])?;
+                let rhs = self.lower_expr_expected(&args[1], Some(&lhs.ty))?;
+                self.infer_ctx.constrain(
+                    &lhs.ty,
+                    super::unify::TypeConstraint::Integer,
+                    span,
+                    "integer arithmetic operand",
+                )?;
+                self.infer_ctx
+                    .unify_at(&lhs.ty, &rhs.ty, span, "integer arithmetic operands")?;
+                let ty = op.result_type(&lhs.ty);
+                Ok(hir::Expr {
+                    kind: hir::ExprKind::Builtin(op.builtin.clone(), vec![lhs, rhs]),
+                    ty,
+                    span,
+                })
+            })());
+        }
         match name {
             "assert" => {
                 if args.is_empty() {
@@ -81,43 +105,6 @@ impl Typer {
                 Some(Ok(hir::Expr {
                     kind: hir::ExprKind::Builtin(hir::BuiltinFn::VolatileStore, vec![hptr, hval]),
                     ty: Type::Void,
-                    span,
-                }))
-            }
-            "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "saturating_add"
-            | "saturating_sub" | "saturating_mul" | "checked_add" | "checked_sub"
-            | "checked_mul"
-                if args.len() == 2 && !self.fns.contains_key(name) =>
-            {
-                let lhs = match self.lower_expr(&args[0]) {
-                    Ok(e) => e,
-                    Err(e) => return Some(Err(e)),
-                };
-                let rhs = match self.lower_expr(&args[1]) {
-                    Ok(e) => e,
-                    Err(e) => return Some(Err(e)),
-                };
-                let ty = lhs.ty.clone();
-                let builtin = match name {
-                    "wrapping_add" => hir::BuiltinFn::WrappingAdd,
-                    "wrapping_sub" => hir::BuiltinFn::WrappingSub,
-                    "wrapping_mul" => hir::BuiltinFn::WrappingMul,
-                    "saturating_add" => hir::BuiltinFn::SaturatingAdd,
-                    "saturating_sub" => hir::BuiltinFn::SaturatingSub,
-                    "saturating_mul" => hir::BuiltinFn::SaturatingMul,
-                    "checked_add" => hir::BuiltinFn::CheckedAdd,
-                    "checked_sub" => hir::BuiltinFn::CheckedSub,
-                    "checked_mul" => hir::BuiltinFn::CheckedMul,
-                    _ => unreachable!(),
-                };
-                let ret_ty = if name.starts_with("checked_") {
-                    Type::Tuple(vec![ty, Type::Bool])
-                } else {
-                    ty
-                };
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Builtin(builtin, vec![lhs, rhs]),
-                    ty: ret_ty,
                     span,
                 }))
             }
@@ -385,55 +372,7 @@ impl Typer {
                 }))
             }
             "size_of" if args.len() == 1 && !self.fns.contains_key(name) => {
-                let size = match &args[0] {
-                    ast::Expr::Str(s, _) => {
-                        if let Some(fields) = self.structs.get(&Symbol::intern(s)) {
-                            fields.len() as i64 * 8
-                        } else {
-                            match s.as_str() {
-                                "i8" | "u8" | "bool" => 1,
-                                "i16" | "u16" => 2,
-                                "i32" | "u32" | "f32" => 4,
-                                "i64" | "u64" | "f64" => 8,
-                                "String" | "string" => 24,
-                                _ => 0,
-                            }
-                        }
-                    }
-                    ast::Expr::Ident(s, _) => {
-                        if let Some(fields) = self.structs.get(s) {
-                            fields.len() as i64 * 8
-                        } else {
-                            match &*s.as_str() {
-                                "i8" | "u8" | "bool" => 1,
-                                "i16" | "u16" => 2,
-                                "i32" | "u32" | "f32" => 4,
-                                "i64" | "u64" | "f64" => 8,
-                                "String" | "string" => 24,
-                                _ => 0,
-                            }
-                        }
-                    }
-                    _ => {
-                        let harg = match self.lower_expr(&args[0]) {
-                            Ok(e) => e,
-                            Err(e) => return Some(Err(e)),
-                        };
-                        match &harg.ty {
-                            Type::I8 | Type::U8 | Type::Bool => 1,
-                            Type::I16 | Type::U16 => 2,
-                            Type::I32 | Type::U32 | Type::F32 => 4,
-                            Type::I64 | Type::U64 | Type::F64 => 8,
-                            Type::String => 24,
-                            _ => 8,
-                        }
-                    }
-                };
-                Some(Ok(hir::Expr {
-                    kind: hir::ExprKind::Int(size),
-                    ty: Type::I64,
-                    span,
-                }))
+                Some(self.lower_size_of(&args[0], span))
             }
             "likely" => {
                 Some(self.lower_simple_builtin(args, hir::BuiltinFn::Likely, Type::Bool, span))

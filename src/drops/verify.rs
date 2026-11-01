@@ -284,13 +284,18 @@ pub(super) fn verify_function(func: &mir::Function) -> Vec<String> {
 
 pub(super) use super::ConsumingMap;
 
-fn owning_allocs(
+pub(super) fn owning_allocs(
     func: &mir::Function,
     consuming: &ConsumingMap,
     resources: &HashSet<Symbol>,
-    _heap_structs: &HashSet<Symbol>,
+    heap_structs: &HashSet<Symbol>,
 ) -> HashMap<ValueId, Type> {
-    let mut owning = HashMap::new();
+    let mut owning: HashMap<ValueId, Type> = func
+        .params
+        .iter()
+        .filter(|p| p.owned && !p.ty.is_trivially_droppable())
+        .map(|p| (p.value, p.ty.clone()))
+        .collect();
     for block in &func.blocks {
         for inst in &block.insts {
             let Some(dest) = inst.dest else { continue };
@@ -298,14 +303,21 @@ fn owning_allocs(
                 InstKind::VecNew(_) | InstKind::MapInit | InstKind::ChanCreate(..) => {
                     owning.insert(dest, inst.ty.clone());
                 }
-                InstKind::StructInit(name, _) if resources.contains(name) => {
+                InstKind::StructInit(name, _)
+                    if resources.contains(name) || heap_structs.contains(name) =>
+                {
                     owning.insert(dest, inst.ty.clone());
                 }
                 InstKind::ClosureCreate(_, captures) if !captures.is_empty() => {
                     owning.insert(dest, inst.ty.clone());
                 }
                 InstKind::Clone(_, _)
-                    if matches!(inst.ty, Type::Vec(_) | Type::Map(_, _) | Type::String) =>
+                | InstKind::VariantInit(..)
+                | InstKind::ArrayInit(_)
+                | InstKind::ChanRecv(_)
+                | InstKind::IndirectCall(_, _)
+                | InstKind::ClosureCall(_, _)
+                    if !inst.ty.is_trivially_droppable() =>
                 {
                     owning.insert(dest, inst.ty.clone());
                 }
@@ -321,13 +333,47 @@ fn owning_allocs(
                     owning.insert(dest, inst.ty.clone());
                 }
                 InstKind::Call(name, _)
-                    if matches!(inst.ty, Type::Vec(_) | Type::Map(_, _) | Type::String)
-                        && (consuming.contains_key(name) || is_store_vec_alloc(&name.as_str())) =>
+                    if !inst.ty.is_trivially_droppable()
+                        && (consuming.contains_key(name)
+                            || is_store_vec_alloc(&name.as_str())
+                            || name.as_str().starts_with("__gen_create_")
+                            || name.as_str().starts_with("__coro_create_")
+                            || name.as_str() == "__select_recv"
+                            || name.as_str() == PAYLOAD_MOVE) =>
                 {
                     owning.insert(dest, inst.ty.clone());
                 }
                 _ => {}
             }
+        }
+    }
+    loop {
+        let before = owning.len();
+        for block in &func.blocks {
+            for phi in &block.phis {
+                if phi.incoming.iter().any(|(_, v)| owning.contains_key(v)) {
+                    owning.insert(phi.dest, phi.ty.clone());
+                }
+            }
+            for inst in &block.insts {
+                let source = match inst.kind {
+                    InstKind::Copy(v)
+                    | InstKind::Cast(v, _)
+                    | InstKind::FieldSet(v, _, _)
+                    | InstKind::FieldClear(v, _)
+                    | InstKind::IndexSet(v, _, _) => Some(v),
+                    _ => None,
+                };
+                if let (Some(dest), Some(source)) = (inst.dest, source)
+                    && owning.contains_key(&source)
+                    && !inst.ty.is_trivially_droppable()
+                {
+                    owning.insert(dest, inst.ty.clone());
+                }
+            }
+        }
+        if before == owning.len() {
+            break;
         }
     }
     owning
@@ -358,31 +404,58 @@ fn reads_without_taking(kind: &InstKind) -> bool {
             | InstKind::Slice(_, _, _)
             | InstKind::Clone(_, _)
             | InstKind::ChanRecv(_)
-            | InstKind::FieldClear(_, _)
             | InstKind::Deref(_)
+            | InstKind::SelectArm(_, _)
+            | InstKind::Ref(_)
+            | InstKind::Alloc(_)
     )
 }
 
-fn strict_transfers(kind: &InstKind, consuming: &ConsumingMap) -> Vec<ValueId> {
+pub(super) const PAYLOAD_MOVE: &str = "__builtin_PayloadMove";
+
+pub(super) fn strict_transfers(kind: &InstKind, consuming: &ConsumingMap) -> Vec<ValueId> {
     match kind {
         InstKind::Drop(_, _) | InstKind::DropMany(_) => vec![],
+        InstKind::Call(name, args) if name.as_str() == PAYLOAD_MOVE => vec![args[0]],
+        InstKind::VecPush(_, value) | InstKind::ChanSend(_, value) => vec![*value],
+        InstKind::Call(name, args)
+            if name.as_str().starts_with("__gen_create_")
+                || name.as_str().starts_with("__coro_create_") =>
+        {
+            args.clone()
+        }
+        InstKind::Call(name, args)
+            if name.as_str().starts_with("__scope_spawn_")
+                || name.as_str().starts_with("__send_") =>
+        {
+            args.iter().skip(1).copied().collect()
+        }
+        InstKind::Call(name, args)
+            if matches!(
+                &*name.as_str(),
+                "__cleanup_cell_owned" | "__cleanup_cell_set" | "__cleanup_push"
+            ) =>
+        {
+            args.get(1).copied().into_iter().collect()
+        }
+        InstKind::IndirectCall(_, _) | InstKind::ClosureCall(_, _) => vec![],
         InstKind::Call(name, args) => match consuming.get(name) {
             Some(slots) => args
                 .iter()
                 .enumerate()
-                .filter(|(i, _)| slots.get(*i).copied().unwrap_or(true))
+                .filter(|(i, _)| slots.get(*i).copied().unwrap_or(false))
                 .map(|(_, v)| *v)
                 .collect(),
-            None => args.clone(),
+            None => vec![],
         },
         InstKind::MethodCall(recv, name, args, _) => match consuming.get(name) {
             Some(slots) => {
                 let mut out = Vec::new();
-                if slots.first().copied().unwrap_or(true) {
+                if slots.first().copied().unwrap_or(false) {
                     out.push(*recv);
                 }
                 for (i, a) in args.iter().enumerate() {
-                    if slots.get(i + 1).copied().unwrap_or(true) {
+                    if slots.get(i + 1).copied().unwrap_or(false) {
                         out.push(*a);
                     }
                 }
@@ -449,41 +522,79 @@ fn must_held_entry_states(
         .collect();
     let n = func.blocks.len();
     let entry_bi = index_of.get(&func.entry).copied().unwrap_or(0);
+    let mut reachable = HashSet::new();
+    let mut stack = vec![entry_bi];
+    while let Some(bi) = stack.pop() {
+        if reachable.insert(bi) {
+            stack.extend(
+                func.blocks[bi]
+                    .terminator
+                    .successors()
+                    .iter()
+                    .filter_map(|s| index_of.get(s).copied()),
+            );
+        }
+    }
+    let all: HashSet<ValueId> = owning.keys().copied().collect();
+    let initial: HashSet<ValueId> = func
+        .params
+        .iter()
+        .filter(|p| p.owned && owning.contains_key(&p.value))
+        .map(|p| p.value)
+        .collect();
     let mut entry_state: Vec<Option<HashSet<ValueId>>> = vec![None; n];
-    entry_state[entry_bi] = Some(HashSet::new());
-    let mut exit_state: Vec<Option<HashSet<ValueId>>> = vec![None; n];
-
+    for &bi in &reachable {
+        entry_state[bi] = Some(if bi == entry_bi {
+            initial.clone()
+        } else {
+            all.clone()
+        });
+    }
+    let predecessors = func.predecessors();
     loop {
         let mut changed = false;
+        let exit_state: Vec<Option<HashSet<ValueId>>> = entry_state
+            .iter()
+            .enumerate()
+            .map(|(bi, entry)| {
+                entry
+                    .as_ref()
+                    .map(|entry| process_must_held(func, bi, owning, consuming, entry))
+            })
+            .collect();
         for bi in 0..n {
-            let Some(entry) = entry_state[bi].clone() else {
+            if bi == entry_bi || !reachable.contains(&bi) {
                 continue;
-            };
-            let exit = process_must_held(func, bi, owning, consuming, &entry);
-            if exit_state[bi].as_ref() != Some(&exit) {
-                exit_state[bi] = Some(exit.clone());
-                changed = true;
             }
-            for succ in func.blocks[bi].terminator.successors() {
-                if let Some(&si) = index_of.get(&succ) {
-                    let this_id = func.blocks[bi].id;
-                    let mut flow = exit.clone();
-                    for phi in &func.blocks[si].phis {
-                        for (pred, v) in &phi.incoming {
-                            if *pred == this_id {
-                                flow.remove(v);
-                            }
-                        }
+            let mut merged: Option<HashSet<ValueId>> = None;
+            for pred in &predecessors[&func.blocks[bi].id] {
+                let pi = index_of[pred];
+                let Some(exit) = &exit_state[pi] else {
+                    continue;
+                };
+                let mut flow = exit.clone();
+                let mut destinations = Vec::new();
+                for phi in &func.blocks[bi].phis {
+                    if phi
+                        .incoming
+                        .iter()
+                        .any(|(p, v)| p == pred && exit.contains(v))
+                    {
+                        destinations.push(phi.dest);
                     }
-                    let merged = match &entry_state[si] {
-                        None => flow,
-                        Some(cur) => cur.intersection(&flow).copied().collect(),
-                    };
-                    if entry_state[si].as_ref() != Some(&merged) {
-                        entry_state[si] = Some(merged);
-                        changed = true;
+                    for (_, v) in phi.incoming.iter().filter(|(p, _)| p == pred) {
+                        flow.remove(v);
                     }
                 }
+                flow.extend(destinations);
+                merged = Some(match merged {
+                    None => flow,
+                    Some(cur) => cur.intersection(&flow).copied().collect(),
+                });
+            }
+            if entry_state[bi] != merged {
+                entry_state[bi] = merged;
+                changed = true;
             }
         }
         if !changed {
@@ -538,147 +649,129 @@ pub(super) fn insert_edge_escape_drops(
     if owning.is_empty() {
         return 0;
     }
-    let entry_states = must_held_entry_states(func, &owning, consuming);
-    let index_of: HashMap<BlockId, usize> = func
-        .blocks
-        .iter()
-        .enumerate()
-        .map(|(i, b)| (b.id, i))
-        .collect();
-    let n = func.blocks.len();
-
-    let mut mentions: Vec<HashSet<ValueId>> = Vec::with_capacity(n);
-    for b in &func.blocks {
-        let mut m: HashSet<ValueId> = HashSet::new();
-        for phi in &b.phis {
-            for (_, v) in &phi.incoming {
-                m.insert(*v);
+    let mut inserted = 0;
+    loop {
+        let n = func.blocks.len();
+        let index_of: HashMap<BlockId, usize> = func
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(i, b)| (b.id, i))
+            .collect();
+        let mut uses = vec![HashSet::new(); n];
+        let mut defs = vec![HashSet::new(); n];
+        for (bi, block) in func.blocks.iter().enumerate() {
+            defs[bi].extend(block.phis.iter().map(|p| p.dest));
+            for inst in &block.insts {
+                for v in inst_operands(&inst.kind) {
+                    if !defs[bi].contains(&v) {
+                        uses[bi].insert(v);
+                    }
+                }
+                defs[bi].extend(inst.dest);
             }
+            uses[bi].extend(
+                terminator_operands(&block.terminator)
+                    .into_iter()
+                    .filter(|v| !defs[bi].contains(v)),
+            );
         }
-        for inst in &b.insts {
-            m.extend(inst_operands(&inst.kind));
-        }
-        m.extend(terminator_operands(&b.terminator));
-        mentions.push(m);
-    }
-    let succs: Vec<Vec<usize>> = func
-        .blocks
-        .iter()
-        .map(|b| {
-            b.terminator
-                .successors()
-                .iter()
-                .filter_map(|s| index_of.get(s).copied())
-                .collect()
-        })
-        .collect();
-
-    let mut reach: Vec<Vec<bool>> = Vec::with_capacity(n);
-    for bi in 0..n {
-        let mut seen = vec![false; n];
-        let mut stack: Vec<usize> = succs[bi].clone();
-        while let Some(b) = stack.pop() {
-            if seen[b] {
-                continue;
-            }
-            seen[b] = true;
-            for &s in &succs[b] {
-                stack.push(s);
-            }
-        }
-        reach.push(seen);
-    }
-
-    let mut candidates: Vec<(usize, ValueId, Type)> = Vec::new();
-    for bi in 0..n {
-        let Some(entry) = &entry_states[bi] else {
-            continue;
-        };
-        let Terminator::Goto(t) = &func.blocks[bi].terminator else {
-            continue;
-        };
-        let Some(&ti) = index_of.get(t) else {
-            continue;
-        };
-        if reach[bi][bi] {
-            continue;
-        }
-        let held = process_must_held(func, bi, &owning, consuming, entry);
-        if held.is_empty() {
-            continue;
-        }
-        let this_id = func.blocks[bi].id;
-        let mut edge_used: HashSet<ValueId> = HashSet::new();
-        for phi in &func.blocks[ti].phis {
-            for (pred, v) in &phi.incoming {
-                if *pred == this_id {
-                    edge_used.insert(*v);
+        let mut live_in = uses.clone();
+        loop {
+            let mut changed = false;
+            for bi in (0..n).rev() {
+                let mut live = uses[bi].clone();
+                for succ in func.blocks[bi].terminator.successors() {
+                    let si = index_of[&succ];
+                    live.extend(
+                        live_in[si]
+                            .iter()
+                            .filter(|v| !defs[bi].contains(v))
+                            .copied(),
+                    );
+                    for phi in &func.blocks[si].phis {
+                        live.extend(
+                            phi.incoming
+                                .iter()
+                                .filter(|(p, v)| *p == func.blocks[bi].id && !defs[bi].contains(v))
+                                .map(|(_, v)| *v),
+                        );
+                    }
+                }
+                if live != live_in[bi] {
+                    live_in[bi] = live;
+                    changed = true;
                 }
             }
-        }
-        let mut reach_used: HashSet<ValueId> = HashSet::new();
-        for (b, reachable) in reach[bi].iter().enumerate() {
-            if *reachable {
-                reach_used.extend(mentions[b].iter().copied());
+            if !changed {
+                break;
             }
         }
-        for v in held.iter() {
-            if edge_used.contains(v) || reach_used.contains(v) {
-                continue;
+        let entry_states = must_held_entry_states(func, &owning, consuming);
+        let mut candidates = Vec::new();
+        for (bi, entry) in entry_states.iter().enumerate() {
+            let Some(entry) = entry else { continue };
+            let held = process_must_held(func, bi, &owning, consuming, entry);
+            let mut successors = func.blocks[bi].terminator.successors();
+            successors.sort_by_key(|b| b.0);
+            successors.dedup();
+            for succ in successors {
+                let si = index_of[&succ];
+                let mut used = live_in[si].clone();
+                used.extend(entry_states[si].iter().flatten().copied());
+                for phi in &func.blocks[si].phis {
+                    used.extend(
+                        phi.incoming
+                            .iter()
+                            .filter(|(p, _)| *p == func.blocks[bi].id)
+                            .map(|(_, v)| *v),
+                    );
+                }
+                let mut dead: Vec<ValueId> = held.difference(&used).copied().collect();
+                dead.sort_by_key(|v| v.0);
+                if !dead.is_empty() {
+                    candidates.push((bi, succ, dead));
+                }
             }
-            let ty = owning.get(v).cloned().unwrap_or(Type::Void);
-            if matches!(ty, Type::Void) {
-                continue;
+            if !candidates.is_empty() {
+                break;
             }
-            candidates.push((bi, *v, ty));
         }
-    }
-
-    let mut by_value: HashMap<ValueId, Vec<usize>> = HashMap::new();
-    for (ci, (_, v, _)) in candidates.iter().enumerate() {
-        by_value.entry(*v).or_default().push(ci);
-    }
-    let mut keep = vec![false; candidates.len()];
-    for (_, cis) in by_value {
-        let mut remaining = cis;
-        while !remaining.is_empty() {
-            let pick_pos = remaining
-                .iter()
-                .position(|&c| {
-                    remaining
-                        .iter()
-                        .all(|&o| o == c || !reach[candidates[o].0][candidates[c].0])
-                })
-                .unwrap_or(0);
-            let c = remaining.remove(pick_pos);
-            keep[c] = true;
-            remaining.retain(|&o| !reach[candidates[c].0][candidates[o].0]);
+        if candidates.is_empty() {
+            break;
         }
-    }
-
-    let mut inserted = 0u32;
-    let mut per_block: HashMap<usize, Vec<(ValueId, Type)>> = HashMap::new();
-    for (ci, (bi, v, ty)) in candidates.into_iter().enumerate() {
-        if keep[ci] {
-            per_block.entry(bi).or_default().push((v, ty));
-        }
-    }
-    for (bi, mut dead) in per_block {
-        dead.sort_by_key(|(v, _)| v.0);
-        let span = func.blocks[bi]
-            .insts
-            .last()
-            .map(|i| i.span)
-            .unwrap_or(func.span);
-        for (v, ty) in dead {
-            func.blocks[bi].insts.push(Instruction {
-                dest: None,
-                kind: InstKind::Drop(v, ty),
-                ty: Type::Void,
-                span,
-                def_id: None,
-            });
-            inserted += 1;
+        for (bi, succ, dead) in candidates {
+            let pred = func.blocks[bi].id;
+            let span = func.blocks[bi]
+                .insts
+                .last()
+                .map(|i| i.span)
+                .unwrap_or(func.span);
+            let target = if matches!(func.blocks[bi].terminator, Terminator::Goto(_)) {
+                pred
+            } else {
+                let edge = func.new_block("drop.edge");
+                func.blocks[bi].terminator.replace_successor(succ, edge);
+                for phi in &mut func.block_mut(succ).phis {
+                    for (p, _) in &mut phi.incoming {
+                        if *p == pred {
+                            *p = edge;
+                        }
+                    }
+                }
+                func.block_mut(edge).terminator = Terminator::Goto(succ);
+                edge
+            };
+            for v in dead {
+                func.block_mut(target).insts.push(Instruction {
+                    dest: None,
+                    kind: InstKind::Drop(v, owning[&v].clone()),
+                    ty: Type::Void,
+                    span,
+                    def_id: None,
+                });
+                inserted += 1;
+            }
         }
     }
     inserted
@@ -750,6 +843,138 @@ mod tests {
             insts,
             terminator,
         }
+    }
+
+    #[test]
+    fn phi_normalization_removes_dead_cycles_and_coalesces_live_owners() {
+        let mut f = func(vec![
+            block(
+                0,
+                vec![inst(Some(0), InstKind::BoolConst(true), Type::Bool)],
+                Terminator::Branch(ValueId(0), BlockId(1), BlockId(2)),
+            ),
+            block(
+                1,
+                vec![inst(
+                    Some(1),
+                    InstKind::VecNew(vec![]),
+                    Type::Vec(Box::new(Type::I64)),
+                )],
+                Terminator::Goto(BlockId(3)),
+            ),
+            block(
+                2,
+                vec![inst(
+                    Some(2),
+                    InstKind::VecNew(vec![]),
+                    Type::Vec(Box::new(Type::I64)),
+                )],
+                Terminator::Goto(BlockId(3)),
+            ),
+            block(
+                3,
+                vec![inst(
+                    None,
+                    InstKind::Call(Symbol::intern("borrow"), vec![ValueId(5), ValueId(6)]),
+                    Type::Void,
+                )],
+                Terminator::Return(None),
+            ),
+        ]);
+        for dest in [5, 6] {
+            f.blocks[3].phis.push(Phi {
+                dest: ValueId(dest),
+                ty: Type::Vec(Box::new(Type::I64)),
+                incoming: vec![(BlockId(1), ValueId(1)), (BlockId(2), ValueId(2))],
+            });
+        }
+        for (dest, input) in [(7, 8), (8, 7)] {
+            f.blocks[3].phis.push(Phi {
+                dest: ValueId(dest),
+                ty: Type::I64,
+                incoming: vec![(BlockId(1), ValueId(input)), (BlockId(2), ValueId(input))],
+            });
+        }
+        while crate::mir::opt::simplify_phis(&mut f) {}
+        assert_eq!(f.blocks[3].phis.len(), 1);
+        assert_eq!(f.blocks[3].phis[0].dest, ValueId(5));
+        assert!(
+            matches!(&f.blocks[3].insts[0].kind, InstKind::Call(_, args) if args == &[ValueId(5), ValueId(5)])
+        );
+    }
+
+    #[test]
+    fn mixed_borrowed_owned_phi_gets_an_owned_input_on_only_the_borrowed_edge() {
+        let mut f = func(vec![
+            block(
+                0,
+                vec![inst(Some(1), InstKind::BoolConst(true), Type::Bool)],
+                Terminator::Branch(ValueId(1), BlockId(1), BlockId(3)),
+            ),
+            block(
+                1,
+                vec![inst(
+                    Some(2),
+                    InstKind::Clone(ValueId(0), Type::String),
+                    Type::String,
+                )],
+                Terminator::Goto(BlockId(3)),
+            ),
+            block(
+                3,
+                vec![inst(
+                    Some(4),
+                    InstKind::FieldGet(ValueId(3), Symbol::intern("length")),
+                    Type::I64,
+                )],
+                Terminator::Return(None),
+            ),
+        ]);
+        f.params.push(crate::mir::Param {
+            value: ValueId(0),
+            name: Symbol::intern("borrowed"),
+            ty: Type::String,
+            by_ref: false,
+            owned: false,
+        });
+        f.blocks[2].phis.push(Phi {
+            dest: ValueId(3),
+            ty: Type::String,
+            incoming: vec![(BlockId(0), ValueId(0)), (BlockId(1), ValueId(2))],
+        });
+        let mut program = mir::Program {
+            functions: vec![f],
+            types: vec![],
+            externs: vec![],
+            globals: vec![],
+            pkg_id: None,
+            item_pkgs: HashMap::new(),
+        };
+        super::super::mir_drops::run(&mut program, &ConsumingMap::new()).unwrap();
+        let f = &program.functions[0];
+        let edge = f
+            .blocks
+            .iter()
+            .find(|b| b.label.as_str().starts_with("own.phi.edge"))
+            .unwrap();
+        assert!(
+            edge.insts
+                .iter()
+                .any(|i| matches!(i.kind, InstKind::Clone(ValueId(0), Type::String)))
+        );
+        assert!(
+            f.blocks[2]
+                .insts
+                .iter()
+                .any(|i| matches!(i.kind, InstKind::Drop(ValueId(3), Type::String)))
+        );
+        assert!(
+            !f.blocks
+                .iter()
+                .flat_map(|b| &b.insts)
+                .any(|i| matches!(i.kind, InstKind::Drop(ValueId(0), _)))
+        );
+        assert!(verify_function(f).is_empty());
     }
 
     #[test]
@@ -898,7 +1123,7 @@ mod tests {
     }
 
     #[test]
-    fn escape_into_unknown_call_is_a_transfer() {
+    fn unknown_call_borrows_unless_ownership_is_declared() {
         let vty = Type::Vec(Box::new(Type::I64));
         let f = func(vec![block(
             0,
@@ -912,15 +1137,13 @@ mod tests {
             ],
             Terminator::Return(None),
         )]);
-        assert!(
-            verify_function_leaks(
-                &f,
-                &ConsumingMap::new(),
-                &std::collections::HashSet::new(),
-                &std::collections::HashSet::new()
-            )
-            .is_empty()
-        );
+        let resources = HashSet::new();
+        let heap_structs = HashSet::new();
+        let mut consuming = ConsumingMap::new();
+        let errors = verify_function_leaks(&f, &consuming, &resources, &heap_structs);
+        assert!(errors.iter().any(|e| e.contains("it leaks")), "{errors:?}");
+        consuming.insert(Symbol::intern("sink"), vec![true]);
+        assert!(verify_function_leaks(&f, &consuming, &resources, &heap_structs).is_empty());
     }
 
     #[test]
@@ -967,7 +1190,7 @@ mod tests {
     }
 
     #[test]
-    fn conditional_transfer_is_not_flagged_and_not_fixed() {
+    fn conditional_transfer_drops_only_the_nonconsuming_edge() {
         let vty = Type::Vec(Box::new(Type::I64));
         let f = func(vec![
             block(
@@ -990,9 +1213,19 @@ mod tests {
             block(2, vec![], Terminator::Return(None)),
         ]);
         let mut f2 = f;
+        let mut consuming = ConsumingMap::new();
+        consuming.insert(Symbol::intern("eat"), vec![true]);
+        let edges = insert_edge_escape_drops(&mut f2, &consuming, &HashSet::new(), &HashSet::new());
+        assert_eq!(edges, 1);
+        let edge = f2.blocks.iter().find(|b| b.id.0 >= 100).unwrap();
+        assert!(matches!(edge.insts[0].kind, InstKind::Drop(ValueId(1), _)));
+        assert!(matches!(edge.terminator, Terminator::Goto(BlockId(2))));
+        assert_eq!(f2.blocks[1].insts.len(), 1);
+        assert!(f2.blocks[2].insts.is_empty());
+        assert!(verify_function(&f2).is_empty());
         let n = super::super::mir_drops::insert_missing_return_drops(
             &mut f2,
-            &ConsumingMap::new(),
+            &consuming,
             &std::collections::HashSet::new(),
             &std::collections::HashSet::new(),
         );
@@ -1003,7 +1236,7 @@ mod tests {
         assert!(
             verify_function_leaks(
                 &f2,
-                &ConsumingMap::new(),
+                &consuming,
                 &std::collections::HashSet::new(),
                 &std::collections::HashSet::new()
             )

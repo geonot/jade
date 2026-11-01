@@ -81,8 +81,8 @@ impl Typer {
                                 .unwrap_or(Type::I64)
                         });
                 let ownership = self
-                    .param_ownership_with_mod(&ty, p.access_mod)
-                    .unwrap_or_else(|_| Self::ownership_for_type(&ty));
+                    .ownership_with_mod(&ty, p.access_mod)
+                    .map_err(|e| format!("{}: {e}", p.span.loc()))?;
                 self.define_var(
                     &p.name.as_str(),
                     VarInfo {
@@ -182,6 +182,11 @@ impl Typer {
             } else {
                 f.ty.clone().unwrap_or(Type::I64)
             };
+            crate::store_decorators::validate_field_encoding(
+                &sd.name.as_str(),
+                &f.name.as_str(),
+                &ty,
+            )?;
             crate::store_decorators::validate_field_decorators(
                 &sd.name.as_str(),
                 &f.name.as_str(),
@@ -505,7 +510,7 @@ impl Typer {
         self.current_fn_declared_errors = prev_declared;
         self.pop_scope();
 
-        if f.ret.is_none() && f.name != "main" {
+        if f.ret.is_none() && f.name != "main" && !f.is_generator {
             if let Some(tail_ty) = self.hir_tail_type(&body) {
                 let r = self
                     .infer_ctx
@@ -527,6 +532,7 @@ impl Typer {
                 let _ = self.infer_ctx.unify(&ret, &Type::Void);
             }
         } else if f.ret.is_some()
+            && !f.is_generator
             && f.name != "main"
             && let Some(tail_ty) = self.hir_tail_type(&body)
         {

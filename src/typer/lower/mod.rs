@@ -448,6 +448,7 @@ impl Typer {
 
         for d in &prog.decls {
             if let ast::Decl::Type(td) = d {
+                Self::check_native_layout_attrs(td)?;
                 self.check_category_assertion(td)?;
             }
         }
@@ -848,6 +849,7 @@ impl Typer {
                 .filter(|w| seen_warn.insert(w.clone())),
         );
 
+        self.validate_integer_literals();
         let strict_errors = self.infer_ctx.drain_strict_errors();
         let unify_errors = self.infer_ctx.drain_unify_errors();
         let type_errors = std::mem::take(&mut self.type_errors);

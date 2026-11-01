@@ -46,3 +46,46 @@ fn jinn_test_accepts_a_file_and_reports_failures_off_tty() {
     let (ok, out) = run(dir.path(), &["test", "missing.jn"]);
     assert!(!ok && out.contains("file not found: missing.jn"), "{out}");
 }
+
+#[test]
+fn run_cache_tracks_imported_module_edits() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("main.jn"),
+        "use helper\n\n*main\n    log(helper.value())\n",
+    )
+    .unwrap();
+    let go = |n: i64| {
+        std::fs::write(
+            dir.path().join("helper.jn"),
+            format!("*value returns i64\n    {n}\n"),
+        )
+        .unwrap();
+        let out = Command::new(jinn())
+            .args(["run", "main.jn"])
+            .current_dir(dir.path())
+            .env("XDG_CACHE_HOME", cache.path())
+            .env_remove("JINN_NO_RUN_CACHE")
+            .stdin(Stdio::null())
+            .output()
+            .expect("invoke jinn");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    assert_eq!(go(1), "1");
+    assert_eq!(go(22), "22");
+    assert_eq!(go(22), "22");
+    assert_eq!(go(1), "1");
+    let deps: Vec<_> = std::fs::read_dir(cache.path().join("jinn"))
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".deps"))
+        .collect();
+    assert!(!deps.is_empty());
+    for d in deps {
+        let text = std::fs::read_to_string(d.path()).unwrap();
+        assert!(text.starts_with("jinn-sources v1\n"), "{text}");
+        assert!(text.contains("helper.jn"), "{text}");
+    }
+}

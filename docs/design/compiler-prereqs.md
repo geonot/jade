@@ -29,7 +29,10 @@ Current reality, stated plainly so the gap is visible:
 - **The interface file is a v1 header.** `src/interface.rs` holds
   `InterfaceFile { version, module, functions }` over a closed `IType` enum,
   with no ownership, no effect rows, no Perceus obligations, and no hashing.
-  Reading it is off by default (`X-3`).
+  It is write-only: the lossy reader (`to_decls`, behind
+  `JINN_USE_INTERFACE_FILES`) was deleted in [181] because it dropped
+  function bodies and type methods, which broke multi-module builds
+  (`TDX-13`). Reuse returns only as interface v2.
 - **Config blocks do not exist.** The manifest is parsed ad hoc.
 
 ---

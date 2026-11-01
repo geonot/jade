@@ -41,6 +41,18 @@ impl<'ctx> Compiler<'ctx> {
             self.module
                 .add_function("fflush", ft, Some(Linkage::External));
         }
+        for (name, source) in [
+            ("jinn_store_fread", "fread"),
+            ("jinn_store_fwrite", "fwrite"),
+            ("jinn_store_fseek", "fseek"),
+            ("jinn_store_fflush", "fflush"),
+        ] {
+            let signature = self.module.get_function(source).unwrap().get_type();
+            if self.module.get_function(name).is_none() {
+                self.module
+                    .add_function(name, signature, Some(Linkage::External));
+            }
+        }
         if self.module.get_function("remove").is_none() {
             let ft = i32t.fn_type(&[ptr.into()], false);
             self.module
@@ -71,10 +83,10 @@ impl<'ctx> Compiler<'ctx> {
                 .add_function("flock", ft, Some(Linkage::External));
         }
 
-        if self.module.get_function("jinn_wal_open").is_none() {
+        if self.module.get_function("jinn_store_wal_open").is_none() {
             let ft = ptr.fn_type(&[ptr.into()], false);
             self.module
-                .add_function("jinn_wal_open", ft, Some(Linkage::External));
+                .add_function("jinn_store_wal_open", ft, Some(Linkage::External));
         }
         if self.module.get_function("jinn_wal_set_policy").is_none() {
             let i32t = self.ctx.i32_type();
@@ -556,6 +568,13 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     pub(crate) fn declare_store(&mut self, sd: &hir::StoreDef) -> Result<(), String> {
+        for field in &sd.fields {
+            crate::store_decorators::validate_field_encoding(
+                &sd.name.as_str(),
+                &field.name.as_str(),
+                &field.ty,
+            )?;
+        }
         let struct_name = format!("__store_{}", sd.name);
         let rec_name = format!("__store_{}_rec", sd.name);
 

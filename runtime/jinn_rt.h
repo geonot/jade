@@ -16,6 +16,11 @@ static inline size_t jinn_safe_mul(int64_t a, int64_t b) {
     return (size_t)a * (size_t)b;
 }
 
+void *jinn_cleanup_new(void);
+void *jinn_cleanup_cell(void *frame, uint64_t size, void (*drop)(void *));
+void jinn_cleanup_push(void *frame, void (*run)(void *), void *env);
+void jinn_cleanup_run(void *frame);
+
 typedef struct jinn_coro    jinn_coro_t;
 typedef struct jinn_sched   jinn_sched_t;
 typedef struct jinn_chan     jinn_chan_t;
@@ -78,11 +83,12 @@ struct jinn_coro {
     jinn_context_t     ctx;
     void              *stack_base;
     uint32_t           stack_size;
-    jinn_coro_state_t  state;
+    _Atomic(jinn_coro_state_t) state;
     void             (*entry)(void*);
     void              *arg;
     jinn_coro_t       *next;
     void              *wait_chan;
+    _Atomic(int32_t)   wait_lock;
     uint32_t           id;
     uint8_t            daemon;
     void             (*on_exit_cb)(void *);
@@ -91,6 +97,8 @@ struct jinn_coro {
     _Atomic(int32_t)   cancelled;
     jinn_waitq_node_t  wq_node;
     void              *txn_state;
+    jinn_coro_t       *generator_parent;
+    uint32_t           cleanup_depth;
     const void        *san_ret_bottom;
     size_t             san_ret_size;
     void              *san_fiber;
@@ -106,7 +114,8 @@ void         jinn_coro_set_on_exit(jinn_coro_t *c, void (*cb)(void *), void *arg
 void jinn_gen_resume(void *gen_blk);
 void jinn_gen_suspend(void *gen_blk);
 void jinn_gen_destroy(void *gen_blk);
-extern _Thread_local jinn_coro_t *tl_gen_coro;
+jinn_coro_t *jinn_generator_current(void);
+void jinn_generator_set_current(jinn_coro_t *c);
 
 void jinn_context_swap(jinn_context_t *from, jinn_context_t *to);
 
@@ -148,6 +157,8 @@ static inline void jinn_coro_swap_in(jinn_context_t *from, jinn_coro_t *c) {
 }
 
 static inline void jinn_coro_swap_out(jinn_coro_t *c, jinn_context_t *to) {
+    jinn_coro_t *saved_generator = jinn_generator_current();
+    jinn_generator_set_current(NULL);
 #ifdef JINN_SAN_ASAN_FIBERS
     void *san_fake = NULL;
     __sanitizer_start_switch_fiber(&san_fake, c->san_ret_bottom, c->san_ret_size);
@@ -156,12 +167,14 @@ static inline void jinn_coro_swap_out(jinn_coro_t *c, jinn_context_t *to) {
     __tsan_switch_to_fiber(c->san_ret_fiber, 0);
 #endif
     jinn_context_swap(&c->ctx, to);
+    jinn_generator_set_current(saved_generator);
 #ifdef JINN_SAN_ASAN_FIBERS
     __sanitizer_finish_switch_fiber(san_fake, &c->san_ret_bottom, &c->san_ret_size);
 #endif
 }
 
 static inline void jinn_coro_swap_out_final(jinn_coro_t *c, jinn_context_t *to) {
+    jinn_generator_set_current(NULL);
 #ifdef JINN_SAN_ASAN_FIBERS
     __sanitizer_start_switch_fiber(NULL, c->san_ret_bottom, c->san_ret_size);
 #endif
@@ -224,6 +237,7 @@ void jinn_sched_run(void);
 void jinn_sched_shutdown(void);
 void jinn_sched_enqueue(jinn_coro_t *c);
 void jinn_sched_yield(void);
+void jinn_sched_poll(void);
 void jinn_sched_park(void);
 void jinn_sched_unpark(jinn_coro_t *c);
 jinn_coro_t  *jinn_current_coro(void);
@@ -235,6 +249,7 @@ struct jinn_chan {
     uint64_t           capacity;
     size_t             elem_size;
     void              *buffer;
+    void             (*drop_elem)(void *);
     _Atomic(int32_t)   closed;
     jinn_waitq_node_t *send_waitq;
     jinn_waitq_node_t *send_waitq_tail;
@@ -244,6 +259,7 @@ struct jinn_chan {
     _Atomic(int64_t)   refs;
 };
 jinn_chan_t *jinn_chan_create(size_t elem_size, size_t capacity);
+void        jinn_chan_set_drop(jinn_chan_t *ch, void (*drop_elem)(void *));
 void        jinn_chan_retain(jinn_chan_t *ch);
 void        jinn_chan_release(jinn_chan_t *ch);
 int         jinn_chan_send(jinn_chan_t *ch, const void *data);
@@ -252,6 +268,8 @@ int         jinn_chan_try_recv(jinn_chan_t *ch, void *data_out);
 int64_t     jinn_chan_pending(jinn_chan_t *ch);
 void        jinn_chan_close(jinn_chan_t *ch);
 void        jinn_chan_wake_coro(jinn_chan_t *ch, jinn_coro_t *c);
+void        jinn_chan_wake_cancelled(jinn_coro_t *c);
+void        jinn_coro_set_wait_chan(jinn_coro_t *c, jinn_chan_t *ch);
 void        jinn_chan_destroy(jinn_chan_t *ch);
 typedef struct jinn_select_case {
     jinn_chan_t   *chan;
@@ -327,6 +345,20 @@ void jinn_trap(const char *msg) __attribute__((noreturn, cold));
 void *jinn_xmalloc(size_t size);
 void jinn_store_truncation_warn(int64_t original_len, int64_t max_len);
 void jinn_store_reserve(FILE *fp, int64_t count, int64_t rec_size);
+void jinn_persistence_fail(const char *phase) __attribute__((noreturn, cold));
+void jinn_persistence_sync(FILE *fp);
+size_t jinn_store_fread(void *data, size_t size, size_t count, FILE *fp);
+size_t jinn_store_fwrite(const void *data, size_t size, size_t count, FILE *fp);
+int jinn_store_fseek(FILE *fp, long offset, int whence);
+int jinn_store_fflush(FILE *fp);
+void jinn_persistence_prepare(void);
+void jinn_persistence_check_path(const char *path);
+char *jinn_persistence_file_path(FILE *fp);
+void jinn_txn_journal_snapshot(const char *path, const unsigned char *data, long len);
+void jinn_txn_journal_finish(void);
+void jinn_txn_track_path(const char *path);
+void jinn_store_writer_enter(void);
+void jinn_store_writer_leave(void);
 uint64_t jinn_fnv1a(const void *data, int64_t len);
 long jinn_popen_read(const char *cmd, char *buf, long buf_size, int *exit_code);
 char *jinn_popen_read_all(const char *cmd, long *out_len, int *exit_code);
@@ -496,6 +528,7 @@ int jinn_txn_is_tracked(void *key);
 void jinn_txn_swap_fp(FILE *oldfp, FILE *newfp);
 void jinn_wal_commit_group(FILE *wal);
 FILE *jinn_wal_open(const char *path);
+FILE *jinn_store_wal_open(const char *path);
 void  jinn_wal_set_policy(FILE *wal, int policy);
 int  jinn_wal_write(FILE *wal, uint8_t op, const void *payload, uint32_t payload_len);
 void jinn_wal_write_must(FILE *wal, uint8_t op, const void *payload, uint32_t payload_len);

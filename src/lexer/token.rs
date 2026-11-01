@@ -2,7 +2,7 @@ use crate::intern::Symbol;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    Int(i64),
+    Int(u64),
     Float(f64),
     Str(String),
     True,

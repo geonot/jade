@@ -139,7 +139,7 @@ impl<'ctx> Compiler<'ctx> {
         let lty = self.llvm_ty(elem_ty);
         let elem_gep = unsafe { b!(self.bld.build_gep(lty, data, &[idx], "vw.egep")) };
         let raw = b!(self.bld.build_load(lty, elem_gep, "vw.ev"));
-        if Self::is_value_clonable(elem_ty) && !elem_ty.is_trivially_droppable() {
+        if self.is_value_clonable(elem_ty) && !elem_ty.is_trivially_droppable() {
             return self.clone_value(raw, elem_ty);
         }
         Ok(raw)

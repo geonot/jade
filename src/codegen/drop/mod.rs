@@ -29,9 +29,6 @@ impl<'ctx> Compiler<'ctx> {
             Type::Map(kt, vt) => {
                 self.drop_map_deep(val, kt, vt)?;
             }
-            Type::Generator(_) => {
-                self.drop_ptr_allocated(val)?;
-            }
             Type::Tuple(tys) => {
                 self.drop_tuple(val, tys)?;
             }
@@ -57,7 +54,7 @@ impl<'ctx> Compiler<'ctx> {
                 self.drop_value(val, inner)?;
             }
 
-            Type::Coroutine(_) => {
+            Type::Coroutine(_) | Type::Generator(_) => {
                 self.drop_generator(val)?;
             }
 

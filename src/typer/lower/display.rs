@@ -222,7 +222,7 @@ impl Typer {
                     Self::collect_display_usage_expr(a, needs);
                 }
             }
-            hir::ExprKind::Lambda(_, body) | hir::ExprKind::Block(body) => {
+            hir::ExprKind::Lambda(_, body, _) | hir::ExprKind::Block(body) => {
                 Self::collect_display_usage(body, needs);
             }
             hir::ExprKind::IfExpr(i) => {

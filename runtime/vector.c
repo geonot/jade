@@ -3,6 +3,8 @@
 #include <string.h>
 #include <math.h>
 #include <unistd.h>
+#include <errno.h>
+#include <sys/stat.h>
 #include "jinn_rt.h"
 
 #define VEC_MAGIC "JINNVEC\0"
@@ -13,83 +15,59 @@ struct JinnVec {
 };
 
 JinnVec *jinn_vec_open(const char *path, int64_t dims) {
+    jinn_persistence_check_path(path);
     JinnVec *v = calloc(1, sizeof(JinnVec));
-    if (!v) return NULL;
+    if (!v) jinn_persistence_fail("vector allocation");
+    if (dims <= 0 || dims > INT64_MAX / 8) jinn_persistence_fail("vector dimensions");
     v->dims = dims;
     v->fp = fopen(path, "r+b");
     if (v->fp) {
         char magic[8];
-        fread(magic, 1, 8, v->fp);
-        fread(&v->count, 8, 1, v->fp);
+        jinn_store_fread(magic, 1, 8, v->fp);
+        jinn_store_fread(&v->count, 8, 1, v->fp);
         int64_t stored_dims;
-        fread(&stored_dims, 8, 1, v->fp);
-        if (stored_dims != dims) {
-            v->count = 0;
-        }
+        jinn_store_fread(&stored_dims, 8, 1, v->fp);
+        struct stat st;
+        if (memcmp(magic, VEC_MAGIC, 8) || stored_dims != dims || v->count < 0 ||
+            v->count > (INT64_MAX - 24) / (dims * 8) ||
+            fstat(fileno(v->fp), &st) != 0 || st.st_size != 24 + v->count * dims * 8)
+            jinn_persistence_fail("vector header validation");
     } else {
-        v->fp = fopen(path, "w+b");
-        if (!v->fp) { free(v); return NULL; }
+        if (errno != ENOENT) jinn_persistence_fail("vector open");
+        v->fp = fopen(path, "w+bx");
+        if (!v->fp) jinn_persistence_fail("vector creation");
         v->count = 0;
-        fwrite(VEC_MAGIC, 1, 8, v->fp);
-        fwrite(&v->count, 8, 1, v->fp);
-        fwrite(&v->dims, 8, 1, v->fp);
-        fflush(v->fp);
+        jinn_store_fwrite(VEC_MAGIC, 1, 8, v->fp);
+        jinn_store_fwrite(&v->count, 8, 1, v->fp);
+        jinn_store_fwrite(&v->dims, 8, 1, v->fp);
+        jinn_store_finish_create(v->fp, path);
     }
     return v;
 }
 void jinn_vec_close(JinnVec *v) {
     if (!v) return;
-    if (v->fp) fclose(v->fp);
+    if (v->fp && fclose(v->fp) != 0) jinn_persistence_fail("vector close");
     free(v);
 }
 
-typedef struct {
-    JinnVec *v;
-    int64_t  count;
-    long     len;
-} VecTxnSnap;
 static void vec_txn_rollback(void *arg) {
-    VecTxnSnap *s = (VecTxnSnap *)arg;
-    JinnVec *v = s->v;
-    if (!v->fp) return;
-    fflush(v->fp);
-    int fd = fileno(v->fp);
-    if (fd >= 0 && ftruncate(fd, (off_t)s->len) != 0) {
-        fprintf(stderr, "jinn: vector: rollback truncate failed\n");
-    }
-    v->count = s->count;
-    fseek(v->fp, 8, SEEK_SET);
-    fwrite(&v->count, 8, 1, v->fp);
-    fflush(v->fp);
-    fseek(v->fp, 0, SEEK_END);
+    JinnVec *v = arg;
+    if (fseek(v->fp, 8, SEEK_SET) != 0 || fread(&v->count, 8, 1, v->fp) != 1)
+        jinn_persistence_fail("vector rollback header");
 }
-static void vec_txn_release(void *arg) { free(arg); }
 static void vec_txn_guard(JinnVec *v) {
-    if (!jinn_txn_active() || jinn_txn_is_tracked(v)) return;
-    VecTxnSnap *s = (VecTxnSnap *)malloc(sizeof *s);
-    if (!s) {
-        fprintf(stderr, "jinn: vector: out of memory snapshotting for a "
-                        "transaction — aborting (cannot guarantee rollback)\n");
-        abort();
-    }
-    fflush(v->fp);
-    long cur = ftell(v->fp);
-    fseek(v->fp, 0, SEEK_END);
-    s->v = v;
-    s->count = v->count;
-    s->len = ftell(v->fp);
-    fseek(v->fp, cur, SEEK_SET);
-    jinn_txn_track_mem(v, vec_txn_rollback, vec_txn_release, s);
+    if (jinn_txn_active()) jinn_txn_track_aux(v->fp, vec_txn_rollback, v);
 }
 void jinn_vec_insert(JinnVec *v, const double *vec) {
-    if (!v || !v->fp) return;
+    if (!v || !v->fp) jinn_persistence_fail("vector insert handle");
     vec_txn_guard(v);
-    fseek(v->fp, 0, SEEK_END);
-    fwrite(vec, sizeof(double), v->dims, v->fp);
+    if (v->count >= (INT64_MAX - 24) / (v->dims * 8)) jinn_persistence_fail("vector capacity");
+    jinn_store_fseek(v->fp, 0, SEEK_END);
+    jinn_store_fwrite(vec, sizeof(double), v->dims, v->fp);
     v->count++;
-    fseek(v->fp, 8, SEEK_SET);
-    fwrite(&v->count, 8, 1, v->fp);
-    fflush(v->fp);
+    jinn_store_fseek(v->fp, 8, SEEK_SET);
+    jinn_store_fwrite(&v->count, 8, 1, v->fp);
+    jinn_store_fflush(v->fp);
 }
 int64_t jinn_vec_count(JinnVec *v) {
     return v ? v->count : 0;
@@ -116,9 +94,9 @@ int64_t jinn_vec_nearest(JinnVec *v, const double *query, int64_t k,
         free(buf); free(dists); free(indices);
         return 0;
     }
-    fseek(v->fp, 24, SEEK_SET);
+    jinn_store_fseek(v->fp, 24, SEEK_SET);
     for (int64_t i = 0; i < v->count; i++) {
-        fread(buf, sizeof(double), v->dims, v->fp);
+        jinn_store_fread(buf, sizeof(double), v->dims, v->fp);
         dists[i] = vec_dist_sq(buf, query, v->dims);
         indices[i] = i;
     }
@@ -153,9 +131,9 @@ int64_t jinn_vec_nearest_scored(JinnVec *v, const double *query, int64_t k,
         return 0;
     }
 
-    fseek(v->fp, 24, SEEK_SET);
+    jinn_store_fseek(v->fp, 24, SEEK_SET);
     for (int64_t i = 0; i < v->count; i++) {
-        fread(buf, sizeof(double), v->dims, v->fp);
+        jinn_store_fread(buf, sizeof(double), v->dims, v->fp);
         dists[i] = vec_dist_sq(buf, query, v->dims);
         indices[i] = i;
     }

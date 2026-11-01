@@ -69,6 +69,7 @@ impl Lowerer {
 
                 self.set_terminator(Terminator::Goto(cond_bb));
                 self.switch_to(cond_bb);
+                self.lower_cancel_checkpoint(span, true);
                 let idx = self.emit(InstKind::Load(idx_name), Type::I64, span);
                 let cmp = self.emit(
                     InstKind::Cmp(CmpOp::Lt, idx, end_val, Type::I64),

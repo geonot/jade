@@ -97,9 +97,10 @@ int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
                            const char *wal_path, int64_t rec_size,
                            int64_t sid_offset, int64_t deleted_offset) {
     if (!store_fpp || !*store_fpp || !store_path || !wal_path) return -1;
-    if (sid_offset < 0 || rec_size <= 0) return 0;
+    if (rec_size < 8 || sid_offset < 0 || sid_offset > rec_size - 8 ||
+        deleted_offset < -1 || deleted_offset > rec_size - 8) return -1;
     if (access(wal_path, F_OK) != 0) return 0;
-    FILE *wal = jinn_wal_open(wal_path);
+    FILE *wal = jinn_store_wal_open(wal_path);
     if (!wal) return -1;
     if (jinn_wal_size(wal) == 0) {
         jinn_wal_close(wal);
@@ -131,7 +132,7 @@ int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
             memcpy(&u_rec_size, undo + 16, 8);
         }
         if (u_count >= 0 && (u_rec_size == rec_size || u_count == 0) &&
-            REC_HEADER + u_count * rec_size <= undo_len) {
+            u_count <= (undo_len - REC_HEADER) / rec_size) {
             fprintf(stderr,
                     "jinn: recover: %s: an interrupted transaction left "
                     "uncommitted writes — restoring the pre-transaction "
@@ -142,14 +143,7 @@ int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
             memcpy(&version, undo + 32, 8);
             force_rewrite = 1;
         } else {
-            fprintf(stderr,
-                    "jinn: recover: %s: an interrupted transaction was found "
-                    "but its undo image is unusable — the data file may keep "
-                    "that transaction's partial writes\n",
-                    store_path);
-            free(undo);
-            undo = NULL;
-            have_undo = 0;
+            jinn_persistence_fail("invalid interrupted-transaction undo image");
         }
     }
     if (fseek(fp, 0, SEEK_END) != 0) {
@@ -208,7 +202,7 @@ int64_t jinn_store_recover(FILE **store_fpp, const char *store_path,
     free(undo);
     undo = NULL;
     int64_t replayed = jinn_wal_replay(wal, recover_cb, &r);
-    int complete = jinn_wal_replay_was_complete() && r.oom == 0;
+    int complete = replayed >= 0 && jinn_wal_replay_was_complete() && r.oom == 0 && r.skipped == 0;
     if (r.skipped > 0) {
         fprintf(stderr,
                 "jinn: recover: %s: %lld WAL entr%s did not match the record "

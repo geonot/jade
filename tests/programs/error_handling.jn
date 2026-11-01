@@ -41,7 +41,7 @@ err IoError
         err Timeout(0)
     if fd < 0
         err FileNotFound('bad fd')
-    'data'
+    fd
 
 *main
     match safe_divide(10, 3)

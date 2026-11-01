@@ -482,6 +482,7 @@ impl Typer {
             | hir::ExprKind::StoreCount(_)
             | hir::ExprKind::GlobalLoad(_)
             | hir::ExprKind::StoreAll(_) => {}
+            hir::ExprKind::SizeOf(t) => *t = self.resolve_canon(t),
             hir::ExprKind::Var(_, _) | hir::ExprKind::VariantRef(_, _, _) => {}
             hir::ExprKind::FnRef(_, _) => {
                 if let hir::ExprKind::FnRef(ref mut id, ref mut name) = expr.kind {
@@ -626,11 +627,30 @@ impl Typer {
                 }
             }
             hir::ExprKind::Block(block) => self.resolve_block(block),
-            hir::ExprKind::Lambda(params, body) => {
-                for p in params {
+            hir::ExprKind::Lambda(params, body, _) => {
+                for p in params.iter_mut() {
                     p.ty = self.resolve_canon(&p.ty);
+                    match self.param_ownership_with_mod(&p.ty, p.access_mod) {
+                        Ok(ownership) => p.ownership = ownership,
+                        Err(error) => self.type_errors.push(format!("{}: {error}", p.span.loc())),
+                    }
                 }
                 self.resolve_block(body);
+                let mut borrowed: std::collections::HashSet<_> = params
+                    .iter()
+                    .filter(|p| p.ownership.is_borrow())
+                    .map(|p| p.def_id)
+                    .collect();
+                if let Err(error) = Self::repair_borrow_alias_binds(body, &mut borrowed) {
+                    self.type_errors.push(error);
+                }
+                borrowed.extend(
+                    params
+                        .iter()
+                        .filter(|p| matches!(p.ownership, hir::Ownership::Raw))
+                        .map(|p| p.def_id),
+                );
+                Self::strip_drops_for(body, &borrowed);
             }
             hir::ExprKind::Ref(e) | hir::ExprKind::Deref(e) => self.resolve_expr(e),
             hir::ExprKind::ListComp(body, _, _, iter, cond, map) => {
@@ -659,7 +679,7 @@ impl Typer {
                     self.resolve_expr(a);
                 }
             }
-            hir::ExprKind::CoroutineCreate(_, stmts) => {
+            hir::ExprKind::CoroutineCreate(_, stmts, _) => {
                 self.resolve_block(stmts);
             }
             hir::ExprKind::CoroutineNext(e) | hir::ExprKind::Yield(e) => {
@@ -748,7 +768,10 @@ impl Typer {
                     self.resolve_expr(v);
                 }
             }
-            hir::ExprKind::GeneratorCreate(_, _, stmts, _) => {
+            hir::ExprKind::GeneratorCreate(_, _, stmts, captures) => {
+                for (_, ty) in captures {
+                    *ty = self.infer_ctx.resolve(ty);
+                }
                 for s in stmts {
                     self.resolve_stmt(s);
                 }

@@ -9,6 +9,7 @@ mod decl;
 mod drop;
 mod fmt;
 mod lambda;
+mod layout;
 mod map;
 pub mod mir_codegen;
 mod store_filter;
@@ -83,6 +84,7 @@ pub(crate) fn fn_or_die<'ctx>(
 pub struct Compiler<'ctx> {
     pub(crate) ctx: &'ctx Context,
     pub(crate) module: Module<'ctx>,
+    pub(crate) target_data: Option<inkwell::targets::TargetData>,
     pub(crate) bld: Builder<'ctx>,
     pub(crate) cur_fn: Option<FunctionValue<'ctx>>,
     pub(crate) vars: IndexMap<Symbol, (PointerValue<'ctx>, Type)>,

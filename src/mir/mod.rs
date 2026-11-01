@@ -136,6 +136,7 @@ pub struct Param {
     pub name: Symbol,
     pub ty: Type,
     pub by_ref: bool,
+    pub owned: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +168,7 @@ pub struct Instruction {
 #[derive(Debug, Clone)]
 pub enum InstKind {
     IntConst(i64),
+    SizeOf(Type),
     FloatConst(f64),
     BoolConst(bool),
     StringConst(String),

@@ -119,7 +119,7 @@ impl<'ctx> Compiler<'ctx> {
                 .build_conditional_branch(not_found, done_bb, found_bb));
 
             self.bld.position_at_end(found_bb);
-            let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
+            let fseek_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fseek");
             b!(self.bld.build_call(
                 fseek_fn,
                 &[
@@ -129,7 +129,7 @@ impl<'ctx> Compiler<'ctx> {
                 ],
                 ""
             ));
-            let fread_fn = crate::codegen::fn_or_die(&self.module, "fread");
+            let fread_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fread");
             b!(self.bld.build_call(
                 fread_fn,
                 &[

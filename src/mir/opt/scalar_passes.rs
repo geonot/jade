@@ -7,8 +7,49 @@ use std::collections::{HashMap, HashSet};
 pub fn simplify_phis(func: &mut Function) -> bool {
     let mut replacements: HashMap<ValueId, ValueId> = HashMap::new();
 
+    let mut live = HashSet::new();
     for bb in &func.blocks {
-        for phi in &bb.phis {
+        for inst in &bb.insts {
+            super::uses::collect_inst_uses(&inst.kind, &mut live);
+        }
+        match &bb.terminator {
+            Terminator::Branch(v, _, _)
+            | Terminator::Switch(v, _, _)
+            | Terminator::Return(Some(v)) => {
+                live.insert(*v);
+            }
+            _ => {}
+        }
+    }
+    loop {
+        let before = live.len();
+        for bb in &func.blocks {
+            for phi in &bb.phis {
+                if live.contains(&phi.dest) {
+                    live.extend(phi.incoming.iter().map(|(_, v)| *v));
+                }
+            }
+        }
+        if before == live.len() {
+            break;
+        }
+    }
+    let mut removed = false;
+    for bb in &mut func.blocks {
+        let before = bb.phis.len();
+        bb.phis.retain(|p| live.contains(&p.dest));
+        removed |= before != bb.phis.len();
+    }
+
+    for bb in &func.blocks {
+        for (index, phi) in bb.phis.iter().enumerate() {
+            if let Some(previous) = bb.phis[..index]
+                .iter()
+                .find(|other| other.ty == phi.ty && other.incoming == phi.incoming)
+            {
+                replacements.insert(phi.dest, previous.dest);
+                continue;
+            }
             let unique: HashSet<ValueId> = phi
                 .incoming
                 .iter()
@@ -24,7 +65,7 @@ pub fn simplify_phis(func: &mut Function) -> bool {
     }
 
     if replacements.is_empty() {
-        return false;
+        return removed;
     }
 
     let resolved: HashMap<ValueId, ValueId> = replacements

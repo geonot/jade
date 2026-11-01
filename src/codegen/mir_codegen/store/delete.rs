@@ -302,7 +302,7 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(done_bb);
 
-        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
+        let fseek_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fseek");
 
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::AfterDelete(fname) = dec
@@ -322,7 +322,7 @@ impl<'ctx> Compiler<'ctx> {
             ],
             ""
         ));
-        let fwrite_fn = crate::codegen::fn_or_die(&self.module, "fwrite");
+        let fwrite_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fwrite");
         b!(self.bld.build_call(
             fwrite_fn,
             &[
@@ -336,7 +336,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let free_fn = self.ensure_free();
         b!(self.bld.build_call(free_fn, &[buf.into()], ""));
-        let fflush_fn = crate::codegen::fn_or_die(&self.module, "fflush");
+        let fflush_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fflush");
         b!(self.bld.build_call(fflush_fn, &[fp.into()], ""));
         self.store_unlock(store_name, fp)?;
 
@@ -466,7 +466,7 @@ impl<'ctx> Compiler<'ctx> {
             )))
             .into_pointer_value();
 
-        let fwrite_fn = crate::codegen::fn_or_die(&self.module, "fwrite");
+        let fwrite_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fwrite");
         let magic = b!(self.bld.build_global_string_ptr("JADESTR\0", "del.magic"));
         b!(self.bld.build_call(
             fwrite_fn,
@@ -671,7 +671,7 @@ impl<'ctx> Compiler<'ctx> {
 
         self.bld.position_at_end(done_bb);
 
-        let fseek_fn = crate::codegen::fn_or_die(&self.module, "fseek");
+        let fseek_fn = crate::codegen::fn_or_die(&self.module, "jinn_store_fseek");
         b!(self.bld.build_call(
             fseek_fn,
             &[

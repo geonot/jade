@@ -372,6 +372,7 @@ fn defer_runs_on_cancellation() {
             defer log('cleaned')
             for i in 0 to 1000000
                 send sig, i
+        receive sig
         stop s
     log('done')
 ",

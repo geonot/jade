@@ -140,7 +140,6 @@ plumbing. To add a capability: implement the handler, wire it in
 | `JINN_RT_DEBUG=1` | Build the C runtime `-O0 -g`. |
 | `JINN_MIR_VERIFY=0` | Opt out of MIR verification (on by default on every compile path, including in release; failure is a compiler bug). |
 | `JINN_MIR_VERIFY_SOFT` | Make a post-lower MIR verify failure non-fatal (testing aid). |
-| `JINN_USE_INTERFACE_FILES=1` | Turn `.jni` interface reuse on (off by default — `X-3`). |
 | `JINN_ALLOW_SHELL=1` | Allow `process` shell execution at runtime; without it shell exec returns `EPERM`. |
 | `JINN_TXN_SNAPSHOT_MAX` | Cap in bytes on the per-transaction store snapshot (default 256 MB; exceeding it aborts with a message naming this knob). |
 | `JINN_PROPTEST_CASES=N` | Property-test case count. |

@@ -86,9 +86,19 @@ jinn_chan_t *jinn_chan_create(size_t elem_size, size_t capacity) {
     atomic_store(&ch->refs, 1);
     return ch;
 }
+void jinn_chan_set_drop(jinn_chan_t *ch, void (*drop_elem)(void *)) {
+    if (ch) ch->drop_elem = drop_elem;
+}
 void jinn_chan_destroy(jinn_chan_t *ch) {
     if (!ch) return;
     jinn_chan_close(ch);
+    if (ch->drop_elem) {
+        uint64_t head = atomic_load_explicit(&ch->head, memory_order_relaxed);
+        uint64_t tail = atomic_load_explicit(&ch->tail, memory_order_relaxed);
+        for (; head != tail; head++) {
+            ch->drop_elem((char *)ch->buffer + (head & (ch->capacity - 1)) * ch->elem_size);
+        }
+    }
     free(ch->buffer);
     free(ch);
 }
@@ -102,6 +112,30 @@ void jinn_chan_release(jinn_chan_t *ch) {
     if (prev == 1) {
         jinn_chan_destroy(ch);
     }
+}
+static void coro_wait_lock(jinn_coro_t *c) {
+    while (atomic_exchange_explicit(&c->wait_lock, 1, memory_order_acquire) != 0)
+        sched_yield();
+}
+static void coro_wait_unlock(jinn_coro_t *c) {
+    atomic_store_explicit(&c->wait_lock, 0, memory_order_release);
+}
+void jinn_coro_set_wait_chan(jinn_coro_t *c, jinn_chan_t *ch) {
+    jinn_chan_retain(ch);
+    coro_wait_lock(c);
+    jinn_chan_t *old = c->wait_chan;
+    c->wait_chan = ch;
+    coro_wait_unlock(c);
+    jinn_chan_release(old);
+}
+void jinn_chan_wake_cancelled(jinn_coro_t *c) {
+    if (!c) return;
+    coro_wait_lock(c);
+    jinn_chan_t *ch = c->wait_chan;
+    jinn_chan_retain(ch);
+    coro_wait_unlock(c);
+    if (ch) jinn_chan_wake_coro(ch, c);
+    jinn_chan_release(ch);
 }
 void jinn_chan_close(jinn_chan_t *ch) {
     if (!ch) return;
@@ -122,7 +156,7 @@ void jinn_chan_close(jinn_chan_t *ch) {
         jinn_coro_t *c = wake_head;
         wake_head = c->next;
         c->next = NULL;
-        c->wait_chan = NULL;
+        jinn_coro_set_wait_chan(c, NULL);
         c->state = JINN_CORO_READY;
         jinn_sched_enqueue(c);
     }
@@ -151,7 +185,7 @@ void jinn_chan_wake_coro(jinn_chan_t *ch, jinn_coro_t *c) {
     jinn_coro_t *wake = node ? waitq_node_claim(node) : NULL;
     chan_unlock(ch);
     if (wake) {
-        wake->wait_chan = NULL;
+        jinn_coro_set_wait_chan(wake, NULL);
         wake->state = JINN_CORO_READY;
         jinn_sched_enqueue(wake);
     }
@@ -159,11 +193,7 @@ void jinn_chan_wake_coro(jinn_chan_t *ch, jinn_coro_t *c) {
 int jinn_chan_send(jinn_chan_t *ch, const void *data) {
     if (!ch) return 0;
     for (;;) {
-        jinn_worker_t *wc = jinn_worker_self();
-        if (wc && wc->current
-            && atomic_load_explicit(&wc->current->cancelled, memory_order_acquire)) {
-            return 0;
-        }
+        if (jinn_scope_check_cancelled()) return 0;
         chan_lock(ch);
         if (atomic_load(&ch->closed)) {
             chan_unlock(ch);
@@ -178,7 +208,7 @@ int jinn_chan_send(jinn_chan_t *ch, const void *data) {
 
             jinn_coro_t *waiter = waitq_pop_wakeable(&ch->recv_waitq, &ch->recv_waitq_tail);
             if (waiter) {
-                waiter->wait_chan = NULL;
+                jinn_coro_set_wait_chan(waiter, NULL);
                 waiter->state = JINN_CORO_READY;
                 chan_unlock(ch);
                 jinn_sched_enqueue(waiter);
@@ -188,6 +218,7 @@ int jinn_chan_send(jinn_chan_t *ch, const void *data) {
             return 1;
         }
 
+        if (jinn_txn_active()) jinn_persistence_fail("blocking channel send inside a transaction is unsupported");
         jinn_worker_t *w = jinn_worker_self();
         if (!w || !w->current) {
             chan_unlock(ch);
@@ -203,12 +234,12 @@ int jinn_chan_send(jinn_chan_t *ch, const void *data) {
             continue;
         }
         jinn_coro_t *self = w->current;
-        if (atomic_load_explicit(&self->cancelled, memory_order_acquire)) {
+        if (jinn_scope_check_cancelled()) {
             chan_unlock(ch);
             return 0;
         }
         self->state = JINN_CORO_SUSPENDED;
-        self->wait_chan = ch;
+        jinn_coro_set_wait_chan(self, ch);
         self->wq_node.coro = self;
         self->wq_node.select_claim = NULL;
 
@@ -228,9 +259,7 @@ int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
     if (!ch) return 0;
     for (;;) {
 
-        jinn_worker_t *wc = jinn_worker_self();
-        if (wc && wc->current
-            && atomic_load_explicit(&wc->current->cancelled, memory_order_acquire)) {
+        if (jinn_scope_check_cancelled()) {
             memset(data_out, 0, ch->elem_size);
             return 0;
         }
@@ -245,7 +274,7 @@ int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
 
             jinn_coro_t *waiter = waitq_pop_wakeable(&ch->send_waitq, &ch->send_waitq_tail);
             if (waiter) {
-                waiter->wait_chan = NULL;
+                jinn_coro_set_wait_chan(waiter, NULL);
                 waiter->state = JINN_CORO_READY;
                 chan_unlock(ch);
                 jinn_sched_enqueue(waiter);
@@ -260,6 +289,7 @@ int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
             return 0;
         }
 
+        if (jinn_txn_active()) jinn_persistence_fail("blocking channel receive inside a transaction is unsupported");
         jinn_worker_t *w = jinn_worker_self();
         if (!w || !w->current) {
             chan_unlock(ch);
@@ -273,13 +303,13 @@ int jinn_chan_recv(jinn_chan_t *ch, void *data_out) {
             continue;
         }
         jinn_coro_t *self = w->current;
-        if (atomic_load_explicit(&self->cancelled, memory_order_acquire)) {
+        if (jinn_scope_check_cancelled()) {
             memset(data_out, 0, ch->elem_size);
             chan_unlock(ch);
             return 0;
         }
         self->state = JINN_CORO_SUSPENDED;
-        self->wait_chan = ch;
+        jinn_coro_set_wait_chan(self, ch);
         self->wq_node.coro = self;
         self->wq_node.select_claim = NULL;
         waitq_push(&ch->recv_waitq, &ch->recv_waitq_tail, &self->wq_node);
@@ -300,7 +330,7 @@ int jinn_chan_try_recv(jinn_chan_t *ch, void *data_out) {
         atomic_store_explicit(&ch->head, head + 1, memory_order_release);
         jinn_coro_t *waiter = waitq_pop_wakeable(&ch->send_waitq, &ch->send_waitq_tail);
         if (waiter) {
-            waiter->wait_chan = NULL;
+            jinn_coro_set_wait_chan(waiter, NULL);
             waiter->state = JINN_CORO_READY;
             chan_unlock(ch);
             jinn_sched_enqueue(waiter);

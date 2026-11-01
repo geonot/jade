@@ -10,6 +10,12 @@ pub fn run(
     prog: &mut mir::Program,
     consuming: &verify::ConsumingMap,
 ) -> Result<DropHints, Vec<String>> {
+    let mut consuming = consuming.clone();
+    consuming.extend(
+        prog.functions
+            .iter()
+            .map(|f| (f.name, f.params.iter().map(|p| p.owned).collect())),
+    );
     let mut hints = DropHints::default();
     let mut next_slot: u32 = 0;
     let checked = verify::enabled();
@@ -23,6 +29,7 @@ pub fn run(
         .filter(|n| fn_names.contains(&crate::intern::Symbol::intern(&format!("{n}_drop"))))
         .collect();
     let heap_structs = compute_heap_structs(&prog.types);
+    let move_only = compute_move_only(&prog.types, &resources);
     for func in &mut prog.functions {
         run_on_function(
             func,
@@ -30,15 +37,45 @@ pub fn run(
             &mut next_slot,
             checked,
             &mut errors,
-            consuming,
+            &consuming,
             &resources,
             &heap_structs,
+            &move_only,
         );
     }
     if errors.is_empty() {
         Ok(hints)
     } else {
         Err(errors)
+    }
+}
+
+fn compute_move_only(
+    types: &[mir::TypeDef],
+    resources: &HashSet<crate::intern::Symbol>,
+) -> HashSet<crate::intern::Symbol> {
+    let mut move_only = resources.clone();
+    loop {
+        let before = move_only.len();
+        for td in types {
+            if td.fields.iter().any(|(_, t)| is_move_only(t, &move_only)) {
+                move_only.insert(td.name);
+            }
+        }
+        if move_only.len() == before {
+            return move_only;
+        }
+    }
+}
+
+fn is_move_only(ty: &Type, move_only: &HashSet<crate::intern::Symbol>) -> bool {
+    match ty {
+        Type::Struct(n, _) => move_only.contains(n),
+        Type::Tuple(ts) => ts.iter().any(|t| is_move_only(t, move_only)),
+        Type::Array(t, _) | Type::Alias(_, t) | Type::Newtype(_, t) | Type::Frozen(t) => {
+            is_move_only(t, move_only)
+        }
+        _ => false,
     }
 }
 
@@ -122,7 +159,11 @@ pub(super) fn insert_missing_return_drops(
     inserted
 }
 
-fn suppress_moved_enum_payload_drops(func: &mut mir::Function) {
+fn own_escaping_enum_payloads(
+    func: &mut mir::Function,
+    consuming: &verify::ConsumingMap,
+    move_only: &HashSet<crate::intern::Symbol>,
+) {
     use std::collections::HashSet;
 
     let mut escapes: HashSet<ValueId> = HashSet::new();
@@ -136,7 +177,11 @@ fn suppress_moved_enum_payload_drops(func: &mut mir::Function) {
                 | InstKind::ChanSend(_, v) => {
                     escapes.insert(*v);
                 }
-                _ => {}
+                InstKind::Drop(v, _) => {
+                    escapes.insert(*v);
+                }
+                InstKind::DropMany(items) => escapes.extend(items.iter().map(|(v, _)| *v)),
+                kind => escapes.extend(verify::strict_transfers(kind, consuming)),
             }
         }
         if let Terminator::Return(Some(v)) = &b.terminator {
@@ -159,24 +204,96 @@ fn suppress_moved_enum_payload_drops(func: &mut mir::Function) {
         }
     }
 
-    let mut moved_enums: HashSet<ValueId> = HashSet::new();
-    for b in &func.blocks {
-        for inst in &b.insts {
-            if let (Some(dest), InstKind::FieldGet(obj, field)) = (inst.dest, &inst.kind)
+    for bi in 0..func.blocks.len() {
+        let original = std::mem::take(&mut func.blocks[bi].insts);
+        for mut inst in original {
+            if let (Some(dest), InstKind::FieldGet(owner, field)) = (inst.dest, &inst.kind)
                 && field.as_str().starts_with("__v")
                 && !inst.ty.is_trivially_droppable()
                 && escapes.contains(&dest)
             {
-                moved_enums.insert(*obj);
+                let owner = *owner;
+                let borrowed = func.new_value();
+                inst.dest = Some(borrowed);
+                let kind = if is_move_only(&inst.ty, move_only) {
+                    InstKind::Call(verify::PAYLOAD_MOVE.into(), vec![owner, borrowed])
+                } else {
+                    InstKind::Clone(borrowed, inst.ty.clone())
+                };
+                let clone = Instruction {
+                    dest: Some(dest),
+                    kind,
+                    ty: inst.ty.clone(),
+                    span: inst.span,
+                    def_id: inst.def_id.take(),
+                };
+                func.blocks[bi].insts.push(inst);
+                func.blocks[bi].insts.push(clone);
+            } else {
+                func.blocks[bi].insts.push(inst);
             }
         }
     }
-    if moved_enums.is_empty() {
-        return;
+}
+
+fn own_mixed_phi_inputs(
+    func: &mut mir::Function,
+    consuming: &verify::ConsumingMap,
+    resources: &HashSet<crate::intern::Symbol>,
+    heap_structs: &HashSet<crate::intern::Symbol>,
+    move_only: &HashSet<crate::intern::Symbol>,
+) {
+    let owning = verify::owning_allocs(func, consuming, resources, heap_structs);
+    let mut edges = HashMap::new();
+    let mut inputs = Vec::new();
+    for block in &func.blocks {
+        for phi in &block.phis {
+            if !owning.contains_key(&phi.dest) || is_move_only(&phi.ty, move_only) {
+                continue;
+            }
+            for &(pred, value) in &phi.incoming {
+                if !owning.contains_key(&value) {
+                    inputs.push((block.id, phi.dest, pred, value, phi.ty.clone()));
+                }
+            }
+        }
     }
-    for b in &mut func.blocks {
-        b.insts
-            .retain(|inst| !matches!(&inst.kind, InstKind::Drop(v, Type::Enum(_)) if moved_enums.contains(v)));
+    for (target, dest, pred, value, ty) in inputs {
+        let edge = *edges.entry((pred, target)).or_insert_with(|| {
+            if matches!(func.block(pred).terminator, Terminator::Goto(_)) {
+                pred
+            } else {
+                let edge = func.new_block("own.phi.edge");
+                func.block_mut(pred)
+                    .terminator
+                    .replace_successor(target, edge);
+                for phi in &mut func.block_mut(target).phis {
+                    for (p, _) in &mut phi.incoming {
+                        if *p == pred {
+                            *p = edge;
+                        }
+                    }
+                }
+                func.block_mut(edge).terminator = Terminator::Goto(target);
+                edge
+            }
+        });
+        let clone = func.new_value();
+        let span = func.span;
+        func.block_mut(edge).insts.push(Instruction {
+            dest: Some(clone),
+            kind: InstKind::Clone(value, ty.clone()),
+            ty,
+            span,
+            def_id: None,
+        });
+        let phi = func
+            .block_mut(target)
+            .phis
+            .iter_mut()
+            .find(|p| p.dest == dest)
+            .unwrap();
+        *phi.incoming.iter_mut().find(|(p, _)| *p == edge).unwrap() = (edge, clone);
     }
 }
 
@@ -190,12 +307,15 @@ fn run_on_function(
     consuming: &verify::ConsumingMap,
     resources: &std::collections::HashSet<crate::intern::Symbol>,
     heap_structs: &std::collections::HashSet<crate::intern::Symbol>,
+    move_only: &HashSet<crate::intern::Symbol>,
 ) {
-    hints.stats.return_drops_inserted +=
-        insert_missing_return_drops(func, consuming, resources, heap_structs);
+    while crate::mir::opt::simplify_phis(func) {}
+    own_escaping_enum_payloads(func, consuming, move_only);
+    own_mixed_phi_inputs(func, consuming, resources, heap_structs, move_only);
     hints.stats.return_drops_inserted +=
         verify::insert_edge_escape_drops(func, consuming, resources, heap_structs);
-    suppress_moved_enum_payload_drops(func);
+    hints.stats.return_drops_inserted +=
+        insert_missing_return_drops(func, consuming, resources, heap_structs);
 
     let uses = count_uses(func);
     hints.stats.total_bindings_analyzed += uses.len() as u32;
@@ -425,6 +545,7 @@ fn count_uses(func: &mir::Function) -> HashMap<ValueId, UseInfo> {
 pub(super) fn inst_operands(kind: &InstKind) -> Vec<ValueId> {
     match kind {
         InstKind::IntConst(_)
+        | InstKind::SizeOf(_)
         | InstKind::FloatConst(_)
         | InstKind::BoolConst(_)
         | InstKind::StringConst(_)

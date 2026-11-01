@@ -1,15 +1,44 @@
 # `jinn fmt` and `jinn lint` — design
 
 > **Status: design; the formatter half is partially implemented.** `src/fmt.rs`
-> lexes, parses to `ast::Program`, and pretty-prints the AST back to source,
-> covering the corpus grammar: a CI gate formats every corpus file and fails if
-> any stops frontend-checking, and `--write` refuses output that no longer
-> parses (residue at `X-1` in [`../roadmap.md`](../roadmap.md#tooling)). The
+> lexes, parses to `ast::Program`, and pretty-prints the AST back to source.
+> Both stdout and `--write` modes reparse the candidate and require exact AST
+> equality after normalizing source locations. A changed tree or invalid candidate
+> is an error: no candidate is emitted and no file is written. Unsupported printer
+> forms fail closed under this guard; grammar completeness is not claimed. The
 > sidecar-trivia first step below has shipped: the lexer records comment spans,
 > `src/fmt.rs` threads them through printing, and
 > `tests/fmt_nondestructive.rs` pins comment/shebang preservation and
-> idempotence. `--check`, `--diff`, `--stdin`, a `jinn lint` subcommand, and
-> the rule engine below do not exist.
+> idempotence. `tests/sol_formatter_contracts.rs` additionally pins precedence,
+> operand-position grouping, floating non-reassociation, fail-closed CLI behavior
+> and app checking with imports resolved in project context. `--check`, `--diff`,
+> `--stdin`, a `jinn lint` subcommand, and the rule engine below do not exist.
+
+## Current preservation contract
+
+The formatter uses the compiler parser before top-level-main synthesis and
+multi-clause-function merging, preserving those source structures rather than
+printing their lowered representation. Other parser desugarings remain shared.
+The structural check reparses both sources with token spans replaced by a common
+empty span; indentation tokens and every AST field remain significant. It does
+not compare debug strings, hashes or only frontend success, and does not erase
+casts, annotations, attributes, capability bounds, discriminants, access modes,
+statement kinds or literal domains. No semantic rewrite rules are enabled.
+
+Expression printing follows precedence and operand position. Ordinary binary
+operators associate left; `pow` associates right. A same-precedence right operand
+is parenthesized even for addition and multiplication: floating reassociation and
+checked-arithmetic intermediate traps are observable. Nested comparisons are
+parenthesized to avoid the parser's comparison-chain expansion. Unary operands,
+cast sources, callable/field/index receivers and conditional arms retain their
+own grouping. Unsupported syntax, including currently unprinted migration/view
+bodies, is refused rather than silently removed or replaced by placeholders.
+
+This is a syntactic preservation check, not a proof of compiler correctness or a
+replacement for execution tests. The opt0/3 execution oracles include `8, 8, -3`
+for nested subtraction, division and unary negation, a floating grouping witness,
+and callable/conditional/index/cast and parser-desugared control-flow cases.
+The wider rule-engine verifier below remains a design, not shipped behavior.
 
 The target: take any well-formed Jinn source — including un-idiomatic or
 C-transliterated code — and turn it into clean, idiomatic Jinn **without
@@ -174,5 +203,6 @@ stays idiomatic and cannot regress.
 | **4** | T3 type-aware rewrites behind `--type-aware`. | higher; gated on the typer |
 | **5** | LSP integration: format-on-save, lint diagnostics, code actions. | low |
 
-Phase 0 is the immediate priority. Until it lands, `jinn fmt --write` should be
-removed or gated behind an explicit unsafe flag rather than recommended.
+Grammar completeness in Phase 0 remains open. The shipped structural guard makes
+`jinn fmt --write` fail closed on unsupported printer forms; it does not make the
+remaining rollout phases complete. Preserve that guard while extending coverage.

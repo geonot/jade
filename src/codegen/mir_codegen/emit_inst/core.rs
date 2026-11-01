@@ -15,6 +15,14 @@ impl<'ctx> Compiler<'ctx> {
                         _ => llvm_ty.into_int_type().const_int(*n as u64, true).into(),
                     })
                 }
+                mir::InstKind::SizeOf(t) => {
+                    let size = self.type_store_size(self.llvm_ty(t));
+                    Ok(self
+                        .llvm_ty(&inst.ty)
+                        .into_int_type()
+                        .const_int(size, false)
+                        .into())
+                }
                 mir::InstKind::FloatConst(f) => Ok(match &inst.ty {
                     Type::F32 => self.ctx.f32_type().const_float(*f).into(),
                     _ => self.ctx.f64_type().const_float(*f).into(),

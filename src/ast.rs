@@ -46,7 +46,7 @@ impl Span {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Decl {
     Fn(Fn),
     Type(TypeDef),
@@ -126,7 +126,7 @@ pub enum UnaryOp {
     BitNot,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Bind(Bind),
     TupleBind(Vec<Symbol>, Expr, Span),
@@ -201,7 +201,7 @@ impl Stmt {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Pat {
     Wild(Span),
     Ident(Symbol, Span),
@@ -228,11 +228,11 @@ impl Pat {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     None(Span),
     Void(Span),
-    Int(i64, Span),
+    Int(u64, Span),
     Float(f64, Span),
     Str(String, Span),
     Bool(bool, Span),
@@ -374,12 +374,12 @@ impl Expr {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     pub decls: Vec<Decl>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Fn {
     pub name: Symbol,
     pub type_params: Vec<Symbol>,
@@ -395,14 +395,14 @@ pub struct Fn {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CapAnnot {
     pub class: String,
     pub scope: Option<String>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct FnAttrs {
     pub inline: bool,
     pub noinline: bool,
@@ -429,7 +429,7 @@ impl std::fmt::Display for AccessMod {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Param {
     pub name: Symbol,
     pub ty: Option<Type>,
@@ -439,7 +439,7 @@ pub struct Param {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct LayoutAttrs {
     pub packed: bool,
     pub strict: bool,
@@ -455,7 +455,7 @@ pub enum CategoryAssert {
     Aggregate,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TypeDef {
     pub name: Symbol,
     pub type_params: Vec<Symbol>,
@@ -465,7 +465,7 @@ pub struct TypeDef {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Field {
     pub name: Symbol,
     pub ty: Option<Type>,
@@ -474,7 +474,7 @@ pub struct Field {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EnumDef {
     pub name: Symbol,
     pub type_params: Vec<Symbol>,
@@ -482,7 +482,7 @@ pub struct EnumDef {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Variant {
     pub name: Symbol,
     pub fields: Vec<VField>,
@@ -490,13 +490,13 @@ pub struct Variant {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VField {
     pub name: Option<Symbol>,
     pub ty: Type,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Bind {
     pub name: Symbol,
     pub value: Expr,
@@ -507,7 +507,7 @@ pub struct Bind {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct If {
     pub cond: Expr,
     pub then: Block,
@@ -516,20 +516,20 @@ pub struct If {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct While {
     pub cond: Expr,
     pub body: Block,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct TogetherHandler {
     pub ok_arm: Option<Box<Expr>>,
     pub err_arm: Option<Box<Expr>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct For {
     pub label: Option<Symbol>,
     pub bind: Symbol,
@@ -543,20 +543,20 @@ pub struct For {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Loop {
     pub body: Block,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Match {
     pub subject: Expr,
     pub arms: Vec<Arm>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Arm {
     pub pat: Pat,
     pub guard: Option<Expr>,
@@ -564,7 +564,7 @@ pub struct Arm {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExternFn {
     pub name: Symbol,
     pub params: Vec<(Symbol, Type)>,
@@ -573,13 +573,13 @@ pub struct ExternFn {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FieldInit {
     pub name: Option<Symbol>,
     pub value: Expr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AsmBlock {
     pub template: String,
     pub outputs: Vec<(String, String)>,
@@ -588,7 +588,7 @@ pub struct AsmBlock {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum QueryClause {
     Where(Expr, Span),
     Limit(Expr, Span),
@@ -601,13 +601,13 @@ pub enum QueryClause {
     Select(Vec<SelectItem>, Span),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SelectItem {
     Field(Symbol, Span),
     Agg(Symbol, Option<Symbol>, Span),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UseDecl {
     pub path: Vec<Symbol>,
     pub imports: Option<Vec<Symbol>>,
@@ -615,28 +615,28 @@ pub struct UseDecl {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ErrDef {
     pub name: Symbol,
     pub variants: Vec<ErrVariant>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ErrVariant {
     pub name: Symbol,
     pub fields: Vec<Type>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TestBlock {
     pub name: Symbol,
     pub body: Block,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ActorDef {
     pub name: Symbol,
     pub fields: Vec<Field>,
@@ -644,7 +644,7 @@ pub struct ActorDef {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Handler {
     pub name: Symbol,
     pub params: Vec<Param>,
@@ -655,7 +655,7 @@ pub struct Handler {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ReceiveArm {
     pub handler: Symbol,
     pub bindings: Vec<Symbol>,
@@ -663,7 +663,7 @@ pub struct ReceiveArm {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SelectArm {
     pub is_send: bool,
     pub chan: Expr,
@@ -710,7 +710,7 @@ pub enum FieldDecorator {
     Search,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StoreField {
     pub name: Symbol,
     pub ty: Option<Type>,
@@ -721,7 +721,7 @@ pub struct StoreField {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StoreDef {
     pub name: Symbol,
     pub decorators: Vec<StoreDecorator>,
@@ -730,7 +730,7 @@ pub struct StoreDef {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MigrationDef {
     pub name: Symbol,
     pub version: i64,
@@ -739,13 +739,13 @@ pub struct MigrationDef {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AlterOp {
     pub store_name: Symbol,
     pub actions: Vec<AlterAction>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AlterAction {
     Add {
         name: String,
@@ -761,7 +761,7 @@ pub enum AlterAction {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ViewDef {
     pub name: Symbol,
     pub source: Symbol,
@@ -769,7 +769,7 @@ pub struct ViewDef {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TraitDef {
     pub name: Symbol,
     pub type_params: Vec<Symbol>,
@@ -778,7 +778,7 @@ pub struct TraitDef {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TraitMethod {
     pub name: Symbol,
     pub params: Vec<Param>,
@@ -788,7 +788,7 @@ pub struct TraitMethod {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ImplBlock {
     pub trait_name: Option<Symbol>,
     pub trait_type_args: Vec<Type>,
@@ -811,7 +811,7 @@ pub enum SupervisorStrategy {
     RestForOne,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SupervisorDef {
     pub name: Symbol,
     pub strategy: SupervisorStrategy,
@@ -819,7 +819,7 @@ pub struct SupervisorDef {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BuilderField {
     pub name: Symbol,
     pub value: Expr,
@@ -838,7 +838,7 @@ pub enum FilterPred {
     IEndsWith,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StoreFilter {
     pub field: Symbol,
     pub op: BinOp,
@@ -848,7 +848,7 @@ pub struct StoreFilter {
     pub pred: FilterPred,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StoreFilterCond {
     pub field: Symbol,
     pub op: BinOp,

@@ -316,6 +316,10 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         self.bld.position_at_end(exit_bb);
+        self.drop_value(
+            state_ptr.into(),
+            &Type::Struct(format!("{name}_state").into(), vec![]),
+        )?;
 
         let join_slot_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr, 3, "join_slot_ptr"));
         let join_signal = crate::codegen::fn_or_die(&self.module, "jinn_join_signal");
@@ -329,6 +333,108 @@ impl<'ctx> Compiler<'ctx> {
         b!(self.bld.build_return(None));
 
         self.cur_fn = old_fn;
+        Ok(())
+    }
+
+    pub(in crate::codegen) fn actor_message_drop_fn(
+        &mut self,
+        actor_name: &str,
+    ) -> Result<inkwell::values::FunctionValue<'ctx>, String> {
+        let name = format!("__message_drop.{actor_name}");
+        if let Some(function) = self.module.get_function(&name) {
+            return Ok(function);
+        }
+        let actor = self
+            .actor_defs
+            .get(actor_name)
+            .cloned()
+            .ok_or("missing actor definition")?;
+        let msg = self
+            .module
+            .get_struct_type(&format!("{actor_name}_msg"))
+            .ok_or("missing actor message type")?;
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        let function = self.module.add_function(
+            &name,
+            self.ctx.void_type().fn_type(&[ptr.into()], false),
+            Some(Linkage::Internal),
+        );
+        self.tag_fn(function);
+        let saved_block = self.bld.get_insert_block();
+        let saved_fn = self.cur_fn;
+        self.cur_fn = Some(function);
+        let entry = self.ctx.append_basic_block(function, "entry");
+        let done = self.ctx.append_basic_block(function, "done");
+        self.bld.position_at_end(entry);
+        let value = function.get_nth_param(0).unwrap().into_pointer_value();
+        let tag_ptr = b!(self.bld.build_struct_gep(msg, value, 0, "tag.ptr"));
+        let tag = b!(self.bld.build_load(self.ctx.i32_type(), tag_ptr, "tag")).into_int_value();
+        let payload = b!(self.bld.build_struct_gep(msg, value, 1, "payload"));
+        let handlers: Vec<_> = actor
+            .handlers
+            .iter()
+            .filter(|h| !h.is_loop)
+            .map(|h| (h, self.ctx.append_basic_block(function, &h.name.as_str())))
+            .collect();
+        let cases: Vec<_> = handlers
+            .iter()
+            .map(|(h, block)| (self.ctx.i32_type().const_int(h.tag as u64, false), *block))
+            .collect();
+        b!(self.bld.build_switch(tag, done, &cases));
+        for (handler, block) in handlers {
+            self.bld.position_at_end(block);
+            let mut offset = 0;
+            for param in handler.params.iter().filter(|p| p.name.as_str() != "self") {
+                let ty = self.llvm_ty(&param.ty);
+                if !param.ty.is_trivially_droppable() {
+                    let field = unsafe {
+                        b!(self.bld.build_gep(
+                            self.ctx.i8_type(),
+                            payload,
+                            &[self.ctx.i64_type().const_int(offset, false)],
+                            "field"
+                        ))
+                    };
+                    let value = b!(self.bld.build_load(ty, field, "value"));
+                    self.drop_value(value, &param.ty)?;
+                }
+                offset += self.type_store_size(ty);
+            }
+            b!(self.bld.build_unconditional_branch(done));
+        }
+        self.bld.position_at_end(done);
+        b!(self.bld.build_return(None));
+        self.cur_fn = saved_fn;
+        if let Some(block) = saved_block {
+            self.bld.position_at_end(block);
+        }
+        Ok(function)
+    }
+
+    fn set_actor_channel_drop(
+        &mut self,
+        ch: BasicValueEnum<'ctx>,
+        actor_name: &str,
+    ) -> Result<(), String> {
+        let drop = self.actor_message_drop_fn(actor_name)?;
+        let ptr = self.ctx.ptr_type(AddressSpace::default());
+        let setter = self
+            .module
+            .get_function("jinn_chan_set_drop")
+            .unwrap_or_else(|| {
+                self.module.add_function(
+                    "jinn_chan_set_drop",
+                    self.ctx
+                        .void_type()
+                        .fn_type(&[ptr.into(), ptr.into()], false),
+                    Some(Linkage::External),
+                )
+            });
+        b!(self.bld.build_call(
+            setter,
+            &[ch.into(), drop.as_global_value().as_pointer_value().into()],
+            ""
+        ));
         Ok(())
     }
 
@@ -399,6 +505,7 @@ impl<'ctx> Compiler<'ctx> {
         let alive_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 1, "alive_ptr"));
         b!(self.bld.build_store(alive_ptr, i32t.const_int(1, false)));
 
+        self.set_actor_channel_drop(ch, actor_name)?;
         let reg_live = crate::codegen::fn_or_die(&self.module, "jinn_actor_register_live");
         b!(self.bld.build_call(reg_live, &[mb_ptr_v.into()], ""));
 
@@ -426,6 +533,12 @@ impl<'ctx> Compiler<'ctx> {
                         fi as u32,
                         &format!("state_user_{}", uname)
                     ));
+                    let old = b!(self.bld.build_load(
+                        self.llvm_ty(&ad.fields[fi].ty),
+                        field_ptr,
+                        "state.old"
+                    ));
+                    self.drop_value(old, &ad.fields[fi].ty)?;
                     b!(self.bld.build_store(field_ptr, *uval));
                 }
             }
@@ -538,6 +651,7 @@ impl<'ctx> Compiler<'ctx> {
 
         let alive_ptr = b!(self.bld.build_struct_gep(mb_st, mb_ptr_v, 1, "alive_ptr"));
         b!(self.bld.build_store(alive_ptr, i32t.const_int(1, false)));
+        self.set_actor_channel_drop(ch, actor_name)?;
 
         if let Some(ad) = self.actor_defs.get(actor_name).cloned() {
             let state_ptr = b!(self

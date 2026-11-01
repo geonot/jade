@@ -78,60 +78,7 @@ impl Typer {
                                 span: *span,
                             });
                         }
-                        "size" => {
-                            let size = match arg.as_ref() {
-                                ast::Expr::Ident(s, _) => {
-                                    if let Some(fields) = self.structs.get(s) {
-                                        fields.len() as i64 * 8
-                                    } else {
-                                        match &*s.as_str() {
-                                            "i8" | "u8" | "bool" => 1,
-                                            "i16" | "u16" => 2,
-                                            "i32" | "u32" | "f32" => 4,
-                                            "i64" | "u64" | "f64" => 8,
-                                            "String" | "string" | "str" => 24,
-                                            _ => 0,
-                                        }
-                                    }
-                                }
-                                ast::Expr::Str(s, _) => {
-                                    let sym = Symbol::intern(s);
-                                    if let Some(fields) = self.structs.get(&sym) {
-                                        fields.len() as i64 * 8
-                                    } else {
-                                        match s.as_str() {
-                                            "i8" | "u8" | "bool" => 1,
-                                            "i16" | "u16" => 2,
-                                            "i32" | "u32" | "f32" => 4,
-                                            "i64" | "u64" | "f64" => 8,
-                                            "String" | "string" | "str" => 24,
-                                            _ => 0,
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    let harg = self.lower_expr(arg)?;
-                                    match &harg.ty {
-                                        Type::I8 | Type::U8 | Type::Bool => 1,
-                                        Type::I16 | Type::U16 => 2,
-                                        Type::I32 | Type::U32 | Type::F32 => 4,
-                                        Type::I64 | Type::U64 | Type::F64 => 8,
-                                        Type::String => 24,
-                                        Type::Struct(sname, _) => self
-                                            .structs
-                                            .get(sname)
-                                            .map(|f| f.len() as i64 * 8)
-                                            .unwrap_or(8),
-                                        _ => 8,
-                                    }
-                                }
-                            };
-                            return Ok(hir::Expr {
-                                kind: hir::ExprKind::Int(size),
-                                ty: Type::I64,
-                                span: *span,
-                            });
-                        }
+                        "size" => return self.lower_size_of(arg, *span),
                         _ => {}
                     }
                 }
@@ -171,5 +118,43 @@ impl Typer {
             }
             _ => unreachable!(),
         }
+    }
+
+    pub(in crate::typer) fn lower_size_of(
+        &mut self,
+        arg: &ast::Expr,
+        span: ast::Span,
+    ) -> Result<hir::Expr, String> {
+        let named = match arg {
+            ast::Expr::Ident(name, _) if self.find_var(&name.as_str()).is_none() => {
+                Some(Self::ident_to_type(&name.as_str()))
+            }
+            ast::Expr::Str(name, _) => Some(Self::ident_to_type(name)),
+            ast::Expr::Tuple(..) | ast::Expr::OfCall(..) => self.expr_to_single_type(arg),
+            _ => None,
+        };
+        let ty = match named {
+            Some(t) => self.resolve_ty(t),
+            None => {
+                let harg = self.lower_expr(arg)?;
+                self.infer_ctx.resolve(&harg.ty)
+            }
+        };
+        let known = match &ty {
+            Type::Struct(name, args) => args.is_empty() && self.structs.contains_key(name),
+            Type::Void | Type::Param(_) | Type::TypeVar(_) => false,
+            other => Self::is_concrete_type(other),
+        };
+        if !known {
+            return Err(format!(
+                "{}: `size of` needs a concrete, declared type; `{ty}` has no native layout",
+                span.loc()
+            ));
+        }
+        Ok(hir::Expr {
+            kind: hir::ExprKind::SizeOf(ty),
+            ty: Type::I64,
+            span,
+        })
     }
 }
