@@ -115,6 +115,7 @@ pub struct Fn {
     pub ret: Type,
 
     pub error_types: Vec<Type>,
+    pub needs: Option<Vec<ast::CapAnnot>>,
     pub body: Block,
     pub span: Span,
     pub generic_origin: Option<Symbol>,

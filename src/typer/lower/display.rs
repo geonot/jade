@@ -103,6 +103,7 @@ impl Typer {
                     }],
                     ret: Type::String,
                     error_types: Vec::new(),
+                    needs: None,
                     body,
                     span,
                     generic_origin: None,

@@ -542,3 +542,76 @@ release and debug suites each report 2562 passed, 0 failed and 15 ignored.
 seven-file diff SHA is `e868d323…` again. Running rustfmt on
 `src/driver/mod.rs` had recursively reformatted `sources/modules.rs`, and the
 removed trailing blank line was restored.
+
+## Execution record — resolved callable capability authority (`17-3-4-1`)
+
+The capability pass no longer scans AST declarations. It runs after HIR type
+checking, method selection, generic instantiation and display synthesis have
+finished, over the resolved program. Graph nodes are `DefId`s, not spellings.
+Direct calls use the resolved definition; methods use the selected lowered
+symbol so two receivers that share a method name no longer share a row; actor
+handlers are keyed by actor identity and handler tag, so identical handler
+names on different actors stay disjoint.
+
+`hir::Fn` carries the declared `needs` annotation through lowering, which is
+what lets the check happen after resolution instead of before it. An
+uninstantiated generic therefore keeps its annotation for validation but has no
+executable row, and its unknown capability classes are still rejected. When a
+generic is instantiated, the instantiated body is checked against the original
+ceiling.
+
+The fixpoint is a monotone worklist over a finite lattice: the union of
+primitive rows. Intrinsic store effects are enumerated at their `DefId`s rather
+than inferred from rendered names, including KV methods, relation traversal
+targets, delete cascades and insert/delete hooks. Restore is deliberately not a
+cascade and does not run delete hooks, which is now pinned. Implicit display,
+implicit resource drops (transitively through fields), global loads,
+global initialisers and parameter defaults all participate. Extern leaves stay
+with `cap_sites.rs`; unclassified externs, `syscall` and `asm` fail closed to
+`ffi.unsafe`. Std aperture signatures are matched on the resolved `DefId` *and*
+on the definition originating in a vetted std file, so a user function that
+merely shares an aperture's spelling gains no authority. Diagnostics name a
+shortest introducing call path.
+
+What remains explicitly incomplete, and is not claimed:
+
+- Higher-order capability precision (`17-3-4-2`). Function references and
+  lambda bodies are charged at construction, and an unresolved indirect
+  invocation rejects every finite ceiling. A callable stored in a value does
+  not yet carry an effect row in its type.
+- Default expressions are conservatively charged to the callee even when the
+  caller supplies the argument.
+- Shared frozen callable contracts for interface reuse (`17-3-4-3`).
+
+`docs/design/compiler-prereqs.md` is updated to state exactly this: what is
+live, what is conservative, and that none of it is a runtime sandbox or a
+complete purity proof. Filesystem scope comparison remains lexical, and vetted
+extern and aperture classifications remain trusted boundaries.
+
+`tests/sol_callable_caps.rs` adds 31 integration pins. Thirteen are run cases
+checked at `-O0` and `-O3` so a regression cannot hide behind optimisation,
+covering disjoint method spellings, disjoint actor handlers, receiver names
+that look like std modules, selected-only generic dispatch, benign externs,
+recursion to a fixed point, restore without cascades, and enum formatting that
+does not reach payload `display`. Eighteen are diagnostic cases covering
+unclassified externs, `clock`, scoped paths, unreachable branches, `syscall`,
+lambda and match-bound callables, defaults, global state, KV and relation
+access, both insert lowerings, delete cascades, implicit display and drop,
+method `needs`, a faked std spelling, and unknown capabilities in generics that
+are never instantiated. The eighteen AST-level unit tests that exercised the
+removed bucket scanner were retired with it; the integration file is the
+replacement and is strictly stronger, because it sees resolved identities.
+
+One defect surfaced by the new authority is filed rather than papered over.
+With `use io` in scope, a top-level `*read` collides with the std extern
+`read`: MIR verification reports that `io_read_stdin` calls `read` with three
+arguments where the callee takes one. MIR `InstKind::Call` carries only a
+symbol, and codegen registers externs under their bare C name, so extern and
+user identity are not yet distinguished downstream of HIR even though HIR has
+the `DefId`. The pin for that case uses a differently spelled user function so
+the capability semantics stay tested; the collision itself is `18`.
+
+Verification for this batch: release build warning-clean; `cargo clippy
+--release --all-targets -D warnings` clean; full release suite
+2575 passed, 0 failed, 15 ignored; full debug suite 2575 passed, 0 failed,
+15 ignored. `tests/sol_callable_caps.rs` reports 31 passed.

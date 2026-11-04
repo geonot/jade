@@ -490,87 +490,7 @@ impl Typer {
 
         self.seed_inferred_fallibility(&non_generic_fns);
 
-        let synth_handler_fns: Vec<(Symbol, Symbol, ast::Fn)> = prog
-            .decls
-            .iter()
-            .filter_map(|d| match d {
-                ast::Decl::Actor(ad) => Some(ad),
-                _ => None,
-            })
-            .flat_map(|ad| {
-                ad.handlers.iter().map(move |h| {
-                    let f = ast::Fn {
-                        name: Symbol::intern(&format!("{}__handler_{}", ad.name, h.name)),
-                        type_params: Vec::new(),
-                        type_bounds: Vec::new(),
-                        params: h.params.clone(),
-                        ret: None,
-                        error_types: Vec::new(),
-                        needs: None,
-                        body: h.body.clone(),
-                        is_generator: false,
-                        attrs: ast::FnAttrs::default(),
-                        span: h.span,
-                    };
-                    (ad.name, h.name, f)
-                })
-            })
-            .collect();
-        let mut cap_ctx = super::caps::CapContext::default();
-        for d in &prog.decls {
-            if let ast::Decl::Store(sd) = d {
-                cap_ctx.store_names.insert(sd.name);
-            }
-        }
-        for (actor, _, f) in &synth_handler_fns {
-            cap_ctx.actor_items.entry(*actor).or_default().push(f.name);
-        }
-        let mut cap_items: Vec<super::caps::CapItem> = Vec::new();
-        for d in &prog.decls {
-            match d {
-                ast::Decl::Fn(f) => cap_items.push(super::caps::CapItem {
-                    name: f.name,
-                    bare_method: None,
-                    fun: f,
-                }),
-                ast::Decl::Type(td) => {
-                    for m in &td.methods {
-                        cap_items.push(super::caps::CapItem {
-                            name: Symbol::intern(&format!("{}_{}", td.name, m.name)),
-                            bare_method: Some(m.name),
-                            fun: m,
-                        });
-                    }
-                }
-                ast::Decl::Impl(ib) => {
-                    for m in &ib.methods {
-                        cap_items.push(super::caps::CapItem {
-                            name: Symbol::intern(&format!("{}_{}", ib.type_name, m.name)),
-                            bare_method: Some(m.name),
-                            fun: m,
-                        });
-                    }
-                }
-                ast::Decl::Store(sd) => {
-                    for m in &sd.methods {
-                        cap_items.push(super::caps::CapItem {
-                            name: Symbol::intern(&format!("{}_{}", sd.name, m.name)),
-                            bare_method: Some(m.name),
-                            fun: m,
-                        });
-                    }
-                }
-                _ => {}
-            }
-        }
-        for (_, bare, f) in &synth_handler_fns {
-            cap_items.push(super::caps::CapItem {
-                name: f.name,
-                bare_method: Some(*bare),
-                fun: f,
-            });
-        }
-        super::caps::analyze(&cap_items, &self.std_files, &cap_ctx)?;
+        super::caps::validate_annotations(prog)?;
 
         self.declaration_errors_are_fatal()?;
 
@@ -872,6 +792,8 @@ impl Typer {
                 .join("\n");
             return Err(format!("type checking failed:\n{combined}"));
         }
+
+        super::caps::analyze(&program, &self.std_files)?;
 
         program.item_pkgs = {
             let names = program

@@ -1,32 +1,53 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::ast::{self, CapAnnot};
 use crate::cap_sites::{self, ExternCaps};
 use crate::caps::{CapSet, Capability};
+use crate::hir::{self, DefId, Expr, ExprKind, Stmt};
 use crate::intern::Symbol;
+use crate::types::Type;
 
-use super::scc;
-
-pub(in crate::typer) struct CapItem<'a> {
-    pub name: Symbol,
-    pub bare_method: Option<Symbol>,
-    pub fun: &'a ast::Fn,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Callable {
+    Function(DefId),
+    Handler(DefId, u32),
 }
 
-#[derive(Debug)]
-pub(in crate::typer) struct CapAnalysis {
-    #[allow(dead_code)]
-    pub rows: HashMap<Symbol, CapSet>,
+struct Item<'a> {
+    id: Callable,
+    name: String,
+    body: &'a hir::Block,
+    needs: Option<&'a [CapAnnot]>,
+    span: ast::Span,
+    extra: Vec<&'a Expr>,
 }
 
 #[derive(Default)]
-pub(in crate::typer) struct CapContext {
-    pub store_names: HashSet<Symbol>,
-    pub actor_items: HashMap<Symbol, Vec<Symbol>>,
+struct Collected {
+    caps: CapSet,
+    callees: HashSet<Callable>,
+}
+
+struct Context<'a> {
+    functions: HashMap<DefId, &'a hir::Fn>,
+    methods: HashMap<Symbol, DefId>,
+    externs: HashMap<DefId, Symbol>,
+    apertures: HashMap<DefId, &'static cap_sites::ApertureSite>,
+    actors: HashMap<Symbol, &'a hir::ActorDef>,
+    stores: Vec<&'a hir::StoreDef>,
+    globals: HashMap<Symbol, &'a Expr>,
+    types: HashMap<Symbol, &'a hir::TypeDef>,
+    enums: HashMap<Symbol, &'a hir::EnumDef>,
+}
+
+struct Scanner<'a, 'p> {
+    ctx: &'a Context<'p>,
+    out: Collected,
+    globals_seen: HashSet<Symbol>,
 }
 
 fn parse_annot(a: &CapAnnot) -> Result<Capability, String> {
-    let cap = match a.class.as_str() {
+    Ok(match a.class.as_str() {
         "fs.read" => Capability::FsRead(a.scope.clone()),
         "fs.write" => Capability::FsWrite(a.scope.clone()),
         "net.client" => Capability::NetClient,
@@ -40,838 +61,726 @@ fn parse_annot(a: &CapAnnot) -> Result<Capability, String> {
         "state" => Capability::State(a.scope.clone()),
         other => {
             return Err(format!(
-                "unknown capability class `{other}` at {:?}; the capability set is closed (caps.md §1.1)",
-                a.span
+                "{}: unknown capability class `{other}`; the capability set is closed",
+                a.span.loc()
             ));
         }
-    };
-    Ok(cap)
+    })
 }
 
 fn declared_set(needs: &[CapAnnot]) -> Result<CapSet, String> {
-    let mut set = CapSet::new();
-    for a in needs {
-        set.insert(parse_annot(a)?);
-    }
-    Ok(set)
+    needs.iter().map(parse_annot).collect()
 }
 
-fn literal_str(e: Option<&ast::Expr>) -> Option<&str> {
-    match e {
-        Some(ast::Expr::Str(s, _)) => Some(s.as_str()),
+pub(in crate::typer) fn validate_annotations(prog: &ast::Program) -> Result<(), String> {
+    for decl in &prog.decls {
+        let functions: &[ast::Fn] = match decl {
+            ast::Decl::Fn(f) => std::slice::from_ref(f),
+            ast::Decl::Type(t) => &t.methods,
+            ast::Decl::Impl(i) => &i.methods,
+            ast::Decl::Store(s) => &s.methods,
+            _ => &[],
+        };
+        for f in functions {
+            if let Some(needs) = &f.needs {
+                declared_set(needs)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn literal_str(e: Option<&Expr>) -> Option<&str> {
+    match e.map(|e| &e.kind) {
+        Some(ExprKind::Str(s)) => Some(s),
         _ => None,
     }
 }
 
-#[derive(Default)]
-struct Collected {
-    caps: CapSet,
-    callees: HashSet<Symbol>,
-    method_calls: HashSet<Symbol>,
-    suppressed: HashSet<Symbol>,
-}
-
-struct Scanner<'a> {
-    out: Collected,
-    trusted_apertures: &'a HashSet<Symbol>,
-    param_names: HashSet<Symbol>,
-    opaque_locals: HashSet<Symbol>,
-    local_alias: HashMap<Symbol, Symbol>,
-    fn_names: &'a HashSet<Symbol>,
-    ctx: &'a CapContext,
-}
-
-impl Scanner<'_> {
-    fn alias_root(&self, name: Symbol) -> Symbol {
-        let mut cur = name;
-        let mut seen: HashSet<Symbol> = HashSet::new();
-        while let Some(next) = self.local_alias.get(&cur) {
-            if !seen.insert(cur) {
-                break;
-            }
-            cur = *next;
-        }
-        cur
-    }
-
-    fn scan_call_arg(&mut self, a: &ast::Expr) {
-        if let ast::Expr::Ident(name, _) = a {
-            let root = self.alias_root(*name);
-            if !self.param_names.contains(&root)
-                && !self.opaque_locals.contains(&root)
-                && self.fn_names.contains(&root)
-            {
-                self.out.callees.insert(root);
-            }
-        }
-        self.scan_expr(a);
-    }
-
-    fn store_op(&mut self, store: Symbol) {
-        let path = Some(format!("./{store}.store"));
+impl Scanner<'_, '_> {
+    fn store(&mut self, name: Symbol) {
+        let path = Some(format!("./{name}.store"));
         self.out.caps.insert(Capability::FsRead(path.clone()));
         self.out.caps.insert(Capability::FsWrite(path));
     }
 
-    fn classed_caps(&mut self, caps: &[(cap_sites::CapClass, Option<usize>)], args: &[ast::Expr]) {
+    fn store_hooks(&mut self, name: Symbol, insert: bool) {
+        if let Some(store) = self.ctx.stores.iter().find(|s| s.name == name) {
+            for decorator in &store.decorators {
+                let hook = match decorator {
+                    ast::StoreDecorator::BeforeInsert(f) | ast::StoreDecorator::AfterInsert(f)
+                        if insert =>
+                    {
+                        Some(*f)
+                    }
+                    ast::StoreDecorator::BeforeDelete(f) | ast::StoreDecorator::AfterDelete(f)
+                        if !insert =>
+                    {
+                        Some(*f)
+                    }
+                    _ => None,
+                };
+                if let Some(hook) = hook {
+                    self.method(hook, &[]);
+                }
+            }
+        }
+    }
+
+    fn store_delete(&mut self, name: Symbol) {
+        let mut pending = vec![name];
+        let mut seen = HashSet::new();
+        while let Some(parent) = pending.pop() {
+            if !seen.insert(parent) {
+                continue;
+            }
+            self.store(parent);
+            self.store_hooks(parent, false);
+            for store in &self.ctx.stores {
+                for rel in &store.relations {
+                    let (owner, child) = if rel.is_has_many {
+                        (store.name, rel.target)
+                    } else {
+                        (rel.target, store.name)
+                    };
+                    if rel.cascade && owner == parent {
+                        pending.push(child);
+                    }
+                }
+            }
+        }
+    }
+
+    fn drop_type(&mut self, ty: &Type, seen: &mut HashSet<Symbol>) {
+        match ty {
+            Type::Struct(name, _) | Type::Enum(name) => {
+                if !seen.insert(*name) {
+                    return;
+                }
+                if let Some(t) = self.ctx.types.get(name) {
+                    if t.layout.resource {
+                        let method = Symbol::intern(&format!("{name}_drop"));
+                        if self.ctx.methods.contains_key(&method) {
+                            self.method(method, &[]);
+                        }
+                    }
+                    for field in &t.fields {
+                        self.drop_type(&field.ty, seen);
+                    }
+                } else if let Some(e) = self.ctx.enums.get(name) {
+                    for variant in &e.variants {
+                        for field in &variant.fields {
+                            self.drop_type(&field.ty, seen);
+                        }
+                    }
+                }
+            }
+            Type::Vec(inner)
+            | Type::Array(inner, _)
+            | Type::Alias(_, inner)
+            | Type::Newtype(_, inner)
+            | Type::Frozen(inner) => self.drop_type(inner, seen),
+            Type::Map(key, value) => {
+                self.drop_type(key, seen);
+                self.drop_type(value, seen);
+            }
+            Type::Tuple(fields) => {
+                for field in fields {
+                    self.drop_type(field, seen);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn classed(&mut self, caps: &[cap_sites::ClassedArg], args: &[&Expr]) {
         for (class, path_arg) in caps {
-            let path = path_arg.and_then(|i| literal_str(args.get(i)));
+            let path = path_arg.and_then(|i| literal_str(args.get(i).copied()));
             self.out.caps.insert(cap_sites::capability_of(*class, path));
         }
     }
 
-    fn extern_call(&mut self, name: &str, args: &[ast::Expr]) {
-        match cap_sites::classify_extern(name) {
-            ExternCaps::Effect(caps) => self.classed_caps(caps, args),
-            ExternCaps::OpenMode { path_arg, mode_arg } => {
-                let path = literal_str(args.get(path_arg));
-                let mode = literal_str(args.get(mode_arg));
-                cap_sites::open_mode_caps(path, mode, &mut |c| {
-                    self.out.caps.insert(c);
-                });
+    fn open_mode(&mut self, args: &[&Expr], path: usize, mode: usize) {
+        cap_sites::open_mode_caps(
+            literal_str(args.get(path).copied()),
+            literal_str(args.get(mode).copied()),
+            &mut |c| self.out.caps.insert(c),
+        );
+    }
+
+    fn call(&mut self, id: DefId, name: Symbol, args: &[&Expr]) {
+        if let Some(site) = self.ctx.apertures.get(&id) {
+            self.classed(site.caps, args);
+            if let Some((path, mode)) = site.open_mode {
+                self.open_mode(args, path, mode);
             }
-            ExternCaps::Benign => {}
-            ExternCaps::Unknown => {
+        } else if self.ctx.functions.contains_key(&id) {
+            self.out.callees.insert(Callable::Function(id));
+        } else if let Some(name) = self.ctx.externs.get(&id) {
+            match cap_sites::classify_extern(&name.as_str()) {
+                ExternCaps::Effect(caps) => self.classed(caps, args),
+                ExternCaps::OpenMode { path_arg, mode_arg } => {
+                    self.open_mode(args, path_arg, mode_arg)
+                }
+                ExternCaps::Benign => {}
+                ExternCaps::Unknown => self.out.caps.insert(Capability::FfiUnsafe),
+            }
+        } else if id == DefId::BUILTIN {
+            let name = name.as_str();
+            if let Some(store) = self.ctx.stores.iter().find(|s| {
+                name == format!("__store_insert_status_{}", s.name)
+                    || name.starts_with(&format!("__store_set_status_{}__", s.name))
+            }) {
+                self.store(store.name);
+                if name == format!("__store_insert_status_{}", store.name) {
+                    self.store_hooks(store.name, true);
+                }
+            } else {
                 self.out.caps.insert(Capability::FfiUnsafe);
             }
+        } else {
+            self.out.caps.insert(Capability::FfiUnsafe);
         }
     }
 
-    fn module_call(&mut self, base: Symbol, method: Symbol, args: &[ast::Expr]) {
-        let flattened = Symbol::intern(&format!("{base}_{method}"));
-        if let Some(site) = cap_sites::aperture(&format!("{base}.{method}")) {
-            self.classed_caps(site.caps, args);
-            if let Some((path_arg, mode_arg)) = site.open_mode {
-                let path = literal_str(args.get(path_arg));
-                let mode = literal_str(args.get(mode_arg));
-                cap_sites::open_mode_caps(path, mode, &mut |c| {
-                    self.out.caps.insert(c);
-                });
+    fn method(&mut self, name: Symbol, args: &[&Expr]) {
+        if let Some(id) = self.ctx.methods.get(&name) {
+            self.call(*id, name, args);
+        } else {
+            self.out.caps.insert(Capability::IndirectCall);
+        }
+    }
+
+    fn display(&mut self, ty: &Type) {
+        match ty {
+            Type::Struct(name, _) => {
+                let method = Symbol::intern(&format!("{name}_display"));
+                if self.ctx.methods.contains_key(&method) {
+                    self.method(method, &[]);
+                }
             }
-            if self.trusted_apertures.contains(&flattened) {
-                self.out.suppressed.insert(flattened);
-                return;
+            Type::Vec(inner) | Type::Array(inner, _) => self.display(inner),
+            _ => {}
+        }
+    }
+
+    fn exprs(&mut self, args: &[Expr]) {
+        for a in args {
+            self.expr(a);
+        }
+    }
+
+    fn filter(&mut self, filter: &hir::StoreFilter) {
+        self.expr(&filter.value);
+        for (_, cond) in &filter.extra {
+            self.expr(&cond.value);
+        }
+    }
+
+    fn conditional(&mut self, i: &hir::If) {
+        self.expr(&i.cond);
+        self.block(&i.then);
+        for (cond, body) in &i.elifs {
+            self.expr(cond);
+            self.block(body);
+        }
+        if let Some(body) = &i.els {
+            self.block(body);
+        }
+    }
+
+    fn pattern(&mut self, p: &hir::Pat) {
+        match p {
+            hir::Pat::Lit(e) => self.expr(e),
+            hir::Pat::Range(a, b, _) => {
+                self.expr(a);
+                self.expr(b);
+            }
+            hir::Pat::Ctor(_, _, ps, _)
+            | hir::Pat::Tuple(ps, _)
+            | hir::Pat::Array(ps, _)
+            | hir::Pat::Or(ps, _) => {
+                for p in ps {
+                    self.pattern(p);
+                }
+            }
+            hir::Pat::Wild(_) | hir::Pat::Bind(..) => {}
+        }
+    }
+
+    fn block(&mut self, body: &hir::Block) {
+        for s in body {
+            match s {
+                Stmt::Bind(b) => self.expr(&b.value),
+                Stmt::TupleBind(_, e, _)
+                | Stmt::Expr(e)
+                | Stmt::Ret(Some(e), _, _)
+                | Stmt::Break(Some(e), _)
+                | Stmt::ErrReturn(e, _, _)
+                | Stmt::ChannelClose(e, _)
+                | Stmt::Stop(e, _)
+                | Stmt::Join(e, _) => self.expr(e),
+                Stmt::Assign(a, b, _) => {
+                    self.expr(a);
+                    self.expr(b);
+                }
+                Stmt::GlobalStore(name, e, _) => {
+                    self.out.caps.insert(Capability::State(Some(name.as_str())));
+                    self.expr(e);
+                }
+                Stmt::If(i) => self.conditional(i),
+                Stmt::While(w) => {
+                    self.expr(&w.cond);
+                    self.block(&w.body);
+                }
+                Stmt::For(f) | Stmt::SimFor(f, _) => {
+                    self.expr(&f.iter);
+                    for e in [&f.end, &f.step].into_iter().flatten() {
+                        self.expr(e);
+                    }
+                    self.block(&f.body);
+                }
+                Stmt::Loop(l) => self.block(&l.body),
+                Stmt::Match(m) => {
+                    self.expr(&m.subject);
+                    for arm in &m.arms {
+                        self.pattern(&arm.pat);
+                        if let Some(g) = &arm.guard {
+                            self.expr(g);
+                        }
+                        self.block(&arm.body);
+                    }
+                }
+                Stmt::Asm(a) => {
+                    self.out.caps.insert(Capability::FfiUnsafe);
+                    for (_, e) in &a.inputs {
+                        self.expr(e);
+                    }
+                }
+                Stmt::Defer(b, _) | Stmt::Transaction(b, _) | Stmt::SimBlock(b, _) => self.block(b),
+                Stmt::Together(_, b, _, handler, _) => {
+                    self.block(b);
+                    if let Some(h) = handler {
+                        for b in [&h.ok_arm, &h.err_arm].into_iter().flatten() {
+                            self.block(b);
+                        }
+                    }
+                }
+                Stmt::StoreInsert(s, args, _) => {
+                    self.store(*s);
+                    self.store_hooks(*s, true);
+                    self.exprs(args);
+                }
+                Stmt::StoreDelete(s, f, _) | Stmt::StoreDestroy(s, f, _) => {
+                    self.store_delete(*s);
+                    self.filter(f);
+                }
+                Stmt::StoreRestore(s, f, _) => {
+                    self.store(*s);
+                    self.filter(f);
+                }
+                Stmt::StoreSet(s, updates, filter, _) => {
+                    self.store(*s);
+                    for (_, e) in updates {
+                        self.expr(e);
+                    }
+                    self.filter(filter);
+                }
+                Stmt::StoreSave(s, _) | Stmt::StoreCompact(s, _) => self.store(*s),
+                Stmt::Drop(_, _, ty, _) => self.drop_type(ty, &mut HashSet::new()),
+                Stmt::Ret(None, _, _)
+                | Stmt::Break(None, _)
+                | Stmt::Continue(_)
+                | Stmt::Nop(_)
+                | Stmt::ScopeCancel(..)
+                | Stmt::UseLocal(..) => {}
             }
         }
-        self.out.callees.insert(flattened);
     }
 
-    fn scan_block(&mut self, block: &[ast::Stmt]) {
-        for s in block {
-            self.scan_stmt(s);
-        }
-    }
-
-    fn scan_filter(&mut self, f: &ast::StoreFilter) {
-        self.scan_expr(&f.value);
-        for (_, c) in &f.extra {
-            self.scan_expr(&c.value);
-        }
-    }
-
-    fn scan_stmt(&mut self, s: &ast::Stmt) {
-        match s {
-            ast::Stmt::Bind(b) => {
-                match &b.value {
-                    ast::Expr::Lambda(..) => {
-                        self.opaque_locals.remove(&b.name);
-                        self.local_alias.remove(&b.name);
-                    }
-                    ast::Expr::Ident(src, _) => {
-                        self.opaque_locals.remove(&b.name);
-                        self.local_alias.insert(b.name, *src);
-                    }
-                    ast::Expr::Field(..)
-                    | ast::Expr::Index(..)
-                    | ast::Expr::Call(..)
-                    | ast::Expr::Method(..) => {
-                        self.local_alias.remove(&b.name);
-                        self.opaque_locals.insert(b.name);
+    fn expr(&mut self, e: &Expr) {
+        use ExprKind::*;
+        match &e.kind {
+            Call(id, name, args) => {
+                self.call(*id, *name, &args.iter().collect::<Vec<_>>());
+                self.exprs(args);
+            }
+            FnRef(id, name) => self.call(*id, *name, &[]),
+            IndirectCall(callee, args) => {
+                self.out.caps.insert(Capability::IndirectCall);
+                self.expr(callee);
+                self.exprs(args);
+            }
+            Method(recv, name, _, args) => {
+                let all = std::iter::once(recv.as_ref())
+                    .chain(args.iter())
+                    .collect::<Vec<_>>();
+                self.method(*name, &all);
+                self.expr(recv);
+                self.exprs(args);
+            }
+            Pipe(recv, id, name, args) => {
+                let all = std::iter::once(recv.as_ref())
+                    .chain(args.iter())
+                    .collect::<Vec<_>>();
+                self.call(*id, *name, &all);
+                self.expr(recv);
+                self.exprs(args);
+            }
+            DeferredMethod(recv, _, args) => {
+                self.out.caps.insert(Capability::IndirectCall);
+                self.expr(recv);
+                self.exprs(args);
+            }
+            Builtin(b, args) => {
+                match b {
+                    hir::BuiltinFn::TimeMonotonic => self.out.caps.insert(Capability::Time),
+                    hir::BuiltinFn::FileExists => self.out.caps.insert(Capability::FsRead(
+                        literal_str(args.first()).map(str::to_owned),
+                    )),
+                    hir::BuiltinFn::GetArgs => self.out.caps.insert(Capability::EnvRead),
+                    hir::BuiltinFn::SignalHandle
+                    | hir::BuiltinFn::SignalRaise
+                    | hir::BuiltinFn::SignalIgnore
+                    | hir::BuiltinFn::SignalDefault
+                    | hir::BuiltinFn::SignalKill
+                    | hir::BuiltinFn::VolatileLoad
+                    | hir::BuiltinFn::VolatileStore => self.out.caps.insert(Capability::FfiUnsafe),
+                    hir::BuiltinFn::Log
+                    | hir::BuiltinFn::Print
+                    | hir::BuiltinFn::Eprint
+                    | hir::BuiltinFn::ToString => {
+                        for arg in args {
+                            self.display(&arg.ty);
+                        }
                     }
                     _ => {}
                 }
-                self.scan_expr(&b.value)
+                self.exprs(args);
             }
-            ast::Stmt::TupleBind(_, e, _)
-            | ast::Stmt::Expr(e)
-            | ast::Stmt::Ret(Some(e), _)
-            | ast::Stmt::ErrReturn(e, _)
-            | ast::Stmt::Break(Some(e), _)
-            | ast::Stmt::ChannelClose(e, _)
-            | ast::Stmt::Stop(e, _)
-            | ast::Stmt::Join(e, _) => self.scan_expr(e),
-            ast::Stmt::Assign(lhs, rhs, _) => {
-                self.scan_expr(lhs);
-                self.scan_expr(rhs);
+            StringMethod(recv, _, args) | VecMethod(recv, _, args) | MapMethod(recv, _, args) => {
+                self.expr(recv);
+                self.exprs(args);
             }
-            ast::Stmt::If(i) => {
-                self.scan_expr(&i.cond);
-                self.scan_block(&i.then);
-                for (c, b) in &i.elifs {
-                    self.scan_expr(c);
-                    self.scan_block(b);
-                }
-                if let Some(el) = &i.els {
-                    self.scan_block(el);
-                }
+            BinOp(a, _, b)
+            | Index(a, b)
+            | ChannelSend(a, b)
+            | AtomicStore(a, b)
+            | AtomicAdd(a, b)
+            | AtomicSub(a, b) => {
+                self.expr(a);
+                self.expr(b);
             }
-            ast::Stmt::While(w) => {
-                self.scan_expr(&w.cond);
-                self.scan_block(&w.body);
+            UnaryOp(_, a)
+            | Field(a, _, _)
+            | Coerce(a, _)
+            | Cast(a, _)
+            | Ref(a)
+            | Deref(a)
+            | CoroutineNext(a)
+            | Yield(a)
+            | ChannelRecv(a)
+            | StrictCast(a, _)
+            | AtomicLoad(a)
+            | Grad(a)
+            | GeneratorNext(a)
+            | EnumUnwrap(a, _, _)
+            | EnumIs(a, _)
+            | ChannelCreate(_, a) => self.expr(a),
+            AsFormat(a, _) => {
+                self.display(&a.ty);
+                self.expr(a);
             }
-            ast::Stmt::For(f) | ast::Stmt::SimFor(f, _) => {
-                self.scan_expr(&f.iter);
-                if let Some(e) = &f.end {
-                    self.scan_expr(e);
-                }
-                if let Some(e) = &f.step {
-                    self.scan_expr(e);
-                }
-                self.scan_block(&f.body);
+            Ternary(a, b, c) | Slice(a, b, c) | AtomicCas(a, b, c) => {
+                self.expr(a);
+                self.expr(b);
+                self.expr(c);
             }
-            ast::Stmt::Loop(l) => self.scan_block(&l.body),
-            ast::Stmt::Match(m) => {
-                self.scan_expr(&m.subject);
-                for arm in &m.arms {
-                    if let Some(g) = &arm.guard {
-                        self.scan_expr(g);
-                    }
-                    self.scan_block(&arm.body);
-                }
-            }
-            ast::Stmt::Asm(_) => {
+            VecNew(args) | Array(args) | Tuple(args) | Einsum(_, args) => self.exprs(args),
+            Syscall(args) => {
                 self.out.caps.insert(Capability::FfiUnsafe);
+                self.exprs(args);
             }
-            ast::Stmt::Defer(b, _) | ast::Stmt::Transaction(b, _) | ast::Stmt::SimBlock(b, _) => {
-                self.scan_block(b)
-            }
-            ast::Stmt::Together(_, b, handler, _) => {
-                self.scan_block(b);
-                if let Some(e) = &handler.ok_arm {
-                    self.scan_expr(e);
-                }
-                if let Some(e) = &handler.err_arm {
-                    self.scan_expr(e);
+            Struct(_, fields) | VariantCtor(_, _, _, fields) => {
+                for f in fields {
+                    self.expr(&f.value);
                 }
             }
-            ast::Stmt::StoreInsert(store, inits, _) => {
-                self.store_op(*store);
-                for fi in inits {
-                    self.scan_expr(&fi.value);
+            Builder(_, fields) => {
+                for (_, e) in fields {
+                    self.expr(e);
                 }
             }
-            ast::Stmt::StoreDelete(store, f, _)
-            | ast::Stmt::StoreDestroy(store, f, _)
-            | ast::Stmt::StoreRestore(store, f, _) => {
-                self.store_op(*store);
-                self.scan_filter(f);
+            IfExpr(i) => self.conditional(i),
+            Block(b) | Lambda(_, b, _) | CoroutineCreate(_, b, _) | GeneratorCreate(_, _, b, _) => {
+                self.block(b)
             }
-            ast::Stmt::StoreSet(store, updates, f, _) => {
-                self.store_op(*store);
-                for (_, e) in updates {
-                    self.scan_expr(e);
+            ListComp(body, _, _, iter, cond, map) => {
+                self.expr(body);
+                self.expr(iter);
+                for e in [cond, map].into_iter().flatten() {
+                    self.expr(e);
                 }
-                self.scan_filter(f);
             }
-            ast::Stmt::StoreSave(store, _) | ast::Stmt::StoreCompact(store, _) => {
-                self.store_op(*store);
-            }
-            ast::Stmt::Ret(None, _)
-            | ast::Stmt::Break(None, _)
-            | ast::Stmt::Continue(_)
-            | ast::Stmt::Nop(_)
-            | ast::Stmt::UseLocal(_) => {}
-        }
-    }
-
-    fn scan_expr(&mut self, e: &ast::Expr) {
-        match e {
-            ast::Expr::Call(callee, args, _) => {
-                match callee.as_ref() {
-                    ast::Expr::Ident(name, _) => {
-                        if self.param_names.contains(name) || self.opaque_locals.contains(name) {
-                            self.out.caps.insert(Capability::IndirectCall);
-                        } else {
-                            let root = self.alias_root(*name);
-                            if self.param_names.contains(&root)
-                                || self.opaque_locals.contains(&root)
-                            {
-                                self.out.caps.insert(Capability::IndirectCall);
-                            } else {
-                                self.out.callees.insert(root);
-                            }
+            Spawn(actor, inits) => {
+                if let Some(actor) = self.ctx.actors.get(actor) {
+                    for h in &actor.handlers {
+                        self.out
+                            .callees
+                            .insert(Callable::Handler(actor.def_id, h.tag));
+                    }
+                    for f in &actor.fields {
+                        if let Some(e) = &f.default {
+                            self.expr(e);
                         }
                     }
-                    ast::Expr::Field(..) | ast::Expr::Index(..) => {
-                        self.out.caps.insert(Capability::IndirectCall);
-                        self.scan_expr(callee);
-                    }
-                    _ => {
-                        self.out.caps.insert(Capability::IndirectCall);
-                        self.scan_expr(callee);
-                    }
-                }
-                for a in args {
-                    self.scan_call_arg(a);
-                }
-            }
-            ast::Expr::Method(recv, method, args, _) => {
-                if let ast::Expr::Ident(base, _) = recv.as_ref() {
-                    if base.as_str() == "extern" {
-                        self.extern_call(&method.as_str(), args);
-                    } else {
-                        self.module_call(*base, *method, args);
-                        self.out.method_calls.insert(*method);
-                    }
                 } else {
-                    self.out.method_calls.insert(*method);
-                    self.scan_expr(recv);
-                }
-                for a in args {
-                    self.scan_call_arg(a);
-                }
-            }
-            ast::Expr::Pipe(recv, func, args, _) => {
-                if let ast::Expr::Ident(name, _) = func.as_ref() {
-                    self.out.callees.insert(*name);
-                } else {
-                    self.scan_expr(func);
-                }
-                self.scan_expr(recv);
-                for a in args {
-                    self.scan_expr(a);
-                }
-            }
-            ast::Expr::Syscall(args, _) => {
-                self.out.caps.insert(Capability::FfiUnsafe);
-                for a in args {
-                    self.scan_expr(a);
-                }
-            }
-            ast::Expr::BinOp(l, _, r, _)
-            | ast::Expr::Index(l, r, _)
-            | ast::Expr::ChannelSend(l, r, _)
-            | ast::Expr::OfCall(l, r, _) => {
-                self.scan_expr(l);
-                self.scan_expr(r);
-            }
-            ast::Expr::UnaryOp(_, e, _)
-            | ast::Expr::As(e, _, _)
-            | ast::Expr::StrictCast(e, _, _)
-            | ast::Expr::Ref(e, _)
-            | ast::Expr::Deref(e, _)
-            | ast::Expr::Freeze(e, _)
-            | ast::Expr::Yield(e, _)
-            | ast::Expr::ChannelRecv(e, _)
-            | ast::Expr::Field(e, _, _)
-            | ast::Expr::AsFormat(e, _, _)
-            | ast::Expr::NamedArg(_, e, _)
-            | ast::Expr::Spread(e, _)
-            | ast::Expr::Grad(e, _)
-            | ast::Expr::ChannelCreate(_, e, _) => self.scan_expr(e),
-            ast::Expr::StoreGet(store, e, _) => {
-                self.store_op(*store);
-                self.scan_expr(e);
-            }
-            ast::Expr::Ternary(c, t, f, _) => {
-                self.scan_expr(c);
-                self.scan_expr(t);
-                self.scan_expr(f);
-            }
-            ast::Expr::Quaternary(s, ok, no, er, _) => {
-                self.scan_expr(s);
-                for x in [ok, no, er].into_iter().flatten() {
-                    self.scan_expr(x);
-                }
-            }
-            ast::Expr::Slice(a, b, c, _) => {
-                self.scan_expr(a);
-                self.scan_expr(b);
-                self.scan_expr(c);
-            }
-            ast::Expr::Array(es, _) | ast::Expr::Tuple(es, _) | ast::Expr::Einsum(_, es, _) => {
-                for x in es {
-                    self.scan_expr(x);
-                }
-            }
-            ast::Expr::Struct(_, fields, _) => {
-                for fl in fields {
-                    self.scan_expr(&fl.value);
-                }
-            }
-            ast::Expr::Builder(_, fields, _) => {
-                for fl in fields {
-                    self.scan_expr(&fl.value);
-                }
-            }
-            ast::Expr::IfExpr(i) => {
-                self.scan_expr(&i.cond);
-                self.scan_block(&i.then);
-                for (c, b) in &i.elifs {
-                    self.scan_expr(c);
-                    self.scan_block(b);
-                }
-                if let Some(el) = &i.els {
-                    self.scan_block(el);
-                }
-            }
-            ast::Expr::Block(b, _) | ast::Expr::DispatchBlock(_, b, _) => self.scan_block(b),
-            ast::Expr::Lambda(params, _, body, _) => {
-                for p in params {
-                    if let Some(d) = &p.default {
-                        self.scan_expr(d);
-                    }
-                }
-                self.scan_block(body);
-            }
-            ast::Expr::ListComp(body, _, iter, cond, map, _) => {
-                self.scan_expr(body);
-                self.scan_expr(iter);
-                if let Some(c) = cond {
-                    self.scan_expr(c);
-                }
-                if let Some(m) = map {
-                    self.scan_expr(m);
-                }
-            }
-            ast::Expr::Query(subject, clauses, _) => {
-                if let ast::Expr::Ident(n, _) = subject.as_ref()
-                    && self.ctx.store_names.contains(n)
-                {
-                    self.store_op(*n);
-                }
-                self.scan_expr(subject);
-                for cl in clauses {
-                    match cl {
-                        ast::QueryClause::Where(e, _)
-                        | ast::QueryClause::Limit(e, _)
-                        | ast::QueryClause::Take(e, _)
-                        | ast::QueryClause::Skip(e, _)
-                        | ast::QueryClause::Set(_, e, _) => self.scan_expr(e),
-                        ast::QueryClause::Sort(_, _, _)
-                        | ast::QueryClause::Delete(_)
-                        | ast::QueryClause::Group(_, _)
-                        | ast::QueryClause::Select(_, _) => {}
-                    }
-                }
-            }
-            ast::Expr::StoreQuery(store, f, _)
-            | ast::Expr::StoreFirst(store, f, _)
-            | ast::Expr::StoreExists(store, f, _) => {
-                self.store_op(*store);
-                self.scan_filter(f);
-            }
-            ast::Expr::StoreCount(store, f, _) => {
-                self.store_op(*store);
-                if let Some(f) = f {
-                    self.scan_filter(f);
-                }
-            }
-            ast::Expr::StoreInsert(store, inits, _) => {
-                self.store_op(*store);
-                for fi in inits {
-                    self.scan_expr(&fi.value);
-                }
-            }
-            ast::Expr::StoreUpdate(store, updates, f, _) => {
-                self.store_op(*store);
-                for (_, e) in updates {
-                    self.scan_expr(e);
-                }
-                self.scan_filter(f);
-            }
-            ast::Expr::Spawn(actor, inits, _) => {
-                if let Some(handler_items) = self.ctx.actor_items.get(actor) {
-                    for h in handler_items {
-                        self.out.callees.insert(*h);
-                    }
+                    self.out.caps.insert(Capability::IndirectCall);
                 }
                 for (_, e) in inits {
-                    self.scan_expr(e);
+                    self.expr(e);
                 }
             }
-            ast::Expr::Send(recv, handler, args, _) => {
-                self.out.method_calls.insert(*handler);
-                self.scan_expr(recv);
-                for a in args {
-                    self.scan_expr(a);
+            Send(recv, actor, _, tag, args) => {
+                if let Some(actor) = self.ctx.actors.get(actor) {
+                    self.out
+                        .callees
+                        .insert(Callable::Handler(actor.def_id, *tag));
+                } else {
+                    self.out.caps.insert(Capability::IndirectCall);
+                }
+                self.expr(recv);
+                self.exprs(args);
+            }
+            StoreQuery(s, f)
+            | StoreAllWhere(s, f)
+            | StoreFirst(s, f)
+            | StoreExists(s, f)
+            | ViewCount(s, f)
+            | ViewAll(s, f) => {
+                self.store(*s);
+                self.filter(f);
+            }
+            StoreCount(s)
+            | StoreAll(s)
+            | StoreDistinct(s, _)
+            | StoreGroup(s, _, _, _)
+            | StoreSum(s, _)
+            | StoreAvg(s, _)
+            | StoreMin(s, _)
+            | StoreMax(s, _)
+            | KvCount(s)
+            | VecCount(s)
+            | FtsCount(s, _)
+            | TsLatest(s) => self.store(*s),
+            StoreGet(s, e)
+            | StoreVersionCount(s, e)
+            | StoreHistory(s, e)
+            | KvGet(s, e)
+            | KvHas(s, e)
+            | KvDel(s, e)
+            | VecInsert(s, e)
+            | BloomTest(s, _, e)
+            | FtsSearch(s, _, e)
+            | GraphFrom(s, e)
+            | GraphTo(s, e) => {
+                self.store(*s);
+                self.expr(e);
+            }
+            StoreAtVersion(s, a, b) | KvSet(s, a, b) | KvIncr(s, a, b) | VecNearest(s, a, b) => {
+                self.store(*s);
+                self.expr(a);
+                self.expr(b);
+            }
+            StoreQueryGroup(s, _, _, filter) => {
+                self.store(*s);
+                if let Some(f) = filter {
+                    self.filter(f);
                 }
             }
-            ast::Expr::Receive(arms, _) => {
-                for arm in arms {
-                    self.scan_block(&arm.body);
-                }
-            }
-            ast::Expr::Select(arms, default, _) => {
-                for arm in arms {
-                    self.scan_expr(&arm.chan);
-                    if let Some(v) = &arm.value {
-                        self.scan_expr(v);
+            IterNext(_, ty, method) => self.method(Symbol::intern(&format!("{ty}_{method}")), &[]),
+            Select(arms, default) => {
+                for a in arms {
+                    self.expr(&a.chan);
+                    if let Some(v) = &a.value {
+                        self.expr(v);
                     }
-                    self.scan_block(&arm.body);
+                    self.block(&a.body);
                 }
                 if let Some(b) = default {
-                    self.scan_block(b);
+                    self.block(b);
                 }
             }
-            ast::Expr::StoreAll(store, _) | ast::Expr::StoreDistinct(store, _, _) => {
-                self.store_op(*store);
+            GlobalLoad(name) => {
+                self.out.caps.insert(Capability::State(Some(name.as_str())));
+                if self.globals_seen.insert(*name)
+                    && let Some(e) = self.ctx.globals.get(name)
+                {
+                    self.expr(e);
+                }
             }
-            ast::Expr::None(_)
-            | ast::Expr::Void(_)
-            | ast::Expr::Int(_, _)
-            | ast::Expr::Float(_, _)
-            | ast::Expr::Str(_, _)
-            | ast::Expr::Bool(_, _)
-            | ast::Expr::Ident(_, _)
-            | ast::Expr::Placeholder(_)
-            | ast::Expr::IndexPlaceholder(_)
-            | ast::Expr::Embed(_, _)
-            | ast::Expr::Unreachable(_)
-            | ast::Expr::QualifiedIdent(_, _, _) => {}
+            Int(_) | Float(_) | Str(_) | Bool(_) | None | Void | Var(..) | VariantRef(..)
+            | MapNew | Unreachable | SizeOf(_) => {}
         }
     }
 }
 
 pub(in crate::typer) fn analyze(
-    items: &[CapItem],
+    program: &hir::Program,
     std_files: &HashSet<Symbol>,
-    ctx: &CapContext,
-) -> Result<CapAnalysis, String> {
-    let item_lookup: HashMap<Symbol, &CapItem> = items.iter().map(|it| (it.name, it)).collect();
-
-    let mut method_index: HashMap<Symbol, Vec<Symbol>> = HashMap::new();
-    for it in items {
-        if let Some(m) = it.bare_method {
-            method_index.entry(m).or_default().push(it.name);
-        }
-    }
-
-    let mut trusted_apertures: HashSet<Symbol> = HashSet::new();
+) -> Result<(), String> {
+    let functions: Vec<&hir::Fn> = program
+        .fns
+        .iter()
+        .chain(program.types.iter().flat_map(|t| &t.methods))
+        .chain(program.trait_impls.iter().flat_map(|i| &i.methods))
+        .chain(program.stores.iter().flat_map(|s| &s.methods))
+        .collect();
+    let mut ctx = Context {
+        functions: functions.iter().map(|f| (f.def_id, *f)).collect(),
+        methods: functions.iter().map(|f| (f.name, f.def_id)).collect(),
+        externs: program.externs.iter().map(|f| (f.def_id, f.name)).collect(),
+        apertures: HashMap::new(),
+        actors: program.actors.iter().map(|a| (a.name, a)).collect(),
+        stores: program.stores.iter().collect(),
+        globals: program.globals.iter().map(|g| (g.name, &g.init)).collect(),
+        types: program.types.iter().map(|t| (t.name, t)).collect(),
+        enums: program.enums.iter().map(|e| (e.name, e)).collect(),
+    };
+    ctx.stores
+        .sort_by_key(|s| std::cmp::Reverse(s.name.as_str().len()));
     for site in cap_sites::APERTURE_SITES {
-        let flattened = Symbol::intern(&site.symbol.replace('.', "_"));
-        if let Some(it) = item_lookup.get(&flattened)
-            && it.fun.span.file.is_some_and(|f| std_files.contains(&f))
+        let name = Symbol::intern(&site.symbol.replace('.', "_"));
+        if let Some(id) = ctx.methods.get(&name)
+            && let Some(f) = ctx.functions.get(id)
+            && f.span.file.is_some_and(|file| std_files.contains(&file))
         {
-            trusted_apertures.insert(flattened);
+            ctx.apertures.insert(*id, site);
         }
     }
-
-    let fn_names: HashSet<Symbol> = item_lookup.keys().copied().collect();
-
-    let mut primitive: HashMap<Symbol, CapSet> = HashMap::new();
-    let mut graph: HashMap<Symbol, HashSet<Symbol>> = HashMap::new();
-    for it in items {
+    let mut items: Vec<Item<'_>> = functions
+        .iter()
+        .map(|f| Item {
+            id: Callable::Function(f.def_id),
+            name: f.name.as_str(),
+            body: &f.body,
+            needs: f.needs.as_deref(),
+            span: f.span,
+            extra: f.params.iter().filter_map(|p| p.default.as_ref()).collect(),
+        })
+        .collect();
+    for actor in &program.actors {
+        for handler in &actor.handlers {
+            items.push(Item {
+                id: Callable::Handler(actor.def_id, handler.tag),
+                name: format!("{}.{}", actor.name, handler.name),
+                body: &handler.body,
+                needs: None,
+                span: handler.span,
+                extra: handler.loop_sleep_ms.iter().collect(),
+            });
+        }
+    }
+    let indices: HashMap<Callable, usize> = items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| (item.id, i))
+        .collect();
+    let mut primitive = Vec::new();
+    let mut graph = Vec::new();
+    let mut callers = vec![Vec::new(); items.len()];
+    for (i, item) in items.iter().enumerate() {
         let mut scanner = Scanner {
+            ctx: &ctx,
             out: Collected::default(),
-            trusted_apertures: &trusted_apertures,
-            param_names: it.fun.params.iter().map(|p| p.name).collect(),
-            opaque_locals: HashSet::new(),
-            local_alias: HashMap::new(),
-            fn_names: &fn_names,
-            ctx,
+            globals_seen: HashSet::new(),
         };
-        scanner.scan_block(&it.fun.body);
-        let mut collected = scanner.out;
-        let mut edges: HashSet<Symbol> = collected
-            .callees
-            .drain()
-            .filter(|c| item_lookup.contains_key(c))
-            .collect();
-        for m in &collected.method_calls {
-            if let Some(targets) = method_index.get(m) {
-                for t in targets {
-                    if !collected.suppressed.contains(t) {
-                        edges.insert(*t);
-                    }
-                }
+        scanner.block(item.body);
+        for e in &item.extra {
+            scanner.expr(e);
+        }
+        if item.name == "main" {
+            for global in &program.globals {
+                scanner.expr(&global.init);
             }
         }
-        primitive.insert(it.name, collected.caps);
-        graph.insert(it.name, edges);
-    }
-
-    let sccs = scc::tarjan_scc(&graph);
-    let mut rows: HashMap<Symbol, CapSet> = HashMap::new();
-    for scc_group in &sccs {
-        loop {
-            let mut changed = false;
-            for name in scc_group {
-                let mut acc = primitive.get(name).cloned().unwrap_or_default();
-                if let Some(callees) = graph.get(name) {
-                    let mut sorted: Vec<&Symbol> = callees.iter().collect();
-                    sorted.sort();
-                    for c in sorted {
-                        if let Some(r) = rows.get(c) {
-                            acc.join(r);
-                        }
-                    }
-                }
-                let entry = rows.entry(*name).or_default();
-                let before = entry.len();
-                entry.join(&acc);
-                if entry.len() != before {
-                    changed = true;
-                }
+        let mut edges = Vec::new();
+        for callee in &scanner.out.callees {
+            if let Some(&callee) = indices.get(callee) {
+                edges.push(callee);
+            } else {
+                scanner.out.caps.insert(Capability::IndirectCall);
             }
-            if !changed {
-                break;
+        }
+        edges.sort_by(|a, b| items[*a].name.cmp(&items[*b].name));
+        for &callee in &edges {
+            callers[callee].push(i);
+        }
+        graph.push(edges);
+        primitive.push(scanner.out.caps);
+    }
+    let mut rows = primitive.clone();
+    let mut pending: VecDeque<usize> = (0..items.len()).collect();
+    let mut queued = vec![true; items.len()];
+    while let Some(callee) = pending.pop_front() {
+        queued[callee] = false;
+        let effects = rows[callee].clone();
+        for &caller in &callers[callee] {
+            let before = rows[caller].len();
+            rows[caller].join(&effects);
+            if before != rows[caller].len() && !queued[caller] {
+                pending.push_back(caller);
+                queued[caller] = true;
             }
         }
     }
-
-    for it in items {
-        let Some(needs) = &it.fun.needs else { continue };
+    for (i, item) in items.iter().enumerate() {
+        let Some(needs) = item.needs else {
+            continue;
+        };
         let declared = declared_set(needs)?;
-        let derived = rows.get(&it.name).cloned().unwrap_or_default();
-        let uncovered = derived.contained_in(&declared);
-        if let Some(bad) = uncovered.first() {
-            let path = shortest_intro_path(it.name, bad, &graph, &primitive, &item_lookup);
+        if let Some(bad) = rows[i].contained_in(&declared).first() {
+            let path = shortest_intro_path(i, bad, &graph, &primitive, &items);
             return Err(format!(
                 "{}: function `{}` declares `needs {}` but uses `{}`{}",
-                it.fun.span.loc(),
-                it.name,
+                item.span.loc(),
+                item.name,
                 declared.render(),
                 bad.render(),
-                path,
+                path
             ));
         }
     }
-
-    Ok(CapAnalysis { rows })
+    Ok(())
 }
 
 fn shortest_intro_path(
-    start: Symbol,
+    start: usize,
     cap: &Capability,
-    graph: &HashMap<Symbol, HashSet<Symbol>>,
-    primitive: &HashMap<Symbol, CapSet>,
-    item_lookup: &HashMap<Symbol, &CapItem>,
+    graph: &[Vec<usize>],
+    primitive: &[CapSet],
+    items: &[Item<'_>],
 ) -> String {
-    use std::collections::VecDeque;
-    let introduces = |n: &Symbol| primitive.get(n).map(|s| s.satisfies(cap)).unwrap_or(false);
-    let mut q: VecDeque<Vec<Symbol>> = VecDeque::new();
-    let mut seen: HashSet<Symbol> = HashSet::new();
-    q.push_back(vec![start]);
-    seen.insert(start);
-    while let Some(path) = q.pop_front() {
+    let mut pending = VecDeque::from([vec![start]]);
+    let mut seen = HashSet::from([start]);
+    while let Some(path) = pending.pop_front() {
         let last = *path.last().unwrap();
-        if introduces(&last) {
-            let chain = path
-                .iter()
-                .map(|s| s.as_str().replace("__handler_", "."))
-                .collect::<Vec<_>>()
-                .join(" -> ");
-            return format!(" (introduced via {chain})");
+        if primitive[last].satisfies(cap) {
+            return format!(
+                " (introduced via {})",
+                path.iter()
+                    .map(|&i| items[i].name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" -> ")
+            );
         }
-        if let Some(callees) = graph.get(&last) {
-            let mut sorted: Vec<&Symbol> = callees.iter().collect();
-            sorted.sort();
-            for c in sorted {
-                if item_lookup.contains_key(c) && seen.insert(*c) {
-                    let mut next = path.clone();
-                    next.push(*c);
-                    q.push_back(next);
-                }
+        for &callee in &graph[last] {
+            if seen.insert(callee) {
+                let mut next = path.clone();
+                next.push(callee);
+                pending.push_back(next);
             }
         }
     }
     String::new()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lexer::Lexer;
-    use crate::parser::Parser;
-
-    fn parse(src: &str) -> Vec<ast::Decl> {
-        let t = Lexer::new(src).tokenize().expect("lex");
-        Parser::new(t).parse_program().expect("parse").decls
-    }
-
-    fn items_of(decls: &[ast::Decl]) -> Vec<CapItem<'_>> {
-        let mut items = Vec::new();
-        for d in decls {
-            match d {
-                ast::Decl::Fn(f) => items.push(CapItem {
-                    name: f.name,
-                    bare_method: None,
-                    fun: f,
-                }),
-                ast::Decl::Type(td) => {
-                    for m in &td.methods {
-                        items.push(CapItem {
-                            name: Symbol::intern(&format!("{}_{}", td.name, m.name)),
-                            bare_method: Some(m.name),
-                            fun: m,
-                        });
-                    }
-                }
-                ast::Decl::Impl(ib) => {
-                    for m in &ib.methods {
-                        items.push(CapItem {
-                            name: Symbol::intern(&format!("{}_{}", ib.type_name, m.name)),
-                            bare_method: Some(m.name),
-                            fun: m,
-                        });
-                    }
-                }
-                _ => {}
-            }
-        }
-        items
-    }
-
-    fn run(src: &str) -> Result<CapAnalysis, String> {
-        let decls = parse(src);
-        let items = items_of(&decls);
-        analyze(&items, &HashSet::new(), &CapContext::default())
-    }
-
-    #[test]
-    fn pure_fn_infers_empty() {
-        let a = run("*add a, b returns i64\n    a + b\n").unwrap();
-        let row = a.rows.get(&Symbol::intern("add")).unwrap();
-        assert!(row.is_empty());
-    }
-
-    #[test]
-    fn declared_pure_passes() {
-        assert!(run("*add a, b returns i64 needs pure\n    a + b\n").is_ok());
-    }
-
-    #[test]
-    fn unknown_cap_class_rejected() {
-        let err = run("*f needs teleport\n    1\n").unwrap_err();
-        assert!(err.contains("unknown capability"));
-    }
-
-    #[test]
-    fn extern_site_introduces_cap() {
-        let a = run("*f\n    extern.connect(fd, addr, len)\n").unwrap();
-        let row = a.rows.get(&Symbol::intern("f")).unwrap();
-        assert!(row.satisfies(&Capability::NetClient));
-    }
-
-    #[test]
-    fn unknown_extern_is_ffi_unsafe() {
-        let a = run("*f\n    extern.launch_missiles()\n").unwrap();
-        let row = a.rows.get(&Symbol::intern("f")).unwrap();
-        assert!(row.satisfies(&Capability::FfiUnsafe));
-    }
-
-    #[test]
-    fn benign_extern_introduces_nothing() {
-        let a = run("*f\n    extern.memcpy(a, b, n)\n").unwrap();
-        let row = a.rows.get(&Symbol::intern("f")).unwrap();
-        assert!(row.is_empty());
-    }
-
-    #[test]
-    fn cap_propagates_through_call_graph() {
-        let src = "*lo\n    extern.connect(fd, addr, len)\n*hi\n    lo()\n";
-        let a = run(src).unwrap();
-        let hi = a.rows.get(&Symbol::intern("hi")).unwrap();
-        assert!(hi.satisfies(&Capability::NetClient));
-    }
-
-    #[test]
-    fn declared_narrower_than_derived_is_rejected() {
-        let src = "*f needs fs.read\n    extern.connect(fd, addr, len)\n";
-        let err = run(src).unwrap_err();
-        assert!(err.contains("net.client"), "diag: {err}");
-        assert!(err.contains("introduced via"), "diag: {err}");
-    }
-
-    #[test]
-    fn needs_pure_rejects_aperture_write() {
-        let src = "*sneaky returns i64 needs pure\n    io.write_file('canary.txt', 'x')\n    0\n";
-        let err = run(src).unwrap_err();
-        assert!(err.contains("fs.write 'canary.txt'"), "diag: {err}");
-    }
-
-    #[test]
-    fn scoped_write_satisfies_wider_needs() {
-        let src = "*f needs fs.write './out'\n    io.write_file('./out/log', data)\n";
-        assert!(run(src).is_ok());
-    }
-
-    #[test]
-    fn scoped_write_outside_declared_scope_rejected() {
-        let src = "*f needs fs.write './out'\n    io.write_file('./etc', data)\n";
-        assert!(run(src).is_err());
-    }
-
-    #[test]
-    fn non_literal_path_is_unscoped() {
-        let src = "*f needs fs.write './out'\n    io.write_file(p, data)\n";
-        let err = run(src).unwrap_err();
-        assert!(err.contains("fs.write"), "diag: {err}");
-    }
-
-    #[test]
-    fn method_bucket_propagates_caps() {
-        let src = "type W\n    n as i64\n\n    *hit\n        extern.connect(fd, addr, len)\n\n*f w needs pure\n    w.hit()\n";
-        let err = run(src).unwrap_err();
-        assert!(err.contains("net.client"), "diag: {err}");
-    }
-
-    #[test]
-    fn generic_fn_bodies_are_scanned() {
-        let src =
-            "*leak of T(x as T)\n    extern.connect(fd, addr, len)\n*f needs pure\n    leak(1)\n";
-        let err = run(src).unwrap_err();
-        assert!(err.contains("net.client"), "diag: {err}");
-    }
-
-    #[test]
-    fn syscall_is_ffi_unsafe() {
-        let src = "*f needs pure\n    syscall(60, 0)\n";
-        let err = run(src).unwrap_err();
-        assert!(err.contains("ffi.unsafe"), "diag: {err}");
-    }
-
-    #[test]
-    fn lambda_bodies_are_scanned() {
-        let src = "*f needs pure\n    g is |x| extern.connect(x, addr, len)\n    g(1)\n";
-        let err = run(src).unwrap_err();
-        assert!(err.contains("net.client"), "diag: {err}");
-    }
-
-    #[test]
-    fn env_write_is_state_env() {
-        let src = "*f needs pure\n    extern.setenv(k, v, 1)\n";
-        let err = run(src).unwrap_err();
-        assert!(err.contains("state"), "diag: {err}");
-    }
-
-    #[test]
-    fn aperture_row_replaces_trusted_std_body() {
-        let src = "\
-*io_write_file(path as String, content as String) returns bool
-    extern.connect(fd, addr, len)
-    true
-
-*f needs fs.write './out'
-    io.write_file('./out/log', data)
-";
-        let decls = parse(src);
-        let file = Symbol::intern("std/io.jn");
-        let mut std_files = HashSet::new();
-        std_files.insert(file);
-        let items = items_of(&decls);
-        assert!(
-            analyze(&items, &std_files, &CapContext::default()).is_err(),
-            "without provenance the body's caps must join through the edge"
-        );
-        let mut owned: Vec<ast::Decl> = decls.clone();
-        for d in &mut owned {
-            if let ast::Decl::Fn(f) = d {
-                f.span.file = Some(file);
-            }
-        }
-        let items3 = items_of(&owned);
-        assert!(analyze(&items3, &std_files, &CapContext::default()).is_ok());
-    }
 }

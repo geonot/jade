@@ -837,6 +837,7 @@ mod tests {
             error_types: vec![],
             body,
             span: sp(),
+            needs: None,
             generic_origin: None,
             is_generator: false,
             attrs: crate::ast::FnAttrs::default(),

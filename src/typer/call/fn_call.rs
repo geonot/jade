@@ -434,6 +434,7 @@ impl Typer {
                         error_types: Vec::new(),
                         body: hbody,
                         span: lspan,
+                        needs: None,
                         generic_origin: Some(*name),
                         is_generator: false,
                         attrs: crate::ast::FnAttrs::default(),

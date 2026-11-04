@@ -2,9 +2,9 @@
 
 > **Status: decided spec; the capabilities pass has shipped, the rest has
 > not.** Four pieces of compiler machinery that [`lamp.md`](lamp.md) assumes:
-> capabilities as an effect pass (**live** — [145]/[149]/[159]: inferred rows
-> over call-graph SCCs, extern-leaf classification, std apertures, path-scoped
-> store effects, actor handlers in the fixpoint; residue at `E-2`/`E-3`),
+> capabilities as an effect pass (**live** — resolved-HIR callable graph,
+> extern-leaf classification, provenance-checked std apertures, path-scoped
+> store effects and actor handlers; higher-order rows remain incomplete),
 > path-scoped package identity, interface v2 with the three-hash ladder, and
 > config blocks — the latter three unimplemented. They are specified together
 > because they depend on each other in that order — capabilities feed the
@@ -15,14 +15,33 @@ Read [`lamp.md`](lamp.md) first for what consumes all of this.
 
 Current reality, stated plainly so the gap is visible:
 
-- **Capability checking is live for `needs` upper bounds.** Effects are
-  classified at the extern leaves (`src/cap_sites.rs`; an
-  unclassified extern call or `syscall`/`asm` is `ffi.unsafe`), std-vetted
-  aperture entries give `io.*`/`fs.*` path-scoped signatures, and the fixpoint
-  in `src/typer/caps.rs` covers free functions, generics, type/impl methods,
-  actor handlers, and store operations (path-scoped `fs` effects, [159]). What
-  this design still adds beyond that: module/project capability ceilings and
-  the manifest story.
+- **Capability checking is live for function `needs` upper bounds.** The pass
+  runs after HIR type, method and generic-instantiation resolution. Direct calls
+  use definition IDs; methods use the selected lowered symbol, not every method
+  sharing a source spelling; actor handlers use actor identity and handler tag.
+  A monotone worklist computes the least union fixpoint and diagnostics name an
+  introducing call path. Extern leaves use `src/cap_sites.rs`; unclassified
+  externs and `syscall`/`asm` require `ffi.unsafe`. Only definitions originating
+  in vetted std files receive aperture signatures. Store operations require
+  read and write access to `./<store>.store`, including checked insert/update,
+  KV methods, relation targets and delete cascades; insert/delete hooks add their
+  own effects. Restore does not cascade or invoke delete hooks. Implicit display
+  and HIR resource-drop calls participate, as do defaults and global accesses.
+  Generic bodies are checked when instantiated, with their original `needs`
+  preserved; unknown capability names are rejected even without instantiation.
+- **Higher-order capability precision is not implemented.** Function references
+  and closure bodies are charged conservatively at construction, and unresolved
+  indirect invocation rejects every finite `needs` ceiling. Returning or storing
+  a callable does not yet carry a capability row in its type. Default expressions
+  are conservatively included in the callee's row even if an argument is supplied.
+  Shared frozen callable contracts, module/project ceilings and interface rows
+  remain follow-up work (`17-3-4-2` / `17-3-4-3`).
+- **These checks are not a runtime security sandbox or a complete purity proof.**
+  Filesystem scope comparison is lexical, not symlink-safe confinement. Vetted
+  extern/aperture classifications and store-internal bookkeeping are trusted
+  boundaries; resource cleanup through opaque callable environments and runtime
+  surfaces still require the later contract audit. No package-promotion or
+  interface-reuse proof may be inferred from this implementation stage.
 - **Modules are merged by string prefixing.** `flatten_module` in
   `src/resolve.rs` rewrites `*name` → `module_name` and `Type` → `Module_Type`,
   after which there are no modules — just a flat mangled global namespace.
@@ -109,7 +128,8 @@ capabilities net.client, fs.read './assets'    # module ceiling
 Multiple capabilities are a comma list. Omitting `needs` means "infer, do not
 check" — the common case. Writing it turns the inferred set into a checked
 claim. `needs pure` (equivalently `needs ()`) is the affirmative "this function
-is capability-free" assertion, and it is checked.
+is capability-free" assertion, and it is checked against the implemented static
+classification described above.
 
 `needs` rather than `@caps(...)` because it reads as prose, sits in the
 signature where an effect row belongs — so it reaches the interface naturally
