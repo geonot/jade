@@ -602,14 +602,53 @@ are never instantiated. The eighteen AST-level unit tests that exercised the
 removed bucket scanner were retired with it; the integration file is the
 replacement and is strictly stronger, because it sees resolved identities.
 
-One defect surfaced by the new authority is filed rather than papered over.
-With `use io` in scope, a top-level `*read` collides with the std extern
-`read`: MIR verification reports that `io_read_stdin` calls `read` with three
-arguments where the callee takes one. MIR `InstKind::Call` carries only a
-symbol, and codegen registers externs under their bare C name, so extern and
-user identity are not yet distinguished downstream of HIR even though HIR has
-the `DefId`. The pin for that case uses a differently spelled user function so
-the capability semantics stay tested; the collision itself is `18`.
+One defect surfaced by the new authority was filed rather than papered over.
+With `use io` in scope, a top-level `*read` collided with the std extern
+`read`: MIR verification reported that `io_read_stdin` called `read` with three
+arguments where the callee takes one. MIR `InstKind::Call` carried only a
+symbol, and codegen registered externs under their bare C name, so extern and
+user identity were not distinguished downstream of HIR even though HIR had the
+`DefId`. That defect is `18` and is now fixed.
+
+## Execution record — callable identity below HIR (`18`)
+
+`InsKind::Call` and `InsKind::FnRef` now carry an identity-qualified symbol
+instead of a bare spelling, so a user callable and an extern of the same
+spelling cannot collapse.
+
+- **Reserved extern namespace.** `mir::extern_key` prefixes an extern's MIR
+  symbol with `$extern$`. The lexer accepts only `[A-Za-z0-9_]` in identifiers,
+  so no Jinn source can spell the prefix: it is unforgeable rather than
+  reserved-and-rejected, which removes the whole class of fail-closed checks a
+  text prefix would have needed.
+- **Identity reaches lowering.** `Lowerer` carries the set of extern `DefId`s
+  from `lower_program`, and `call_key` qualifies a call only when the callee
+  `DefId` is in that set. `ExprKind::Call`, `ExprKind::Pipe` and
+  `ExprKind::FnRef` no longer discard the `DefId`; every sub-lowerer (closures,
+  deferred bodies, coroutines, actor init/sleep/handlers) inherits the set.
+- **Declaration and linkage are separated.** `mir::ExternDecl` gained
+  `link_name`, so `name` is the `$extern$` key used for lookup in `self.fns`
+  and `link_name` is the real C symbol used for `add_function`. Runtime,
+  OpenSSL, sqlite and pcre2 detection keys on `link_name`, which is the symbol
+  that must actually resolve.
+- **Linkage cannot be captured by a spelling.** Two distinct failure modes were
+  live before this change. First, `io.eprintln`'s `extern.write` was silently
+  routed into a user `*write`, so stdlib I/O ran user code. Second, a user
+  `*strlen` was emitted as a global `T strlen` that overrode the libc symbol
+  the runtime itself calls from `signals.c`. Both are closed: `declare_symbol`
+  emits `__jinn_pvt_<name>` when a function name is already taken by a
+  declaration, and every non-`main` user function is `Internal` outside
+  `--lib` mode, so a user callable can never occupy a foreign symbol. `nm` on
+  the pinned case shows `t strlen` for the user function and
+  `U strlen@GLIBC_2.2.5` for the runtime's real import.
+- `Compiler::jinn_fn` resolves a user callee through `self.fns` before the
+  module, and the actor, store-hook and `FnRef` lookups that previously read
+  bare names through `module.get_function` now go through it.
+
+`tests/sol_callable_caps.rs` pins the case: `use io` plus a top-level `*read`
+compiles, calls the user function for the user call site, and still reaches
+libc for `extern.write`. The `*inspect` spelling that dodged the defect is
+restored to `*read`.
 
 Verification for this batch: release build warning-clean; `cargo clippy
 --release --all-targets -D warnings` clean; full release suite

@@ -179,6 +179,13 @@ impl<'ctx> Compiler<'ctx> {
         self.source = src.to_string();
     }
 
+    pub(in crate::codegen) fn jinn_fn(&self, name: &str) -> Option<FunctionValue<'ctx>> {
+        if let Some((fv, _, _)) = self.fns.get(name) {
+            return Some(*fv);
+        }
+        self.module.get_function(name)
+    }
+
     pub fn set_lib_mode(&mut self) {
         self.lib_mode = true;
     }

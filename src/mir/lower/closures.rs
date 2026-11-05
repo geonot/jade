@@ -45,6 +45,7 @@ impl Lowerer {
         };
 
         let mut lambda_lowerer = Lowerer::new(&lambda_name, crate::hir::DefId(0), span);
+        lambda_lowerer.extern_ids = self.extern_ids.clone();
         lambda_lowerer.func.ret_ty = ret_ty.clone();
 
         for (id, cap_name, _, cap_ty) in &capture_info {

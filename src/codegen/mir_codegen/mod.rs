@@ -162,11 +162,10 @@ impl<'ctx> Compiler<'ctx> {
                 })
                 .collect();
             let ft = self.mk_fn_type(&ext.ret, &ptys, false);
-            let fv = match self.module.get_function(&ext.name.as_str()) {
+            let link = ext.link_name.as_str();
+            let fv = match self.module.get_function(&link) {
                 Some(existing) => existing,
-                None => self
-                    .module
-                    .add_function(&ext.name.as_str(), ft, Some(Linkage::External)),
+                None => self.module.add_function(&link, ft, Some(Linkage::External)),
             };
             fv.add_attribute(
                 inkwell::attributes::AttributeLoc::Function,
@@ -232,7 +231,10 @@ impl<'ctx> Compiler<'ctx> {
                 })
             })
         }) || !hir_prog.actors.is_empty()
-            || prog.externs.iter().any(|e| e.name.starts_with("jinn_"))
+            || prog
+                .externs
+                .iter()
+                .any(|e| e.link_name.starts_with("jinn_"))
             || super::Compiler::uses_concurrency(hir_prog)
             || super::Compiler::uses_pool(hir_prog);
         self.needs_runtime = needs_runtime;
@@ -241,22 +243,25 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         let needs_ssl = prog.externs.iter().any(|e| {
-            e.name.starts_with("jinn_tls_")
-                || e.name.starts_with("jinn_sha")
-                || e.name.starts_with("jinn_hmac")
-                || e.name.starts_with("jinn_aes")
-                || e.name == "jinn_random_bytes"
-                || e.name == "jinn_bytes_to_hex"
+            e.link_name.starts_with("jinn_tls_")
+                || e.link_name.starts_with("jinn_sha")
+                || e.link_name.starts_with("jinn_hmac")
+                || e.link_name.starts_with("jinn_aes")
+                || e.link_name == "jinn_random_bytes"
+                || e.link_name == "jinn_bytes_to_hex"
         });
         self.needs_ssl = needs_ssl;
 
         let needs_sqlite = prog
             .externs
             .iter()
-            .any(|e| e.name.starts_with("jinn_sqlite_"));
+            .any(|e| e.link_name.starts_with("jinn_sqlite_"));
         self.needs_sqlite = needs_sqlite;
 
-        let needs_pcre2 = prog.externs.iter().any(|e| e.name.starts_with("pcre2_"));
+        let needs_pcre2 = prog
+            .externs
+            .iter()
+            .any(|e| e.link_name.starts_with("pcre2_"));
         self.needs_pcre2 = needs_pcre2;
 
         let uses_coro = prog.functions.iter().any(|f| {
@@ -376,10 +381,19 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
+    fn declare_symbol(&self, func: &mir::Function) -> String {
+        let mangled = self.mangle_symbol(func);
+        if func.name == "main" || self.module.get_function(&mangled).is_none() {
+            mangled
+        } else {
+            format!("__jinn_pvt_{mangled}")
+        }
+    }
+
     fn declare_mir_fn(&mut self, func: &mir::Function) -> Result<(), String> {
         let ptys: Vec<Type> = func.params.iter().map(|p| p.ty.clone()).collect();
         let ret = func.ret_ty.clone();
-        let sym_name = self.mangle_symbol(func);
+        let sym_name = self.declare_symbol(func);
 
         let ptr_ty = self.ctx.ptr_type(AddressSpace::default());
 
@@ -491,6 +505,9 @@ impl<'ctx> Compiler<'ctx> {
             let ft = self.mk_fn_type(&ret, &lp, false);
             let fv = self.module.add_function(&sym_name, ft, None);
             self.tag_fn(fv);
+            if !self.lib_mode {
+                fv.set_linkage(Linkage::Internal);
+            }
             fv.add_attribute(
                 inkwell::attributes::AttributeLoc::Function,
                 self.attr("nobuiltin"),

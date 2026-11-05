@@ -20,7 +20,7 @@ pub fn print_program(prog: &Program) -> String {
     }
 
     for ext in &prog.externs {
-        let _ = write!(out, "extern fn {}(", ext.name);
+        let _ = write!(out, "extern fn {} as {} (", ext.link_name, ext.name);
         for (i, p) in ext.params.iter().enumerate() {
             if i > 0 {
                 let _ = write!(out, ", ");

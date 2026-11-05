@@ -50,13 +50,15 @@ fn sim_for_over_collection_uses_index_unchecked() {
     );
 }
 
-fn emit_llvm(src: &str) -> String {
+fn emit_llvm(src: &str, opt: u8) -> String {
     let dir = tempfile::tempdir().expect("tempdir");
     let jinn = dir.path().join("test.jn");
     std::fs::write(&jinn, src).expect("write source");
     let output = Command::new(jinnc())
         .arg(&jinn)
         .arg("--emit-llvm")
+        .arg("--opt")
+        .arg(opt.to_string())
         .output()
         .expect("jinnc failed to start");
     assert!(
@@ -70,20 +72,24 @@ fn emit_llvm(src: &str) -> String {
 #[test]
 fn loop_bounded_index_arithmetic_elides_overflow_checks() {
     let src = "*main\n    n is 1500\n    total is 0\n    for i in 0 to n\n        for k in 0 to n\n            total is wrapping_add(total, (i * n + k) * (k * n + i))\n    log(total)\n";
-    let ir = emit_llvm(src);
+    let ir = emit_llvm(src, 0);
     assert!(
         !ir.contains("with.overflow"),
-        "range-proven index arithmetic must not carry overflow checks\nIR:\n{ir}"
+        "range-proven index arithmetic must not carry overflow checks; \
+         tested at --opt 0 so the result reflects the compiler's bounds proof \
+         rather than LLVM's optimizer\nIR:\n{ir}"
     );
 }
 
 #[test]
 fn unbounded_arithmetic_keeps_overflow_checks() {
     let src = "*step(n)\n    3 * n + 1\n*main\n    log(step(7))\n";
-    let ir = emit_llvm(src);
+    let ir = emit_llvm(src, 0);
     assert!(
         ir.contains("with.overflow"),
-        "arithmetic on unconstrained parameters must stay checked\nIR:\n{ir}"
+        "arithmetic on unconstrained parameters must stay checked; \
+         tested at --opt 0 because at higher levels LLVM legally folds the \
+         call and GlobalDCE drops the now-dead user function\nIR:\n{ir}"
     );
 }
 

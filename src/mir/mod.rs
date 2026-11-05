@@ -364,8 +364,18 @@ pub struct TypeDef {
 #[derive(Debug, Clone)]
 pub struct ExternDecl {
     pub name: Symbol,
+    pub link_name: Symbol,
     pub params: Vec<Type>,
     pub ret: Type,
+}
+
+pub const EXTERN_KEY_PREFIX: &str = "$extern$";
+
+pub fn extern_key(name: Symbol) -> Symbol {
+    if name.starts_with(EXTERN_KEY_PREFIX) {
+        return name;
+    }
+    Symbol::intern(&format!("{EXTERN_KEY_PREFIX}{}", name.as_str()))
 }
 
 impl fmt::Display for ValueId {

@@ -145,7 +145,7 @@ impl<'ctx> Compiler<'ctx> {
 
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::BeforeDelete(fname) = dec
-                && let Some(hook_fn) = self.module.get_function(&fname.as_str())
+                && let Some(hook_fn) = self.jinn_fn(&fname.as_str())
             {
                 b!(self.bld.build_call(hook_fn, &[], ""));
             }
@@ -306,7 +306,7 @@ impl<'ctx> Compiler<'ctx> {
 
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::AfterDelete(fname) = dec
-                && let Some(hook_fn) = self.module.get_function(&fname.as_str())
+                && let Some(hook_fn) = self.jinn_fn(&fname.as_str())
             {
                 b!(self.bld.build_call(hook_fn, &[], ""));
             }
@@ -397,7 +397,7 @@ impl<'ctx> Compiler<'ctx> {
 
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::BeforeDelete(fname) = dec
-                && let Some(hook_fn) = self.module.get_function(&fname.as_str())
+                && let Some(hook_fn) = self.jinn_fn(&fname.as_str())
             {
                 b!(self.bld.build_call(hook_fn, &[], ""));
             }
@@ -624,7 +624,7 @@ impl<'ctx> Compiler<'ctx> {
         self.wal_write_delete(store_name, rec_ptr, rec_size)?;
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::AfterDelete(fname) = dec
-                && let Some(hook_fn) = self.module.get_function(&fname.as_str())
+                && let Some(hook_fn) = self.jinn_fn(&fname.as_str())
             {
                 b!(self.bld.build_call(hook_fn, &[], ""));
             }

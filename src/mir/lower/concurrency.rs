@@ -401,6 +401,7 @@ impl Lowerer {
     ) {
         let coro_fn_name = format!("__coro_{name}");
         let mut sub = Lowerer::new(&coro_fn_name, def_id, span);
+        sub.extern_ids = self.extern_ids.clone();
         sub.func.ret_ty = Type::Void;
         sub.func.is_coroutine = true;
         sub.func.scheduler_task = scheduler_task;

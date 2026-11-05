@@ -59,10 +59,11 @@ impl Lowerer {
                 let mir_op = super::lower_unaryop(op);
                 self.emit(InstKind::UnaryOp(mir_op, v), ty, span)
             }
-            ExprKind::Call(_, name, args) => {
+            ExprKind::Call(def_id, name, args) => {
                 let arg_vals: Vec<ValueId> =
                     args.iter().map(|a| self.lower_expr_owned(a)).collect();
-                self.emit(InstKind::Call(*name, arg_vals), ty, span)
+                let key = self.call_key(*def_id, *name);
+                self.emit(InstKind::Call(key, arg_vals), ty, span)
             }
             ExprKind::IndirectCall(callee, args) => {
                 let f = self.lower_expr(callee);
@@ -136,10 +137,11 @@ impl Lowerer {
                 }
             },
 
-            ExprKind::Pipe(inner, _def_id, name, extra_args) => {
+            ExprKind::Pipe(inner, def_id, name, extra_args) => {
                 let mut args = vec![self.lower_expr_owned(inner)];
                 args.extend(extra_args.iter().map(|a| self.lower_expr_owned(a)));
-                self.emit(InstKind::Call(*name, args), ty, span)
+                let key = self.call_key(*def_id, *name);
+                self.emit(InstKind::Call(key, args), ty, span)
             }
 
             ExprKind::Cast(inner, target_ty) => {
@@ -177,7 +179,10 @@ impl Lowerer {
                 let e = self.lower_expr(end);
                 self.emit(InstKind::Slice(a, s, e), ty, span)
             }
-            ExprKind::FnRef(_, name) => self.emit(InstKind::FnRef(*name), ty, span),
+            ExprKind::FnRef(def_id, name) => {
+                let key = self.call_key(*def_id, *name);
+                self.emit(InstKind::FnRef(key), ty, span)
+            }
             ExprKind::Builder(name, fields) => {
                 let inits: Vec<(Symbol, ValueId)> = fields
                     .iter()

@@ -179,6 +179,7 @@ impl Lowerer {
         let mut refs: Vec<_> = refs.vars.into_iter().collect();
         refs.sort_by_key(|(id, _)| id.0);
         let mut sub = Lowerer::new(&name.as_str(), DefId::BUILTIN, span);
+        sub.extern_ids = self.extern_ids.clone();
         let mut captures = Vec::new();
         if let Some(field_ctx) = &self.field_ctx {
             let state = field_ctx.self_state;

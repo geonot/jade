@@ -816,7 +816,7 @@ impl<'ctx> Compiler<'ctx> {
                 }
 
                 mir::InstKind::FnRef(name) => {
-                    if let Some(fv) = self.module.get_function(&name.as_str()) {
+                    if let Some(fv) = self.jinn_fn(&name.as_str()) {
                         let wrapper = self.fn_ref_wrapper(fv);
                         let null_env = self
                             .ctx

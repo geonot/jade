@@ -2,6 +2,7 @@ use super::*;
 use crate::ast;
 use crate::hir::{self, ExprKind};
 use crate::types::Type;
+use std::collections::HashSet;
 
 mod cleanup;
 mod closures;
@@ -22,30 +23,36 @@ mod store_stmt;
 use ctx::Lowerer;
 
 pub fn lower_program(prog: &hir::Program) -> Program {
+    let extern_ids: HashSet<hir::DefId> = prog
+        .externs
+        .iter()
+        .map(|e| e.def_id)
+        .filter(|id| *id != hir::DefId::BUILTIN)
+        .collect();
     let mut functions = Vec::new();
     for f in &prog.fns {
-        functions.extend(lower_function(f));
+        functions.extend(lower_function(f, &extern_ids));
     }
 
     for td in &prog.types {
         for m in &td.methods {
-            functions.extend(lower_function(m));
+            functions.extend(lower_function(m, &extern_ids));
         }
     }
 
     for ti in &prog.trait_impls {
         for m in &ti.methods {
-            functions.extend(lower_function(m));
+            functions.extend(lower_function(m, &extern_ids));
         }
     }
 
     for ad in &prog.actors {
-        functions.extend(lower_actor_init(ad));
-        if let Some(sleep_fn) = lower_actor_sleep(ad) {
+        functions.extend(lower_actor_init(ad, &extern_ids));
+        if let Some(sleep_fn) = lower_actor_sleep(ad, &extern_ids) {
             functions.extend(sleep_fn);
         }
         for h in &ad.handlers {
-            functions.extend(lower_handler(ad, h));
+            functions.extend(lower_handler(ad, h, &extern_ids));
         }
     }
     let types = prog
@@ -60,7 +67,8 @@ pub fn lower_program(prog: &hir::Program) -> Program {
         .externs
         .iter()
         .map(|ef| ExternDecl {
-            name: ef.name,
+            name: extern_key(ef.name),
+            link_name: ef.name,
             params: ef.params.iter().map(|p| p.1.clone()).collect(),
             ret: ef.ret.clone(),
         })
@@ -87,8 +95,9 @@ pub fn lower_program(prog: &hir::Program) -> Program {
     }
 }
 
-fn lower_function(f: &hir::Fn) -> Vec<Function> {
+fn lower_function(f: &hir::Fn, extern_ids: &HashSet<hir::DefId>) -> Vec<Function> {
     let mut lowerer = Lowerer::new(&f.name.as_str(), f.def_id, f.span);
+    lowerer.extern_ids = extern_ids.clone();
     lowerer.func.ret_ty = f.ret.clone();
     lowerer.func.attrs = f.attrs.clone();
 
@@ -276,9 +285,14 @@ fn finish_body(
     }
 }
 
-fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Function> {
+fn lower_handler(
+    actor: &hir::ActorDef,
+    handler: &hir::HandlerDef,
+    extern_ids: &HashSet<hir::DefId>,
+) -> Vec<Function> {
     let fn_name = actor_handler_fn_name(actor.name, handler);
     let mut lowerer = Lowerer::new(&fn_name, actor.def_id, handler.span);
+    lowerer.extern_ids = extern_ids.clone();
     lowerer.func.ret_ty = Type::Void;
 
     let state_struct_name = Symbol::intern(&format!("{}_state", actor.name));
@@ -359,8 +373,13 @@ fn lower_handler(actor: &hir::ActorDef, handler: &hir::HandlerDef) -> Vec<Functi
     result
 }
 
-fn actor_state_lowerer(actor: &hir::ActorDef, fn_name: &str) -> Lowerer {
+fn actor_state_lowerer(
+    actor: &hir::ActorDef,
+    fn_name: &str,
+    extern_ids: &HashSet<hir::DefId>,
+) -> Lowerer {
     let mut lowerer = Lowerer::new(fn_name, actor.def_id, actor.span);
+    lowerer.extern_ids = extern_ids.clone();
 
     let state_struct_name = Symbol::intern(&format!("{}_state", actor.name));
     let state_ptr_ty = Type::Ptr(Box::new(Type::Struct(state_struct_name, vec![])));
@@ -396,9 +415,9 @@ fn actor_state_lowerer(actor: &hir::ActorDef, fn_name: &str) -> Lowerer {
     lowerer
 }
 
-fn lower_actor_init(actor: &hir::ActorDef) -> Vec<Function> {
+fn lower_actor_init(actor: &hir::ActorDef, extern_ids: &HashSet<hir::DefId>) -> Vec<Function> {
     let fn_name = actor_init_fn_name(actor.name);
-    let mut lowerer = actor_state_lowerer(actor, &fn_name);
+    let mut lowerer = actor_state_lowerer(actor, &fn_name, extern_ids);
     lowerer.func.ret_ty = Type::Void;
 
     let mut body: Vec<hir::Stmt> = Vec::new();
@@ -435,12 +454,15 @@ fn lower_actor_init(actor: &hir::ActorDef) -> Vec<Function> {
     result
 }
 
-fn lower_actor_sleep(actor: &hir::ActorDef) -> Option<Vec<Function>> {
+fn lower_actor_sleep(
+    actor: &hir::ActorDef,
+    extern_ids: &HashSet<hir::DefId>,
+) -> Option<Vec<Function>> {
     let loop_h = actor.handlers.iter().find(|h| h.is_loop)?;
     let sleep_expr = loop_h.loop_sleep_ms.as_ref()?;
 
     let fn_name = actor_sleep_fn_name(actor.name);
-    let mut lowerer = actor_state_lowerer(actor, &fn_name);
+    let mut lowerer = actor_state_lowerer(actor, &fn_name, extern_ids);
     lowerer.func.ret_ty = Type::I64;
 
     let body = vec![hir::Stmt::Expr(sleep_expr.clone())];

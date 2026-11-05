@@ -130,7 +130,7 @@ impl<'ctx> Compiler<'ctx> {
         self.bld.position_at_end(loop_bb);
         if let Some(loop_h) = loop_handler {
             let loop_fn_name = crate::mir::actor_handler_fn_name(ad.name, loop_h);
-            let loop_fv = self.module.get_function(&loop_fn_name).unwrap_or_else(|| {
+            let loop_fv = self.jinn_fn(&loop_fn_name).unwrap_or_else(|| {
                 panic!("ICE: actor loop handler fn not lowered: {loop_fn_name}")
             });
             b!(self.bld.build_call(loop_fv, &[state_ptr.into()], ""));
@@ -141,8 +141,7 @@ impl<'ctx> Compiler<'ctx> {
 
                 let sleep_fn_name = crate::mir::actor_sleep_fn_name(ad.name);
                 let sleep_fv = self
-                    .module
-                    .get_function(&sleep_fn_name)
+                    .jinn_fn(&sleep_fn_name)
                     .unwrap_or_else(|| panic!("ICE: actor sleep fn not lowered: {sleep_fn_name}"));
                 let sleep_ms = b!(self
                     .bld
@@ -301,12 +300,9 @@ impl<'ctx> Compiler<'ctx> {
                 }
 
                 let handler_fn_name = crate::mir::actor_handler_fn_name(ad.name, h);
-                let handler_fv = self
-                    .module
-                    .get_function(&handler_fn_name)
-                    .unwrap_or_else(|| {
-                        panic!("ICE: actor handler fn not lowered: {handler_fn_name}")
-                    });
+                let handler_fv = self.jinn_fn(&handler_fn_name).unwrap_or_else(|| {
+                    panic!("ICE: actor handler fn not lowered: {handler_fn_name}")
+                });
                 b!(self.bld.build_call(handler_fv, &call_args, ""));
 
                 if self.no_term() {
@@ -516,8 +512,7 @@ impl<'ctx> Compiler<'ctx> {
                     .bld
                     .build_struct_gep(mb_st, mb_ptr_v, 2, "state_init_ptr"));
                 let init_fn = self
-                    .module
-                    .get_function(&crate::mir::actor_init_fn_name(ad.name))
+                    .jinn_fn(&crate::mir::actor_init_fn_name(ad.name))
                     .unwrap_or_else(|| panic!("ICE: actor init fn not lowered: {actor_name}"));
                 b!(self.bld.build_call(init_fn, &[state_ptr.into()], ""));
 
@@ -545,8 +540,7 @@ impl<'ctx> Compiler<'ctx> {
         }
 
         let loop_fn = self
-            .module
-            .get_function(&loop_name)
+            .jinn_fn(&loop_name)
             .ok_or_else(|| format!("actor loop fn '{loop_name}' not found"))?;
         let coro_create = crate::codegen::fn_or_die(&self.module, "jinn_coro_create");
         let coro = b!(self.bld.build_call(
@@ -577,7 +571,7 @@ impl<'ctx> Compiler<'ctx> {
         actor_name: &str,
     ) -> Result<inkwell::values::FunctionValue<'ctx>, String> {
         let fn_name = format!("{actor_name}_create_mb");
-        if let Some(fv) = self.module.get_function(&fn_name) {
+        if let Some(fv) = self.jinn_fn(&fn_name) {
             return Ok(fv);
         }
 
@@ -658,8 +652,7 @@ impl<'ctx> Compiler<'ctx> {
                 .bld
                 .build_struct_gep(mb_st, mb_ptr_v, 2, "state_init_ptr"));
             let init_fn = self
-                .module
-                .get_function(&crate::mir::actor_init_fn_name(ad.name))
+                .jinn_fn(&crate::mir::actor_init_fn_name(ad.name))
                 .unwrap_or_else(|| panic!("ICE: actor init fn not lowered: {actor_name}"));
             b!(self.bld.build_call(init_fn, &[state_ptr.into()], ""));
         }

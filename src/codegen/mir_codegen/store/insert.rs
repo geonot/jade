@@ -26,7 +26,7 @@ impl<'ctx> Compiler<'ctx> {
 
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::BeforeInsert(fname) = dec
-                && let Some(hook_fn) = self.module.get_function(&fname.as_str())
+                && let Some(hook_fn) = self.jinn_fn(&fname.as_str())
             {
                 b!(self.bld.build_call(hook_fn, &[], ""));
             }
@@ -443,7 +443,7 @@ impl<'ctx> Compiler<'ctx> {
 
         for dec in &sd.decorators {
             if let crate::ast::StoreDecorator::AfterInsert(fname) = dec
-                && let Some(hook_fn) = self.module.get_function(&fname.as_str())
+                && let Some(hook_fn) = self.jinn_fn(&fname.as_str())
             {
                 b!(self.bld.build_call(hook_fn, &[], ""));
             }

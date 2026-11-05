@@ -56,8 +56,16 @@ fn run(source: &str, expected: &str) {
 #[test]
 fn unrelated_method_with_same_spelling_does_not_pollute_pure_call() {
     run(
-        "use io\n\ntype Quiet\n    n as i64\n    *hit returns i64\n        self.n\n\ntype Loud\n    n as i64\n    *hit returns i64\n        io.write_file('wrong.txt', 'x')\n        self.n\n\n*inspect(q as Quiet) returns i64 needs pure\n    q.hit()\n\n*main\n    q is Quiet(42)\n    log(inspect(q))\n",
+        "use io\n\ntype Quiet\n    n as i64\n    *hit returns i64\n        self.n\n\ntype Loud\n    n as i64\n    *hit returns i64\n        io.write_file('wrong.txt', 'x')\n        self.n\n\n*read(q as Quiet) returns i64 needs pure\n    q.hit()\n\n*main\n    q is Quiet(42)\n    log(read(q))\n",
         "42\n",
+    );
+}
+
+#[test]
+fn user_callable_shadowing_an_extern_keeps_both_callees_distinct() {
+    run(
+        "use io\n\ntype Quiet\n    n as i64\n    *hit returns i64\n        self.n\n\n*read(q as Quiet) returns i64\n    q.hit()\n\n*main\n    q is Quiet(42)\n    log(read(q))\n    bad is extern.write(-1, %'x', 1)\n    if bad < 0\n        log('extern-reached-libc')\n",
+        "42\nextern-reached-libc\n",
     );
 }
 

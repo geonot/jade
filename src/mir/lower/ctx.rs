@@ -52,6 +52,8 @@ pub(super) struct Lowerer {
     pub(super) binder_alias: HashMap<crate::hir::DefId, Symbol>,
 
     pub(super) addr_taken: HashSet<Symbol>,
+
+    pub(super) extern_ids: HashSet<crate::hir::DefId>,
 }
 
 impl Lowerer {
@@ -163,8 +165,17 @@ impl Lowerer {
             borrowed_params: HashSet::new(),
             binder_alias: HashMap::new(),
             addr_taken: HashSet::new(),
+            extern_ids: HashSet::new(),
             scope_stack: Vec::new(),
             scope_named: Vec::new(),
+        }
+    }
+
+    pub(super) fn call_key(&self, def_id: crate::hir::DefId, name: Symbol) -> Symbol {
+        if self.extern_ids.contains(&def_id) {
+            crate::mir::extern_key(name)
+        } else {
+            name
         }
     }
 
